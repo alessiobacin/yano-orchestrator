@@ -1,0 +1,266 @@
+schema_version: 1
+id: default-orchestration
+label: Default Pi MQTT orchestration flow
+description: >-
+  Contratto deterministico del ciclo planner/coder/reviewer/specialisti per un
+  task gestito da yano-orchestrator.
+enforcement:
+  status: partial
+  note: >-
+    binding immutabile, guardie con evidence persistite, transizioni atomiche,
+    approval hold, outbox effect e gate actor sono applicati dal runtime; la
+    riconciliazione completa ticket↔fase, dispatch adapter e chiusura completa
+    restano in parte affidati al planner e ai prompt.
+  existing_runtime:
+    - playbook_bind_immutable_snapshot
+    - playbook_evidence_verified_sources
+    - playbook_transition_generation_gate
+    - playbook_human_approval_hold
+    - playbook_effect_outbox
+    - playbook_effect_adapter_authorization
+    - playbook_actor_identity_gate
+    - plan_set
+    - plan_advance
+    - plan_get
+    - agent_send_phase_gate
+    - ticket_claim_authorization
+    - worktree_finalize_checklist
+    - watchdog_stall_detection
+
+states:
+  - id: received
+    owner: planner
+    terminal: false
+  - id: scoping
+    owner: planner
+    terminal: false
+  - id: awaiting_team_confirmation
+    owner: human
+    terminal: false
+  - id: awaiting_worktree_confirmation
+    owner: human
+    terminal: false
+  - id: bootstrapping
+    owner: planner
+    terminal: false
+  - id: preflight
+    owner: planner
+    terminal: false
+  - id: phase_active
+    owner: team
+    terminal: false
+  - id: awaiting_phase_review
+    owner: planner
+    terminal: false
+  - id: phase_rework
+    owner: coder_or_specialist
+    terminal: false
+  - id: awaiting_next_phase
+    owner: planner
+    terminal: false
+  - id: final_checks
+    owner: planner_and_team
+    terminal: false
+  - id: awaiting_final_confirmation
+    owner: human
+    terminal: false
+  - id: finalizing
+    owner: planner
+    terminal: false
+  - id: completed
+    owner: planner
+    terminal: true
+  - id: blocked
+    owner: planner_and_human
+    terminal: true
+  - id: cancelled
+    owner: planner_and_human
+    terminal: true
+
+transitions:
+  - id: receive_to_scope
+    from: received
+    to: scoping
+    actor: planner
+    requires: [objective_received]
+    effects:
+      - id: scope-entered-audit
+        kind: audit
+        payload:
+          state: scoping
+      - id: scope-entered-notification
+        kind: notification
+        payload:
+          message: Playbook entered scoping.
+  - id: scope_to_confirmation
+    from: scoping
+    to: awaiting_team_confirmation
+    actor: planner
+    requires: [scope_defined, team_selected, phases_proposed]
+    effects:
+      - id: team-confirmation-hold
+        kind: human_approval
+        payload:
+          question: Confermare il team e il piano proposti?
+          owner: user
+  - id: confirm_team
+    from: awaiting_team_confirmation
+    to: awaiting_worktree_confirmation
+    actor: human
+    requires: [explicit_team_and_plan_confirmation]
+  - id: confirm_reuse_or_new_worktree
+    from: awaiting_worktree_confirmation
+    to: bootstrapping
+    actor: human
+    requires: [worktree_list_open_checked, reuse_or_new_decision]
+  - id: bootstrap_task
+    from: bootstrapping
+    to: preflight
+    actor: planner
+    requires:
+      - worktree_created_or_reused
+      - report_created
+      - plan_set_for_code_task
+      - run_created
+      - spec_created
+      - tickets_created_for_all_phases
+      - tickets_ready_checked
+  - id: pass_preflight
+    from: preflight
+    to: phase_active
+    actor: planner
+    requires:
+      - required_cli_skill_mcp_checked
+      - human_holds_resolved_or_not_required
+      - phase_one_unlocked
+      - all_phase_one_agents_online
+  - id: start_phase
+    from: phase_active
+    to: awaiting_phase_review
+    actor: team
+    requires:
+      - every_phase_role_claimed_its_ticket
+      - every_phase_role_reported_result
+      - coder_sent_to_reviewer_when_code_changed
+      - reviewer_approved_when_code_changed
+  - id: reject_phase
+    from: awaiting_phase_review
+    to: phase_rework
+    actor: planner_or_reviewer
+    requires: [concrete_findings, same_worktree, new_round_true]
+  - id: retry_phase
+    from: phase_rework
+    to: phase_active
+    actor: planner
+    requires: [round_count_less_than_or_equal_to_three, target_role_online]
+  - id: stop_after_retries
+    from: phase_rework
+    to: blocked
+    actor: planner
+    requires: [three_complete_rounds_without_resolution, report_updated, whatsapp_sent]
+  - id: complete_phase
+    from: awaiting_phase_review
+    to: awaiting_next_phase
+    actor: planner
+    requires:
+      - all_parallel_roles_finished
+      - every_phase_ticket_completed
+      - plan_advance_called
+  - id: start_next_phase
+    from: awaiting_next_phase
+    to: phase_active
+    actor: planner
+    requires: [tickets_ready_checked, next_phase_unlocked, next_phase_delegated]
+  - id: enter_final_checks
+    from: awaiting_next_phase
+    to: final_checks
+    actor: planner
+    requires: [last_phase_completed, final_ticket_status_verified]
+  - id: request_final_confirmation
+    from: final_checks
+    to: awaiting_final_confirmation
+    actor: planner
+    requires: [final_report_written, test_results_recorded, user_confirmation_requested]
+  - id: confirm_final_result
+    from: awaiting_final_confirmation
+    to: finalizing
+    actor: human
+    requires: [explicit_user_confirmation]
+  - id: finalize_success
+    from: finalizing
+    to: completed
+    actor: planner
+    requires:
+      - user_confirmed_true
+      - e2e_tests_run_or_skipped_with_reason
+      - version_bumped_or_skipped_with_reason
+      - docs_synced_or_skipped_with_reason
+      - main_checkout_clean
+      - worktree_finalize_success
+  - id: finalize_dirty_main
+    from: finalizing
+    to: blocked
+    actor: runtime
+    requires: [main_checkout_dirty]
+  - id: finalize_merge_conflict
+    from: finalizing
+    to: blocked
+    actor: runtime
+    requires: [merge_conflict]
+  - id: manual_conflict_resolution
+    from: blocked
+    to: completed
+    actor: planner
+    requires: [human_confirmed_changes_in_main, worktree_abandon_called]
+  - id: cancel_task
+    from: [scoping, awaiting_team_confirmation, awaiting_worktree_confirmation, bootstrapping, preflight, phase_active, awaiting_phase_review, phase_rework, awaiting_next_phase, final_checks, awaiting_final_confirmation, finalizing]
+    to: cancelled
+    actor: human
+    requires: [explicit_cancellation, report_updated]
+
+failure_routes:
+  - condition: assigned_instance_offline
+    action: auto_fail_ticket_then_relaunch_and_replan
+    terminal: false
+  - condition: ticket_stalled
+    action: ping_then_fail_or_escalate
+    terminal: false
+  - condition: required_ticket_missing
+    action: stop_and_escalate
+    terminal: true
+  - condition: phase_gate_rejected
+    action: inspect_plan_get_and_correct_order
+    terminal: false
+  - condition: file_claim_denied
+    action: wait_choose_other_file_or_report_block
+    terminal: false
+  - condition: ticket_failed
+    action: create_replacement_ticket_or_escalate
+    terminal: false
+
+invariants:
+  - planner_never_claims_ticket
+  - planner_never_implements_substantive_work
+  - every_code_task_uses_isolated_worktree
+  - every_code_plan_has_coder_in_phase_one_unless_tdd_exception
+  - tdd_phase_one_is_tdd_agent_alone_and_coder_is_phase_two
+  - reviewer_cycle_is_internal_to_coder_phase
+  - reviewer_is_not_a_plan_ticket
+  - no_role_appears_in_two_plan_phases
+  - every_plan_ends_with_docs_sync
+  - locked_phase_cannot_receive_agent_send
+  - every_ticket_worker_claims_before_work
+  - planner_completes_phase_tickets_with_plan_advance
+  - failed_ticket_does_not_unblock_dependents
+  - report_append_is_the_only_shared_report_append_path
+  - no_finalize_before_explicit_user_confirmation
+  - no_finalize_with_dirty_main_checkout
+  - merge_conflict_is_never_resolved_automatically
+
+non_code_tasks:
+  enabled: true
+  plan_set: false
+  flow: [scoping, awaiting_team_confirmation, bootstrapping, phase_active, awaiting_phase_review, final_checks, awaiting_final_confirmation, finalizing]
+  rule: >-
+    Sono esenti dal piano a fasi solo perché plan_set richiede coder in fase 1;
+    restano soggetti a worktree/report, delega, verifica, conferma e chiusura.

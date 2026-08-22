@@ -1,0 +1,37 @@
+{
+  "name": "yano-orchestrator",
+  "version": "1.2.8",
+  "private": true,
+  "type": "module",
+  "description": "MQTT-based multi-agent orchestration extension for Yano (planner/coder/reviewer + a ticket/DAG layer), with a global `yano` CLI (yano init / yano start / yano end) for scaffolding, launching, and closing out orchestrated projects.",
+  "homepage": "https://github.com/alessiobacin/yano-orchestrator",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alessiobacin/yano-orchestrator.git"
+  },
+  "license": "MIT",
+  "keywords": ["yano-package", "yano-agent", "multi-agent", "mqtt", "orchestrator"],
+  "yano": {
+    "extensions": ["./extensions"]
+  },
+  "bin": {
+    "yano": "./bin/yano.mjs"
+  },
+  "files": [".env.example", "agents", "bin", "docs", "extensions", "mcp.json.example", "mqtt", "playbooks", "prompts", "scripts", "skills-vendor", "README.md", "LICENSE"],
+  "scripts": {
+    "check-syntax": "node --experimental-strip-types scripts/check-syntax.mjs extensions/orchestrator.ts",
+    "review-log": "node scripts/review-log.mjs",
+    "launch-planner": "node scripts/launch-planner.mjs",
+    "check-skill-isolation": "node scripts/check-skill-isolation.mjs",
+    "create-project": "node scripts/create-project.mjs",
+    "end-project": "node scripts/end-project.mjs",
+    "setup-dev-stubs": "node scripts/setup-dev-stubs.mjs"
+  },
+  "dependencies": {
+    "mqtt": "^5",
+    "yaml": "^2.8.0"
+  },
+  "devDependencies": {
+    "@sinclair/typebox": "^0.34.52"
+  }
+}

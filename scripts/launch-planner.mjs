@@ -1,0 +1,291 @@
+#!/usr/bin/env node
+// Lancia una istanza `pi` per QUALUNQUE ruolo (Revisione 44 — prima solo
+// planner, vedi sotto), includendo automaticamente i flag --skill per le
+// skill vendorizzate di mattpocock/skills (skills-vendor/mattpocock/, vedi
+// VERSION.md lì dentro) — wayfinder, to-spec, grilling, domain-modeling,
+// setup-matt-pocock-skills — MA SOLO quando il ruolo risolto è "planner"
+// (default se --role non è passato affatto, per compatibilità con l'uso
+// storico di questo script/`yano start`).
+//
+// Revisione 49 — stessa identica logica, seconda skill vendorizzata: la
+// skill `chrome-devtools` (skills-vendor/awesome-copilot/, vedi VERSION.md
+// lì dentro) viene attaccata con --skill SOLO quando il ruolo risolto è
+// "reviewer" o "frontend-developer" — richiesta esplicita dell'operatore
+// per permettere a questi due ruoli di verificare DAVVERO nel browser che
+// il frontend funzioni (via i tool del server MCP chrome-devtools), non
+// solo leggendo il codice. Vedi VERSION.md per il limite onesto: la SKILL
+// è scopabile per ruolo esattamente come le skill mattpocock, ma il server
+// MCP che quella skill presuppone NON lo è (limite di pi-mcp-adapter/Pi,
+// non di questo script) — va dichiarato project-wide in .mcp.json.
+//
+// PERCHÉ QUESTO SCRIPT ESISTE (Revisione 22, vedi docs/development-notes.md):
+// extensions/orchestrator.ts non compone MAI il comando che lancia un nuovo
+// processo `pi` — l'unico uso di execFile() nell'estensione è per le
+// chiamate di self-report/rename verso herdr e per `git` (vedi
+// herdrReportAgent()/herdrRenamePane()/gitExec... più sotto nel file). Le
+// istanze del team vengono lanciate dal planner stesso via shell, seguendo
+// il testo di prompts/planner.md (herdr o tmux) — mai per un altro
+// planner, visto che l'architettura attuale non ne spawna mai un secondo.
+// planner-01 stesso viene avviato a mano dall'utente (vedi README
+// Quickstart). Questo script è quindi il vero "punto" in cui gli argomenti
+// del processo pi vengono composti — non un ramo dentro orchestrator.ts,
+// che non esiste.
+//
+// Uso:
+//   node scripts/launch-planner.mjs --instance planner-01 [--name "Planner"] [altri flag pi...]
+//   node scripts/launch-planner.mjs --instance coder-01 --role coder   # Revisione 44: qualunque ruolo, non solo planner
+//   node scripts/launch-planner.mjs --instance planner-01 --print-only   # stampa il comando composto, non lo esegue (verifica manuale)
+//   yano start --instance planner-01   # dopo `npm install -g`/`npm link` (Revisione 31, vedi bin/yano.mjs)
+//
+// Revisione 44 — generalizzato a QUALUNQUE ruolo, non solo planner (incidente
+// reale, vedi docs/development-notes.md): prima di questa revisione, questo
+// script si rifiutava con un --role diverso da "planner" e rimandava a "usa
+// `pi -e extensions/orchestrator.ts --role <ruolo>` direttamente" — un
+// consiglio diventato STALE dalla Revisione 33 (un progetto scaffoldato non
+// ha più quel file, l'estensione si carica da sola). Il planner, componendo
+// quel comando a mano dal proprio prompt (mai passando da questo script),
+// lanciava esattamente quel comando stale per lanciare coder/reviewer/
+// specialisti via herdr/tmux — il processo `pi` falliva subito
+// (`extensions/orchestrator.ts` non esiste nel progetto), il pannello/sessione
+// moriva immediatamente, e il planner doveva ridiagnosticare il problema da
+// capo ogni volta (osservato realmente: ~58k token di ragionamento sprecati
+// per riscoprire ciò che questo script già sapeva fare correttamente per
+// planner). Fix: questo script (quindi `yano start`) ora gestisce QUALUNQUE
+// ruolo con la stessa identica logica di rilevamento `-e` già corretta per
+// planner dalla Revisione 33/38 — i flag --skill mattpocock restano
+// attaccati SOLO quando il ruolo risolto è "planner" (default se --role è
+// omesso), mai per altri ruoli.
+//
+// Revisione 31 — packageRoot vs cwd (importante per l'installazione globale):
+// prima di questa revisione lo script usava SEMPRE la propria directory
+// (repoRoot, cioè la cartella del pacchetto) sia per risolvere le skill
+// vendorizzate sia come cwd del processo `pi` che spawna — corretto solo
+// quando lo script viene eseguito dalla root del pacchetto stesso (l'unico
+// caso d'uso, prima d'ora). Con `yano start` installato globalmente, invece,
+// il pacchetto vive in tutt'altra directory rispetto al PROGETTO
+// dell'operatore (dove sta extensions/orchestrator.ts scaffoldato da `yano
+// init`): le skill vendorizzate vanno ancora cercate nel pacchetto
+// (packageRoot — non vengono copiate nei progetti scaffoldati, vedi
+// create-project.mjs), ma `pi` va spawnato con cwd = directory
+// dell'operatore (cwd), altrimenti caricherebbe l'orchestrator.ts sbagliato
+// (quello del pacchetto, non quello del progetto).
+
+import { spawn } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+// Le 5 skill vendorizzate destinate al ruolo planner (Revisione 22) — vedi
+// skills-vendor/mattpocock/VERSION.md per la motivazione di ciascuna
+// (wayfinder/to-spec richieste dall'utente; grilling/domain-modeling
+// dipendenze dirette e incondizionate di wayfinder; setup-matt-pocock-skills
+// perché entrambe la richiedono per configurare il tracker del repo).
+const MATT_POCOCK_SKILLS = ["wayfinder", "to-spec", "grilling", "domain-modeling", "setup-matt-pocock-skills"];
+
+// Revisione 49 — skill vendorizzata destinata SOLO ai ruoli reviewer e
+// frontend-developer (vedi skills-vendor/awesome-copilot/VERSION.md).
+const CHROME_DEVTOOLS_SKILL = "chrome-devtools";
+const CHROME_DEVTOOLS_SKILL_ROLES = ["reviewer", "frontend-developer"];
+
+function resolveVendoredSkillPaths(packageRoot, vendorDir, names) {
+	const base = path.join(packageRoot, "skills-vendor", vendorDir);
+	const missing = [];
+	const paths = names.map((name) => {
+		const p = path.join(base, name);
+		if (!existsSync(path.join(p, "SKILL.md"))) missing.push(p);
+		return p;
+	});
+	if (missing.length > 0) {
+		console.error("launch-planner: skill vendorizzate mancanti o incomplete (manca SKILL.md):");
+		for (const m of missing) console.error(`  - ${m}`);
+		console.error(`Verifica skills-vendor/${vendorDir}/ (vedi VERSION.md lì dentro).`);
+		process.exit(1);
+	}
+	return paths;
+}
+
+function resolveSkillPaths(packageRoot) {
+	return resolveVendoredSkillPaths(packageRoot, "mattpocock", MATT_POCOCK_SKILLS);
+}
+
+function resolveChromeDevToolsSkillPath(packageRoot) {
+	return resolveVendoredSkillPaths(packageRoot, "awesome-copilot", [CHROME_DEVTOOLS_SKILL])[0];
+}
+
+function parseArgs(argv) {
+	const passthrough = [];
+	let printOnly = false;
+	let role; // undefined finché non trovato — risolto a "planner" più sotto se mai passato
+	for (let i = 0; i < argv.length; i++) {
+		const a = argv[i];
+		if (a === "--print-only") {
+			printOnly = true;
+			continue;
+		}
+		if (a === "--role") {
+			role = argv[i + 1];
+			if (!role) {
+				console.error("launch-planner: --role richiede un valore (es. --role coder).");
+				process.exit(1);
+			}
+			i++; // consuma anche il valore, verrà comunque riaggiunto sotto in modo esplicito
+			continue;
+		}
+		passthrough.push(a);
+	}
+	return { passthrough, printOnly, role: role ?? "planner" };
+}
+
+// runLaunchPlanner({ packageRoot, cwd, argv }) — packageRoot risolve le
+// skill vendorizzate (vivono SOLO nel pacchetto, mai copiate in un progetto
+// scaffoldato — vedi create-project.mjs); cwd è la directory del progetto
+// dell'operatore, usata sia come cwd del processo `pi` spawnato sia per
+// verificare che sia davvero un progetto inizializzato.
+//
+// Revisione 33 — niente più `-e extensions/orchestrator.ts` di default:
+// da quando l'estensione si installa globalmente (`pi extension install`),
+// `pi` la carica in automatico in OGNI sessione, ovunque (verificato da un
+// test reale dell'operatore su Windows: `pi --instance planner-01`, senza
+// alcun `-e`, si connette correttamente). Un progetto scaffoldato da `yano
+// init` non contiene più una copia locale di extensions/orchestrator.ts
+// (vedi create-project.mjs) — comporre comunque il comando con
+// `-e extensions/orchestrator.ts` in quel caso caricava lo stesso codice
+// due volte (quello globale auto-caricato + quello esplicito locale), e
+// `pi` rifiutava ogni tool/flag duplicato ("Tool ... conflicts with ...",
+// "Flag ... conflicts with ...") — esattamente il traceback riportato
+// dall'operatore. Fix: passa `-e extensions/orchestrator.ts` SOLO se quel
+// file esiste davvero in cwd (dev mode dentro questo stesso repo, o un
+// progetto legacy pre-Revisione-33 con ancora una copia locale); altrimenti
+// confida nell'auto-load globale e non passa `-e` affatto. La verifica "è
+// un progetto inizializzato" non può quindi più dipendere dall'esistenza di
+// extensions/orchestrator.ts (Revisione 31) — usa invece i marker che
+// `yano init` scrive sempre: agents/roles.yaml oppure
+// .pi/extensions/multiAgentOrchestrator/config/project.json.
+export function runLaunchPlanner({ packageRoot, cwd, argv }) {
+	const { passthrough, printOnly, role } = parseArgs(argv);
+
+	const orchestratorPath = path.join(cwd, "extensions", "orchestrator.ts");
+	const hasLocalExtension = existsSync(orchestratorPath);
+	const projectMarkers = [
+		path.join(cwd, ".pi", "extensions", "multiAgentOrchestrator", "config", "project.json"),
+		path.join(cwd, "agents", "roles.yaml"),
+	];
+	const looksInitialized = hasLocalExtension || projectMarkers.some((p) => existsSync(p));
+	if (!looksInitialized) {
+		console.error(
+			`launch-planner: questa directory non sembra un progetto yano-orchestrator inizializzato ` +
+				`(nessun agents/roles.yaml, nessun .pi/extensions/multiAgentOrchestrator/config/project.json, ` +
+				`nessun extensions/orchestrator.ts locale).\n` +
+				`Esegui prima \`yano init --name "<nome progetto>"\` (o \`node scripts/create-project.mjs ...\` in locale), poi rilancia da lì.`,
+		);
+		process.exit(1);
+	}
+
+	// Revisione 34 — caso reale osservato dall'operatore: un progetto
+	// scaffoldato da una versione di `yano init` PRECEDENTE alla Revisione 33
+	// ha ancora una copia locale di extensions/orchestrator.ts sul disco
+	// (creata prima che create-project.mjs smettesse di copiarla). Quella
+	// copia stale continua a triggerare `hasLocalExtension` qui sopra.
+	// Euristica per distinguere questo caso dal legittimo "dentro il repo del
+	// pacchetto stesso, in sviluppo": il package.json del pacchetto ha
+	// sempre name === "yano-orchestrator"; un progetto scaffoldato da `yano
+	// init` ha sempre uno slug diverso (viene da --name, vedi
+	// create-project.mjs).
+	let cwdPkgName;
+	try {
+		cwdPkgName = JSON.parse(readFileSync(path.join(cwd, "package.json"), "utf-8")).name;
+	} catch {
+		cwdPkgName = undefined;
+	}
+	const looksLikePackageRepo = cwdPkgName === "yano-orchestrator";
+
+	// Revisione 38 — bug reale trovato in produzione (docs/development-notes.md,
+	// Revisione 38): fino a qui questo script si limitava ad AVVISARE del
+	// rischio di conflitto ("Tool ... conflicts with ...") ma continuava
+	// comunque a comporre `-e extensions/orchestrator.ts` anche nel caso
+	// stale — l'avviso descriveva correttamente il crash imminente invece di
+	// evitarlo. Un operatore che ha visto esattamente quell'avviso ha
+	// comunque avuto il crash subito dopo, sia con `yano start` che con `pi -e
+	// extensions/orchestrator.ts --role planner` a mano. Fix: quando la
+	// copia locale NON è dentro il repo del pacchetto stesso, ignorala del
+	// tutto — non passare mai `-e` per lei, confida SEMPRE sull'auto-load
+	// globale in quel caso (esattamente come per un progetto senza copia
+	// locale affatto). L'unico caso in cui `-e` viene ancora composto è lo
+	// sviluppo del pacchetto stesso (packageRoot === cwd, verificato via
+	// package.json name).
+	if (hasLocalExtension && !looksLikePackageRepo) {
+		console.warn(
+			`launch-planner: trovato "${orchestratorPath}" residuo, ma IGNORATO (non aggiunto a -e) — è quasi certamente\n` +
+				`un residuo di uno scaffold creato da una versione di \`yano init\` precedente alla Revisione 33 (che non copia\n` +
+				`più extensions/ — vedi docs/development-notes.md). L'estensione installata globalmente (pi extension install /\n` +
+				`npm install -g) viene usata al suo posto, come per qualunque altro progetto scaffoldato di recente — questa\n` +
+				`cartella residua è ormai inerte e sicura da cancellare quando vuoi:\n` +
+				`  ${process.platform === "win32" ? "Remove-Item -Recurse -Force" : "rm -rf"} "${path.join(cwd, "extensions")}"\n`,
+		);
+	}
+
+	// Revisione 44: le skill mattpocock restano riservate al planner — un
+	// --role diverso (coder/reviewer/specialista) non le riceve mai, stessa
+	// garanzia di isolamento verificata da scripts/check-skill-isolation.mjs.
+	const mattPocockSkillFlags = role === "planner" ? resolveSkillPaths(packageRoot).flatMap((p) => ["--skill", p]) : [];
+	// Revisione 49: la skill chrome-devtools resta riservata a reviewer e
+	// frontend-developer — nessun altro ruolo la riceve mai, stessa garanzia
+	// verificata da scripts/check-skill-isolation.mjs.
+	const chromeDevToolsSkillFlags = CHROME_DEVTOOLS_SKILL_ROLES.includes(role)
+		? ["--skill", resolveChromeDevToolsSkillPath(packageRoot)]
+		: [];
+	const skillFlags = [...mattPocockSkillFlags, ...chromeDevToolsSkillFlags];
+	// -e esplicito SOLO in sviluppo del pacchetto stesso (looksLikePackageRepo)
+	// — mai per una copia locale residua in un progetto scaffoldato, anche se
+	// esiste sul disco (vedi Revisione 38 sopra): l'estensione installata
+	// globalmente basta sempre da sola in quel caso. Questa logica di
+	// rilevamento vale per QUALUNQUE ruolo (Revisione 44), non solo planner —
+	// è esattamente ciò che mancava quando il planner componeva a mano
+	// `pi -e extensions/orchestrator.ts` per lanciare altri ruoli.
+	const extensionFlags = hasLocalExtension && looksLikePackageRepo ? ["-e", "extensions/orchestrator.ts"] : [];
+	const piArgs = [...extensionFlags, ...passthrough, "--role", role, ...skillFlags];
+
+	const printable = ["pi", ...piArgs].map((a) => (a.includes(" ") ? `"${a}"` : a)).join(" ");
+	console.log(`launch-planner: comando composto (cwd ${cwd}):\n  ${printable}\n`);
+
+	if (printOnly) {
+		process.exit(0);
+	}
+
+	// stdio: "inherit" — planner è una sessione interattiva, deve ereditare
+	// il terminale corrente esattamente come un `pi ...` lanciato a mano.
+	// cwd: la directory del PROGETTO (non del pacchetto) — vedi commento
+	// Revisione 31 in testa al file.
+	//
+	// shell su Windows (Revisione 32): un `pi` installato via npm su Windows è
+	// quasi certamente uno shim `pi.cmd`/`pi.ps1`, non un eseguibile nativo —
+	// `child_process.spawn()` NON risolve l'estensione da solo (a differenza
+	// della shell dell'utente) e fallirebbe con ENOENT anche se `pi` funziona
+	// perfettamente da un prompt aperto a mano. Passare per la shell di
+	// sistema (cmd.exe) risolve lo shim correttamente. Limite noto e onesto:
+	// Node cita rare stranezze di quoting con `shell: true` su Windows quando
+	// un argomento contiene spazi (es. un percorso come "C:\Users\Mario
+	// Rossi\..."); non verificato in questa sessione (nessun ambiente
+	// Windows disponibile per testarlo) — se capita, la libreria `cross-spawn`
+	// è il fix noto (gestisce il quoting di cmd.exe correttamente), non
+	// ancora aggiunta come dipendenza per non appesantire il pacchetto senza
+	// una verifica reale del problema.
+	const child = spawn("pi", piArgs, { cwd, stdio: "inherit", shell: process.platform === "win32" });
+	child.on("error", (err) => {
+		console.error(`launch-planner: impossibile lanciare "pi" (${err.message}) — è nel PATH?`);
+		process.exit(1);
+	});
+	child.on("exit", (code, signal) => {
+		process.exit(signal ? 1 : (code ?? 0));
+	});
+}
+
+// Uso diretto: `node scripts/launch-planner.mjs ...` (dev, dal repo del
+// pacchetto — packageRoot e cwd coincidono in questo caso, comportamento
+// invariato rispetto a prima della Revisione 31 per questo flusso).
+const invokedDirectly = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (invokedDirectly) {
+	const __dirname = path.dirname(fileURLToPath(import.meta.url));
+	const packageRoot = path.resolve(__dirname, "..");
+	runLaunchPlanner({ packageRoot, cwd: process.cwd(), argv: process.argv.slice(2) });
+}

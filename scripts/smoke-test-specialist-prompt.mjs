@@ -137,7 +137,7 @@ function main() {
 	const fdRendered = render(fdText, { instance: "frontend-developer-01", role: "frontend-developer", project: "demo", team: ["core", "frontend"] }, cfg.roles["frontend-developer"]);
 	assert.ok(!fdRendered.includes("{{"), "no unfilled placeholders should remain after rendering");
 	assert.match(fdRendered, /frontend-developer-01/);
-	assert.match(fdRendered, /target_role:\s*"reviewer"/, "frontend-developer.md must instruct sending work to reviewer, not straight to planner");
+	assert.match(fdRendered, /target_role:\s*"frontend-reviewer"/, "frontend-developer.md must instruct sending work to frontend-reviewer, not straight to planner");
 	assert.ok(!/target_role:\s*"planner"/.test(fdRendered), "frontend-developer.md must NOT instruct sending its own work directly to planner");
 	console.log("   OK — frontend-developer.md renders cleanly, is picked up ahead of specialist.md, and always routes through reviewer");
 

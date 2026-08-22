@@ -4667,19 +4667,22 @@ export default function (pi: ExtensionAPI) {
 	function assertRoleHandoffAllowed(senderRole: string, targetRole: string, slug: string): void {
 		const sender = senderRole.trim().toLowerCase();
 		const target = targetRole.trim().toLowerCase();
-		const codeRoles = new Set(["coder", "frontend-developer"]);
-		const coreRoles = new Set(["planner", "coder", "frontend-developer", "reviewer"]);
+		const backendRoles = new Set(["coder", "reviewer"]);
+		const frontendRoles = new Set(["frontend-developer", "frontend-reviewer"]);
+		const coreRoles = new Set(["planner", ...backendRoles, ...frontendRoles]);
 		if (!coreRoles.has(target)) return;
 		const allowed = target === "planner"
 			? sender === "reviewer" || !coreRoles.has(sender)
 			: target === "reviewer"
-				? codeRoles.has(sender)
-				: sender === "planner" || sender === "reviewer";
+				? sender === "coder"
+				: target === "frontend-reviewer"
+					? sender === "frontend-developer"
+					: sender === "planner" || sender === "reviewer" || sender === "frontend-reviewer";
 		if (!allowed) {
 			throw new Error(
 				`agent_send: refused — handoff ${senderRole} → ${targetRole} is not allowed for "${slug}". ` +
-				"The enforced code path is planner → coder/frontend-developer → reviewer → planner; " +
-				"reviewer may return to coder/frontend-developer for a bounded correction round.",
+				"The enforced paths are planner → coder → reviewer → planner and planner → frontend-developer → frontend-reviewer → planner; " +
+				"each reviewer may return corrections only to its matching developer role.",
 			);
 		}
 	}

@@ -83,14 +83,17 @@ function findPhaseForRole(plan, role) {
 function assertRoleHandoffAllowed(senderRole, targetRole, slug) {
 	const sender = senderRole.trim().toLowerCase();
 	const target = targetRole.trim().toLowerCase();
-	const codeRoles = new Set(["coder", "frontend-developer"]);
-	const coreRoles = new Set(["planner", "coder", "frontend-developer", "reviewer"]);
+	const backendRoles = new Set(["coder", "reviewer"]);
+	const frontendRoles = new Set(["frontend-developer", "frontend-reviewer"]);
+	const coreRoles = new Set(["planner", ...backendRoles, ...frontendRoles]);
 	if (!coreRoles.has(target)) return;
 	const allowed = target === "planner"
 		? sender === "reviewer" || !coreRoles.has(sender)
 		: target === "reviewer"
-			? codeRoles.has(sender)
-			: sender === "planner" || sender === "reviewer";
+			? sender === "coder"
+			: target === "frontend-reviewer"
+				? sender === "frontend-developer"
+				: sender === "planner" || sender === "reviewer" || sender === "frontend-reviewer";
 	if (!allowed) throw new Error(`agent_send: refused — handoff ${senderRole} → ${targetRole} is not allowed for "${slug}".`);
 }
 

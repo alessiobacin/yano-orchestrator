@@ -69,13 +69,10 @@ function main() {
 	ok(!coderOut.includes("--skill"), "coder: NO --skill flags attached (mattpocock skills stay planner-only)");
 	ok(!coderOut.includes("-e extensions/orchestrator.ts"), "coder: no stale -e flag (modern scaffold, relies on global install)");
 
-	console.log("\n=== TEST 2 — --role reviewer: gets chrome-devtools, but none of the mattpocock skills (Revisione 49) ===");
+	console.log("\n=== TEST 2 — --role reviewer: backend reviewer gets no frontend browser skill ===");
 	const reviewerOut = run(dir, ["--instance", "reviewer-01", "--role", "reviewer", "--print-only"]);
 	ok(reviewerOut.includes("--role reviewer"), "reviewer: composed command carries --role reviewer");
-	ok(
-		reviewerOut.includes(path.join(PACKAGE_ROOT, "skills-vendor", "awesome-copilot", "chrome-devtools")),
-		"reviewer: DOES receive --skill chrome-devtools (Revisione 49)",
-	);
+	ok(!reviewerOut.includes("chrome-devtools"), "reviewer: does not receive chrome-devtools");
 	for (const name of ["wayfinder", "to-spec", "grilling", "domain-modeling", "setup-matt-pocock-skills"]) {
 		ok(
 			!reviewerOut.includes(path.join(PACKAGE_ROOT, "skills-vendor", "mattpocock", name)),
@@ -83,13 +80,17 @@ function main() {
 		);
 	}
 
-	console.log("\n=== TEST 2b — --role frontend-developer: same guarantee as reviewer (Revisione 49) ===");
+	console.log("\n=== TEST 2b — --role frontend-developer: gets chrome-devtools ===");
 	const frontendOut = run(dir, ["--instance", "frontend-01", "--role", "frontend-developer", "--print-only"]);
 	ok(frontendOut.includes("--role frontend-developer"), "frontend-developer: composed command carries --role frontend-developer");
 	ok(
 		frontendOut.includes(path.join(PACKAGE_ROOT, "skills-vendor", "awesome-copilot", "chrome-devtools")),
 		"frontend-developer: DOES receive --skill chrome-devtools (Revisione 49)",
 	);
+	console.log("\n=== TEST 2c — --role frontend-reviewer: gets chrome-devtools ===");
+	const frontendReviewerOut = run(dir, ["--instance", "frontend-reviewer-01", "--role", "frontend-reviewer", "--print-only"]);
+	ok(frontendReviewerOut.includes("--role frontend-reviewer"), "frontend-reviewer: composed command carries role");
+	ok(frontendReviewerOut.includes("chrome-devtools"), "frontend-reviewer: receives chrome-devtools");
 
 	console.log("\n=== TEST 3 — --role omitted still defaults to planner WITH the skill flags (backward compatible) ===");
 	const defaultOut = run(dir, ["--instance", "planner-01", "--print-only"]);

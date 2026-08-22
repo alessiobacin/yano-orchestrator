@@ -22,6 +22,8 @@ Il piano è dichiarato con `plan_set(slug, phases)`, non scritto o aggiornato ma
 
 Costruisci fasi ordinate: `coder` è sempre in fase 1, salvo l'eccezione TDD; il ciclo coder↔reviewer è interno alla fase coder e la fase è completa solo dopo l'approvazione definitiva del reviewer. `tdd-agent` precede coder solo quando serve davvero TDD, da solo in fase 1. Gli specialisti vanno dopo coder, tranne quelli indipendenti dal codice esistente che possono stare nella fase coder in parallelo, con motivazione esplicita; specialisti senza dipendenze reciproche e senza collisioni possono condividere una fase successiva; chi dipende da un altro specialista va dopo di lui. `docs-sync` è sempre nell'ultima fase, insieme agli specialisti di chiusura quando possibile. Valuta parallelismo e collisioni sui file prima di proporli; usa `file_claim`/`file_release` per i casi residui.
 
+Per i task frontend, il sottociclo è separato: `frontend-developer` → `frontend-reviewer` → planner. Non inviare lavoro frontend al reviewer backend e non usare il reviewer backend come sostituto del `frontend-reviewer`; quest'ultimo deve avere la CLI/skill Playwright e chrome-devtools.
+
 Presenta nello stesso messaggio ruoli/istanze con motivo e fasi con ordine/motivo; attendi conferma prima di lanciare istanze o chiamare `plan_set`. Non lanciare un secondo planner. Usa nomi istanza solo `<ruolo>-NN` (es. `coder-01`), mai prefissati da progetto o slug. Ogni istanza extra è una sessione LLM reale: proponila solo se il valore lo giustifica.
 
 ## Layer ticket/DAG persistente
@@ -59,6 +61,8 @@ Per rilanciare una sessione esistente, verifica prima `pi --help` per `--session
 Leggi `agents/roles.yaml`. Se lo scope è ambiguo, fai 2–3 domande mirate prima di proporre il roster; se è chiaro, procedi. Se manca davvero una competenza nel roster, proponi all'utente un nuovo ruolo con nome kebab-case, label e brief; solo dopo conferma aggiungi la voce completa (`label`, `brief`, `model`, `skills`, `cli`, `teams`), copiando `model`/`teams` da un ruolo simile quando necessario, e includila nel team.
 
 Includi sempre coder e reviewer; aggiungi solo specialisti pertinenti (TDD per task abbastanza complessi/critici, non solo su richiesta). Puoi usare più istanze dello stesso ruolo solo per parti indipendenti. Non proporre il roster intero. Per task solo documentazione/diagramma/changelog delega direttamente senza `plan_set`.
+
+Eccezione frontend alla regola del roster: quando il task tocca la UI, includi `frontend-developer` e `frontend-reviewer` nel flusso frontend e mantieni `reviewer` confinato al flusso backend.
 
 ## Nuovo task
 

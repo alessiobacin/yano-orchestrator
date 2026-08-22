@@ -21,13 +21,13 @@ Everything communicates over a local MQTT broker, using role/instance identity a
 - **`agent_send` warns immediately, in the same turn, if nobody is actually there to receive it** — instead of silently reporting success when a role/instance was never launched
 - **The planner is structurally barred from claiming ticket work itself** (`ticket_claim` refuses the planner role outright) — planning and delegating is the job, never quietly doing the work when an instance is missing
 - **A mandatory closing checklist**: `worktree_finalize` refuses to merge until you declare the user actually confirmed the result, e2e tests ran (or don't apply), the version was bumped (or doesn't apply), *and* a docs-sync pass actually reconciled the project's own README/QUICK-START/architecture diagram with what shipped (or doesn't apply) — and now pushes to the remote automatically after a successful merge
-- **Frontend work always goes through reviewer, in a loop** — `frontend-developer` never reports "done" straight to the planner; reviewer checks the specific requested design/UI change is really there, rejects back to frontend-developer with specifics if it isn't, and the two keep iterating until it is, the same discipline already used for coder
+- **Frontend work has its own enforced review loop** — `frontend-developer` always hands off to `frontend-reviewer`, never to the backend `reviewer`; the frontend reviewer uses Playwright CLI/skill, chrome-devtools, and `code-review`, rejects back with specifics if needed, and informs the planner only after verification
 - **Phased execution plans** — the planner declares which roles work together and in what order, and the system enforces it
 - **WhatsApp notifications** (via Evolution API) when a task completes or needs your input, so you don't have to watch the terminal
 - **A global `yano` CLI** (`yano init`, `yano start`, `yano doctor`, `yano update`, `yano copy-prompts`, `yano uninstall`, `yano end`) for scaffolding, launching, verifying the environment, keeping new orchestrated projects up to date, and closing them out — `yano start` now composes the right launch command for *any* role, not just planner, which is what the planner itself uses when it launches new team members over herdr/tmux
 - **Role prompts are always read live from the installed package by default — no per-project copy to keep in sync** — `yano update` alone is enough to bring every project current; `yano copy-prompts` + `yano start --custom-prompts` are there only if you actually want to customize a role's prompt for one specific project
 - **Automatic per-project MQTT scoping** — two different projects never collide on a shared broker without you having to pass `--project` yourself
-- **`reviewer` and `frontend-developer` can verify the frontend for real, in a browser** — both get the vendored `chrome-devtools` skill (`skills-vendor/awesome-copilot/`, `--skill`-scoped by `yano start` exactly like the planner-only skills above) and, once you opt in to the `chrome-devtools` MCP server (`.mcp.json.example` → `.mcp.json`, plus `pi install npm:pi-mcp-adapter` — see Configuration below), the actual tools to navigate, snapshot/screenshot, and inspect console/network output instead of only reading the code. Honest limit: Pi/`pi-mcp-adapter` has no per-role MCP scoping at all, so an enabled `chrome-devtools` server is technically reachable by every role in the project — only `reviewer`'s and `frontend-developer`'s prompts are actually written to use it
+- **Frontend prerequisites are deterministic** — every `yano init` verifies/installs global `@playwright/cli@latest` and the global `playwright-cli` skill; `frontend-developer` and `frontend-reviewer` receive the browser skill, while backend `reviewer` remains backend-only. The optional `chrome-devtools` MCP remains project-wide because Pi cannot scope MCP servers per role
 - **Cross-platform** — macOS, Linux, and Windows
 
 ## Installation
@@ -143,16 +143,15 @@ WhatsApp notifications are optional and configured via `.env` (see `.env.example
 
 Without a `.env`, the extension runs normally — notifications are simply skipped.
 
-### Optional: chrome-devtools MCP for reviewer/frontend-developer
+### MCP e prerequisiti frontend
 
-Both roles get the vendored `chrome-devtools` skill automatically (see Features above) — it documents the workflow, but the actual browser-automation tools only exist in a session once the `chrome-devtools` MCP server is wired up, project-wide:
+`yano init` verifica e installa automaticamente skill, CLI, adapter MCP e broker necessari. I due server MCP essenziali vengono anche dichiarati nel `.mcp.json` attivo del progetto:
 
 ```bash
-pi install npm:pi-mcp-adapter   # once per Pi installation, then restart pi
-cp .mcp.json.example .mcp.json  # once per project — yano init already copies the .example for you
+pi install npm:pi-mcp-adapter   # ripetere solo se yano doctor lo segnala
 ```
 
-`.mcp.json` declares `chrome-devtools` (`npx chrome-devtools-mcp@latest`) for the whole project — there is no native way in Pi/`pi-mcp-adapter` to restrict an MCP server to specific roles, so every instance in the project can technically reach it once enabled. Only `reviewer` and `frontend-developer`'s prompts are written to actually use it; nothing changes for any other role.
+`.mcp.json` dichiara `chrome-devtools` e il server remoto GitHub OAuth. Il server MCP resta tecnicamente raggiungibile da tutte le istanze del progetto perché Pi non supporta lo scope MCP per ruolo; i prompt istruiscono però esclusivamente `frontend-developer`/`frontend-reviewer` a usare il browser e `coder`/`reviewer` a usare GitHub quando previsto.
 
 ## Project layout
 

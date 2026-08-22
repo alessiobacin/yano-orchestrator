@@ -29,9 +29,141 @@
 // insaputa).
 
 import { spawnSync } from "node:child_process";
+import * as fs from "node:fs";
 import * as net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+const PLAYWRIGHT_CLI_PACKAGE = "@playwright/cli@latest";
+const PLAYWRIGHT_CLI_SKILL_REPO = "https://github.com/microsoft/playwright-cli";
+const MATT_SKILLS_REPO = "https://github.com/mattpocock/skills";
+const CHROME_SKILLS_REPO = "https://github.com/github/awesome-copilot";
+const ESSENTIAL_SKILLS = [
+	{ name: "wayfinder", repo: MATT_SKILLS_REPO, vendored: true },
+	{ name: "to-spec", repo: MATT_SKILLS_REPO, vendored: true },
+	{ name: "grilling", repo: MATT_SKILLS_REPO, vendored: true },
+	{ name: "domain-modeling", repo: MATT_SKILLS_REPO, vendored: true },
+	{ name: "setup-matt-pocock-skills", repo: MATT_SKILLS_REPO, vendored: true },
+	{ name: "code-review", repo: MATT_SKILLS_REPO },
+	{ name: "chrome-devtools", repo: CHROME_SKILLS_REPO },
+	{ name: "playwright-cli", repo: PLAYWRIGHT_CLI_SKILL_REPO },
+];
+const ESSENTIAL_MCP_SERVERS = ["chrome-devtools", "github"];
+
+function playwrightSkillPaths() {
+	const roots = [
+		process.env.HOME ? path.join(process.env.HOME, ".agents", "skills") : null,
+		process.env.HOME ? path.join(process.env.HOME, ".codex", "skills") : null,
+	].filter(Boolean);
+	return roots.map((root) => path.join(root, "playwright-cli", "SKILL.md"));
+}
+
+function hasPlaywrightSkill() {
+	return playwrightSkillPaths().some((file) => {
+		try { return fs.readFileSync(file, "utf8").trim().length >= 20; } catch { return false; }
+	});
+}
+
+function skillFile(name, packageRoot) {
+	const readable = (file) => {
+		try { return fs.readFileSync(file, "utf8").trim().length >= 20; } catch { return false; }
+	};
+	const globalFile = [
+		process.env.HOME ? path.join(process.env.HOME, ".agents", "skills", name, "SKILL.md") : null,
+		process.env.HOME ? path.join(process.env.HOME, ".codex", "skills", name, "SKILL.md") : null,
+	].find((file) => file && readable(file));
+	if (globalFile) return globalFile;
+	if (packageRoot) {
+		const vendorRoots = [path.join(packageRoot, "skills-vendor", "mattpocock", name), path.join(packageRoot, "skills-vendor", "awesome-copilot", name)];
+		const vendorFile = vendorRoots.map((root) => path.join(root, "SKILL.md")).find(readable);
+		if (vendorFile) return vendorFile;
+	}
+	return null;
+}
+
+function checkEssentialSkills(packageRoot) {
+	return ESSENTIAL_SKILLS.map((spec) => ({ ...spec, path: skillFile(spec.name, packageRoot), ok: Boolean(skillFile(spec.name, packageRoot)) }));
+}
+
+function checkPiMcpAdapter() {
+	try {
+		const result = spawnSync("pi", ["list"], { encoding: "utf8", timeout: 10_000 });
+		return result.status === 0 && /pi-mcp-adapter/.test(`${result.stdout}\n${result.stderr}`);
+	} catch { return false; }
+}
+
+function checkMcpServerPackage() {
+	try {
+		const result = spawnSync("npx", ["-y", "chrome-devtools-mcp@latest", "--help"], { stdio: "ignore", timeout: 30_000 });
+		return result.status === 0;
+	} catch { return false; }
+}
+
+function checkHttpEndpoint(url) {
+	try {
+		const result = spawnSync("curl", ["-sS", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "10", url], { encoding: "utf8", timeout: 15_000 });
+		const status = Number.parseInt(result.stdout, 10);
+		return result.status === 0 && Number.isFinite(status) && status >= 200 && status < 500;
+	} catch { return false; }
+}
+
+function readMcpConfig(cwd) {
+	const candidates = [path.join(cwd, ".mcp.json"), path.join(cwd, ".pi", "mcp.json")];
+	const file = candidates.find((candidate) => fs.existsSync(candidate));
+	if (!file) return { file: null, servers: {} };
+	try { return { file, servers: JSON.parse(fs.readFileSync(file, "utf8")).mcpServers ?? {} }; } catch { return { file, servers: {}, invalid: true }; }
+}
+
+export function ensureCorePrerequisites({ packageRoot, cwd, install = false } = {}) {
+	const skills = checkEssentialSkills(packageRoot);
+	const missingSkills = skills.filter((skill) => !skill.ok);
+	if (install && missingSkills.length) {
+		for (const skill of missingSkills) {
+			const installed = runInstall("npx", ["-y", "skills", "add", skill.repo, "--skill", skill.name, "--global", "--yes"]);
+			if (!installed) console.error(`yano init: installazione skill fallita: ${skill.name}`);
+		}
+	}
+	const afterSkills = checkEssentialSkills(packageRoot);
+	let adapter = checkPiMcpAdapter();
+	if (install && !adapter) {
+		console.log("yano init: installo pi-mcp-adapter...");
+		adapter = runInstall("pi", ["install", "npm:pi-mcp-adapter"]) && checkPiMcpAdapter();
+	}
+	const chromePackage = checkMcpServerPackage();
+	const githubEndpoint = checkHttpEndpoint("https://api.githubcopilot.com/mcp/");
+	const mcp = readMcpConfig(cwd ?? process.cwd());
+	const declared = ESSENTIAL_MCP_SERVERS.filter((name) => Object.hasOwn(mcp.servers, name));
+	return {
+		ok: afterSkills.every((skill) => skill.ok) && adapter && chromePackage && githubEndpoint && (!mcp.file || declared.length === ESSENTIAL_MCP_SERVERS.length || install),
+		skills: afterSkills,
+		mcp: { adapter, chromePackage, githubEndpoint, config: mcp.file, declared, missing: ESSENTIAL_MCP_SERVERS.filter((name) => !declared.includes(name)) },
+	};
+}
+
+function runInstall(command, args) {
+	return spawnSync(command, args, { stdio: "inherit", shell: process.platform === "win32", timeout: 120_000 }).status === 0;
+}
+
+// Installs the two frontend prerequisites idempotently. This is deliberately
+// separate from runDoctor: doctor remains read-only, while every `yano init`
+// calls this function before scaffolding so a partial project is never created.
+export function ensurePlaywrightPrerequisites({ install = false } = {}) {
+	let cliOk = commandExists("playwright-cli", ["--help"]);
+	let skillOk = hasPlaywrightSkill();
+	if (install && !cliOk) {
+		console.log(`yano init: installo ${PLAYWRIGHT_CLI_PACKAGE} globalmente...`);
+		cliOk = runInstall("npm", ["install", "-g", PLAYWRIGHT_CLI_PACKAGE]) && commandExists("playwright-cli", ["--help"]);
+	}
+	if (install && !skillOk) {
+		console.log(`yano init: installo la skill playwright-cli da ${PLAYWRIGHT_CLI_SKILL_REPO}...`);
+		skillOk = runInstall("npx", ["-y", "skills", "add", PLAYWRIGHT_CLI_SKILL_REPO, "--skill", "playwright-cli", "--global", "--yes"]) && hasPlaywrightSkill();
+	}
+	return {
+		ok: cliOk && skillOk,
+		cli: { name: "playwright-cli", ok: cliOk, hint: `npm install -g ${PLAYWRIGHT_CLI_PACKAGE}` },
+		skill: { name: "playwright-cli", ok: skillOk, hint: `npx -y skills add ${PLAYWRIGHT_CLI_SKILL_REPO} --skill playwright-cli --global --yes` },
+	};
+}
 
 function commandExists(cmd, args = ["--version"]) {
 	try {
@@ -95,6 +227,7 @@ function osInstallHint(tool) {
 // segnalato ma non fa fallire il check da solo (serve solo per i worktree,
 // alcuni usi read-only/di prova non lo richiedono subito).
 export async function runDoctor({ cwd = process.cwd(), json = false, autoStartBroker = false, packageRoot = null } = {}) {
+	packageRoot ??= path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 	if (!json) console.log("yano doctor — verifica ambiente\n");
 
 	const rows = [];
@@ -104,6 +237,11 @@ export async function runDoctor({ cwd = process.cwd(), json = false, autoStartBr
 
 	const hasGit = commandExists("git");
 	rows.push(["git", hasGit, hasGit ? "trovato" : `non trovato — ${osInstallHint("git")}`]);
+	const hasNpm = commandExists("npm", ["--version"]);
+	const hasNpx = commandExists("npx", ["--version"]);
+	rows.push(["npm", hasNpm, hasNpm ? "trovato" : "non trovato — installa Node.js LTS"]);
+	rows.push(["npx", hasNpx, hasNpx ? "trovato" : "non trovato — installa Node.js LTS"]);
+	if (!hasNpm || !hasNpx) ok = false;
 
 	const hasPi = commandExists("pi", ["--version"]);
 	rows.push([
@@ -114,6 +252,28 @@ export async function runDoctor({ cwd = process.cwd(), json = false, autoStartBr
 			: "non trovato sul PATH — questo pacchetto non gestisce l'installazione di `pi` stesso: installalo secondo la documentazione della tua distribuzione di pi.",
 	]);
 	if (!hasPi) ok = false;
+
+	const playwright = ensurePlaywrightPrerequisites({ install: false });
+	rows.push(["playwright-cli", playwright.cli.ok, playwright.cli.ok ? "trovato" : `non trovato — ${playwright.cli.hint}`]);
+	rows.push(["skill playwright-cli", playwright.skill.ok, playwright.skill.ok ? "installata globalmente" : `non trovata — ${playwright.skill.hint}`]);
+	if (!playwright.ok) ok = false;
+
+	const core = ensureCorePrerequisites({ packageRoot, cwd, install: false });
+	for (const skill of core.skills) {
+		rows.push([`skill ${skill.name}`, skill.ok, skill.ok ? "presente" : `mancante — installa da ${skill.repo}`]);
+		if (!skill.ok) ok = false;
+	}
+	rows.push(["pi-mcp-adapter", core.mcp.adapter, core.mcp.adapter ? "installato" : "mancante — pi install npm:pi-mcp-adapter"]);
+	rows.push(["MCP chrome-devtools", core.mcp.chromePackage, core.mcp.chromePackage ? "pacchetto risolvibile" : "mancante — npx -y chrome-devtools-mcp@latest --help"]);
+	rows.push(["MCP GitHub endpoint", core.mcp.githubEndpoint, core.mcp.githubEndpoint ? "raggiungibile; OAuth al primo uso" : "non raggiungibile — verifica rete/GitHub OAuth"]);
+	if (!core.mcp.adapter || !core.mcp.chromePackage || !core.mcp.githubEndpoint) ok = false;
+	if (core.mcp.config) {
+		for (const server of ESSENTIAL_MCP_SERVERS) {
+			const present = core.mcp.declared.includes(server);
+			rows.push([`MCP ${server}`, present, present ? `dichiarato in ${core.mcp.config}` : `mancante in ${core.mcp.config}`]);
+			if (!present) ok = false;
+		}
+	}
 
 	const dockerOk = dockerDaemonRunning();
 	const hasMosquitto = commandExists("mosquitto", ["-h"]);

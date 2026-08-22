@@ -35,12 +35,10 @@ roles:
       model: reasoning-model
     skills:
       - code-review
-      - chrome-devtools
     cli:
       - git
     mcp:
       - github
-      - chrome-devtools
     teams:
       - core
 
@@ -206,8 +204,17 @@ roles:
     label: "Frontend Developer"
     brief: "Implementi/aggiorni i componenti UI nel worktree secondo la specifica del task, integrandoti con le API già esposte dal coder backend (o segnalando a coder cosa manca lato API)."
     model: { provider: llmproxy, model: coding-model }
-    skills: [frontend-development, chrome-devtools]
-    cli: [git, npm]
+    skills: [frontend-development, playwright-cli, chrome-devtools, code-review]
+    cli: [git, npm, playwright-cli]
+    mcp: [chrome-devtools]
+    teams: [core, frontend]
+
+  frontend-reviewer:
+    label: "Frontend Reviewer"
+    brief: "Rivedi esclusivamente il lavoro UI del frontend-developer: usa playwright-cli per aprire e verificare il flusso reale nel browser, chrome-devtools per console/rete/screenshot e la checklist code-review per qualità, regressioni e test. Rimanda le correzioni al frontend-developer e informa il planner solo dopo un'approvazione verificata."
+    model: { provider: llmproxy, model: reasoning-model }
+    skills: [code-review, playwright-cli, chrome-devtools]
+    cli: [git, npm, playwright-cli]
     mcp: [chrome-devtools]
     teams: [core, frontend]
 

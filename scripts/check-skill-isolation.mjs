@@ -24,7 +24,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
 const MATT_POCOCK_SKILLS = ["wayfinder", "to-spec", "grilling", "domain-modeling", "setup-matt-pocock-skills"];
 const CHROME_DEVTOOLS_SKILL = "chrome-devtools";
-const CHROME_DEVTOOLS_SKILL_ROLES = ["reviewer", "frontend-developer"];
+const CHROME_DEVTOOLS_SKILL_ROLES = ["frontend-reviewer", "frontend-developer"];
 
 function read(relPath) {
 	return readFileSync(path.join(repoRoot, relPath), "utf8");
@@ -127,7 +127,7 @@ for (const forbidden of [".pi/skills", path.join("agents", "skills"), ".agents/s
 }
 console.log("   OK");
 
-console.log("8. agents/roles.yaml: SOLO reviewer e frontend-developer hanno la skill chrome-devtools dichiarata...");
+console.log("8. agents/roles.yaml: SOLO frontend-reviewer e frontend-developer hanno la skill chrome-devtools dichiarata...");
 for (const [roleName, cfg] of Object.entries(roles)) {
 	const hasIt = (cfg.skills ?? []).includes(CHROME_DEVTOOLS_SKILL);
 	if (CHROME_DEVTOOLS_SKILL_ROLES.includes(roleName)) {

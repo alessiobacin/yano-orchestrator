@@ -31,6 +31,9 @@ agents:
   reviewer-01:
     role: reviewer
 
+  frontend-reviewer-01:
+    role: frontend-reviewer
+
   reviewer-security-01:
     role: reviewer
     inherit_role_tools: true

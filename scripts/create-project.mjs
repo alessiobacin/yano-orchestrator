@@ -75,7 +75,7 @@ import { createInterface } from "node:readline/promises";
 import * as fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { runDoctor } from "./doctor.mjs";
+import { runDoctor, ensurePlaywrightPrerequisites, ensureCorePrerequisites } from "./doctor.mjs";
 
 function parseArgs(argv) {
 	let name;
@@ -189,6 +189,27 @@ async function ensureMcpCredentials(targetDir) {
 	return true;
 }
 
+function mergeEssentialMcpServers(targetDir, packageRoot) {
+	const activePath = [path.join(targetDir, ".mcp.json"), path.join(targetDir, ".pi", "mcp.json")].find((candidate) => fs.existsSync(candidate));
+	if (!activePath) return true;
+	const examplePath = path.join(packageRoot, "mcp.json.example");
+	try {
+		const current = JSON.parse(fs.readFileSync(activePath, "utf8"));
+		const example = JSON.parse(fs.readFileSync(examplePath, "utf8"));
+		current.mcpServers ??= {};
+		for (const [name, definition] of Object.entries(example.mcpServers ?? {})) {
+			if (!current.mcpServers[name]) current.mcpServers[name] = definition;
+		}
+		const temporaryPath = `${activePath}.yano-init-mcp-${process.pid}`;
+		fs.writeFileSync(temporaryPath, `${JSON.stringify(current, null, 2)}\n`, { mode: 0o600 });
+		fs.renameSync(temporaryPath, activePath);
+		return true;
+	} catch (error) {
+		console.error(`yano init: impossibile aggiungere i MCP essenziali (${activePath}): ${error instanceof Error ? error.message : String(error)}`);
+		return false;
+	}
+}
+
 // runCreateProject({ packageRoot, cwd, argv }) — packageRoot è la directory
 // del pacchetto yano-orchestrator installato (da cui copiare
 // extensions/agents/prompts/mqtt/.env.example/check-syntax.mjs); cwd è la
@@ -222,14 +243,37 @@ export async function runCreateProject({ packageRoot, cwd, argv }) {
 	// the exact doctor diagnostics and can fix the machine before retrying the
 	// same command. Installation of system-level tools remains explicit and
 	// version-controlled by the operator (doctor prints the platform command).
-	const preflight = await runDoctor({ cwd: targetDir, autoStartBroker: true, packageRoot });
-	if (!preflight.ok) {
-		console.error("yano init: preflight fallito — nessun file è stato scritto. Risolvi i prerequisiti indicati sopra e ripeti lo stesso comando.");
+	const playwright = ensurePlaywrightPrerequisites({ install: true });
+	if (!playwright.ok) {
+		console.error("yano init: prerequisiti Playwright non installabili — nessun file di scaffold è stato scritto.");
+		console.error(`  CLI: ${playwright.cli.hint}`);
+		console.error(`  skill: ${playwright.skill.hint}`);
+		process.exitCode = 1;
+		return;
+	}
+	const core = ensureCorePrerequisites({ packageRoot, cwd: targetDir, install: true });
+	if (!core.ok) {
+		console.error("yano init: skill/MCP prerequisiti non installabili — nessun file di scaffold è stato scritto.");
+		for (const skill of core.skills.filter((item) => !item.ok)) console.error(`  skill ${skill.name}: installa da ${skill.repo}`);
+		if (!core.mcp.adapter) console.error("  MCP adapter: pi install npm:pi-mcp-adapter");
+		if (!core.mcp.chromePackage) console.error("  MCP chrome-devtools: npx -y chrome-devtools-mcp@latest --help");
+		if (!core.mcp.githubEndpoint) console.error("  MCP GitHub: endpoint non raggiungibile; verifica connessione e accesso OAuth");
 		process.exitCode = 1;
 		return;
 	}
 	if (!(await ensureMcpCredentials(targetDir))) {
 		console.error("yano init: preflight credenziali fallito — nessun file di scaffold è stato scritto.");
+		process.exitCode = 1;
+		return;
+	}
+	if (!mergeEssentialMcpServers(targetDir, packageRoot)) {
+		console.error("yano init: preflight MCP fallito — nessun file di scaffold è stato scritto.");
+		process.exitCode = 1;
+		return;
+	}
+	const preflight = await runDoctor({ cwd: targetDir, autoStartBroker: true, packageRoot });
+	if (!preflight.ok) {
+		console.error("yano init: preflight fallito — nessun file è stato scritto. Risolvi i prerequisiti indicati sopra e ripeti lo stesso comando.");
 		process.exitCode = 1;
 		return;
 	}
@@ -253,18 +297,22 @@ export async function runCreateProject({ packageRoot, cwd, argv }) {
 	const envExample = path.join(packageRoot, ".env.example");
 	if (fs.existsSync(envExample)) fs.copyFileSync(envExample, path.join(targetDir, ".env.example"));
 
-	// Revisione 49 — stesso identico principio di .env.example sopra: copia un
-	// TEMPLATE, mai un file attivo. `.mcp.json` (o `.pi/mcp.json`) è letto da
-	// pi-mcp-adapter (non da questo pacchetto — extensions/orchestrator.ts non
-	// lo tocca), quindi non c'è nulla qui da "inizializzare" davvero: serve
-	// solo perché l'operatore non debba ricopiare a mano la config del server
-	// MCP chrome-devtools richiesta per reviewer/frontend-developer (vedi
-	// documentazione vendorizzata della skill per il limite onesto: questo
-	// file, una volta rinominato in .mcp.json, rende il server disponibile a
-	// QUALUNQUE ruolo del progetto, non solo a quei due — nessun modo nativo
-	// di scoparlo di più).
-	const mcpExample = path.join(packageRoot, ".mcp.json.example");
-	if (fs.existsSync(mcpExample)) fs.copyFileSync(mcpExample, path.join(targetDir, ".mcp.json.example"));
+	// Revisione 49 — il template MCP diventa attivo automaticamente: i server
+	// essenziali sono parte del preflight e devono essere disponibili a ogni
+	// progetto. `.mcp.json` (o `.pi/mcp.json`) è letto da pi-mcp-adapter.
+	// Questo script copia anche una versione `.example` per riferimento. Il
+	// server resta tecnicamente disponibile a qualunque ruolo: Pi non offre
+	// scope MCP per ruolo.
+	const mcpExample = path.join(packageRoot, "mcp.json.example");
+	if (fs.existsSync(mcpExample)) {
+		fs.copyFileSync(mcpExample, path.join(targetDir, "mcp.json.example"));
+		fs.copyFileSync(mcpExample, path.join(targetDir, ".mcp.json.example"));
+		const activeMcp = path.join(targetDir, ".mcp.json");
+		if (!fs.existsSync(activeMcp)) {
+			fs.copyFileSync(mcpExample, activeMcp);
+			fs.chmodSync(activeMcp, 0o600);
+		}
+	}
 
 	// Playbook package assets are copied into the project's runtime workspace
 	// as an explicit, inspectable local baseline. Never source them from an
@@ -406,7 +454,7 @@ export async function runCreateProject({ packageRoot, cwd, argv }) {
 	console.log(`Fatto. Prossimi passi${inPlace ? "" : ` (cd ${targetDir})`}:`);
 	console.log(`  ${copyEnvCmd}   # facoltativo, per la notifica WhatsApp di fine task`);
 	console.log(
-		`  ${isWindows ? "copy .mcp.json.example .mcp.json" : "cp .mcp.json.example .mcp.json"}   # facoltativo, per far usare a reviewer/frontend-developer il server MCP chrome-devtools`,
+		"  .mcp.json è già attivo: chrome-devtools e GitHub MCP sono stati dichiarati automaticamente; autentica GitHub alla prima connessione",
 	);
 	console.log("  docker compose -f mqtt/compose.yaml up -d   # broker MQTT locale (Docker Desktop su Windows), oppure punta --broker a uno esistente");
 	if (isWindows) {
@@ -422,7 +470,7 @@ export async function runCreateProject({ packageRoot, cwd, argv }) {
 	console.log("metodo di scoping equivalente ma più semplice, integrato nel suo prompt (vedi Revisione 38 in docs/development-notes.md).");
 	console.log("coder/specialisti non hanno bisogno di questo — per loro basta `yano start --instance <nome> --role <ruolo>` (Revisione 44");
 	console.log("— nessun `-e` a mano, funziona per qualunque ruolo esattamente come per planner, senza le skill mattpocock). reviewer e");
-	console.log("Frontend Developer invece SI (Revisione 49): `yano start` è anche l'unico modo in cui ricevono la skill chrome-devtools —");
+	console.log("Frontend Developer e frontend-reviewer invece SI: `yano start` cabla la skill chrome-devtools e la CLI Playwright —");
 	console.log("lanciati a mano restano funzionanti ma senza quella skill (e senza sapere come usare il server MCP omonimo, se configurato");
 	console.log("in .mcp.json — vedi sopra). oppure `pi --instance <nome> --role <ruolo>` direttamente, MAI `pi -e extensions/orchestrator.ts");
 	console.log("...`: questo scaffold non include più quel file (Revisione 33), l'estensione si carica da sola dall'installazione globale.");

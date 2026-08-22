@@ -85,7 +85,7 @@ const MATT_POCOCK_SKILLS = ["wayfinder", "to-spec", "grilling", "domain-modeling
 // Revisione 49 — skill vendorizzata destinata SOLO ai ruoli reviewer e
 // frontend-developer (vedi skills-vendor/awesome-copilot/VERSION.md).
 const CHROME_DEVTOOLS_SKILL = "chrome-devtools";
-const CHROME_DEVTOOLS_SKILL_ROLES = ["reviewer", "frontend-developer"];
+const CHROME_DEVTOOLS_SKILL_ROLES = ["frontend-reviewer", "frontend-developer"];
 
 function resolveVendoredSkillPaths(packageRoot, vendorDir, names) {
 	const base = path.join(packageRoot, "skills-vendor", vendorDir);

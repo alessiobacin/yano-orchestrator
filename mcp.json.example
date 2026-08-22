@@ -2,14 +2,11 @@
   "mcpServers": {
     "chrome-devtools": {
       "command": "npx",
-      "args": ["chrome-devtools-mcp@latest"]
+      "args": ["-y", "chrome-devtools-mcp@latest"]
     },
-    "stitch": {
-      "type": "http",
-      "url": "https://stitch.googleapis.com/mcp",
-      "headers": {
-        "X-Goog-Api-Key": "<YOUR_API_KEY>"
-      }
+    "github": {
+      "url": "https://api.githubcopilot.com/mcp/",
+      "auth": "oauth"
     }
   }
 }

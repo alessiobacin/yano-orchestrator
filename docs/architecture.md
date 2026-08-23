@@ -27,7 +27,7 @@ Every instance has an `instance`, `role`, `project` and `team` identity. MQTT to
 
 ## Main flow
 
-1. `yano init` validates Node, Pi-facing prerequisites, MCP configuration and broker availability before writing a scaffold. Older projects whose roster is still under `.pi/agents/` remain launchable; the launcher selects that directory explicitly instead of assuming the modern root `agents/` layout.
+1. `yano init` validates Node, Pi-facing prerequisites, MCP configuration and broker availability before writing a scaffold. With `--herdr`, the CLI first creates or reuses a Herdr workspace rooted at the current directory, runs the scaffold command in its root pane, then starts `planner-01` in that same terminal. Older projects whose roster is still under `.pi/agents/` remain launchable; the launcher selects that directory explicitly instead of assuming the modern root `agents/` layout.
 2. `yano start` launches any configured role. The trace-analysis skill is attached to every worker; planner-only vendor skills remain restricted to the planner, and browser skills remain restricted to frontend roles.
 3. The planner creates or reuses a Git worktree, initializes the persistent workspace and declares a phase plan.
 4. `agent_send` routes work by instance or role. Presence is advisory but immediately warns when no live target is available. Structured phase gates can refuse sends to locked phases.

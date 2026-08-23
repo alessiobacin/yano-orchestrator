@@ -160,6 +160,19 @@ docker compose -f mqtt/compose.yaml up -d   # local MQTT broker
 yano start --instance planner-01
 ```
 
+If you want Yano to open Herdr and perform both steps in a dedicated Herdr
+workspace named after the current folder, use the convenience mode:
+
+```bash
+mkdir url-shortener && cd url-shortener
+yano init --name "URL Shortener" --herdr
+```
+
+This creates or reuses a Herdr workspace rooted at the current directory,
+runs `yano init` in its root terminal, and starts `planner-01` there. The
+option is intentionally in-place only; use the normal `--target` mode when
+you do not want Herdr to own the project terminal.
+
 `yano start` usa `full` come modalità predefinita e la propaga agli agenti;
 usa `--trace-mode events|standard|off` per ridurla intenzionalmente.
 

@@ -1,0 +1,109 @@
+#!/usr/bin/env node
+// Helper for `yano init --herdr`.
+// Creates (or safely reuses) a Herdr workspace rooted at the directory from
+// which the command was requested, then runs the real init and planner start
+// inside its root pane. Herdr remains the only process supervisor; this file
+// never backgrounds a terminal or starts a second launcher.
+
+import { spawnSync } from "node:child_process";
+import * as fs from "node:fs";
+import path from "node:path";
+
+function decode(stdout) {
+	if (!stdout || !String(stdout).trim()) return null;
+	try {
+		const parsed = JSON.parse(String(stdout));
+		const result = parsed?.result ?? parsed;
+		return result?.snapshot ?? result;
+	} catch {
+		return null;
+	}
+}
+
+function invokeHerdr(args, { herdrBin = "herdr", runner = spawnSync } = {}) {
+	const result = runner(herdrBin, args, { encoding: "utf8" });
+	if (result.status !== 0) {
+		const detail = String(result.stderr || result.stdout || "").trim();
+		throw new Error(`Herdr ha rifiutato "${args.join(" ")}"${detail ? `: ${detail}` : "."}`);
+	}
+	return decode(result.stdout);
+}
+
+function tryInvokeHerdr(args, options) {
+	try {
+		return invokeHerdr(args, options);
+	} catch {
+		return null;
+	}
+}
+
+function normalizedDirectory(value) {
+	const absolute = path.resolve(value);
+	try {
+		return fs.realpathSync(absolute);
+	} catch {
+		return absolute;
+	}
+}
+
+function shellQuote(value, platform) {
+	const text = String(value);
+	if (platform === "win32") return `"${text.replaceAll("\"", "\\\"")}"`;
+	return `'${text.replaceAll("'", `'"'"'`)}'`;
+}
+
+export function buildHerdrInitCommand({ initArgs, plannerInstance = "planner-01", platform = process.platform }) {
+	const quote = (value) => shellQuote(value, platform);
+	const init = ["yano", "init", ...initArgs].map(quote).join(" ");
+	const planner = ["yano", "start", "--instance", plannerInstance, "--role", "planner"].map(quote).join(" ");
+	if (platform === "win32") return { executable: "cmd.exe", args: ["/d", "/s", "/c", `${init} && ${planner}`] };
+	return { executable: "sh", args: ["-lc", `${init} && exec ${planner}`] };
+}
+
+function rootPaneForWorkspace(snapshot, workspace, cwd) {
+	return (snapshot?.panes ?? []).find((pane) => pane.workspace_id === workspace.workspace_id && normalizedDirectory(pane.cwd || "") === cwd);
+}
+
+function existingWorkspace(snapshot, label, cwd) {
+	const matches = (snapshot?.workspaces ?? []).filter((workspace) => workspace.label === label);
+	if (!matches.length) return null;
+	const sameRoot = matches.find((workspace) => rootPaneForWorkspace(snapshot, workspace, cwd));
+	if (sameRoot) return { workspace: sameRoot, pane: rootPaneForWorkspace(snapshot, sameRoot, cwd), reused: true };
+	throw new Error(`esiste già un workspace Herdr chiamato "${label}" ma associato a un'altra directory; rinominalo o chiudilo prima di ripetere l'init`);
+}
+
+export function runHerdrInit({ cwd, initArgs, plannerInstance = "planner-01", herdrBin = "herdr", runner = spawnSync, platform = process.platform }) {
+	const projectRoot = normalizedDirectory(cwd);
+	if (!fs.statSync(projectRoot).isDirectory()) throw new Error(`la directory corrente non è valida: ${projectRoot}`);
+	const label = path.basename(projectRoot) || projectRoot;
+	const options = { herdrBin, runner };
+
+	// Snapshot is best-effort: workspace create is also the command that can
+	// bring up Herdr's local server on a fresh machine. If a server is already
+	// running, this prevents duplicate workspaces and duplicate planner tabs.
+	const snapshot = tryInvokeHerdr(["api", "snapshot"], options);
+	const existing = existingWorkspace(snapshot, label, projectRoot);
+	let workspace;
+	let pane;
+	let reused = false;
+	if (existing) {
+		workspace = existing.workspace;
+		pane = existing.pane;
+		reused = true;
+		const activeAgent = (snapshot.agents ?? []).find((agent) => agent.pane_id === pane.pane_id);
+		if (activeAgent && activeAgent.agent_status !== "done") {
+			throw new Error(`il workspace Herdr "${label}" ha già un agente attivo nella tab ${pane.pane_id}; non avvio un secondo planner`);
+		}
+	} else {
+		const created = invokeHerdr(["workspace", "create", "--cwd", projectRoot, "--label", label, "--focus"], options);
+		workspace = created?.workspace;
+		pane = created?.root_pane;
+		if (!workspace?.workspace_id || !pane?.pane_id) throw new Error("Herdr ha creato il workspace ma non ha restituito il root pane");
+	}
+
+	const command = buildHerdrInitCommand({ initArgs, plannerInstance, platform });
+	invokeHerdr(["pane", "run", pane.pane_id, command.executable, ...command.args], options);
+	console.log(`yano init --herdr: workspace Herdr "${label}" ${reused ? "riusato" : "creato"} (${workspace.workspace_id}).`);
+	console.log(`yano init --herdr: eseguito nella tab ${pane.pane_id}: yano init ... && yano start --instance ${plannerInstance} --role planner`);
+	return { workspace, pane, label, reused, command };
+}

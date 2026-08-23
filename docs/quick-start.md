@@ -30,6 +30,16 @@ cd mio-progetto
 yano init --name "Mio Progetto"
 ```
 
+Per aprire automaticamente Herdr, creare un workspace con il nome della
+cartella corrente ed eseguire subito il planner nello stesso terminale:
+
+```bash
+yano init --name "Mio Progetto" --herdr
+```
+
+Questa modalità è in-place e non accetta `--target`: evita che il workspace
+Herdr e la root reale del progetto puntino a directory diverse.
+
 `yano init` prepara configurazione, ruoli e workspace del progetto senza
 copiarvi il codice dell'estensione; il database SQLite operativo viene creato
 quando il primo planner inizializza l'orchestratore.

@@ -76,18 +76,21 @@ import * as fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runDoctor, ensurePlaywrightPrerequisites, ensureCorePrerequisites, ensureEmbeddingPrerequisites, isSupportedNodeRuntime } from "./doctor.mjs";
+import { runHerdrInit } from "./init-herdr.mjs";
 
 function parseArgs(argv) {
 	let name;
 	let target;
 	let force = false;
 	let llmp = false;
+	let herdr = false;
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i];
 		if (a === "--name") name = argv[++i];
 		else if (a === "--target") target = argv[++i];
 		else if (a === "--force") force = true;
 		else if (a === "--llmp") llmp = true;
+		else if (a === "--herdr") herdr = true;
 		else if (a === "--help" || a === "-h") {
 			printUsage();
 			process.exit(0);
@@ -96,14 +99,14 @@ function parseArgs(argv) {
 			process.exit(1);
 		}
 	}
-	return { name, target, force, llmp };
+	return { name, target, force, llmp, herdr };
 }
 
 function printUsage() {
 	console.log(
 		[
-			'Uso: yano init --name "<Nome Progetto>" [--target <dir>] [--force] [--llmp]',
-			'     (in locale, senza npm install -g: node scripts/create-project.mjs --name "<Nome Progetto>" [--target <dir>] [--force] [--llmp])',
+			'Uso: yano init --name "<Nome Progetto>" [--target <dir>] [--force] [--llmp] [--herdr]',
+			'     (in locale, senza npm install -g: node scripts/create-project.mjs --name "<Nome Progetto>" [--target <dir>] [--force] [--llmp] [--herdr])',
 			"",
 			'  --name    Nome del progetto (obbligatorio) — finisce in package.json ("name", slug kebab-case)',
 			"            e viene pre-scritto in .pi/extensions/yano-orchestrator/config/project.json,",
@@ -116,6 +119,8 @@ function printUsage() {
 			"  --llmp    Scrive anche .pi/agent/models.json e .pi/agent/settings.json, configurazione locale",
 			'            di `pi` per un llmproxy su http://127.0.0.1:7045 (provider "llmproxy", tema dark) —',
 			"            utile se usi un proxy LLM locale invece di un provider cloud diretto.",
+			"  --herdr   Crea/riusa un workspace Herdr con il nome della cartella corrente e",
+			"            avvia lì `yano init`, seguito dal planner-01. Richiede l'init in place: non usare --target.",
 		].join("\n"),
 	);
 }
@@ -217,10 +222,20 @@ function mergeEssentialMcpServers(targetDir, packageRoot) {
 // non più una sottocartella — vedi commento in testa al file); argv sono gli
 // argomenti (senza node/nome-script).
 export async function runCreateProject({ packageRoot, cwd, argv }) {
-	const { name, target, force, llmp } = parseArgs(argv);
+	const { name, target, force, llmp, herdr } = parseArgs(argv);
 	if (!name) {
 		console.error("create-project: --name è obbligatorio (vedi --help).");
 		process.exit(1);
+	}
+	if (herdr) {
+		if (target) {
+			console.error("yano init --herdr: --target non è supportato; esegui il comando dalla directory che deve diventare il workspace Herdr.");
+			process.exitCode = 1;
+			return;
+		}
+		const innerArgs = argv.filter((arg) => arg !== "--herdr");
+		runHerdrInit({ cwd, initArgs: innerArgs });
+		return;
 	}
 	const slug = slugify(name);
 	const inPlace = !target;

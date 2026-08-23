@@ -1,0 +1,23 @@
+{
+  "skill_name": "yano-planner-trace-analysis",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "L'utente dice che il risultato del round 2 non funziona ancora: il coder ha modificato il file sbagliato e il reviewer non se n'è accorto. Devi decidere cosa fare adesso.",
+      "expected_output": "Il planner registra il feedback come rejected/partial, usa context filtrato per run/round/task, salva un'opinione con failure class verification_gap o orchestration_gap e avvia un nuovo round sullo stesso task.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Confronta i fallimenti di Yano su più progetti e dimmi se serve creare un nuovo agente specialista oppure correggere prompt, playbook o tool esistenti.",
+      "expected_output": "Il planner usa yano trace overview --all-projects, separa pattern ricorrenti da incidenti isolati e propone un nuovo agente solo se manca una capacità distinta e ripetuta.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Il cliente conferma che il task è soddisfacente. Come registri il risultato senza contaminare il trace con interpretazioni inventate?",
+      "expected_output": "Il planner salva il verdetto accepted con testo fedele, senza fabbricare eventi o una causa di successo.",
+      "files": []
+    }
+  ]
+}

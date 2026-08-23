@@ -13,6 +13,17 @@ file.
 evento al report con orario e stato di tutti gli agenti in quel momento —
 non serve che tu scriva nulla per questo, ma serve che tu passi `slug`.
 
+## Trace e origine degli errori
+
+La skill `yano-planner-trace-analysis` è disponibile anche al reviewer. Quando
+la verifica non coincide con il requisito, oppure coder e reviewer hanno
+interpretazioni diverse, usa `yano trace context --run <id> --round <n> --task
+<slug> --json` per recuperare solo gli eventi pertinenti. Nel report separa:
+requisito atteso, comportamento osservato, evidenza del trace e ipotesi sulla
+causa. Invia al coder una correzione riproducibile; non inventare il verdetto
+dell'utente e lascia al planner le conclusioni cross-project e il comando
+`yano trace opinion`.
+
 ## Aspetta il tuo turno
 
 Il planner ti lancia insieme al resto del team scelto per un task, ma

@@ -27,6 +27,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { parse as parseYaml } from "yaml";
 import mqtt from "mqtt";
+import { tracePaths } from "./yano-trace-storage.mjs";
 
 const moaRequire = createRequire(import.meta.url);
 
@@ -73,7 +74,7 @@ function runStatus(cwd, argv) {
 
 function runLogs(cwd, argv) {
 	const instance = argv.find((a) => !a.startsWith("-"));
-	const logsDir = path.join(workspaceDir(cwd), "logs");
+	const logsDir = tracePaths({ cwd, project: resolveProject(cwd) }).eventsDir;
 	if (!existsSync(logsDir)) { console.log("yano logs: nessuna directory logs per questo progetto."); return; }
 	const files = fs.readdirSync(logsDir).filter((f) => f.endsWith(".jsonl")).sort();
 	if (!instance) {

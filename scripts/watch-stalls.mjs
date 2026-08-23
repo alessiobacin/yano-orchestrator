@@ -40,6 +40,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import mqtt from "mqtt";
+import { tracePaths } from "./yano-trace-storage.mjs";
 
 const moaRequire = createRequire(import.meta.url);
 
@@ -112,7 +113,7 @@ export async function runWatch({ cwd, argv }) {
 		process.exit(1);
 	}
 
-	const logDir = path.join(cwd, ".pi", "extensions", "multiAgentOrchestrator", "logs");
+	const logDir = tracePaths({ cwd, project }).eventsDir;
 
 	// Semantic liveness proxy (Ticket 05): an assignee whose JSONL log carries a
 	// recent tool_execution_start marker (logged by the extension at the START of
@@ -147,7 +148,7 @@ export async function runWatch({ cwd, argv }) {
 	for (const t of stalled) {
 		const elapsedMs = now - new Date(t.updated_at).getTime();
 		const active = t.assigned_instance ? semanticActive.has(t.assigned_instance) : false;
-		const event = { ts: new Date().toISOString(), type: "stall_watch", ticket_id: t.id, run_id: t.run_id, assigned_instance: t.assigned_instance, elapsed_ms: elapsedMs, semantic_active: active };
+		const event = { ts: new Date().toISOString(), type: "stall_watch", project, project_key: tracePaths({ cwd, project }).projectKey, ticket_id: t.id, run_id: t.run_id, assigned_instance: t.assigned_instance, elapsed_ms: elapsedMs, semantic_active: active };
 		if (client) {
 			const topic = `pi/${project}/runs/${t.run_id}/events`;
 			try {

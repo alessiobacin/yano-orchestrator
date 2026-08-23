@@ -3,7 +3,7 @@
 # yano-orchestrator: per-instance debug event logs, diagnostic only
 logs/
 node_modules/
-# real secrets — NEVER commit (see docs/mvp-notes.md, Revisione 31: a real Evolution API
+# real secrets — NEVER commit (see docs/development-notes.md: a real Evolution API
 # key + phone number were found committed in a sibling deployment's .env; this repo's
 # history starts clean specifically to avoid repeating that mistake)
 .env
@@ -11,4 +11,5 @@ node_modules/
 *.db
 *.db-journal
 .pi/
+temp/
 .DS_Store

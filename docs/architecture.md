@@ -28,7 +28,7 @@ Every instance has an `instance`, `role`, `project` and `team` identity. MQTT to
 ## Main flow
 
 1. `yano init` validates Node, Pi-facing prerequisites, MCP configuration and broker availability before writing a scaffold.
-2. `yano start` launches any configured role. Planner-only vendor skills are attached only to the planner; browser skills are attached only to frontend roles.
+2. `yano start` launches any configured role. The trace-analysis skill is attached to every worker; planner-only vendor skills remain restricted to the planner, and browser skills remain restricted to frontend roles.
 3. The planner creates or reuses a Git worktree, initializes the persistent workspace and declares a phase plan.
 4. `agent_send` routes work by instance or role. Presence is advisory but immediately warns when no live target is available. Structured phase gates can refuse sends to locked phases.
 5. Coder, reviewer and specialists append evidence to the task report. File claims prevent simultaneous edits to the same shared file.
@@ -42,10 +42,47 @@ The workspace lives under `.pi/extensions/multiAgentOrchestrator/`:
 - `orchestratorStorage/orchestrator.db`: SQLite state and audit history;
 - `config/project.json`: project identity and schema metadata;
 - `reports/`: task reports and round evidence;
-- `logs/`: per-instance diagnostic JSONL;
+- `<yano-install>/temp/traces/<project-key>/events/`: global per-instance trace JSONL, outside the project checkout;
 - `specs/`, `playbooks/`, `diagrams/`, `knowledge/`, `policies/`, `artifacts/`: project-scoped working artifacts.
 
 The database is intentionally local to a project. MQTT provides fast coordination, while SQLite is the durable source for recovery, status, evidence and outbox state.
+
+### Global tracing
+
+Yano's forensic trace is stored under `temp/` in the installed Yano package,
+not under the project. `YANO_DATA_DIR` (or `YANO_TEMP_DIR`) can override this
+location when the global package directory is read-only. The CLI controls the
+capture policy:
+
+```text
+yano trace status
+yano trace enable --mode events|standard|full
+yano trace disable
+yano trace feedback --status rejected --text "<verdetto utente>" --run <id> --round <n> --task <slug>
+yano trace context --run <id> --round <n> --task <slug> --json
+yano trace opinion --text "<analisi planner>" --change prompt --confidence medium
+yano trace overview --all-projects --json
+yano trace clear --run <run-id> --yes
+yano trace clear --all --yes
+```
+
+`events` records lifecycle and coordination metadata, `standard` also stores
+visible assistant responses and tool metadata, and `full` stores the visible
+session branch as well. Data is redacted before persistence and tracing is
+best-effort: a logging failure must never stop the agent. Hidden model chain of
+thought is not available to this system; the trace contains observable agent
+messages, tool lifecycle and events supplied by MQTT, Git, filesystem and
+terminal adapters when those adapters are active.
+The operational SQLite database remains project-local because it is the
+orchestrator's live state, not forensic trace data.
+
+The feedback log stores the user's verdict verbatim. Each verdict also creates
+a deterministic snapshot; the planner's evidence-based diagnosis is stored
+separately as an opinion. `context` and `overview` return filtered or
+aggregated JSON so a later planner can retrieve only one task, round or time
+window instead of injecting the entire trace into its context. The bundled
+planner skill defines this protocol and is attached by the launcher on every
+planner start.
 
 Tickets may declare `required_playbook`. When present, `ticket_create` checks it
 against the immutable run binding and `ticket_claim` checks both the binding and

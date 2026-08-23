@@ -2,7 +2,7 @@
 flowchart TD
     USER["👤 User"] --> CLI["yano CLI"]
     CLI --> INIT["init / doctor / start"]
-    CLI --> OBS["status / fleet / deps / gantt / watch"]
+    CLI --> OBS["status / fleet / deps / gantt / watch / trace"]
     INIT --> PLANNER["pi planner\nrole + instance identity"]
 
     subgraph CONFIG["Project configuration"]
@@ -53,7 +53,12 @@ flowchart TD
         SQLITE["SQLite orchestrator.db\nruns / specs / tickets / DAG\nPlaybooks / holds / evidence / outbox"]
         WORKTREES[".worktrees/<slug>\nGit isolated branches"]
         REPORTS[".pi/.../reports\nround evidence"]
-        LOGS[".pi/.../logs\nJSONL diagnostics"]
+    end
+
+    subgraph GLOBAL_TRACE["Global Yano installation / temp"]
+        TRACE["traces/<project-key>/events\nJSONL forensic trace\nevents / standard / full"]
+        TRACE_ANALYSIS["feedback / summaries / opinions\nfiltered context + cross-project overview"]
+        TRACE_CONFIG["tracing.json\nper-project mode"]
     end
 
     PLANNER --> SQLITE
@@ -62,7 +67,11 @@ flowchart TD
     FRONTEND --> WORKTREES
     SPECIALISTS --> WORKTREES
     WORKTREES --> REPORTS
-    WORKERS --> LOGS
+    WORKERS --> TRACE
+    CLI --> TRACE_CONFIG
+    TRACE_CONFIG --> TRACE
+    TRACE --> TRACE_ANALYSIS
+    PLANNER --> TRACE_ANALYSIS
     SQLITE --> DASHBOARD["local read-only dashboard\nGantt + status"]
     OBS --> DASHBOARD
 
@@ -89,5 +98,5 @@ flowchart TD
     classDef risk fill:#3a1f1f,stroke:#e06c75,color:#e5e7eb
     class USER user
     class CLI,INIT,OBS,PLANNER,GATES,FINALIZE,MERGE control
-    class SQLITE,WORKTREES,REPORTS,LOGS durable
+    class SQLITE,WORKTREES,REPORTS,TRACE,TRACE_CONFIG durable
     class WATCHDOG,ADAPTERS risk

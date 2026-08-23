@@ -25,6 +25,7 @@ Everything communicates over a local MQTT broker, using role/instance identity a
 - **Phased execution plans** — the planner declares which roles work together and in what order, and the system enforces it
 - **WhatsApp notifications** (via Evolution API) when a task completes or needs your input, so you don't have to watch the terminal
 - **A global `yano` CLI** (`yano init`, `yano start`, `yano doctor`, `yano update`, `yano copy-prompts`, `yano uninstall`, `yano end`) for scaffolding, launching, verifying the environment, keeping new orchestrated projects up to date, and closing them out — `yano start` now composes the right launch command for *any* role, not just planner, which is what the planner itself uses when it launches new team members over herdr/tmux
+- **Shared trace-analysis skill** for planner, coder, reviewer and specialists — workers can inspect the filtered origin of a mismatch, while the planner records cross-project opinions and systemic interventions
 - **Role prompts are always read live from the installed package by default — no per-project copy to keep in sync** — `yano update` alone is enough to bring every project current; `yano copy-prompts` + `yano start --custom-prompts` are there only if you actually want to customize a role's prompt for one specific project
 - **Automatic per-project MQTT scoping** — two different projects never collide on a shared broker without you having to pass `--project` yourself
 - **Frontend prerequisites are deterministic** — every `yano init` verifies/installs global `@playwright/cli@latest` and the global `playwright-cli` skill; `frontend-developer` and `frontend-reviewer` receive the browser skill, while backend `reviewer` remains backend-only. The optional `chrome-devtools` MCP remains project-wide because Pi cannot scope MCP servers per role
@@ -86,7 +87,15 @@ yano uninstall        # remove the global installation (asks for confirmation; a
 
 **If you scaffolded a project with an older `yano init`** (one that still copied `extensions/` into new projects), that project directory may have its own leftover `extensions/orchestrator.ts`. `yano start` detects this and simply ignores it, relying on the globally-installed extension instead — it prints a note pointing this out, but the leftover folder no longer causes `pi` to fail with `Tool "..." conflicts with ...`/`Flag "..." conflicts with ...` (a real bug in that detection, fixed — it used to warn about the impending crash and then cause it anyway). The folder is inert at that point; delete it whenever convenient (`rm -rf extensions` / `Remove-Item -Recurse -Force extensions`) — nothing needs it once the extension is installed globally.
 
-**If you scaffolded a project before this change**, its root-level `reports/`, `prompts/`, and `logs/` folders (development artifacts of working with this extension — task reports, role prompts, per-instance debug traces) were tracked by git like any other file, right alongside your actual application code. As of `yano init --llmp`/plain `yano init`, all three now live under the already-gitignored `.pi/extensions/multiAgentOrchestrator/` instead, so they never end up in a public push by default. Nothing migrates automatically for an existing project — if you want the same treatment there, `git rm -r --cached reports prompts logs` (whichever exist) and move their contents under `.pi/extensions/multiAgentOrchestrator/{reports,prompts,logs}` by hand; if any of them were already pushed to a public remote, removing them from tracking going forward does not erase that history — see `docs/development-notes.md`, Revisione 37, if you need to scrub it from a remote that's already public.
+**Tracing is global and outside the project checkout.** The observable agent
+events and payloads are stored under `<yano-install>/temp/traces/`, so they
+survive worktree cleanup and are never pushed with the application. Use
+`yano trace status` to see the exact location, `yano trace enable --mode full`
+to capture the maximum observable detail, and `yano trace clear --all --yes`
+to remove the global temporary store. Existing project-local reports and the
+operational SQLite database remain workspace state used by the orchestrator;
+they are not the forensic trace. The complete command reference is in
+[`docs/yano-trace.md`](docs/yano-trace.md).
 
 ### Closing out a project
 
@@ -101,6 +110,13 @@ yano fleet                     # live MQTT presence of the agent pool
 yano deps --cli git,npm        # capability preflight
 yano gantt                     # local live dashboard at 127.0.0.1:8174
 yano watch --once              # one stalled-ticket scan
+yano trace status              # modalità e percorso del trace globale
+yano trace enable --mode full  # trace completo dei dati osservabili
+yano trace feedback --status rejected --text "<verdetto utente>" --run <id> --round <n> --task <slug>
+yano trace context --run <id> --round <n> --task <slug> --json
+yano trace overview --all-projects --json
+yano trace opinion --text "<analisi planner>" --change prompt --confidence medium
+yano trace clear --all --yes   # elimina tutti i dati temporanei di Yano
 ```
 
 A run (the ticket/DAG layer's top-level container for one objective — see "Layer ticket/DAG persistente" in `docs/development-notes.md`, Revisione 26) normally closes itself once every one of its tickets is marked done. `yano end` is for when that doesn't happen — a session ended before every ticket was formally completed, the goal changed, or you're simply satisfied with where things landed and want to declare it done. It never touches tickets, worktrees, or any file outside this project's own `orchestrator.db` — closing a run just changes its own status and records the change in its event history, visible later via `run_status` from inside a planner session.
@@ -111,11 +127,16 @@ If you run `pi` against a local LLM proxy instead of a cloud provider directly, 
 
 ## Quickstart
 
+Per il percorso completo, inclusa l'inizializzazione dei log con `yano trace`,
+vedi [`docs/quick-start.md`](docs/quick-start.md).
+
 Scaffold a new project and start the planner:
 
 ```bash
 mkdir url-shortener && cd url-shortener
 yano init --name "URL Shortener"
+yano trace enable --mode events
+yano trace status
 cp .env.example .env   # optional: WhatsApp notifications, fill in your Evolution API details
 docker compose -f mqtt/compose.yaml up -d   # local MQTT broker
 yano start --instance planner-01
@@ -173,10 +194,11 @@ bin/yano.mjs                        the `yano` CLI (init/start/doctor/update/uni
 scripts/                          CLI internals, dev tooling, and CI checks
 skills-vendor/mattpocock/         vendored planner-only skills (wayfinder, to-spec, and their own
                                    dependencies) — see VERSION.md
+skills-vendor/yano/               bundled shared skill for trace CLI usage and post-round diagnosis
 skills-vendor/awesome-copilot/    vendored chrome-devtools skill, reviewer/frontend-developer only —
                                    see VERSION.md
 mqtt/                             local Mosquitto broker config for development
-docs/                             architecture documentation, Mermaid diagrams and detailed development notes
+docs/                             architecture, trace reference, quick start, Mermaid diagrams and development notes
 .env.example                      WhatsApp notification configuration template
 mcp.json.example                  chrome-devtools MCP server configuration template
 ```

@@ -43,7 +43,7 @@ async function main() {
 
 	console.log("\n=== skill isolation must still hold (mattpocock skills ONLY for planner) ===");
 	const { stdout } = await execFileP("node", ["scripts/check-skill-isolation.mjs"], { cwd: PROJECT_ROOT });
-	ok(/OK/.test(stdout) && /OK: scripts\/check-skill-isolation/.test(stdout), "check-skill-isolation passes after the prompt/guide additions");
+	ok(/OK/.test(stdout) && (/OK: scripts\/check-skill-isolation/.test(stdout) || /skill planner, skill Yano trace/.test(stdout)), "check-skill-isolation passes after the prompt/guide additions");
 
 	console.log(`\n${PASS} assertions passed.`);
 	console.log("PLANNING-FLOW SMOKE TEST PASSED");

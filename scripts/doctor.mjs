@@ -40,6 +40,7 @@ const PLAYWRIGHT_CLI_SKILL_REPO = "https://github.com/microsoft/playwright-cli";
 const MATT_SKILLS_REPO = "https://github.com/mattpocock/skills";
 const CHROME_SKILLS_REPO = "https://github.com/github/awesome-copilot";
 const ESSENTIAL_SKILLS = [
+	{ name: "yano-planner-trace-analysis", repo: "bundled with yano-orchestrator", vendored: true },
 	{ name: "wayfinder", repo: MATT_SKILLS_REPO, vendored: true },
 	{ name: "to-spec", repo: MATT_SKILLS_REPO, vendored: true },
 	{ name: "grilling", repo: MATT_SKILLS_REPO, vendored: true },
@@ -89,7 +90,11 @@ function skillFile(name, packageRoot) {
 	].find((file) => file && readable(file));
 	if (globalFile) return globalFile;
 	if (packageRoot) {
-		const vendorRoots = [path.join(packageRoot, "skills-vendor", "mattpocock", name), path.join(packageRoot, "skills-vendor", "awesome-copilot", name)];
+		const vendorRoots = [
+			path.join(packageRoot, "skills-vendor", "yano", name),
+			path.join(packageRoot, "skills-vendor", "mattpocock", name),
+			path.join(packageRoot, "skills-vendor", "awesome-copilot", name),
+		];
 		const vendorFile = vendorRoots.map((root) => path.join(root, "SKILL.md")).find(readable);
 		if (vendorFile) return vendorFile;
 	}

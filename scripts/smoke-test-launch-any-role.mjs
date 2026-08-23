@@ -16,8 +16,8 @@
 // Revisione 49: reviewer now DOES receive a --skill flag (chrome-devtools,
 // vendored skill (see VERSION.md there), same mechanism as
 // planner's mattpocock skills. TEST 2 below was updated accordingly: it now
-// asserts reviewer gets exactly the chrome-devtools skill and NONE of the
-// mattpocock ones, instead of asserting no --skill at all.
+// asserts reviewer gets exactly the chrome-devtools skill plus the shared Yano
+// trace skill and NONE of the mattpocock ones.
 //
 // Spawns the REAL scripts/launch-planner.mjs as a child process (never a
 // hand-copied mirror), same as `yano start --instance <x> --role <y>
@@ -66,7 +66,8 @@ function main() {
 	const coderOut = run(dir, ["--instance", "coder-01", "--role", "coder", "--print-only"]);
 	ok(/comando composto/.test(coderOut), "coder: command is printed (launch not refused, unlike pre-Revisione-44 behavior)");
 	ok(coderOut.includes("--role coder"), "coder: composed command carries --role coder");
-	ok(!coderOut.includes("--skill"), "coder: NO --skill flags attached (mattpocock skills stay planner-only)");
+	ok(coderOut.includes(path.join(PACKAGE_ROOT, "skills-vendor", "yano", "yano-planner-trace-analysis")), "coder: receives the shared Yano trace skill");
+	ok(!coderOut.includes(path.join(PACKAGE_ROOT, "skills-vendor", "mattpocock")), "coder: receives no planner-only mattpocock skills");
 	ok(!coderOut.includes("-e extensions/orchestrator.ts"), "coder: no stale -e flag (modern scaffold, relies on global install)");
 
 	console.log("\n=== TEST 2 — --role reviewer: backend reviewer gets no frontend browser skill ===");
@@ -96,6 +97,7 @@ function main() {
 	const defaultOut = run(dir, ["--instance", "planner-01", "--print-only"]);
 	ok(defaultOut.includes("--role planner"), "default (no --role passed): resolves to planner");
 	ok(defaultOut.includes("--skill"), "default (no --role passed): mattpocock skill flags ARE attached, exactly as before Revisione 44");
+	ok(defaultOut.includes(path.join(PACKAGE_ROOT, "skills-vendor", "yano", "yano-planner-trace-analysis")), "planner: receives the mandatory Yano trace-analysis skill");
 	ok(
 		!defaultOut.includes(path.join(PACKAGE_ROOT, "skills-vendor", "awesome-copilot", "chrome-devtools")),
 		"planner: does NOT receive --skill chrome-devtools (Revisione 49 — reviewer/frontend-developer only)",

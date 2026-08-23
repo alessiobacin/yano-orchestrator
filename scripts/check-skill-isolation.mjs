@@ -23,6 +23,7 @@ import YAML from "yaml";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
 const MATT_POCOCK_SKILLS = ["wayfinder", "to-spec", "grilling", "domain-modeling", "setup-matt-pocock-skills"];
+const YANO_PLANNER_SKILL = "yano-planner-trace-analysis";
 const CHROME_DEVTOOLS_SKILL = "chrome-devtools";
 const CHROME_DEVTOOLS_SKILL_ROLES = ["frontend-reviewer", "frontend-developer"];
 
@@ -74,13 +75,14 @@ for (const name of MATT_POCOCK_SKILLS) {
 }
 console.log("   OK");
 
-console.log("5. launch-planner.mjs (Revisione 44) ACCETTA un --role diverso da planner (es. coder), ma senza NESSUN --skill mattpocock...");
+console.log("5. launch-planner.mjs (Revisione 44+) accetta un --role diverso da planner: coder riceve la skill trace condivisa, ma non quelle mattpocock...");
 const printedCoder = execFileSync("node", ["scripts/launch-planner.mjs", "--instance", "coder-check", "--role", "coder", "--print-only"], {
 	cwd: repoRoot,
 	encoding: "utf8",
 });
 assert.match(printedCoder, /--role coder/, "il comando composto per --role coder deve includere --role coder");
-assert.ok(!printedCoder.includes("--skill"), "il comando composto per --role coder NON deve includere alcun flag --skill");
+assert.ok(printedCoder.includes(path.join(repoRoot, "skills-vendor", "yano", YANO_PLANNER_SKILL)), "il comando composto per --role coder deve includere la skill trace condivisa");
+for (const name of MATT_POCOCK_SKILLS) assert.ok(!printedCoder.includes(path.join(repoRoot, "skills-vendor", "mattpocock", name)), `il coder non deve ricevere la skill mattpocock '${name}'`);
 console.log("   OK");
 
 console.log("6. nessun altro script/prompt referenzia skills-vendor/mattpocock con un ruolo diverso da planner...");
@@ -187,6 +189,19 @@ const offenders2 = grepOut2
 assert.deepEqual(offenders2, [], `file inattesi che referenziano skills-vendor/awesome-copilot: ${offenders2.join(", ")}`);
 console.log("   OK");
 
+console.log("12. la skill Yano per l'analisi trace è presente e viene caricata da tutti i ruoli...");
+const yanoSkillPath = path.join(repoRoot, "skills-vendor", "yano", YANO_PLANNER_SKILL);
+assert.ok(existsSync(path.join(yanoSkillPath, "SKILL.md")), "la skill Yano deve contenere SKILL.md");
+assert.ok(existsSync(path.join(yanoSkillPath, "evals", "evals.json")), "la skill Yano deve contenere evals/evals.json");
+assert.ok(launcherSrc.includes(`"${YANO_PLANNER_SKILL}"`), "launch-planner.mjs deve referenziare la skill Yano");
+assert.ok(printed.includes(yanoSkillPath), "il planner deve ricevere la skill Yano");
+assert.ok(printedCoder.includes(yanoSkillPath), "il coder deve ricevere la skill Yano");
+assert.ok((roles.planner.skills ?? []).includes(YANO_PLANNER_SKILL), "planner deve dichiarare la skill Yano in roles.yaml");
+for (const [roleName, cfg] of Object.entries(roles)) {
+	assert.equal((cfg.skills ?? []).includes(YANO_PLANNER_SKILL), true, `il ruolo '${roleName}' deve dichiarare la skill Yano condivisa`);
+}
+console.log("   OK");
+
 console.log(
-	"\nOK: scripts/check-skill-isolation.mjs — le skill mattpocock risultano cablate SOLO per planner, chrome-devtools SOLO per reviewer/frontend-developer.",
+	"\nOK: skill planner, skill Yano trace e chrome-devtools risultano cablate ai soli ruoli previsti.",
 );

@@ -20,6 +20,7 @@ import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 import assert from "node:assert/strict";
 import mqtt from "mqtt";
+import { tracePaths } from "../scripts/yano-trace-storage.mjs";
 
 const execFileP = promisify(execFile);
 const PROJECT_ROOT = path.resolve(new URL(".", import.meta.url).pathname, "..");
@@ -162,8 +163,8 @@ async function main() {
 	ok(stalledEvents.some((e) => e.payload?.ticket_id === stalled.id), "MQTT ticket_stalled published for the stalled ticket");
 	ok(!stalledEvents.some((e) => e.payload?.ticket_id === fresh.id), "no ticket_stalled for the fresh (not-yet-stalled) ticket");
 
-	const markerPath = path.join(cwd, ".pi", "extensions", "multiAgentOrchestrator", "logs", "watch-stalls.jsonl");
-	ok(fs.existsSync(markerPath), "watcher appended a local JSONL marker file");
+	const markerPath = path.join(tracePaths({ cwd, project: "watch-smoke" }).eventsDir, "watch-stalls.jsonl");
+	ok(fs.existsSync(markerPath), "watcher appended a global JSONL marker file");
 	const markers = fs.readFileSync(markerPath, "utf-8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
 	ok(markers.some((m) => m.type === "stall_watch" && m.ticket_id === stalled.id), "marker recorded the stalled ticket");
 	ok(!markers.some((m) => m.ticket_id === fresh.id), "no marker for the fresh ticket");
@@ -174,7 +175,7 @@ async function main() {
 	// blocked).
 	try { fs.rmSync(markerPath, { force: true }); } catch { /* ignore */ }
 	try {
-		const coderLog = path.join(cwd, ".pi", "extensions", "multiAgentOrchestrator", "logs", "coder-01.jsonl");
+		const coderLog = path.join(tracePaths({ cwd, project: "watch-smoke" }).eventsDir, "coder-01.jsonl");
 		fs.mkdirSync(path.dirname(coderLog), { recursive: true });
 		fs.appendFileSync(coderLog, JSON.stringify({ ts: new Date().toISOString(), type: "tool_execution_start", tool: "read" }) + "\n");
 	} catch { /* ignore (redundant: coder claimed earlier so log exists) */ }
@@ -193,7 +194,7 @@ const cleanSpec = (await planner.call("spec_create", { run_id: cleanRun.id, titl
 const cleanTix = (await planner.call("ticket_create", { run_id: cleanRun.id, spec_id: cleanSpec.id, title: "recent2", required_capabilities: ["coder"], depends_on: [] })).details.ticket;
 await coder.call("ticket_claim", { ticket_id: cleanTix.id }); // fresh, not stalled
 // Clear the marker file so we can count only newly appended markers.
-const origMarkerPath = path.join(cwd, ".pi", "extensions", "multiAgentOrchestrator", "logs", "watch-stalls.jsonl");
+	const origMarkerPath = path.join(tracePaths({ cwd, project: "watch-smoke" }).eventsDir, "watch-stalls.jsonl");
 try { fs.rmSync(origMarkerPath, { force: true }); } catch { /* ignore */ }
 
 let routineOut = "";

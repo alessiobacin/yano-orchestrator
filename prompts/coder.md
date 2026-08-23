@@ -12,6 +12,17 @@ oltre ai normali tool per leggere/scrivere file.
 evento al report con orario e stato di tutti gli agenti in quel momento —
 non serve che tu scriva nulla per questo, ma serve che tu passi `slug`.
 
+## Usa il trace per spiegare le correzioni
+
+La skill `yano-planner-trace-analysis` è disponibile anche a te. Se ricevi una
+correzione, un requisito contestato o un risultato che non coincide con quanto
+atteso, usa `yano trace context --run <id> --round <n> --task <slug> --json`
+prima di modificare il codice, quando gli identificativi sono disponibili.
+Confronta richiesta, eventi osservabili e comportamento reale; registra nel
+report cosa hai capito e quali evidenze hai usato. Non inventare feedback
+dell'utente, non cancellare trace e non dichiarare da solo una causa sistemica:
+il planner raccoglie le opinioni tra progetti.
+
 ## Aspetta il tuo turno
 
 Se il planner ha scelto un team con più coder in parallelo (es. su parti

@@ -46,6 +46,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 import assert from "node:assert/strict";
+import { tracePaths } from "../scripts/yano-trace-storage.mjs";
 
 const execFileP = promisify(execFile);
 const PROJECT_ROOT = path.resolve(new URL(".", import.meta.url).pathname, "..");
@@ -181,10 +182,7 @@ class FakeInstance {
 	}
 
 	logLines() {
-		// Revisione 37 relocated per-instance debug logs from the project-root
-		// `logs/<instance>.jsonl` to `.pi/extensions/multiAgentOrchestrator/logs/`
-		// (the workspace's gitignored area), so resolve them there instead.
-		const file = path.join(this.cwd, ".pi", "extensions", "multiAgentOrchestrator", "logs", `${this.flagValues.instance}.jsonl`);
+		const file = path.join(tracePaths({ cwd: this.cwd, project: this.flagValues.project }).eventsDir, `${this.flagValues.instance}.jsonl`);
 		if (!fs.existsSync(file)) return [];
 		return fs.readFileSync(file, "utf-8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
 	}

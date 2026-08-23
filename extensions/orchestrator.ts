@@ -48,6 +48,7 @@ import { execFile, execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { loadPlaybook } from "../scripts/playbook-loader.mjs";
+import { ensureTraceProject, getTraceConfig, traceEnabled } from "../scripts/yano-trace-storage.mjs";
 
 // ESM-safe lazy require, used only inside SQLiteOrchestratorStorage's
 // constructor to resolve node:sqlite on first actual use (see the
@@ -2468,23 +2469,11 @@ export default function (pi: ExtensionAPI) {
 		if (activityLog.length > ACTIVITY_LOG_CAP) activityLog.shift();
 	}
 
-	// ━━ Debug event log (Revisione 18) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-	// Plain JSONL, un file per istanza (<instance>.jsonl dentro
-	// .pi/extensions/multiAgentOrchestrator/logs/ — non dentro un worktree,
-	// così sopravvive a worktree_finalize/cleanup e non finisce mai in un
-	// branch; spostato qui dalla root del progetto in Revisione 37, vedi
-	// moaSubdirs più sopra per il perché). Un solo scrittore per file (ogni
-	// istanza scrive solo il proprio), quindi — a differenza del file di
-	// report condiviso — non c'è nessun rischio di lost-update qui e non
-	// serve nulla di più sofisticato di fs.appendFileSync. Puramente
-	// diagnostico: nessun agente lo legge mai, non influenza in nessun modo
-	// il comportamento, best-effort (un fallimento di log non deve MAI
-	// interrompere l'orchestrazione vera). Vedi scripts/review-log.mjs per
-	// riassemblare questi file in un'unica timeline cronologica dopo un test
-	// live, e capire se il flusso è partito nell'ordine giusto.
-	function logsDir(cwd: string): string {
-		return moaSubdirs(moaWorkspaceDir(cwd)).logs;
-	}
+	// ━━ Global trace store ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+	// Tracing is deliberately outside the project checkout. It survives
+	// worktree finalization, is not committed with the application, and can be
+	// selected/deleted with `yano trace`. The operational ticket DB remains in
+	// the project workspace; these files are the forensic trace only.
 
 	// Contatore monotono per-processo (Revisione 20): due eventi di istanze
 	// DIVERSE possono avere lo stesso timestamp ISO (risoluzione al
@@ -2500,12 +2489,26 @@ export default function (pi: ExtensionAPI) {
 	function logEvent(type: string, data: Record<string, unknown> = {}): void {
 		if (!identity) return;
 		try {
-			const dir = logsDir(identity.cwd);
-			fs.mkdirSync(dir, { recursive: true });
-			const line = `${JSON.stringify({ ts: nowIso(), seq: ++logSeq, instance: identity.instance, role: identity.role, type, ...data })}\n`;
-			fs.appendFileSync(path.join(dir, `${identity.instance}.jsonl`), line);
+			const config = getTraceConfig({ cwd: identity.cwd, project: identity.project });
+			if (!traceEnabled(config.mode, "events")) return;
+			const paths = ensureTraceProject({ cwd: identity.cwd, project: identity.project, instance: identity.instance });
+			const line = `${JSON.stringify({ ts: nowIso(), seq: ++logSeq, instance: identity.instance, role: identity.role, project: identity.project, trace_mode: config.mode, type, ...redactRuntimeProjection(data) })}\n`;
+			fs.appendFileSync(paths.instanceLog!, line, { mode: 0o600 });
 		} catch {
-			// best-effort — un fallimento del log non deve mai rompere l'orchestrazione reale
+			// best-effort — tracing non deve mai rompere l'orchestrazione reale
+		}
+	}
+
+	function tracePayload(type: string, data: Record<string, unknown>, minimum: "standard" | "full" = "standard"): void {
+		if (!identity) return;
+		try {
+			const config = getTraceConfig({ cwd: identity.cwd, project: identity.project });
+			if (!traceEnabled(config.mode, minimum)) return;
+			const paths = ensureTraceProject({ cwd: identity.cwd, project: identity.project, instance: identity.instance });
+			const line = `${JSON.stringify({ ts: nowIso(), seq: ++logSeq, instance: identity.instance, role: identity.role, project: identity.project, trace_mode: config.mode, type, ...redactRuntimeProjection(data) })}\n`;
+			fs.appendFileSync(paths.instanceLog!, line, { mode: 0o600 });
+		} catch {
+			// best-effort
 		}
 	}
 
@@ -3041,6 +3044,25 @@ export default function (pi: ExtensionAPI) {
 		// scripts/review-log.mjs, che lo segnala esplicitamente.
 		logEvent("turn_start", { had_pending_inbound: [...inboundQueue.values()].some((i) => !i.fulfilled) });
 		return { systemPrompt };
+	});
+
+	// Pi exposes these lifecycle hooks in the live harness. They are kept
+	// best-effort so older Pi builds can still load the extension; when present
+	// they provide the tool inventory needed by `yano trace --mode full`.
+	pi.on("tool_execution_start", async (event: any) => {
+		logEvent("tool_execution_start", {
+			tool_call_id: event?.toolCallId ?? event?.tool_call_id ?? null,
+			tool: event?.toolName ?? event?.tool_name ?? event?.name ?? null,
+		});
+		tracePayload("tool_execution_start_payload", { tool_call_id: event?.toolCallId ?? event?.tool_call_id ?? null, args: event?.args ?? null }, "standard");
+	});
+	pi.on("tool_execution_end", async (event: any) => {
+		logEvent("tool_execution_end", {
+			tool_call_id: event?.toolCallId ?? event?.tool_call_id ?? null,
+			tool: event?.toolName ?? event?.tool_name ?? event?.name ?? null,
+			ok: event?.isError === true ? false : event?.error ? false : true,
+		});
+		tracePayload("tool_execution_end_payload", { tool_call_id: event?.toolCallId ?? event?.tool_call_id ?? null, error: event?.error ?? null, result: event?.result ?? event?.output ?? null }, "standard");
 	});
 
 	// ━━ Widget ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -6133,7 +6155,7 @@ export default function (pi: ExtensionAPI) {
 		// finisce senza aver mai avuto un inbound da soddisfare è un turno che
 		// l'agente ha fatto di propria iniziativa, non su assegnazione.
 		logEvent("agent_end", { had_inbound: !!inbound, assignment_id: inbound?.assignment_id ?? null });
-		if (!inbound || !identity || !client) return;
+		if (!identity) return;
 
 		let lastAssistantText = "";
 		for (const entry of ctx.sessionManager.getBranch()) {
@@ -6147,6 +6169,20 @@ export default function (pi: ExtensionAPI) {
 				}
 			}
 		}
+		tracePayload("assistant_response", {
+			assignment_id: inbound?.assignment_id ?? null,
+			text: lastAssistantText,
+		}, "standard");
+		if (identity) {
+			const config = getTraceConfig({ cwd: identity.cwd, project: identity.project });
+			if (traceEnabled(config.mode, "full")) {
+				tracePayload("visible_session_branch", {
+					assignment_id: inbound?.assignment_id ?? null,
+					branch: ctx.sessionManager.getBranch(),
+				}, "full");
+			}
+		}
+		if (!inbound || !client) return;
 
 		let response: any = lastAssistantText;
 		let error: string | null = null;

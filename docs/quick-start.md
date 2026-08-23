@@ -37,8 +37,11 @@ cartella corrente ed eseguire subito il planner nello stesso terminale:
 yano init --name "Mio Progetto" --herdr
 ```
 
-Questa modalità è in-place e non accetta `--target`: evita che il workspace
-Herdr e la root reale del progetto puntino a directory diverse.
+Questa modalità porta esplicitamente il workspace in primo piano. Da un
+terminale normale apre/aggancia anche il client Herdr; se il comando è già
+eseguito dentro Herdr, evita di aprire un client annidato. È in-place e non
+accetta `--target`: evita che il workspace Herdr e la root reale del progetto
+puntino a directory diverse.
 
 `yano init` prepara configurazione, ruoli e workspace del progetto senza
 copiarvi il codice dell'estensione; il database SQLite operativo viene creato

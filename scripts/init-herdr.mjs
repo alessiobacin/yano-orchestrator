@@ -37,6 +37,29 @@ function tryInvokeHerdr(args, options) {
 	}
 }
 
+function focusWorkspace(workspaceId, options) {
+	try {
+		invokeHerdr(["workspace", "focus", workspaceId], options);
+		return true;
+	} catch (error) {
+		console.error(`yano init --herdr: impossibile portare in primo piano il workspace: ${error instanceof Error ? error.message : String(error)}`);
+		return false;
+	}
+}
+
+function openHerdrClient(projectRoot, { herdrBin = "herdr", runner = spawnSync } = {}) {
+	// Dentro un pane Herdr il client è già visibile: workspace focus sopra è
+	// sufficiente e avviare un Herdr annidato renderebbe inutilizzabile il pane.
+	if (process.env.HERDR_ENV === "1") return false;
+	console.log("yano init --herdr: apro/aggancio il client Herdr...");
+	const result = runner(herdrBin, [], { cwd: projectRoot, stdio: "inherit" });
+	if (result.status !== 0) {
+		console.error(`yano init --herdr: il client Herdr non si è aperto (exit ${result.status ?? "sconosciuto"}).`);
+		return false;
+	}
+	return true;
+}
+
 function normalizedDirectory(value) {
 	const absolute = path.resolve(value);
 	try {
@@ -54,10 +77,18 @@ function shellQuote(value, platform) {
 
 export function buildHerdrInitCommand({ initArgs, plannerInstance = "planner-01", platform = process.platform }) {
 	const quote = (value) => shellQuote(value, platform);
-	const init = ["yano", "init", ...initArgs].map(quote).join(" ");
-	const planner = ["yano", "start", "--instance", plannerInstance, "--role", "planner"].map(quote).join(" ");
-	if (platform === "win32") return { executable: "cmd.exe", args: ["/d", "/s", "/c", `${init} && ${planner}`] };
-	return { executable: "sh", args: ["-lc", `${init} && exec ${planner}`] };
+	// `herdr pane run` accepts one shell command string after the pane id. It
+	// does not accept an executable plus argv in the style of spawn(2): passing
+	// `sh`, `-lc` and a pre-quoted script makes Herdr quote the script again and
+	// breaks the command (for example: `sh -lc 'yano 'init' ...'`). Keep the
+	// shell syntax here, but pass the complete command as one argument.
+	const init = ["yano", "init", ...initArgs]
+		.map((value, index) => (index < 2 || value.startsWith("--") ? value : quote(value)))
+		.join(" ");
+	const planner = ["yano", "start", "--instance", plannerInstance, "--role", "planner"]
+		.map((value) => (value.startsWith("--") || value === "yano" || value === "start" ? value : quote(value)))
+		.join(" ");
+	return { command: platform === "win32" ? `${init} && ${planner}` : `${init} && exec ${planner}` };
 }
 
 function rootPaneForWorkspace(snapshot, workspace, cwd) {
@@ -72,7 +103,7 @@ function existingWorkspace(snapshot, label, cwd) {
 	throw new Error(`esiste già un workspace Herdr chiamato "${label}" ma associato a un'altra directory; rinominalo o chiudilo prima di ripetere l'init`);
 }
 
-export function runHerdrInit({ cwd, initArgs, plannerInstance = "planner-01", herdrBin = "herdr", runner = spawnSync, platform = process.platform }) {
+export function runHerdrInit({ cwd, initArgs, plannerInstance = "planner-01", herdrBin = "herdr", runner = spawnSync, platform = process.platform, launchClient = process.env.HERDR_ENV !== "1" }) {
 	const projectRoot = normalizedDirectory(cwd);
 	if (!fs.statSync(projectRoot).isDirectory()) throw new Error(`la directory corrente non è valida: ${projectRoot}`);
 	const label = path.basename(projectRoot) || projectRoot;
@@ -101,9 +132,11 @@ export function runHerdrInit({ cwd, initArgs, plannerInstance = "planner-01", he
 		if (!workspace?.workspace_id || !pane?.pane_id) throw new Error("Herdr ha creato il workspace ma non ha restituito il root pane");
 	}
 
+	focusWorkspace(workspace.workspace_id, options);
 	const command = buildHerdrInitCommand({ initArgs, plannerInstance, platform });
-	invokeHerdr(["pane", "run", pane.pane_id, command.executable, ...command.args], options);
+	invokeHerdr(["pane", "run", pane.pane_id, command.command], options);
 	console.log(`yano init --herdr: workspace Herdr "${label}" ${reused ? "riusato" : "creato"} (${workspace.workspace_id}).`);
 	console.log(`yano init --herdr: eseguito nella tab ${pane.pane_id}: yano init ... && yano start --instance ${plannerInstance} --role planner`);
-	return { workspace, pane, label, reused, command };
+	const clientOpened = launchClient ? openHerdrClient(projectRoot, options) : false;
+	return { workspace, pane, label, reused, command, clientOpened };
 }

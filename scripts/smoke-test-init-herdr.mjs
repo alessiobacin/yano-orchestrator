@@ -16,26 +16,34 @@ const runner = (_binary, args) => {
 			stderr: "",
 		};
 	}
+	if (args[0] === "workspace" && args[1] === "focus") return { status: 0, stdout: "", stderr: "" };
 	if (args[0] === "pane" && args[1] === "run") return { status: 0, stdout: "", stderr: "" };
+	if (args.length === 0) return { status: 0, stdout: "", stderr: "" };
 	throw new Error(`unexpected Herdr call: ${args.join(" ")}`);
 };
 
-const result = runHerdrInit({ cwd: root, initArgs: ["--name", "Focus 'Board'", "--llmp"], runner, herdrBin: "herdr", platform: "linux" });
+const result = runHerdrInit({ cwd: root, initArgs: ["--name", "Focus 'Board'", "--llmp"], runner, herdrBin: "herdr", platform: "linux", launchClient: true });
 assert.equal(result.workspace.workspace_id, "w-smoke");
 assert.equal(result.pane.pane_id, "w-smoke:p1");
 assert.equal(calls[1][0], "workspace");
-assert.equal(calls[2].slice(0, 3).join(" "), "pane run w-smoke:p1");
-assert.match(calls[2].join(" "), /yano.*init/);
-assert.match(calls[2].join(" "), /yano.*start/);
-assert.match(calls[2].join(" "), /planner-01/);
+assert.deepEqual(calls[2], ["workspace", "focus", "w-smoke"]);
+assert.equal(calls[3].slice(0, 3).join(" "), "pane run w-smoke:p1");
+assert.equal(calls[3].length, 4, "pane run receives one complete command string");
+assert.match(calls[3][3], /^yano init /);
+assert.match(calls[3][3], /&& exec yano start/);
+assert.match(calls[3][3], /planner-01/);
+assert.doesNotMatch(calls[3][3], /sh -lc/);
+assert.deepEqual(calls[4], [], "a normal terminal opens/attaches the Herdr client");
+assert.equal(result.clientOpened, true);
 
 const linux = buildHerdrInitCommand({ initArgs: ["--name", "A project's test"], platform: "linux" });
-assert.equal(linux.executable, "sh");
-assert.match(linux.args.join(" "), /exec/);
+assert.match(linux.command, /^yano init --name /);
+assert.match(linux.command, /A project.*s test/);
+assert.match(linux.command, /&& exec yano start/);
 
 const windows = buildHerdrInitCommand({ initArgs: ["--name", "Windows test"], platform: "win32" });
-assert.equal(windows.executable, "cmd.exe");
-assert.equal(windows.args[0], "/d");
+assert.match(windows.command, /^yano init --name /);
+assert.match(windows.command, /&& yano start/);
 
 const reuseCalls = [];
 const reuseRunner = (_binary, args) => {
@@ -49,12 +57,16 @@ const reuseRunner = (_binary, args) => {
 		} } }),
 		stderr: "",
 	};
+	if (args[0] === "workspace" && args[1] === "focus") return { status: 0, stdout: "", stderr: "" };
 	if (args[0] === "pane" && args[1] === "run") return { status: 0, stdout: "", stderr: "" };
+	if (args.length === 0) return { status: 0, stdout: "", stderr: "" };
 	throw new Error(`unexpected reuse Herdr call: ${args.join(" ")}`);
 };
-const reused = runHerdrInit({ cwd: root, initArgs: ["--name", "Focus Board"], runner: reuseRunner, herdrBin: "herdr", platform: "linux" });
+const reused = runHerdrInit({ cwd: root, initArgs: ["--name", "Focus Board"], runner: reuseRunner, herdrBin: "herdr", platform: "linux", launchClient: true });
 assert.equal(reused.reused, true);
-assert.equal(reuseCalls.filter((args) => args[0] === "workspace").length, 0);
+assert.equal(reuseCalls.filter((args) => args[0] === "workspace" && args[1] === "create").length, 0);
+assert.deepEqual(reuseCalls[1], ["workspace", "focus", "w-existing"]);
+assert.deepEqual(reuseCalls[3], [], "a normal terminal attaches Herdr also when reusing a workspace");
 
 console.log("YANO INIT HERDR SMOKE TEST PASSED (workspace, pane command and quoting)");
 fs.rmSync(root, { recursive: true, force: true });

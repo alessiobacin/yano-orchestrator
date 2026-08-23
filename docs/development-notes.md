@@ -6,6 +6,25 @@ l'equivalente diretto di `coms.ts`/`coms-net.ts` del repo
 `disler/pi-vs-claude-code`, ma su MQTT 5 e con il paradigma role/instance al
 posto della chat P2P piatta.
 
+## Revisione 54 — `init --herdr` porta davvero il client Herdr in primo piano
+
+**Incidente reale**: il workspace e il planner venivano creati, ma l'operatore
+doveva spostarsi manualmente nel client Herdr per vedere il nuovo workspace.
+
+**Causa**: `workspace create --focus` non era sufficiente in tutti i percorsi:
+non veniva eseguito un focus esplicito dopo il riuso e Yano non avviava mai il
+client Herdr quando il comando partiva da un terminale normale.
+
+**Fix**:
+
+- dopo la creazione o il riuso viene eseguito `herdr workspace focus <id>`;
+- fuori da un pane Herdr, Yano apre/aggancia il client Herdr dopo aver avviato
+  il comando nel root pane;
+- dentro Herdr non viene aperto un client annidato: il focus del workspace
+  aggiorna direttamente la sessione già visibile;
+- il comportamento è coperto dallo smoke test di init Herdr, inclusi creazione,
+  riuso e apertura del client.
+
 ## Revisione 52 — init non distruttivo di progetti esistenti
 
 **Incidente reale**: `yano init` rifiutava una root applicativa già esistente
@@ -31,6 +50,32 @@ con `package.json`, codice e configurazioni proprie.
 
 **Verifica**: smoke test dedicato con package JSON, sorgente, `.env.example`,
 cartella `agents/` applicativa e `.gitignore` preesistenti; tutti preservati.
+
+## Revisione 53 — `yano init --herdr` passa il comando come testo a Herdr
+
+**Incidente reale**: il primo tentativo di `yano init --herdr` apriva il
+workspace, ma il planner non partiva. Il terminale mostrava un comando simile
+a `sh -lc 'yano 'init' ...'` e restituiva l'help di Yano invece di eseguire
+l'inizializzazione.
+
+**Causa**: `herdr pane run` accetta un comando shell testuale unico dopo il
+pane id. Yano gli passava invece un eseguibile (`sh`), gli argomenti (`-lc`)
+e uno script già quotato separatamente. Herdr ricomponeva questi argomenti
+per il terminale e introduceva un secondo livello di quoting, rompendo gli
+apici dello script.
+
+**Fix**:
+
+- il comando POSIX/Windows viene costruito come una singola stringa shell;
+- `herdr pane run <pane> <comando>` riceve esattamente un solo argomento dopo
+  il pane id;
+- il quoting resta applicato ai valori dinamici, inclusi nomi con spazi o
+  apostrofi, ma non viene più annidato dentro `sh -lc`;
+- il test Herdr verifica esplicitamente la cardinalità degli argomenti e
+  rifiuta la regressione `sh -lc`.
+
+**Verifica**: `smoke-test-init-herdr.mjs`, controllo sintassi e suite completa
+devono passare prima di reinstallare la CLI globale.
 
 ## Revisione 51 — `agent_list` include il planner corrente
 

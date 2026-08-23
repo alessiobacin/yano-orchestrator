@@ -45,7 +45,7 @@ async function git(args, cwd) {
 }
 
 async function bootstrapScratchRepo() {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "moa-approval-gate-"));
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "yano-approval-gate-"));
 	await git(["init", "-q", "-b", "main"], dir);
 	await git(["config", "user.email", "smoke@test.local"], dir);
 	await git(["config", "user.name", "Smoke Test"], dir);

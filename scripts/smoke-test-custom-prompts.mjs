@@ -10,7 +10,7 @@
 //   1. By DEFAULT (no --custom-prompts), role prompts are read from the
 //      INSTALLED PACKAGE's own prompts/ folder (resolveGlobalPromptsDir(),
 //      resolved from this very file's real location) — a local
-//      .pi/extensions/multiAgentOrchestrator/prompts/ copy is completely
+//      .pi/extensions/yano-orchestrator/prompts/ copy is completely
 //      IGNORED even when one exists with different content. This is the
 //      actual fix for the Revisione 46 bug: a project's prompts can never
 //      again silently fall behind after `yano update`.
@@ -139,7 +139,7 @@ async function main() {
 
 	console.log("\n=== Setup — two scratch projects: one with a local custom prompts/ copy, one with none at all ===");
 	const projectWithLocal = await makeScratchProject("custom-prompts-with-local");
-	const localPromptsDir = path.join(projectWithLocal, ".pi", "extensions", "multiAgentOrchestrator", "prompts");
+	const localPromptsDir = path.join(projectWithLocal, ".pi", "extensions", "yano-orchestrator", "prompts");
 	fs.mkdirSync(localPromptsDir, { recursive: true });
 	// Deliberately customize ONLY coder.md — reviewer.md/planner.md are NOT
 	// present locally, to prove the per-file fallback (point 3 above).

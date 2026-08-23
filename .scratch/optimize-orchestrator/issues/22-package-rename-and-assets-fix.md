@@ -4,7 +4,7 @@ Blocked by: 17, 18
 
 ## Question
 
-Applicare la correzione di distribuzione dopo l'audit: rinominare completamente package, binario, entrypoint e riferimenti da `po`/`yolo` a `yano`, includere i Playbook nel pacchetto e verificare `npm pack` e installazione end-to-end senza compatibilità legacy.
+Applicare la correzione di distribuzione dopo l'audit: rinominare completamente package, binario, entrypoint e riferimenti da `legacy-cli`/`yolo` a `yano`, includere i Playbook nel pacchetto e verificare `npm pack` e installazione end-to-end senza compatibilità legacy.
 
 ## Answer
 
@@ -12,8 +12,8 @@ Applicata la correzione:
 
 - package name e metadata sono `yano-orchestrator`;
 - il solo binario è `yano`, con entrypoint `bin/yano.mjs`;
-- script e smoke test `po-*` sono stati rinominati `yano-*`;
-- riferimenti operativi/docs/CI sono stati aggiornati da `po`/`yolo` al nome ufficiale;
+- script e smoke test `legacy-cli-*` sono stati rinominati `yano-*`;
+- riferimenti operativi/docs/CI sono stati aggiornati da `legacy-cli`/`yolo` al nome ufficiale;
 - i Playbook sono stati copiati nel percorso package `playbooks/`, incluso nel campo `files` di `package.json`;
 - `yano init` copia il baseline Playbook nella workspace locale del progetto;
 - `.scratch` e `.pi` non entrano nel tarball npm.

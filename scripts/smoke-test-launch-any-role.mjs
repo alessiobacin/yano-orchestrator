@@ -52,7 +52,7 @@ function scratchDir(prefix) {
 }
 
 function modernScaffold() {
-	const dir = scratchDir("moa-any-role-scaffold");
+	const dir = scratchDir("yano-any-role-scaffold");
 	fs.mkdirSync(path.join(dir, "agents"), { recursive: true });
 	fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "any-role-test-project" }, null, 2));
 	fs.writeFileSync(path.join(dir, "agents", "roles.yaml"), "roles: {}\n");

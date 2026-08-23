@@ -16,6 +16,6 @@ Portare i database esistenti al nuovo schema Playbook senza operare su layout pa
 
 ## Resolution
 
-Introdotto `MOA_STORAGE_SCHEMA_VERSION = 2`; `SQLiteOrchestratorStorage.init()` crea le tabelle additive, valida il marker e aggiorna v1→v2 solo dopo il DDL riuscito. Versioni future e valori non interi/inferiori a 1 vengono rifiutati.
+Introdotto `YANO_STORAGE_SCHEMA_VERSION = 2`; `SQLiteOrchestratorStorage.init()` crea le tabelle additive, valida il marker e aggiorna v1→v2 solo dopo il DDL riuscito. Versioni future e valori non interi/inferiori a 1 vengono rifiutati.
 
 Test verdi: `npm run check-syntax`; ticket engine — 67 assertion.

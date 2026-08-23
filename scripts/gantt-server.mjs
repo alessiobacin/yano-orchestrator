@@ -28,12 +28,12 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import mqtt from "mqtt";
 
-const moaRequire = createRequire(import.meta.url);
+const yanoRequire = createRequire(import.meta.url);
 
-function workspaceDir(cwd) { return path.join(cwd, ".pi", "extensions", "multiAgentOrchestrator"); }
+function workspaceDir(cwd) { return path.join(cwd, ".pi", "extensions", "yano-orchestrator"); }
 function resolveProject(cwd) {
 	try { const cfg = JSON.parse(readFileSync(path.join(workspaceDir(cwd), "config", "project.json"), "utf-8")); if (cfg.project) return cfg.project; } catch { /* */ }
-	try { const pkg = JSON.parse(readFileSync(path.join(cwd, "package.json"), "utf-8")); if (pkg.name && !String(pkg.name).startsWith("@otomatik/pi-mqtt-")) return pkg.name; } catch { /* */ }
+	try { const pkg = JSON.parse(readFileSync(path.join(cwd, "package.json"), "utf-8")); if (pkg.name && !String(pkg.name).startsWith("@otomatik/yano-")) return pkg.name; } catch { /* */ }
 	return path.basename(cwd);
 }
 
@@ -42,7 +42,7 @@ function buildSnapshot(cwd) {
 	const dbPath = path.join(workspaceDir(cwd), "orchestratorStorage", "orchestrator.db");
 	if (!existsSync(dbPath)) return { project: resolveProject(cwd), runs: [], ok: false };
 	let DatabaseSync;
-	try { ({ DatabaseSync } = moaRequire("node:sqlite")); } catch { return { project: resolveProject(cwd), runs: [], ok: false, error: "node:sqlite unavailable" }; }
+	try { ({ DatabaseSync } = yanoRequire("node:sqlite")); } catch { return { project: resolveProject(cwd), runs: [], ok: false, error: "node:sqlite unavailable" }; }
 	const db = new DatabaseSync(dbPath, { readOnly: true });
 	const project = resolveProject(cwd);
 	const runs = db.prepare("SELECT * FROM runs WHERE project = ? ORDER BY created_at ASC").all(project);
@@ -152,7 +152,7 @@ export async function runGantt({ cwd, argv, packageRoot }) {
 			if (open) {
 				try {
 					const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
-					const { execFile } = moaRequire("node:child_process");
+					const { execFile } = yanoRequire("node:child_process");
 					execFile(cmd, [base], () => {});
 				} catch { /* best-effort */ }
 			}

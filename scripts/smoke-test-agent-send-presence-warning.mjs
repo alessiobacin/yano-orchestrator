@@ -47,7 +47,7 @@ function fakeContext(cwd) {
 }
 
 async function main() {
-	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "moa-presence-warning-"));
+	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "yano-presence-warning-"));
 	await git(["init", "-q", "-b", "main"], cwd);
 	await git(["config", "user.email", "smoke@test.local"], cwd);
 	await git(["config", "user.name", "Smoke Test"], cwd);

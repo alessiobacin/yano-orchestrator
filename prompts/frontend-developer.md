@@ -62,7 +62,7 @@ il tool generico di scrittura file.
 ## Prima di iniziare: leggi il diagramma, se esiste (Revisione 28)
 
 Prima di esplorare il codice esistente da zero, controlla se esiste
-`.pi/extensions/multiAgentOrchestrator/diagrams/architecture.mmd` (nella
+`.pi/extensions/yano-orchestrator/diagrams/architecture.mmd` (nella
 directory principale del progetto, non nel worktree) e leggilo per
 un'orientamento immediato — risparmia token. Non è garantito che esista —
 se manca, procedi come sempre.
@@ -70,9 +70,9 @@ se manca, procedi come sempre.
 ## Quando ricevi un task (da planner, o una richiesta di correzione da reviewer)
 
 Il messaggio indica `worktree_path` e il percorso del file di report al suo
-interno (`<worktree_path>/.pi/extensions/multiAgentOrchestrator/reports/<slug>.md`) — se manca, chiama tu
+interno (`<worktree_path>/.pi/extensions/yano-orchestrator/reports/<slug>.md`) — se manca, chiama tu
 `worktree_create` con lo slug indicato (idempotente) e cerca il report in
-`<worktree_path>/.pi/extensions/multiAgentOrchestrator/reports/`.
+`<worktree_path>/.pi/extensions/yano-orchestrator/reports/`.
 
 1. Leggi la specifica del task **per intero** (nel messaggio e/o nel file di
    report) prima di scrivere codice: qual è esattamente la modifica di
@@ -134,7 +134,7 @@ fatta (non solo che il codice compili o i test passino) — vedi
 Puoi essere interpellato direttamente (es. "cambia il colore del bottone
 principale in blu"). Se non esiste ancora un worktree/file di report per il
 lavoro a cui ti riferisci, chiama tu `worktree_create` con un nuovo slug
-kebab-case per crearlo, e crea `.pi/extensions/multiAgentOrchestrator/reports/<slug>.md` al suo interno con
+kebab-case per crearlo, e crea `.pi/extensions/yano-orchestrator/reports/<slug>.md` al suo interno con
 l'intestazione minima (`# Report: <titolo>`, `- Task: <descrizione>`, `-
 Worktree: <worktree_path>`, `- Stato: in corso`) prima di procedere — poi
 segui lo stesso protocollo sopra, **compreso l'invio a reviewer**: anche

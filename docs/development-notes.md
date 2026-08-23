@@ -247,7 +247,7 @@ completato, inviato a reviewer.", "In attesa del prossimo incarico.", ecc.).
 
 **4) Diagramma di architettura/flusso non più opzionale per docs-sync**:
 richiesta esplicita dell'operatore — prima, `prompts/docs-sync.md` lasciava
-il diagramma (`.pi/extensions/multiAgentOrchestrator/diagrams/architecture.mmd`)
+il diagramma (`.pi/extensions/yano-orchestrator/diagrams/architecture.mmd`)
 a un fallback condizionale ("se architecture-diagrammer non è nel team,
 aggiornalo tu; se lo è, fidati che lo faccia lui") senza mai verificare che
 fosse stato aggiornato per davvero. **Fix**: il punto 3 del checklist di
@@ -350,7 +350,7 @@ non c'è più nulla da tenere sincronizzato.
 - **`yano copy-prompts`** (`scripts/copy-prompts.mjs`, nuovo — sostituisce
   interamente `yano sync-prompts`/`scripts/sync-prompts.mjs`, ora rimossi)
   copia `prompts/` dal pacchetto installato dentro
-  `.pi/extensions/multiAgentOrchestrator/prompts/` del progetto corrente, per
+  `.pi/extensions/yano-orchestrator/prompts/` del progetto corrente, per
   chi vuole personalizzare — non cambia da solo alcun comportamento: serve
   comunque `yano start ... --custom-prompts` per farla leggere davvero. Stesso
   principio di backup-prima-di-sovrascrivere già usato da `yano sync-prompts`
@@ -428,7 +428,7 @@ Il planner di QUESTO progetto reale sta ancora componendo **tmux** +
 stesso repo ha corretto in `prompts/planner.md` settimane prima. La causa,
 una volta trovata, è ovvia con il senno di poi: `yano init` copia `prompts/`
 dentro un progetto scaffoldato **una volta sola**
-(`.pi/extensions/multiAgentOrchestrator/prompts/`, vedi Revisione 37); `yano
+(`.pi/extensions/yano-orchestrator/prompts/`, vedi Revisione 37); `yano
 update` (Revisione 34) aggiorna SOLO le due copie GLOBALI del pacchetto
 (npm + il clone di `pi extension install`) — nessun comando in questo
 progetto ha MAI ricopiato `prompts/` dentro un progetto già scaffoldato dopo
@@ -452,7 +452,7 @@ Confusione comprensibile ma innocua, chiarita all'operatore.
 **Fix**: nuovo comando `yano sync-prompts` (`scripts/sync-prompts.mjs`,
 esposto da `bin/yano.mjs`) — ricopia `prompts/` dal pacchetto installato
 (quello da cui `yano` sta girando ORA) dentro
-`.pi/extensions/multiAgentOrchestrator/prompts/` del progetto nella
+`.pi/extensions/yano-orchestrator/prompts/` del progetto nella
 directory corrente, la stessa identica sorgente/destinazione già usata da
 `create-project.mjs` alla creazione, ma eseguibile in qualunque momento
 successivo. Non sovrascrive mai in silenzio: se esiste già una copia locale,
@@ -565,7 +565,7 @@ funziona già oggi per coder/reviewer in questo stesso progetto.
 suite `smoke-test-*.mjs` (incluso il nuovo blocco `2d` in
 `smoke-test-specialist-prompt.mjs`), `e2e-full-flow.mjs`, e un giro completo
 di `yano init`/`yano start --print-only`/`yano end` su un progetto scaffoldato da
-zero (confermato: `.pi/extensions/multiAgentOrchestrator/prompts/frontend-developer.md`
+zero (confermato: `.pi/extensions/yano-orchestrator/prompts/frontend-developer.md`
 viene copiato correttamente nello scaffold, come già avviene per
 docs-sync.md/security-evaluator.md).
 
@@ -762,8 +762,8 @@ silenzio). Non è un'euristica, è un fatto: se l'istanza assegnataria di un
 ticket `running` non ha una presence card viva, è confermabilmente
 disconnessa, punto.
 
-Nuova funzione pura `moaFindOrphanedTickets(storage, project, presenceSnapshot)`
-(stesso stile testabile di `moaFindStalledTickets`/`moaFindUnfinalizedRuns`,
+Nuova funzione pura `yanoFindOrphanedTickets(storage, project, presenceSnapshot)`
+(stesso stile testabile di `yanoFindStalledTickets`/`yanoFindUnfinalizedRuns`,
 nessuna soglia di tempo richiesta) integrata nello sweep automatico del
 planner (`watchdogSweep`, ogni `WATCHDOG_INTERVAL_MS`, default 2 min): un
 ticket "orfano" viene **automaticamente marcato `failed`** (con
@@ -897,7 +897,7 @@ riusando lo stesso `--instance planner-01` in entrambi. `scripts/smoke-test-proj
 directory scratch diverse (package.json `alpha-widgets`/`beta-widgets`) e
 verifica che i prefissi risolti siano diversi — esattamente lo scenario
 dell'operatore, già coperto. Anche a livello di filesystem non c'è
-collisione: il workspace `.pi/extensions/multiAgentOrchestrator/` (incluso
+collisione: il workspace `.pi/extensions/yano-orchestrator/` (incluso
 `orchestrator.db`) vive dentro la cartella di CIASCUN progetto, quindi due
 progetti diversi non condividono mai lo stesso storage anche con identico
 nome istanza. Il raggruppamento per "space"/progetto visibile nel pannello
@@ -985,7 +985,7 @@ blocco. L'operatore ha collegato il blocco a un riavvio del container Docker
 `llmproxy-production` fatto "nel frattempo".
 
 **Diagnosi, verificata leggendo i log/report/DB reali del progetto** (non solo
-il codice): il log jsonl di `planner-01` (`.pi/extensions/multiAgentOrchestrator/
+il codice): il log jsonl di `planner-01` (`.pi/extensions/yano-orchestrator/
 logs/planner-01.jsonl`) si ferma alle 17:12:46, **oltre un minuto prima** che
 `docs-sync-02` completasse il proprio ticket (17:13:52) — il planner ha smesso
 di processare qualunque cosa (nemmeno un evento di ricezione del completamento)
@@ -997,7 +997,7 @@ risultava correttamente `status: "completed"` (il branch `allDone` di
 evento `worktree_finalize` né `whatsapp_notify` risultava mai registrato** —
 il merge del worktree e la notifica finale sono decisioni del planner stesso
 (chiamare `worktree_finalize`), non qualcosa che il layer ticket/DAG fa da
-solo. Il watchdog esistente (Revisione 29, `moaFindStalledTickets`) guarda
+solo. Il watchdog esistente (Revisione 29, `yanoFindStalledTickets`) guarda
 **solo** ticket ancora in stato `"running"` — nel momento in cui l'ultimo
 ticket passa a `"done"` (e il run a `"completed"`), quel controllo non ha più
 nulla da segnalare, per costruzione: è cieco esattamente al caso "il layer
@@ -1006,8 +1006,8 @@ l'operatore".
 
 **Due fix distinti, entrambi in `extensions/orchestrator.ts`**:
 
-1. **Watchdog: nuovo controllo `moaFindUnfinalizedRuns()`** — parallelo e
-   indipendente da `moaFindStalledTickets()`, gira nello stesso
+1. **Watchdog: nuovo controllo `yanoFindUnfinalizedRuns()`** — parallelo e
+   indipendente da `yanoFindStalledTickets()`, gira nello stesso
    `watchdogSweep()` (stesso timer, planner-only, stessa filosofia "euristica,
    non certezza — informa, non agisce automaticamente"): un run con
    `status === "completed"` da più di `WATCHDOG_FINALIZE_GRACE_MS` (default 10
@@ -1066,11 +1066,11 @@ comunque avvisato entro un tempo limitato e che, se il turno era solo fermo
 ## Revisione 39 — bug reale: la protezione anti-doppio-caricamento (Revisione 34/35) avvisava del crash imminente invece di evitarlo
 
 **Incidente reale, riportato subito dopo la consegna della Revisione 38**:
-l'operatore ha lanciato il planner in `moa-test-project` — sia con `yano start
+l'operatore ha lanciato il planner in `yano-test-project` — sia con `yano start
 --instance planner-01` sia con `pi -e extensions/orchestrator.ts --instance
 planner-01 --role planner` a mano — e ha ricevuto lo stesso identico
 traceback della Revisione 33 (`Tool "agent_list" conflicts with
-.../moa-test-project/extensions/orchestrator.ts`, ripetuto per ogni tool e
+.../yano-test-project/extensions/orchestrator.ts`, ripetuto per ogni tool e
 flag, poi `Hint: Start without extensions using "pi -ne"`).
 
 **Causa reale — un bug genuino in `scripts/launch-planner.mjs`, non un
@@ -1153,7 +1153,7 @@ progetti in corso.
 **Fix**: `--project`, quando omesso, ora deriva dall'identità del progetto
 stesso invece che da una costante condivisa — vedi `resolveDefaultProject()`
 in `extensions/orchestrator.ts`, con questo ordine di priorità:
-`.pi/extensions/multiAgentOrchestrator/config/project.json` (il nome scelto
+`.pi/extensions/yano-orchestrator/config/project.json` (il nome scelto
 dall'operatore, se il workspace è già stato inizializzato) → `package.json`
 (`name`, sempre presente e specifico del progetto da `yano init` in poi) →
 `slugify(basename(cwd))` → `"default"` solo come ultimissima rete di
@@ -1193,7 +1193,7 @@ che lo stesso prompt dichiara.
   equivalente condensato (parole proprie, non il testo dei `SKILL.md`
   vendorizzati) di wayfinder+to-spec — charting a round, ogni ambiguità
   irrisolta come ticket `task`/`grilling`, collasso in una spec unica,
-  traccia locale in `.pi/extensions/multiAgentOrchestrator/reports/<slug>.plan.md`
+  traccia locale in `.pi/extensions/yano-orchestrator/reports/<slug>.plan.md`
   — usato in automatico (con una riga esplicita all'utente) quando le skill
   vendorizzate non risultano cablate, invece di procedere senza alcun
   metodo. Le skill vendorizzate restano comunque la via preferita quando
@@ -1248,8 +1248,8 @@ scaffoldato — un'asserzione rimasta stale dalla Revisione 33, quando
 `create-project.mjs` ha smesso di copiare `extensions/` nei progetti
 scaffoldati. Sarebbe fallita alla prima vera esecuzione di CI. Sostituita
 con asserzioni su quello che uno scaffold post-Revisione-33 garantisce
-davvero (`agents/roles.yaml`, `.pi/extensions/multiAgentOrchestrator/config/project.json`,
-`.pi/extensions/multiAgentOrchestrator/prompts/planner.md`, e l'assenza di
+davvero (`agents/roles.yaml`, `.pi/extensions/yano-orchestrator/config/project.json`,
+`.pi/extensions/yano-orchestrator/prompts/planner.md`, e l'assenza di
 `extensions/orchestrator.ts`), verificato con uno scaffold reale in una
 directory scratch prima di scriverla in CI.
 
@@ -1263,10 +1263,10 @@ proprie (nessuna invocazione reale di `grilling`/`domain-modeling` come
 skill separate) — un compromesso dichiarato per garantire presenza anche
 senza `yano start`, non un sostituto a parità di ricchezza.
 
-## Revisione 37 — `reports/`, `prompts/`, `logs/` spostati sotto `.pi/extensions/multiAgentOrchestrator/`; rimosso il concetto di "MVP" da tutto il progetto
+## Revisione 37 — `reports/`, `prompts/`, `logs/` spostati sotto `.pi/extensions/yano-orchestrator/`; rimosso il concetto di "MVP" da tutto il progetto
 
 **Richiesta 1 dell'operatore**: `reports/` e `prompts/` (e, di conseguenza,
-anche `logs/`) appartengono concettualmente a multiAgentOrchestrator, non
+anche `logs/`) appartengono concettualmente a yano-orchestrator, non
 alla root del progetto — "una questione di ordine mentale". Discussione
 seguita a un controllo effettivo del codice e di `.gitignore`: la prima
 risposta data qui era stata di soprassedere, dato che `.pi/` è interamente
@@ -1292,29 +1292,29 @@ chiarito il punto reale, più specifico del semplice "ordine mentale":
 
 **Implementazione**:
 
-- `extensions/orchestrator.ts` — `moaSubdirs()` ora include `reports`,
+- `extensions/orchestrator.ts` — `yanoSubdirs()` ora include `reports`,
   `prompts`, `logs` insieme alle sotto-cartelle già esistenti (`config`,
-  `specs`, ecc.), quindi `moaEnsureWorkspace()` le crea tutte allo stesso
-  modo. Nuovo helper `reportsDir(base)` = `moaSubdirs(moaWorkspaceDir(base)).reports`,
+  `specs`, ecc.), quindi `yanoEnsureWorkspace()` le crea tutte allo stesso
+  modo. Nuovo helper `reportsDir(base)` = `yanoSubdirs(yanoWorkspaceDir(base)).reports`,
   usato da `reportPath()`, `planPath()`, `planMarkdownPath()` al posto di
   `path.join(base, "reports", ...)` diretto — `base` può essere sia un
   worktree attivo sia `identity.cwd` dopo il merge, esattamente come prima,
   solo un livello più annidato. `logsDir(cwd)` ora ritorna
-  `moaSubdirs(moaWorkspaceDir(cwd)).logs` invece di `path.join(cwd, "logs")`.
+  `yanoSubdirs(yanoWorkspaceDir(cwd)).logs` invece di `path.join(cwd, "logs")`.
   Il default di `--prompts-dir` (nel flag letto da `before_agent_start`) è
-  passato da `"prompts"` a `.pi/extensions/multiAgentOrchestrator/prompts` —
+  passato da `"prompts"` a `.pi/extensions/yano-orchestrator/prompts` —
   un `--prompts-dir` esplicito continua a vincere sempre, invariato.
   `ensureWorktreesGitignored()` non aggiunge più una voce `logs/` a sé
   stante (ridondante: `.pi/` la copre già in ogni progetto scaffoldato dalla
   Revisione 31) — resta solo `.worktrees/`.
 - `scripts/create-project.mjs` — `prompts/` non viene più copiato nella root
   del progetto scaffoldato, ma dentro
-  `.pi/extensions/multiAgentOrchestrator/prompts/` (stessa cartella che
-  `moaEnsureWorkspace()` userà a runtime). `agents/`/`mqtt/` restano invariati
+  `.pi/extensions/yano-orchestrator/prompts/` (stessa cartella che
+  `yanoEnsureWorkspace()` userà a runtime). `agents/`/`mqtt/` restano invariati
   alla root. La riga `logs/` è stata tolta dal `.gitignore` scritto per i
   nuovi progetti — non più necessaria, coperta da `.pi/`.
 - `scripts/review-log.mjs` — la cartella di default passa da `./logs` a
-  `./.pi/extensions/multiAgentOrchestrator/logs`; un argomento esplicito
+  `./.pi/extensions/yano-orchestrator/logs`; un argomento esplicito
   resta comunque supportato per rivedere un progetto scaffoldato prima di
   questa revisione, che ancora scrive in `logs/` a livello di root.
 - Le sei prompt di ruolo (`prompts/*.md`, la copia SORGENTE in questo
@@ -1322,7 +1322,7 @@ chiarito il punto reale, più specifico del semplice "ordine mentale":
   viene copiata dentro `.pi/.../prompts` nei progetti scaffoldati) sono state
   aggiornate ovunque citassero il percorso letterale `reports/<slug>...` o
   `<worktree_path>/reports/...`, che ora è
-  `.pi/extensions/multiAgentOrchestrator/reports/<slug>...`. Sono le
+  `.pi/extensions/yano-orchestrator/reports/<slug>...`. Sono le
   istruzioni che gli agenti LLM leggono per sapere dove scrivere/cercare il
   report — se non aggiornate, planner/coder/reviewer/specialisti avrebbero
   continuato a creare `reports/<slug>.md` nel posto sbagliato (la root),
@@ -1362,7 +1362,7 @@ importare il file reale) — aggiornati uno per uno per restare in sync con il
 codice reale, altrimenti avrebbero silenziosamente testato un percorso
 ormai sbagliato. Scaffold reale (`node scripts/create-project.mjs --name ... --llmp`)
 verificato a mano: nessuna cartella `reports/`/`prompts/`/`logs/` alla root,
-tutto dentro `.pi/extensions/multiAgentOrchestrator/`, `git status`/
+tutto dentro `.pi/extensions/yano-orchestrator/`, `git status`/
 `git check-ignore` confermano che nulla lì dentro risulta tracciabile.
 
 **Limite onesto**: questa revisione non fa nulla per un progetto GIÀ
@@ -1648,7 +1648,7 @@ prompts/*.md, mqtt/, .env).
   confidando sull'auto-load globale. La verifica "è un progetto
   inizializzato" (prima basata sull'esistenza di quel file) ora controlla
   invece `agents/roles.yaml` oppure
-  `.pi/extensions/multiAgentOrchestrator/config/project.json` (marker che
+  `.pi/extensions/yano-orchestrator/config/project.json` (marker che
   `yano init` scrive sempre), con l'esistenza locale di
   `extensions/orchestrator.ts` come terzo criterio valido.
 - **`yano doctor`** (nuovo sottocomando, `scripts/doctor.mjs`,
@@ -1878,9 +1878,9 @@ dietro il fatto che `coder-01` non trovasse affatto il ticket/run atteso
 (si era auto-diagnosticato "cross-instance DB issue" e aveva deciso di
 procedere comunque, bypassando il layer ticket): l'istanza era stata
 lanciata con la propria cwd **già dentro la worktree del task**
-(`.../moa-test-project/.worktrees/url-shortener`), non nella root del
+(`.../yano-test-project/.worktrees/url-shortener`), non nella root del
 progetto. Ogni percorso che l'estensione calcola (`worktreePaths`,
-`moaWorkspaceDir` → il DB SQLite `orchestrator.db`, `reportPath`,
+`yanoWorkspaceDir` → il DB SQLite `orchestrator.db`, `reportPath`,
 `locksPath`) è costruito componendo su `identity.cwd` assumendo che SIA la
 root — lanciata da dentro una worktree, ogni percorso si risolve un livello
 più in profondità, in un albero annidato, vuoto, isolato (compreso un
@@ -1990,11 +1990,11 @@ con una soglia.
   min), configurabili via `PI_ORCH_WATCHDOG_INTERVAL_MS`/
   `PI_ORCH_WATCHDOG_STALL_MS` (stesso pattern già usato da
   `PI_ORCH_HEARTBEAT_MS`/`PI_ORCH_STALE_AFTER_MS`).
-- `moaFindStalledTickets(storage, project, nowMs, stallMs)`: funzione pura
+- `yanoFindStalledTickets(storage, project, nowMs, stallMs)`: funzione pura
   data una `nowMs` esplicita (mai `Date.now()` internamente) — testabile con
   un orologio controllato, senza dover davvero aspettare in un test.
 - `watchdogSweep(nowMs)`: **planner-only**, no-op per ogni altro ruolo e
-  no-op finché non esiste ancora un workspace/DB (`moaStorage` nullo prima
+  no-op finché non esiste ancora un workspace/DB (`yanoStorage` nullo prima
   del primo `orchestrator_init`/`run_create`). Per ogni ticket stalled non
   ancora segnalato **a questo livello di soglia** (dedup per
   `ticket_id::running_since`, con un contatore di soglie superate — non un
@@ -2077,7 +2077,7 @@ non deve farlo.
 
 **Richiesta dell'operatore**: dopo un primo test live reale della Revisione
 27 (feature "URL shortener" completata in un progetto separato,
-`moa-test-project`), sei osservazioni concrete: (1) il README del progetto
+`yano-test-project`), sei osservazioni concrete: (1) il README del progetto
 scaffoldato conteneva ancora `# @otomatik/yano-orchestrator` perché era
 stato copiato a mano il `package.json` dell'ESTENSIONE — serve un modo reale
 di pacchettizzare/installare l'estensione e un comando che inizializzi un
@@ -2115,7 +2115,7 @@ pacchetto stesso**, la causa diretta del bug osservato; scrive un
 `package.json` NUOVO specifico del progetto (name = slug del `--name`,
 dependencies/devDependencies lette dal pacchetto sorgente per restare
 sincronizzate); copia anche `scripts/check-syntax.mjs` (autosufficiente);
-pre-scrive `.pi/extensions/multiAgentOrchestrator/config/project.json` col
+pre-scrive `.pi/extensions/yano-orchestrator/config/project.json` col
 nome scelto, così `orchestrator_init` lo trova già impostato al primo uso;
 scrive un `.gitignore` minimo e fa `git init` se serve (richiesto per
 l'isolamento worktree, Revisioni 13/14). **Verificato end-to-end**: scaffold
@@ -2133,11 +2133,11 @@ all'utente in chat — coprendo sia progetti scaffoldati con
 `pi-orchestrator-init` (nome già pre-scritto, non richiesto di nuovo) sia
 progetti creati in altro modo.
 
-**`extensions/orchestrator.ts`**: `moaEnsureWorkspace()` guadagna un terzo
+**`extensions/orchestrator.ts`**: `yanoEnsureWorkspace()` guadagna un terzo
 parametro opzionale `projectNameOverride` (il nome umano scelto, sempre
 prioritario sul valore MQTT `--project` quando presente); il tool
 `orchestrator_init` guadagna un parametro opzionale `project_name` che lo
-passa a `moaEnsureWorkspace`. Il README del pacchetto stesso guadagna una
+passa a `yanoEnsureWorkspace`. Il README del pacchetto stesso guadagna una
 sezione "Installazione — due scenari diversi" (sviluppare l'estensione vs.
 usarla per un progetto nuovo) con l'intero comando `npm link` →
 `pi-orchestrator-init` → `npm install` → `docker compose` → `pi -e
@@ -2153,7 +2153,7 @@ generico `prompts/specialist.md` — verificato leggendo `loadRolePrompt()`,
 che controlla `prompts/<role>.md` prima di ripiegare su
 `prompts/specialist.md`). Oltre al mandato standard (aggiornare il README
 del progetto, mai copiare quello/il `package.json` dell'estensione — con
-riferimento esplicito al bug osservato in `moa-test-project`), un passo
+riferimento esplicito al bug osservato in `yano-test-project`), un passo
 dedicato: scrivere/aggiornare `QUICK-START.md` con i comandi di
 installazione minimi e un esempio curl reale con la risposta attesa,
 **preso dai test già eseguiti da reviewer nel report** (mai inventato — se
@@ -2162,7 +2162,7 @@ davvero prima di scriverlo).
 
 ### 3. Verifica ordine di esecuzione reale + rimozione della ridondanza `logs/` interna
 
-**Verifica diretta sul run reale** (`moa-test-project`, run
+**Verifica diretta sul run reale** (`yano-test-project`, run
 `01M0DR2TJX0JSASHR60JK1DZ1X`, staging corretto di `.db`+`.db-wal`+`.db-shm`
 insieme — in WAL mode le scritture recenti vivono nel `.db-wal` finché non
 c'è un checkpoint, quindi ispezionare solo il `.db` dà una vista non
@@ -2179,10 +2179,10 @@ al primo test reale, nessun problema di ordine trovato.**
 nella root del progetto (Revisione 18, `logEvent()` scrive
 `logs/<istanza>.jsonl`, letta da `scripts/review-log.mjs` per confrontare il
 comportamento REALE con quello riportato dagli LLM) è **attiva e utile**,
-non toccata. La sottocartella `.pi/extensions/multiAgentOrchestrator/logs/`
-(scaffold creato da `moaSubdirs()` ma **mai scritto da nessun tool** —
+non toccata. La sottocartella `.pi/extensions/yano-orchestrator/logs/`
+(scaffold creato da `yanoSubdirs()` ma **mai scritto da nessun tool** —
 verificato con una ricerca su tutto `extensions/orchestrator.ts`) era invece
-morta: rimossa da `moaSubdirs()`, con una nuova asserzione negativa in
+morta: rimossa da `yanoSubdirs()`, con una nuova asserzione negativa in
 `scripts/smoke-test-ticket-engine.mjs` a prevenire regressioni. La
 cronologia eventi che quella cartella avrebbe dovuto contenere vive già
 nella tabella SQLite `events`, letta da `run_status`.
@@ -2212,7 +2212,7 @@ punto 6 (diagrammi) inizia proprio a riempire `diagrams/`.
 ### 6. Convenzione diagramma di progetto: `diagrams/architecture.mmd`
 
 Nuovo file convenzionale (non ancora esistente prima di questa revisione):
-`.pi/extensions/multiAgentOrchestrator/diagrams/architecture.mmd` — sorgente
+`.pi/extensions/yano-orchestrator/diagrams/architecture.mmd` — sorgente
 Mermaid puro (senza wrapper markdown), **a livello di intero progetto, non
 per singolo task**, che rappresenta lo stato architetturale CORRENTE
 completo, aggiornato continuamente. Distinto da `docs/architecture.mmd` del
@@ -2327,11 +2327,11 @@ testuale (i permessi/il comportamento dei tool citati nel prompt sono stati
 riletti dal codice reale, non assunti) — la verifica comportamentale resta
 da fare con un planner reale su un progetto di prova.
 
-## Revisione 26 — layer ticket/DAG/SQLite (MultiAgentOrchestrator), vertical slice additivo su MQTT+worktree+roster+phase-gate
+## Revisione 26 — layer ticket/DAG/SQLite (YanoOrchestrator), vertical slice additivo su MQTT+worktree+roster+phase-gate
 
 **Richiesta dell'operatore**: valutare e implementare un piano esterno
-("MultiAgentOrchestrator") che descriveva un'estensione Pi da zero — runtime
-persistente/resumable, workspace `.pi/extensions/multiAgentOrchestrator/`,
+("YanoOrchestrator") che descriveva un'estensione Pi da zero — runtime
+persistente/resumable, workspace `.pi/extensions/yano-orchestrator/`,
 ticket canonici interni, dependency graph, execution waves, SQLite come
 storage, Planner Playbook, riuso delle skill Matt Pocock (Wayfinder/Drill-
 Grill-Me/To-Spec/To-Tickets). Il piano non teneva conto dello stato reale di
@@ -2358,10 +2358,10 @@ singolo, nessun modulo separato — la loadability di un'estensione Pi
 multi-file non è mai stata verificata contro un `pi` reale, mentre il
 pattern single-file è quello testato finora):
 
-- **Workspace di progetto** `.pi/extensions/multiAgentOrchestrator/`
+- **Workspace di progetto** `.pi/extensions/yano-orchestrator/`
   (`config/specs/playbooks/diagrams/knowledge/policies/artifacts/logs/
   overrides/orchestratorStorage/orchestrator.db`), creato/aperto in modo
-  idempotente da `moaEnsureWorkspace()` — non distrugge mai stato esistente
+  idempotente da `yanoEnsureWorkspace()` — non distrugge mai stato esistente
   (verificato: `config/project.json.created_at` invariato su init ripetuto).
 - **`OrchestratorStorage`** (interfaccia) → **`SQLiteOrchestratorStorage`**
   (unica implementazione, `node:sqlite` — `DatabaseSync`, WAL mode) — nessun
@@ -2374,9 +2374,9 @@ pattern single-file è quello testato finora):
   GitHub/Linear/Jira (nessun Ticket Publisher, come da richiesta del piano
   originale) — `spec_create` scrive sia in SQLite sia come file markdown
   sotto `specs/`.
-- **Dependency graph deterministico**: `moaComputeReadyBlocked` (READY/
+- **Dependency graph deterministico**: `yanoComputeReadyBlocked` (READY/
   BLOCKED/RUNNING/DONE/FAILED/CANCELLED, sempre calcolato, mai uno status
-  ridondante salvato) e `moaComputeExecutionWaves` (livelli topologici del
+  ridondante salvato) e `yanoComputeExecutionWaves` (livelli topologici del
   lavoro ancora da fare, con rilevamento esplicito di cicli).
 - **8 nuovi tool**: `orchestrator_init`, `run_create`/`spec_create`/
   `ticket_create` (solo planner), `tickets_ready` (chiunque), `ticket_claim`
@@ -4662,7 +4662,7 @@ sviluppami una mini funzione che fa il controllo di un codice fiscale
 Cosa aspettarti, guardando gli altri pannelli:
 
 1. planner-01 chiama `worktree_create`, crea
-   `.pi/extensions/multiAgentOrchestrator/reports/<slug>.md` dentro il
+   `.pi/extensions/yano-orchestrator/reports/<slug>.md` dentro il
    worktree (non nella cartella dove hai lanciato herdr — vedi Revisione 37),
    poi chiama
    `agent_send(target_role: "coder", ...)`, ti dice che ha assegnato il
@@ -4711,7 +4711,7 @@ cartella principale resta inalterata, finché planner non chiama
   qualsiasi sullo stesso broker locale finivano sullo stesso albero di topic
   MQTT. Dalla Revisione 38, il default deriva dall'identità del progetto
   stesso (`config/project.json`, poi `package.json`, poi il nome della
-  cartella) — se lo vedi ancora, controlla `.pi/extensions/multiAgentOrchestrator/config/project.json`
+  cartella) — se lo vedi ancora, controlla `.pi/extensions/yano-orchestrator/config/project.json`
   in entrambi i progetti: se coincidono per errore (es. un progetto copiato
   con `cp -r` invece che scaffoldato con `yano init`), passa `--project` a
   mano con un valore diverso in uno dei due.

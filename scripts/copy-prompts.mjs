@@ -12,7 +12,7 @@
 // Questo comando esiste SOLO per chi vuole personalizzare i prompt di UN
 // progetto specifico: copia prompts/ dal pacchetto installato (quello da cui
 // `yano` sta girando ORA) dentro
-// <progetto>/.pi/extensions/multiAgentOrchestrator/prompts/, pronta da
+// <progetto>/.pi/extensions/yano-orchestrator/prompts/, pronta da
 // modificare a mano. Da sola non cambia nulla: un'istanza continua a leggere
 // i prompt globali finché non la lanci con `yano start --instance <nome>
 // --role <ruolo> --custom-prompts` — è quel flag (letto da
@@ -49,7 +49,7 @@ function countFiles(dir) {
 // runCopyPrompts({ packageRoot, cwd }) — packageRoot è il pacchetto npm da
 // cui `yano` sta girando (la fonte, sempre l'ultima versione installata); cwd
 // è la directory del progetto scaffoldato su cui operare (deve avere già
-// .pi/extensions/multiAgentOrchestrator/, cioè essere stato creato con `yano
+// .pi/extensions/yano-orchestrator/, cioè essere stato creato con `yano
 // init`).
 export function runCopyPrompts({ packageRoot, cwd }) {
 	const promptsSrc = path.join(packageRoot, "prompts");
@@ -58,7 +58,7 @@ export function runCopyPrompts({ packageRoot, cwd }) {
 		process.exit(1);
 	}
 
-	const extensionDir = path.join(cwd, ".pi", "extensions", "multiAgentOrchestrator");
+	const extensionDir = path.join(cwd, ".pi", "extensions", "yano-orchestrator");
 	if (!fs.existsSync(extensionDir)) {
 		console.error(
 			`yano copy-prompts: "${extensionDir}" non esiste — questa directory non sembra un progetto scaffoldato con \`yano init\`. ` +

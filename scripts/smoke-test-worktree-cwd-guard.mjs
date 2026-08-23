@@ -3,7 +3,7 @@
 // scripts/smoke-test-response-wakeup.mjs surfaced a second root cause for:
 // an instance was launched with its cwd already set to
 // ".../.worktrees/<slug>/" instead of the project root. Every path this
-// extension computes (worktreePaths, moaWorkspaceDir → the SQLite
+// extension computes (worktreePaths, yanoWorkspaceDir → the SQLite
 // orchestrator.db, reportPath, locksPath) joins onto identity.cwd assuming
 // it's the project root — from inside a worktree instead, everything
 // silently resolves one level too deep into a nested, empty, throwaway

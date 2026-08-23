@@ -167,8 +167,8 @@ async function resolvedProjectFor(cwd, instance, projectFlag) {
 
 async function main() {
 	console.log("\n=== TEST 1 — cross-project isolation (the real regression) ===");
-	const dirAlpha = scratchDir("moa-scope-alpha");
-	const dirBeta = scratchDir("moa-scope-beta");
+	const dirAlpha = scratchDir("yano-scope-alpha");
+	const dirBeta = scratchDir("yano-scope-beta");
 	fs.writeFileSync(path.join(dirAlpha, "package.json"), JSON.stringify({ name: "alpha-widgets" }, null, 2));
 	fs.writeFileSync(path.join(dirBeta, "package.json"), JSON.stringify({ name: "beta-widgets" }, null, 2));
 
@@ -182,25 +182,25 @@ async function main() {
 
 	// 2a. Nothing at all (no package.json, no config/project.json) -> falls
 	// back to slugify(basename(cwd)).
-	const dirBare = scratchDir("moa-scope-bare");
+	const dirBare = scratchDir("yano-scope-bare");
 	const projectBare = await resolvedProjectFor(dirBare, "scope-bare-01", undefined);
 	ok(projectBare === slugify(path.basename(dirBare)), `no package.json/config -> slugify(basename(cwd)) (got "${projectBare}")`);
 
 	// 2b. Only package.json -> its "name" wins.
-	const dirPkgOnly = scratchDir("moa-scope-pkg");
+	const dirPkgOnly = scratchDir("yano-scope-pkg");
 	fs.writeFileSync(path.join(dirPkgOnly, "package.json"), JSON.stringify({ name: "pkg-only-slug" }, null, 2));
 	const projectPkgOnly = await resolvedProjectFor(dirPkgOnly, "scope-pkg-01", undefined);
 	ok(projectPkgOnly === "pkg-only-slug", `package.json name alone wins over the directory name (got "${projectPkgOnly}")`);
 
 	// 2c. Both config/project.json AND package.json -> config/project.json
 	// wins (the operator's own chosen name, possibly renamed since scaffold —
-	// see moaEnsureWorkspace's projectNameOverride), slugified since it may
+	// see yanoEnsureWorkspace's projectNameOverride), slugified since it may
 	// contain spaces.
-	const dirBoth = scratchDir("moa-scope-both");
+	const dirBoth = scratchDir("yano-scope-both");
 	fs.writeFileSync(path.join(dirBoth, "package.json"), JSON.stringify({ name: "other-slug-should-lose" }, null, 2));
-	fs.mkdirSync(path.join(dirBoth, ".pi", "extensions", "multiAgentOrchestrator", "config"), { recursive: true });
+	fs.mkdirSync(path.join(dirBoth, ".pi", "extensions", "yano-orchestrator", "config"), { recursive: true });
 	fs.writeFileSync(
-		path.join(dirBoth, ".pi", "extensions", "multiAgentOrchestrator", "config", "project.json"),
+		path.join(dirBoth, ".pi", "extensions", "yano-orchestrator", "config", "project.json"),
 		JSON.stringify({ schema_version: 1, extension_version: "test", project: "Human Chosen Name", created_at: "x", updated_at: "x" }, null, 2),
 	);
 	const projectBoth = await resolvedProjectFor(dirBoth, "scope-both-01", undefined);

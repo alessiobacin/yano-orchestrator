@@ -68,7 +68,7 @@ async function git(args, cwd) {
 }
 
 async function bootstrapScratchRepo() {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "moa-response-wakeup-"));
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "yano-response-wakeup-"));
 	await git(["init", "-q"], dir);
 	await git(["config", "user.email", "response-wakeup-test@test.local"], dir);
 	await git(["config", "user.name", "Response Wakeup Test"], dir);

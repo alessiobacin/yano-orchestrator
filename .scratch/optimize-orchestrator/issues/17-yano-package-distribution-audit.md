@@ -8,12 +8,12 @@ Eseguire un audit di distribuzione del pacchetto per garantire che il nome uffic
 
 ## Answer
 
-Audit eseguito il 2026-08-22 con `node --check bin/po.mjs` e `npm pack --dry-run --json`.
+Audit eseguito il 2026-08-22 con `node --check bin/legacy-cli.mjs` e `npm pack --dry-run --json`.
 
 Risultato: il pacchetto non è conforme alla destinazione `yano`.
 
-- `package.json` dichiara `name: yolo-orchestrator` e `bin.po: ./bin/po.mjs`.
-- Il solo entrypoint presente è `bin/po.mjs`; la CLI `yano` non è ancora esposta.
+- `package.json` dichiara `name: yano-orchestrator` e `bin.legacy-cli: ./bin/legacy-cli.mjs`.
+- Il solo entrypoint presente è `bin/legacy-cli.mjs`; la CLI `yano` non è ancora esposta.
 - Il dry-run npm pubblica il pacchetto senza gli asset Playbook sotto `.pi/`, perché `.pi/` è escluso dal `.gitignore` e non è incluso nel package manifest.
 - La sintassi dell'entrypoint esistente è valida, ma non verifica la conformità dei nomi o la distribuzione dei Playbook.
 

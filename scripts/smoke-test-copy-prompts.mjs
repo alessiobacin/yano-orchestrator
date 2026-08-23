@@ -42,16 +42,16 @@ function runCopyPrompts(cwd) {
 }
 
 function main() {
-	console.log("\n=== Scenario A — refuses outside a scaffolded project (no .pi/extensions/multiAgentOrchestrator) ===");
+	console.log("\n=== Scenario A — refuses outside a scaffolded project (no .pi/extensions/yano-orchestrator) ===");
 	const notScaffolded = scratchDir("not-a-project");
 	const resA = runCopyPrompts(notScaffolded);
 	ok(resA.status !== 0, "exits non-zero when the cwd was never scaffolded with `yano init`");
-	ok(/multiAgentOrchestrator|non esiste|non sembra un progetto/.test(resA.out), "clear error message, not a silent no-op");
+	ok(/yano-orchestrator|non esiste|non sembra un progetto/.test(resA.out), "clear error message, not a silent no-op");
 
 	console.log("\n=== Scenario B — copies the package's CURRENT prompts/ into a freshly-scaffolded project (which has none by default, Revisione 47) ===");
 	const project = scratchDir("scaffolded-project-no-prompts");
-	fs.mkdirSync(path.join(project, ".pi", "extensions", "multiAgentOrchestrator"), { recursive: true });
-	const promptsDest = path.join(project, ".pi", "extensions", "multiAgentOrchestrator", "prompts");
+	fs.mkdirSync(path.join(project, ".pi", "extensions", "yano-orchestrator"), { recursive: true });
+	const promptsDest = path.join(project, ".pi", "extensions", "yano-orchestrator", "prompts");
 	ok(!fs.existsSync(promptsDest), "sanity check: a freshly-scaffolded project has NO prompts/ dir yet (matches `yano init`'s new behavior)");
 
 	const resB = runCopyPrompts(project);

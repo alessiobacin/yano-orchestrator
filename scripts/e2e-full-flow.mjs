@@ -70,11 +70,11 @@ function ok(cond, msg) {
 
 // worktree_create only creates the worktree/branch, not the report dir inside
 // it (that's the planner's own job per prompts/planner.md) — mkdir first.
-// Revisione 37: reports/ moved under .pi/extensions/multiAgentOrchestrator/
+// Revisione 37: reports/ moved under .pi/extensions/yano-orchestrator/
 // (gitignored in real scaffolded projects) — kept in sync with reportsDir()
 // in extensions/orchestrator.ts.
 function writeReportHeader(wtPath, slug, content) {
-	const dir = path.join(wtPath, ".pi", "extensions", "multiAgentOrchestrator", "reports");
+	const dir = path.join(wtPath, ".pi", "extensions", "yano-orchestrator", "reports");
 	fs.mkdirSync(dir, { recursive: true });
 	fs.writeFileSync(path.join(dir, `${slug}.md`), content);
 }
@@ -100,7 +100,7 @@ async function makeScratchRepo(evolutionPort) {
 
 	fs.mkdirSync(path.join(dir, "agents"), { recursive: true });
 	fs.mkdirSync(path.join(dir, "prompts"), { recursive: true });
-	fs.mkdirSync(path.join(dir, ".pi", "extensions", "multiAgentOrchestrator", "reports"), { recursive: true });
+	fs.mkdirSync(path.join(dir, ".pi", "extensions", "yano-orchestrator", "reports"), { recursive: true });
 
 	// Copy the REAL config/prompts, not fakes — so the harness exercises the
 	// real docs-sync-brief text, the real planner.md instructions text (even
@@ -339,7 +339,7 @@ async function test1FullFlow(cwd, project, evo) {
 	const created = await planner.call("worktree_create", { slug });
 	ok(created.details.reused === false, "worktree_create: fresh worktree created");
 	const wtPath = created.details.worktree_path;
-	const reportRel = path.join(".pi", "extensions", "multiAgentOrchestrator", "reports", `${slug}.md`);
+	const reportRel = path.join(".pi", "extensions", "yano-orchestrator", "reports", `${slug}.md`);
 	writeReportHeader(wtPath, slug, `# Report: ${slug}\n\n- Task: aggiungi una funzione isPalindrome a src/util.ts\n- Stato: in corso\n`);
 
 	// 3. plan_set with the TDD-exception NOT used here — plain coder+reviewer
@@ -598,7 +598,7 @@ async function test4DirtyMainAndConflict(cwd, project) {
 
 	// Simulate the manual resolution the real incident described: cherry-pick
 	// straight into main, bypassing worktree_finalize entirely...
-	await git(["checkout", `task/${slug}`, "--", path.join(".pi", "extensions", "multiAgentOrchestrator", "reports")], cwd); // bring the report over manually too
+	await git(["checkout", `task/${slug}`, "--", path.join(".pi", "extensions", "yano-orchestrator", "reports")], cwd); // bring the report over manually too
 	await git(["add", "-A"], cwd);
 	await git(["commit", "-q", "-m", "manual conflict resolution, bypassing worktree_finalize"], cwd);
 

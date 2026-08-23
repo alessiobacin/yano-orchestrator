@@ -62,7 +62,7 @@ async function git(args, cwd) {
 }
 
 async function bootstrapScratchRepo() {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "moa-watchdog-"));
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "yano-watchdog-"));
 	await git(["init", "-q"], dir);
 	await git(["config", "user.email", "watchdog-test@test.local"], dir);
 	await git(["config", "user.name", "Watchdog Test"], dir);
@@ -210,7 +210,7 @@ async function runScenario(cwd, project) {
 	await coder.call("ticket_claim", { ticket_id: ticketId });
 	// Tool activity is real progress. Even if the ticket row is old, a recent
 	// tool start must refresh its progress clock and prevent a false stall.
-	const progressDb = new (await import("node:sqlite")).DatabaseSync(path.join(cwd, ".pi", "extensions", "multiAgentOrchestrator", "orchestratorStorage", "orchestrator.db"));
+	const progressDb = new (await import("node:sqlite")).DatabaseSync(path.join(cwd, ".pi", "extensions", "yano-orchestrator", "orchestratorStorage", "orchestrator.db"));
 	progressDb.prepare("UPDATE tickets SET updated_at = ? WHERE id = ?").run(new Date(Date.now() - 5_000).toISOString(), ticketId);
 	progressDb.close();
 	const toolStartHook = coder.harness.hooks.get("tool_execution_start");

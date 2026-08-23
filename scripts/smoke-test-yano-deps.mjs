@@ -27,7 +27,7 @@ function ok(cond, msg) { if (!cond) throw new Error(`ASSERTION FAILED: ${msg}`);
 
 async function main() {
 	console.log("Yano-deps smoke test — scripts/yano-deps.mjs (Ticket 10).\n");
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "moa-yano-deps-"));
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "yano-yano-deps-"));
 	fs.writeFileSync(path.join(dir, ".env"), "GITHUB_TOKEN=abc123\nEMPTY=\n");
 	const { runPoDeps } = await import(pathToFileURL(path.join(PROJECT_ROOT, "scripts", "yano-deps.mjs")).href);
 

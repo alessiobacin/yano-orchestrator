@@ -32,7 +32,7 @@ let PASS = 0;
 function ok(cond, msg) { if (!cond) throw new Error(`ASSERTION FAILED: ${msg}`); PASS++; console.log(`   OK — ${msg}`); }
 
 async function bootstrapScratchRepo() {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "moa-gantt-"));
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "yano-gantt-"));
 	await execFileP("git", ["init", "-q", "-b", "main"], { cwd: dir });
 	await execFileP("git", ["config", "user.email", "smoke@test.local"], { cwd: dir });
 	await execFileP("git", ["config", "user.name", "Smoke Test"], { cwd: dir });

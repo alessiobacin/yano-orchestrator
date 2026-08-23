@@ -19,7 +19,7 @@
 //
 // Revisione 47 — NON copia più prompts/ nel progetto: da Revisione 37 a
 // Revisione 46 questo script copiava prompts/ dentro
-// .pi/extensions/multiAgentOrchestrator/prompts/ del progetto scaffoldato —
+// .pi/extensions/yano-orchestrator/prompts/ del progetto scaffoldato —
 // ma quella copia restava STATICA per sempre: `yano update` (Revisione 34)
 // aggiornava solo le due copie GLOBALI del pacchetto, mai quella
 // per-progetto, quindi un progetto scaffoldato tempo fa restava
@@ -106,7 +106,7 @@ function printUsage() {
 			'     (in locale, senza npm install -g: node scripts/create-project.mjs --name "<Nome Progetto>" [--target <dir>] [--force] [--llmp])',
 			"",
 			'  --name    Nome del progetto (obbligatorio) — finisce in package.json ("name", slug kebab-case)',
-			"            e viene pre-scritto in .pi/extensions/multiAgentOrchestrator/config/project.json,",
+			"            e viene pre-scritto in .pi/extensions/yano-orchestrator/config/project.json,",
 			"            così il planner lo trova già impostato al primo orchestrator_init e non deve chiederlo.",
 			"  --target  Directory da scaffoldare (default: la directory CORRENTE, in place). Se passato,",
 			"            scaffolda invece in quella sottocartella/percorso (creandolo se non esiste).",
@@ -303,7 +303,7 @@ export async function runCreateProject({ packageRoot, cwd, argv }) {
 	//    `pi` lo carica da lì in automatico) e MAI il package.json del
 	//    pacchetto stesso (motivo per cui questo script esiste: evitare che
 	//    un progetto nuovo erediti l'identità/il nome del pacchetto invece
-	//    del proprio, il problema reale osservato in moa-test-project — vedi
+	//    del proprio, il problema reale osservato in yano-test-project — vedi
 	//    docs/development-notes.md, Revisione 28).
 	for (const dir of ["agents", "mqtt"]) {
 		const src = path.join(packageRoot, dir);
@@ -333,7 +333,7 @@ export async function runCreateProject({ packageRoot, cwd, argv }) {
 	// as an explicit, inspectable local baseline. Never source them from an
 	// ignored package path at runtime: yano init owns this deterministic copy.
 	const packagedPlaybooks = path.join(packageRoot, "playbooks");
-	const projectPlaybooks = path.join(targetDir, ".pi", "extensions", "multiAgentOrchestrator", "playbooks");
+	const projectPlaybooks = path.join(targetDir, ".pi", "extensions", "yano-orchestrator", "playbooks");
 	if (fs.existsSync(packagedPlaybooks) && !fs.existsSync(projectPlaybooks)) {
 		copyDir(packagedPlaybooks, projectPlaybooks);
 	}
@@ -362,14 +362,14 @@ export async function runCreateProject({ packageRoot, cwd, argv }) {
 	//    orchestrator_init lo trova già impostato e il planner non deve
 	//    chiederlo all'utente (vedi prompts/planner.md, "Layer ticket/DAG
 	//    persistente", Revisione 28). Schema minimo, coerente con
-	//    MoaProjectConfig in extensions/orchestrator.ts, ma senza importare
+	//    YanoProjectConfig in extensions/orchestrator.ts, ma senza importare
 	//    quel file (troppo pesante per uno script di scaffolding — si
 	//    connetterebbe a MQTT): se lo schema di project.json cambia in una
 	//    revisione futura, orchestrator_init lo aggiorna comunque da solo al
 	//    primo utilizzo (creazione idempotente, mai distruttiva).
-	const moaConfigDir = path.join(targetDir, ".pi", "extensions", "multiAgentOrchestrator", "config");
-	fs.mkdirSync(moaConfigDir, { recursive: true });
-	const projectJsonPath = path.join(moaConfigDir, "project.json");
+	const yanoConfigDir = path.join(targetDir, ".pi", "extensions", "yano-orchestrator", "config");
+	fs.mkdirSync(yanoConfigDir, { recursive: true });
+	const projectJsonPath = path.join(yanoConfigDir, "project.json");
 	if (!fs.existsSync(projectJsonPath)) {
 		fs.writeFileSync(
 			projectJsonPath,
@@ -439,7 +439,7 @@ export async function runCreateProject({ packageRoot, cwd, argv }) {
 		// .pi/ qui è la workspace runtime dell'estensione nel progetto scaffoldato
 		// (SQLite orchestrator.db, config/project.json, specs/tickets — Revisioni
 		// 26-28; report, prompt di ruolo, e log di debug per-istanza dalla
-		// Revisione 37 — vedi extensions/orchestrator.ts, moaSubdirs), non
+		// Revisione 37 — vedi extensions/orchestrator.ts, yanoSubdirs), non
 		// codice: locale per macchina/progetto, mai da condividere. Non serve
 		// più una voce "logs/" separata a livello di root: dalla Revisione 37
 		// quel log vive dentro .pi/, già coperto qui.
@@ -493,7 +493,7 @@ export async function runCreateProject({ packageRoot, cwd, argv }) {
 	console.log("");
 	console.log("I prompt di ruolo (planner/coder/reviewer/specialisti) si leggono SEMPRE dal pacchetto installato (Revisione 47) — un");
 	console.log("`yano update` li aggiorna per questo progetto senza nessun passo in più. Per personalizzarli SOLO per questo progetto:");
-	console.log("`yano copy-prompts` (copia i prompt correnti in .pi/extensions/multiAgentOrchestrator/prompts/, poi modificali), quindi");
+	console.log("`yano copy-prompts` (copia i prompt correnti in .pi/extensions/yano-orchestrator/prompts/, poi modificali), quindi");
 	console.log("lancia quell'istanza con `yano start --instance <nome> --role <ruolo> --custom-prompts` per usarli davvero.");
 }
 

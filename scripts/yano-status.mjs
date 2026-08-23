@@ -31,10 +31,10 @@ import { parse as parseYaml } from "yaml";
 import mqtt from "mqtt";
 import { slugify, tracePaths } from "./yano-trace-storage.mjs";
 
-const moaRequire = createRequire(import.meta.url);
+const yanoRequire = createRequire(import.meta.url);
 
 function workspaceDir(cwd) {
-	return path.join(cwd, ".pi", "extensions", "multiAgentOrchestrator");
+	return path.join(cwd, ".pi", "extensions", "yano-orchestrator");
 }
 
 function optionValue(argv, flag) {
@@ -66,7 +66,7 @@ function resolveProject(cwd, argv = []) {
 	} catch { /* fallthrough */ }
 	try {
 		const pkg = JSON.parse(readFileSync(path.join(cwd, "package.json"), "utf-8"));
-		if (pkg.name && !String(pkg.name).startsWith("@otomatik/pi-mqtt-")) return slugify(pkg.name);
+		if (pkg.name && !String(pkg.name).startsWith("@otomatik/yano-")) return slugify(pkg.name);
 	} catch { /* fallthrough */ }
 	return slugify(path.basename(cwd));
 }
@@ -77,7 +77,7 @@ function runStatus(cwd, argv) {
 	const dbPath = path.join(workspaceDir(cwd), "orchestratorStorage", "orchestrator.db");
 	if (!existsSync(dbPath)) { console.log("yano status: nessun orchestrator.db per questo progetto — niente da mostrare."); return; }
 	let DatabaseSync;
-	try { ({ DatabaseSync } = moaRequire("node:sqlite")); } catch (e) { console.error(`yano status: node:sqlite non disponibile (${e.message})`); process.exit(1); }
+	try { ({ DatabaseSync } = yanoRequire("node:sqlite")); } catch (e) { console.error(`yano status: node:sqlite non disponibile (${e.message})`); process.exit(1); }
 	const db = new DatabaseSync(dbPath, { readOnly: true });
 	const runId = optionValue(argv, "--run");
 	const project = resolveProject(cwd, argv);

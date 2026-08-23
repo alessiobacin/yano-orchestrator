@@ -37,7 +37,7 @@ Every instance has an `instance`, `role`, `project` and `team` identity. MQTT to
 
 ## Persistence model
 
-The workspace lives under `.pi/extensions/multiAgentOrchestrator/`:
+The workspace lives under `.pi/extensions/yano-orchestrator/`:
 
 - `orchestratorStorage/orchestrator.db`: SQLite state and audit history;
 - `config/project.json`: project identity and schema metadata;

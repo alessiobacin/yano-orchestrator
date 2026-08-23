@@ -60,7 +60,7 @@ jobs:
           # a post-Revisione-33 scaffold never has; assert what's actually
           # guaranteed to exist instead.
           test -f agents/roles.yaml
-          test -f .pi/extensions/multiAgentOrchestrator/config/project.json
+          test -f .pi/extensions/yano-orchestrator/config/project.json
           test ! -e extensions/orchestrator.ts
           # Revisione 49: create-project.mjs also copies a .mcp.json.example
           # template (chrome-devtools MCP server, for reviewer/frontend-developer)
@@ -70,7 +70,7 @@ jobs:
           # Revisione 47: `yano init` no longer creates a local prompts/ copy at
           # all — role prompts are always read from the global install by
           # default (see extensions/orchestrator.ts, resolveGlobalPromptsDir()).
-          test ! -e .pi/extensions/multiAgentOrchestrator/prompts
+          test ! -e .pi/extensions/yano-orchestrator/prompts
           yano start --instance planner-01 --print-only | grep -q -- "--role planner"
           yano end | grep -q -- "niente da chiudere"
           # Revisione 47: `yano copy-prompts` materializes a local copy to
@@ -79,8 +79,8 @@ jobs:
           # scripts/smoke-test-custom-prompts.mjs above) — here we just
           # confirm the CLI round-trip against the real global `yano` binary.
           yano copy-prompts | grep -q -- "copiati"
-          test -f .pi/extensions/multiAgentOrchestrator/prompts/planner.md
-          echo "CUSTOMIZED-CI-MARKER" > .pi/extensions/multiAgentOrchestrator/prompts/planner.md
+          test -f .pi/extensions/yano-orchestrator/prompts/planner.md
+          echo "CUSTOMIZED-CI-MARKER" > .pi/extensions/yano-orchestrator/prompts/planner.md
           yano copy-prompts | grep -q -- "copia locale precedente"
-          grep -q -- "CUSTOMIZED-CI-MARKER" .pi/extensions/multiAgentOrchestrator/prompts.bak-*/planner.md
-          ! grep -q -- "CUSTOMIZED-CI-MARKER" .pi/extensions/multiAgentOrchestrator/prompts/planner.md
+          grep -q -- "CUSTOMIZED-CI-MARKER" .pi/extensions/yano-orchestrator/prompts.bak-*/planner.md
+          ! grep -q -- "CUSTOMIZED-CI-MARKER" .pi/extensions/yano-orchestrator/prompts/planner.md

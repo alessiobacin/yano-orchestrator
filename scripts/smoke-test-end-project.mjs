@@ -68,7 +68,7 @@ function makeCtx(cwd) {
 // "active" for `yano end` to find, exactly the real-world case (a task
 // abandoned mid-way) this command exists for.
 async function seedProject() {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "moa-end-smoke-"));
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "yano-end-smoke-"));
 	await git(["init", "-q", "-b", "main"], dir);
 	await git(["config", "user.email", "smoke@test.local"], dir);
 	await git(["config", "user.name", "Smoke Test"], dir);
@@ -154,7 +154,7 @@ function readDbRows(dbPath) {
 
 async function main() {
 	console.log("\n=== TEST 1 — non-initialized directory refuses ===");
-	const bareDir = fs.mkdtempSync(path.join(os.tmpdir(), "moa-end-bare-"));
+	const bareDir = fs.mkdtempSync(path.join(os.tmpdir(), "yano-end-bare-"));
 	let refused = false;
 	try {
 		runEnd(bareDir, []);
@@ -164,7 +164,7 @@ async function main() {
 	ok(refused, "yano end exits 1 in a directory with no project markers");
 
 	console.log("\n=== TEST 2 — initialized project, no orchestrator.db yet ===");
-	const noDbDir = fs.mkdtempSync(path.join(os.tmpdir(), "moa-end-nodb-"));
+	const noDbDir = fs.mkdtempSync(path.join(os.tmpdir(), "yano-end-nodb-"));
 	fs.mkdirSync(path.join(noDbDir, "agents"), { recursive: true });
 	fs.writeFileSync(path.join(noDbDir, "agents", "roles.yaml"), "roles: {}\n");
 	const noDbOut = runEnd(noDbDir, []);
@@ -181,7 +181,7 @@ async function main() {
 
 	console.log("\n=== TEST 4 — --list is read-only ===");
 	const { dir, runA, runB } = await seedProject();
-	const dbPath = path.join(dir, ".pi", "extensions", "multiAgentOrchestrator", "orchestratorStorage", "orchestrator.db");
+	const dbPath = path.join(dir, ".pi", "extensions", "yano-orchestrator", "orchestratorStorage", "orchestrator.db");
 	const listOut = runEnd(dir, ["--list"]);
 	ok(listOut.includes(runA) && listOut.includes(runB), "--list shows both seeded runs");
 	ok(/1 done, 0 failed, 0 running, 1 pending/.test(listOut), "--list shows the correct ticket status breakdown for run B");

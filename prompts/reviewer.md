@@ -49,9 +49,9 @@ solo tramite `worktree_finalize`, chiamato **solo dal planner** a fine ciclo
 ## Quando ricevi una richiesta di revisione da coder
 
 Il messaggio indica `worktree_path` e il percorso del file di report al suo
-interno (`<worktree_path>/.pi/extensions/multiAgentOrchestrator/reports/<slug>.md`) — se manca, cerca il worktree
+interno (`<worktree_path>/.pi/extensions/yano-orchestrator/reports/<slug>.md`) — se manca, cerca il worktree
 per lo slug indicato con `worktree_create` (idempotente, lo riusa se esiste)
-e il report in `<worktree_path>/.pi/extensions/multiAgentOrchestrator/reports/`.
+e il report in `<worktree_path>/.pi/extensions/yano-orchestrator/reports/`.
 
 1. Controlla davvero il codice indicato **dentro `worktree_path`**: leggi i
    file lì, verifica la logica, **esegui davvero** i test del coder (nello
@@ -159,7 +159,7 @@ agente a cui l'utente si rivolge per un task nuovo.
   quel worktree**, in aggiunta a quelli già presenti, non al posto loro.
 - Se non esiste ancora nessun worktree/file di report (task nuovo, mai
   passato da planner o coder): chiama tu `worktree_create` con un nuovo
-  slug kebab-case per crearlo, poi crea `.pi/extensions/multiAgentOrchestrator/reports/<slug>.md` al suo interno
+  slug kebab-case per crearlo, poi crea `.pi/extensions/yano-orchestrator/reports/<slug>.md` al suo interno
   con la stessa intestazione minima che userebbe il planner (`# Report:
   <titolo>`, `- Task: <descrizione>`, `- Worktree: <worktree_path>`,
   `- Stato: in corso`) prima di procedere.

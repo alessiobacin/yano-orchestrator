@@ -30,7 +30,7 @@ let badPayloadFailed = false;
 try { loadPlaybook(badPayload); } catch (error) { badPayloadFailed = error instanceof PlaybookValidationError; }
 if (!badPayloadFailed) throw new Error("ASSERTION FAILED: incomplete effect payload fails fast");
 const changed = path.join(path.dirname(bad), "changed.yaml");
-fs.writeFileSync(changed, fs.readFileSync(source, "utf8").replace("label: Default Pi MQTT orchestration flow", "label: Changed orchestration flow"));
+	fs.writeFileSync(changed, fs.readFileSync(source, "utf8").replace("label: Default Yano orchestration flow", "label: Changed orchestration flow"));
 let conflict = false;
 try { registry.bind("run-1", loadPlaybook(changed)); } catch (error) { conflict = error instanceof PlaybookValidationError; }
 if (!conflict) throw new Error("ASSERTION FAILED: conflicting immutable binding is rejected");

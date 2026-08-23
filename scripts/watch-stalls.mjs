@@ -42,7 +42,7 @@ import { createRequire } from "node:module";
 import mqtt from "mqtt";
 import { tracePaths } from "./yano-trace-storage.mjs";
 
-const moaRequire = createRequire(import.meta.url);
+const yanoRequire = createRequire(import.meta.url);
 
 function parseArgs(argv) {
 	const o = { project: null, stallMs: 900000, intervalMs: 60000, once: false, away: false };
@@ -58,14 +58,14 @@ function parseArgs(argv) {
 }
 
 function resolveProject(cwd) {
-	const cfgPath = path.join(cwd, ".pi", "extensions", "multiAgentOrchestrator", "config", "project.json");
+	const cfgPath = path.join(cwd, ".pi", "extensions", "yano-orchestrator", "config", "project.json");
 	try {
 		const cfg = JSON.parse(readFileSync(cfgPath, "utf-8"));
 		if (cfg.project) return cfg.project;
 	} catch { /* fallthrough */ }
 	try {
 		const pkg = JSON.parse(readFileSync(path.join(cwd, "package.json"), "utf-8"));
-		if (pkg.name && !String(pkg.name).startsWith("@otomatik/pi-mqtt-")) return pkg.name;
+		if (pkg.name && !String(pkg.name).startsWith("@otomatik/yano-")) return pkg.name;
 	} catch { /* fallthrough */ }
 	return path.basename(cwd);
 }
@@ -77,7 +77,7 @@ export async function runWatch({ cwd, argv }) {
 	const opts = parseArgs(argv);
 	const project = opts.project || resolveProject(cwd);
 
-	const dbPath = path.join(cwd, ".pi", "extensions", "multiAgentOrchestrator", "orchestratorStorage", "orchestrator.db");
+	const dbPath = path.join(cwd, ".pi", "extensions", "yano-orchestrator", "orchestratorStorage", "orchestrator.db");
 	if (!existsSync(dbPath)) {
 		console.log(`yano watch: nessun orchestrator.db per questo progetto (${dbPath}) — niente da sorvegliare.`);
 		process.exit(0);
@@ -85,7 +85,7 @@ export async function runWatch({ cwd, argv }) {
 
 	let DatabaseSync;
 	try {
-		({ DatabaseSync } = moaRequire("node:sqlite"));
+		({ DatabaseSync } = yanoRequire("node:sqlite"));
 	} catch (err) {
 		console.error(`yano watch: node:sqlite non disponibile (${err instanceof Error ? err.message : String(err)}).`);
 		process.exit(1);

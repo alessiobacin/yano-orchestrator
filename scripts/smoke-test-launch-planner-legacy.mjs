@@ -53,11 +53,11 @@ function main() {
 	const realOrchestratorSrc = fs.readFileSync(path.join(PACKAGE_ROOT, "extensions", "orchestrator.ts"), "utf8");
 
 	console.log("\n=== Scenario A — stale legacy scaffold (pre-Revisione-33 leftover extensions/) ===");
-	const legacyDir = scratchDir("moa-legacy-scaffold");
+	const legacyDir = scratchDir("yano-legacy-scaffold");
 	fs.mkdirSync(path.join(legacyDir, "extensions"), { recursive: true });
 	fs.mkdirSync(path.join(legacyDir, "agents"), { recursive: true });
 	fs.writeFileSync(path.join(legacyDir, "extensions", "orchestrator.ts"), realOrchestratorSrc);
-	fs.writeFileSync(path.join(legacyDir, "package.json"), JSON.stringify({ name: "moa-test-project" }, null, 2));
+	fs.writeFileSync(path.join(legacyDir, "package.json"), JSON.stringify({ name: "yano-test-project" }, null, 2));
 	fs.writeFileSync(path.join(legacyDir, "agents", "roles.yaml"), "roles: {}\n");
 	const legacyOut = runPrintOnly(legacyDir);
 	ok(!legacyOut.includes("-e extensions/orchestrator.ts"), "stale legacy scaffold: composed command does NOT include -e (the actual fix)");
@@ -66,7 +66,7 @@ function main() {
 	ok(/sicura da cancellare/.test(legacyOut), "stale legacy scaffold: tells the operator the leftover folder is now safe to delete");
 
 	console.log("\n=== Scenario B — genuine package-repo dev mode (name === yano-orchestrator) ===");
-	const devDir = scratchDir("moa-dev-repo");
+	const devDir = scratchDir("yano-dev-repo");
 	fs.mkdirSync(path.join(devDir, "extensions"), { recursive: true });
 	fs.mkdirSync(path.join(devDir, "agents"), { recursive: true });
 	fs.writeFileSync(path.join(devDir, "extensions", "orchestrator.ts"), realOrchestratorSrc);
@@ -77,7 +77,7 @@ function main() {
 	ok(!/IGNORATO/.test(devOut), "package-repo dev mode: no stale-scaffold warning (this really is dev mode, not a leftover)");
 
 	console.log("\n=== Scenario C — normal modern scaffold, no local extensions/ at all ===");
-	const modernDir = scratchDir("moa-modern-scaffold");
+	const modernDir = scratchDir("yano-modern-scaffold");
 	fs.mkdirSync(path.join(modernDir, "agents"), { recursive: true });
 	fs.writeFileSync(path.join(modernDir, "package.json"), JSON.stringify({ name: "modern-project" }, null, 2));
 	fs.writeFileSync(path.join(modernDir, "agents", "roles.yaml"), "roles: {}\n");

@@ -38,16 +38,16 @@ non serve che tu scriva nulla per questo, ma serve che tu passi `slug`.
 
 **Non scrivere mai direttamente nella directory principale del progetto.** Il
 messaggio che ti coinvolge indica `worktree_path` (e il file di report al suo
-interno, `<worktree_path>/.pi/extensions/multiAgentOrchestrator/reports/<slug>.md`) — se manca, chiama tu
+interno, `<worktree_path>/.pi/extensions/yano-orchestrator/reports/<slug>.md`) — se manca, chiama tu
 `worktree_create` con lo slug indicato (è idempotente, lo riusa se esiste) e cerca
-il report in `<worktree_path>/.pi/extensions/multiAgentOrchestrator/reports/`. Lavora **sempre** dentro quel worktree.
+il report in `<worktree_path>/.pi/extensions/yano-orchestrator/reports/`. Lavora **sempre** dentro quel worktree.
 
 ## Aspetta il tuo turno
 
 Il planner ti lancia insieme a tutto il resto del team scelto per un task,
 ma questo NON significa che tocchi a te subito: il planner dichiara e fa
 avanzare un piano di esecuzione a fasi coi tool `plan_set`/`plan_advance`
-(leggibile anche in `.pi/extensions/multiAgentOrchestrator/reports/<slug>.plan.md`, generato in automatico) e ti
+(leggibile anche in `.pi/extensions/yano-orchestrator/reports/<slug>.plan.md`, generato in automatico) e ti
 assegna un task
 via `agent_send` solo quando è il momento della tua fase — a volte insieme
 a coder fin dall'inizio, più spesso dopo che reviewer ha approvato il suo
@@ -93,7 +93,7 @@ parallelo — tutti nello STESSO worktree. Due cose da tenere a mente:
 ## Prima di iniziare: leggi il diagramma, se esiste (Revisione 28)
 
 Prima di esplorare il codice esistente da zero, controlla se esiste
-`.pi/extensions/multiAgentOrchestrator/diagrams/architecture.mmd` (nella
+`.pi/extensions/yano-orchestrator/diagrams/architecture.mmd` (nella
 directory principale del progetto, non nel worktree — è uno stato
 persistente cross-task, aggiornato da `architecture-diagrammer` o da
 `docs-sync`) e leggilo: ti dà un'orientamento immediato sull'architettura
@@ -154,7 +154,7 @@ corrente senza dover ricostruirla leggendo ogni file — risparmia token. Non
 Puoi essere interpellato direttamente per un compito che rientra nella tua
 missione. Se non esiste ancora un worktree/file di report per il lavoro a cui
 ti riferisci, chiama tu `worktree_create` con un nuovo slug kebab-case per
-crearlo, e crea `.pi/extensions/multiAgentOrchestrator/reports/<slug>.md` al suo interno con l'intestazione minima
+crearlo, e crea `.pi/extensions/yano-orchestrator/reports/<slug>.md` al suo interno con l'intestazione minima
 (`# Report: <titolo>`, `- Task: <descrizione>`, `- Worktree: <worktree_path>`,
 `- Stato: in corso`) prima di procedere — poi segui lo stesso protocollo sopra.
 

@@ -52,10 +52,10 @@ import { ensureTraceProject, getTraceConfig, setTraceMode, traceEnabled } from "
 
 // ESM-safe lazy require, used only inside SQLiteOrchestratorStorage's
 // constructor to resolve node:sqlite on first actual use (see the
-// "MultiAgentOrchestrator ticket/dependency layer" section below) — a
+// "YanoOrchestrator ticket/dependency layer" section below) — a
 // top-level `import "node:sqlite"` would resolve it eagerly for every role,
 // even ones that never touch a ticket tool.
-const moaRequire = createRequire(import.meta.url);
+const yanoRequire = createRequire(import.meta.url);
 
 // ━━ Constants ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -118,7 +118,7 @@ const WATCHDOG_STALL_MS = Number(process.env.PI_ORCH_WATCHDOG_STALL_MS) || 900_0
 // making progress right around when the last ticket completes (observed
 // cause in this incident: an LLM proxy container restarted mid-session — see
 // docs/development-notes.md), the run sits "completed" forever with no
-// worktree merged and no human notified, and moaFindStalledTickets() above
+// worktree merged and no human notified, and yanoFindStalledTickets() above
 // finds nothing wrong because there is no ticket left in "running" status to
 // flag. This is a DIFFERENT heuristic — "the DAG layer says done, but nothing
 // has moved since" — not a certainty either (a planner could legitimately be
@@ -131,7 +131,7 @@ const WATCHDOG_FINALIZE_GRACE_MS = Number(process.env.PI_ORCH_WATCHDOG_FINALIZE_
 // (herdr tab closed, `pi` process not running at all — not "hung", just
 // GONE), and the planner, restarted, found itself facing that half-finished
 // ticket with nothing there to receive a delegation, and did the work itself
-// instead of relaunching a coder. moaFindStalledTickets() would eventually
+// instead of relaunching a coder. yanoFindStalledTickets() would eventually
 // have flagged this too, but only after WATCHDOG_STALL_MS (15 min) of pure
 // wall-clock waiting — and even then only as "maybe stalled", informational,
 // never a certainty. This case does NOT need to wait or guess: presence
@@ -143,7 +143,7 @@ const WATCHDOG_FINALIZE_GRACE_MS = Number(process.env.PI_ORCH_WATCHDOG_FINALIZE_
 // elapsed-time threshold needed, the very next watchdog sweep (at most
 // WATCHDOG_INTERVAL_MS after the fact, typically ~2 min, once presence has
 // had time to expire) can call it with certainty. See
-// moaFindOrphanedTickets()/watchdogSweep() below for what this drives: an
+// yanoFindOrphanedTickets()/watchdogSweep() below for what this drives: an
 // automatic (code-only, no LLM judgment involved) ticket_complete(failed) so
 // the slot frees up, PLUS a mandatory instruction to the planner to relaunch
 // the missing instance — never to do the ticket's work itself.
@@ -356,7 +356,7 @@ function topics(project: string) {
 		agentStatusWildcard: () => `pi/${project}/agents/+/status`,
 		roleTasks: (role: string) => `pi/${project}/roles/${role}/tasks`,
 		teamEvents: (team: string) => `pi/${project}/teams/${team}/events`,
-		// MultiAgentOrchestrator ticket/dependency layer (see below): "something
+		// YanoOrchestrator ticket/dependency layer (see below): "something
 		// happened" signals only — SQLite (orchestratorStorage/orchestrator.db)
 		// is the source of truth for what's actually true, this topic is just
 		// pub/sub visibility on top of it, same split the operator asked for.
@@ -465,7 +465,7 @@ function slugify(s: string): string {
 // what happens when it's omitted, which was silently unsafe before.
 function resolveDefaultProject(cwd: string): string {
 	try {
-		const cfgPath = path.join(cwd, ".pi", "extensions", "multiAgentOrchestrator", "config", "project.json");
+		const cfgPath = path.join(cwd, ".pi", "extensions", "yano-orchestrator", "config", "project.json");
 		if (fs.existsSync(cfgPath)) {
 			const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf-8"));
 			if (typeof cfg.project === "string" && cfg.project.trim()) return slugify(cfg.project);
@@ -803,7 +803,7 @@ function worktreePaths(projectCwd: string, slug: string): { path: string; branch
 async function ensureWorktreesGitignored(projectCwd: string): Promise<void> {
 	// Covers .worktrees/ (task worktrees) — logs/ used to need the same
 	// treatment (Revisione 18) until Revisione 37 moved it under
-	// .pi/extensions/multiAgentOrchestrator/, which every scaffolded project
+	// .pi/extensions/yano-orchestrator/, which every scaffolded project
 	// has gitignored wholesale since Revisione 31, so it no longer needs its
 	// own entry here.
 	const patterns: Array<{ dir: string; comment: string }> = [
@@ -873,7 +873,7 @@ async function findExistingWorktree(projectCwd: string, wtPath: string): Promise
 	return false;
 }
 
-// ━━ MultiAgentOrchestrator ticket/dependency layer (Revisione 26) ━━━━━━━━━━
+// ━━ YanoOrchestrator ticket/dependency layer (Revisione 26) ━━━━━━━━━━
 //
 // First vertical slice of the ticket/DAG/SQLite orchestration layer agreed
 // with the operator on top of the existing MQTT+worktree+roster+phase-gate
@@ -885,7 +885,7 @@ async function findExistingWorktree(projectCwd: string, wtPath: string): Promise
 //             agent_send/agent_publish_event already use.
 //   SQLite -> "what is actually true" — durable state for runs, specs,
 //             tickets, ticket_dependencies, events, checkpoints, living at
-//             .pi/extensions/multiAgentOrchestrator/orchestratorStorage/
+//             .pi/extensions/yano-orchestrator/orchestratorStorage/
 //             orchestrator.db. Nothing here replaces the existing per-task
 //             reports/<slug>.plan.json phase gate — that keeps working
 //             unchanged for tasks that use it. This is an ADDITIONAL,
@@ -910,9 +910,9 @@ async function findExistingWorktree(projectCwd: string, wtPath: string): Promise
 // isolation, not against the real binary" limit already flagged for
 // herdr/tmux elsewhere in this file.
 
-const MOA_SCHEMA_VERSION = 1;
-const MOA_STORAGE_SCHEMA_VERSION = 10;
-const MOA_EXTENSION_VERSION = "0.1.0-slice1";
+const YANO_SCHEMA_VERSION = 1;
+const YANO_STORAGE_SCHEMA_VERSION = 10;
+const YANO_EXTENSION_VERSION = "0.1.0-slice1";
 
 function loadRuntimePackageVersion(): string | null {
 	try {
@@ -924,10 +924,10 @@ function loadRuntimePackageVersion(): string | null {
 	}
 }
 
-const MOA_RUNTIME_PACKAGE_VERSION = loadRuntimePackageVersion();
+const YANO_RUNTIME_PACKAGE_VERSION = loadRuntimePackageVersion();
 
-function moaWorkspaceDir(projectCwd: string): string {
-	return path.join(projectCwd, ".pi", "extensions", "multiAgentOrchestrator");
+function yanoWorkspaceDir(projectCwd: string): string {
+	return path.join(projectCwd, ".pi", "extensions", "yano-orchestrator");
 }
 
 // Revisione 28: "logs" removed from this list (was created but never
@@ -947,7 +947,7 @@ function moaWorkspaceDir(projectCwd: string): string {
 // GitHub repo, they'd sit right next to the real application code, fully
 // public, revealing internal AI-orchestration process and possibly
 // hand-tuned prompts that are effectively personal working notes. Moving
-// all three under `.pi/extensions/multiAgentOrchestrator/`, which has been
+// all three under `.pi/extensions/yano-orchestrator/`, which has been
 // gitignored by every scaffolded project since Revisione 31, makes "not
 // tracked, not pushed, stays only on the machine where the project was
 // developed" the default with zero extra configuration. See
@@ -955,7 +955,7 @@ function moaWorkspaceDir(projectCwd: string): string {
 // (including why prompts/ is NOT meant to be edited per-project in the
 // first place — role prompts are customized in the extension itself, once,
 // for every project, not forked per scaffold).
-function moaSubdirs(workspaceDir: string) {
+function yanoSubdirs(workspaceDir: string) {
 	return {
 		config: path.join(workspaceDir, "config"),
 		specs: path.join(workspaceDir, "specs"),
@@ -972,7 +972,7 @@ function moaSubdirs(workspaceDir: string) {
 	};
 }
 
-interface MoaProjectConfig {
+interface YanoProjectConfig {
 	schema_version: number;
 	extension_version: string;
 	project: string;
@@ -996,13 +996,13 @@ interface MoaProjectConfig {
 // config/project.json regardless of whether the config already existed —
 // this is what lets a project have a real name distinct from the MQTT
 // scope, which the planner never asks the user to change.
-function moaEnsureWorkspace(projectCwd: string, project: string, projectNameOverride?: string): MoaProjectConfig {
-	const workspaceDir = moaWorkspaceDir(projectCwd);
-	const dirs = moaSubdirs(workspaceDir);
+function yanoEnsureWorkspace(projectCwd: string, project: string, projectNameOverride?: string): YanoProjectConfig {
+	const workspaceDir = yanoWorkspaceDir(projectCwd);
+	const dirs = yanoSubdirs(workspaceDir);
 	for (const dir of Object.values(dirs)) fs.mkdirSync(dir, { recursive: true });
 	const configPath = path.join(dirs.config, "project.json");
 	const now = nowIso();
-	let cfg: MoaProjectConfig;
+	let cfg: YanoProjectConfig;
 	if (fs.existsSync(configPath)) {
 		try {
 			cfg = JSON.parse(fs.readFileSync(configPath, "utf-8"));
@@ -1010,13 +1010,13 @@ function moaEnsureWorkspace(projectCwd: string, project: string, projectNameOver
 			// Malformed config from a previous run — rewrite it rather than
 			// crashing init, but never silently lose the workspace/db that
 			// already exist alongside it.
-			cfg = { schema_version: MOA_SCHEMA_VERSION, extension_version: MOA_EXTENSION_VERSION, project, created_at: now, updated_at: now };
+			cfg = { schema_version: YANO_SCHEMA_VERSION, extension_version: YANO_EXTENSION_VERSION, project, created_at: now, updated_at: now };
 		}
 		cfg.updated_at = now;
-		cfg.extension_version = MOA_EXTENSION_VERSION; // record which code last touched this workspace
+		cfg.extension_version = YANO_EXTENSION_VERSION; // record which code last touched this workspace
 		if (projectNameOverride) cfg.project = projectNameOverride;
 	} else {
-		cfg = { schema_version: MOA_SCHEMA_VERSION, extension_version: MOA_EXTENSION_VERSION, project: projectNameOverride || project, created_at: now, updated_at: now };
+		cfg = { schema_version: YANO_SCHEMA_VERSION, extension_version: YANO_EXTENSION_VERSION, project: projectNameOverride || project, created_at: now, updated_at: now };
 	}
 	fs.writeFileSync(configPath, JSON.stringify(cfg, null, 2));
 	return cfg;
@@ -1177,7 +1177,7 @@ interface OrchestratorStorage {
 	close(): void;
 }
 
-const MOA_SCHEMA_SQL = `
+const YANO_SCHEMA_SQL = `
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 
@@ -1451,27 +1451,27 @@ class SQLiteOrchestratorStorage implements OrchestratorStorage {
 		// breaks the ticket tools, not the whole extension — same "never let
 		// an optional piece take down the rest" discipline as herdr/paseo
 		// detection elsewhere in this file.
-		const { DatabaseSync } = moaRequire("node:sqlite") as typeof import("node:sqlite");
+		const { DatabaseSync } = yanoRequire("node:sqlite") as typeof import("node:sqlite");
 		this.db = new DatabaseSync(dbPath);
 	}
 
 	init(): void {
-		this.db.exec(MOA_SCHEMA_SQL);
+		this.db.exec(YANO_SCHEMA_SQL);
 		const row = this.db.prepare("SELECT value FROM schema_meta WHERE key = 'schema_version'").get() as { value: string } | undefined;
 		if (!row) {
-			this.db.prepare("INSERT INTO schema_meta (key, value) VALUES ('schema_version', ?)").run(String(MOA_STORAGE_SCHEMA_VERSION));
+			this.db.prepare("INSERT INTO schema_meta (key, value) VALUES ('schema_version', ?)").run(String(YANO_STORAGE_SCHEMA_VERSION));
 		} else if (!Number.isInteger(Number(row.value)) || Number(row.value) < 1) {
 			throw new Error(`orchestrator.db schema_version is invalid: ${row.value} — refusing to open.`);
-		} else if (Number(row.value) > MOA_STORAGE_SCHEMA_VERSION) {
+		} else if (Number(row.value) > YANO_STORAGE_SCHEMA_VERSION) {
 			// This code is OLDER than the schema it's opening — refuse rather
 			// than risk silently misreading a newer layout. No migration engine
 			// exists yet for the reverse case (older schema, newer code) either
 			// — deferred per plan §44, this is just the safety guard that would
 			// need to grow migrations behind it.
 			throw new Error(
-				`orchestrator.db schema_version ${row.value} is newer than this extension supports (${MOA_STORAGE_SCHEMA_VERSION}) — refusing to open. Update the extension.`,
+				`orchestrator.db schema_version ${row.value} is newer than this extension supports (${YANO_STORAGE_SCHEMA_VERSION}) — refusing to open. Update the extension.`,
 			);
-		} else if (Number(row.value) < MOA_STORAGE_SCHEMA_VERSION) {
+		} else if (Number(row.value) < YANO_STORAGE_SCHEMA_VERSION) {
 			const current = Number(row.value);
 			if (current < 3) {
 				for (const sql of [
@@ -1492,7 +1492,7 @@ class SQLiteOrchestratorStorage implements OrchestratorStorage {
 				]) this.db.exec(sql);
 			}
 			if (current < 5) {
-				// v5 adds ticket_recovery_state; MOA_SCHEMA_SQL created it above.
+				// v5 adds ticket_recovery_state; YANO_SCHEMA_SQL created it above.
 				// Keep the marker advance after the CREATE batch so old databases
 				// never advertise recovery support before the table exists.
 				this.db.prepare("SELECT 1 FROM ticket_recovery_state LIMIT 1").get();
@@ -1509,7 +1509,7 @@ class SQLiteOrchestratorStorage implements OrchestratorStorage {
 			if (current < 9) this.db.exec("ALTER TABLE tickets ADD COLUMN required_playbook TEXT");
 			if (current < 10) this.db.exec("ALTER TABLE runs ADD COLUMN finalization_status TEXT NOT NULL DEFAULT 'not_started'");
 			// Advance the marker only after every additive statement succeeds.
-			this.db.prepare("UPDATE schema_meta SET value = ? WHERE key = 'schema_version'").run(String(MOA_STORAGE_SCHEMA_VERSION));
+			this.db.prepare("UPDATE schema_meta SET value = ? WHERE key = 'schema_version'").run(String(YANO_STORAGE_SCHEMA_VERSION));
 		}
 	}
 
@@ -1851,7 +1851,7 @@ class SQLiteOrchestratorStorage implements OrchestratorStorage {
 				server = config?.mcpServers?.[sourceParts[2]];
 			} catch { server = null; }
 			if (!server || typeof server.command !== "string" || !Array.isArray(server.args) || server.args.some((arg: unknown) => typeof arg !== "string")) throw new Error(`playbook_evidence_record: source "${input.source}" is not satisfied.`);
-			const request = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "yano", version: MOA_EXTENSION_VERSION } } }) + "\n";
+			const request = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "yano", version: YANO_EXTENSION_VERSION } } }) + "\n";
 			try {
 				const output = execFileSync(server.command, server.args, { cwd: probeCwd, input: request, encoding: "utf8", timeout: 5000, maxBuffer: 1024 * 1024 });
 				const initialized = output.split(/\r?\n/).map((line) => { try { return JSON.parse(line); } catch { return null; } }).find((message: any) => message?.id === 1 && message?.result?.protocolVersion && message?.result?.serverInfo);
@@ -2192,7 +2192,7 @@ class SQLiteOrchestratorStorage implements OrchestratorStorage {
 // never stored as a ticket status, so there is exactly one place ticket
 // state can drift from reality.
 
-function moaComputeReadyBlocked(
+function yanoComputeReadyBlocked(
 	tickets: TicketRecord[],
 	deps: DependencyRecord[],
 ): { ready: string[]; blocked: string[]; running: string[]; done: string[]; failed: string[]; cancelled: string[] } {
@@ -2226,7 +2226,7 @@ function moaComputeReadyBlocked(
 // in wave < N. Throws on a dependency cycle — same "reject cycles" contract
 // architecture.md §20/§0 requires of the DAG validator, applied here to
 // whatever subgraph is still outstanding.
-function moaComputeExecutionWaves(tickets: TicketRecord[], deps: DependencyRecord[]): string[][] {
+function yanoComputeExecutionWaves(tickets: TicketRecord[], deps: DependencyRecord[]): string[][] {
 	const outstanding = tickets.filter((t) => t.status === "pending" || t.status === "running");
 	const outstandingIds = new Set(outstanding.map((t) => t.id));
 	const doneIds = new Set(tickets.filter((t) => t.status === "done").map((t) => t.id));
@@ -2249,7 +2249,7 @@ function moaComputeExecutionWaves(tickets: TicketRecord[], deps: DependencyRecor
 			if (!blocked) wave.push(id);
 		}
 		if (wave.length === 0) {
-			throw new Error(`moaComputeExecutionWaves: dependency cycle detected among tickets: ${[...remaining].sort().join(", ")}`);
+			throw new Error(`yanoComputeExecutionWaves: dependency cycle detected among tickets: ${[...remaining].sort().join(", ")}`);
 		}
 		wave.sort();
 		waves.push(wave);
@@ -2275,7 +2275,7 @@ interface StalledTicketInfo {
 	elapsed_ms: number;
 }
 
-function moaFindStalledTickets(storage: OrchestratorStorage, project: string, nowMs: number, stallMs: number): StalledTicketInfo[] {
+function yanoFindStalledTickets(storage: OrchestratorStorage, project: string, nowMs: number, stallMs: number): StalledTicketInfo[] {
 	const stalled: StalledTicketInfo[] = [];
 	const runs = storage.listRuns(project).filter((r) => r.status === "active");
 	for (const run of runs) {
@@ -2292,13 +2292,13 @@ function moaFindStalledTickets(storage: OrchestratorStorage, project: string, no
 
 // ━━ Watchdog: detect runs stuck "completed" with no finalize/notify follow-up
 // (Revisione 40) ━━ See WATCHDOG_FINALIZE_GRACE_MS above for why this exists
-// and why it's a separate check from moaFindStalledTickets: ticket_complete's
+// and why it's a separate check from yanoFindStalledTickets: ticket_complete's
 // own allDone branch already flips a run to "completed" the instant every one
 // of its tickets reaches "done" — at that point there is, by definition,
-// nothing left "running" for moaFindStalledTickets to notice, even though the
+// nothing left "running" for yanoFindStalledTickets to notice, even though the
 // operator-facing half of the job (merge the worktree, send the completion
 // notification) may never have happened. Pure/deterministic given `nowMs`,
-// same testability discipline as moaFindStalledTickets — see
+// same testability discipline as yanoFindStalledTickets — see
 // scripts/smoke-test-watchdog.mjs.
 interface UnfinalizedRunInfo {
 	run_id: string;
@@ -2307,7 +2307,7 @@ interface UnfinalizedRunInfo {
 	elapsed_ms: number;
 }
 
-function moaFindUnfinalizedRuns(storage: OrchestratorStorage, project: string, nowMs: number, graceMs: number): UnfinalizedRunInfo[] {
+function yanoFindUnfinalizedRuns(storage: OrchestratorStorage, project: string, nowMs: number, graceMs: number): UnfinalizedRunInfo[] {
 	const found: UnfinalizedRunInfo[] = [];
 	for (const run of storage.listRuns(project)) {
 		if (run.status !== "completed") continue;
@@ -2325,7 +2325,7 @@ function moaFindUnfinalizedRuns(storage: OrchestratorStorage, project: string, n
 // real incident this covers. Pure/deterministic given a presence snapshot
 // (never reads the live module-level `presence` Map directly, never calls
 // Date.now()) so it stays unit-testable the same way as
-// moaFindStalledTickets/moaFindUnfinalizedRuns — see
+// yanoFindStalledTickets/yanoFindUnfinalizedRuns — see
 // scripts/smoke-test-instance-liveness.mjs. Unlike those two, this needs NO
 // elapsed-time threshold at all: presence is either there (instance
 // confirmably connected) or it isn't (LWT already fired, or the client-side
@@ -2340,7 +2340,7 @@ interface OrphanedTicketInfo {
 	running_since: string;
 }
 
-function moaFindOrphanedTickets(
+function yanoFindOrphanedTickets(
 	storage: OrchestratorStorage,
 	project: string,
 	presenceSnapshot: Map<string, { status: PresenceStatus }>,
@@ -2359,10 +2359,10 @@ function moaFindOrphanedTickets(
 	return orphaned;
 }
 
-function moaReconcilePersistedState(storage: OrchestratorStorage, project: string, presenceSnapshot: Map<string, { status: PresenceStatus }>): number {
+function yanoReconcilePersistedState(storage: OrchestratorStorage, project: string, presenceSnapshot: Map<string, { status: PresenceStatus }>): number {
 	let count = 0;
 	for (const run of storage.listRuns(project).filter((candidate) => candidate.status === "active")) {
-		const dangling = moaFindOrphanedTickets(storage, project, presenceSnapshot).filter((ticket) => ticket.run_id === run.id);
+		const dangling = yanoFindOrphanedTickets(storage, project, presenceSnapshot).filter((ticket) => ticket.run_id === run.id);
 		const open_holds = storage.listDecisionHolds(run.id, "open");
 		if (!dangling.length && !open_holds.length) continue;
 		const findings = {
@@ -2413,7 +2413,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerFlag("prompts-dir", {
 		description:
 			"Directory containing this PROJECT's own custom <role>.md prompts (only consulted when --custom-prompts is " +
-			"also passed — see that flag). Defaults to .pi/extensions/multiAgentOrchestrator/prompts, the same place " +
+			"also passed — see that flag). Defaults to .pi/extensions/yano-orchestrator/prompts, the same place " +
 			"`yano copy-prompts` writes to.",
 		type: "string",
 		default: undefined,
@@ -2424,7 +2424,7 @@ export default function (pi: ExtensionAPI) {
 			"prompts/ folder (next to this extension file) — never from a per-project copy — so a `yano update` " +
 			"takes effect immediately for every project, with nothing to resync. Pass this flag to instead load " +
 			"THIS project's own customized prompts (see `yano copy-prompts`) from --prompts-dir (or its default, " +
-			"<project>/.pi/extensions/multiAgentOrchestrator/prompts). Missing a specific <role>.md there — or the " +
+			"<project>/.pi/extensions/yano-orchestrator/prompts). Missing a specific <role>.md there — or the " +
 			"whole directory not existing at all (e.g. `yano copy-prompts` was never run) — falls back automatically " +
 			"to the installed package's own prompt for that role, file by file, never a hard error.",
 		type: "boolean",
@@ -2465,7 +2465,7 @@ export default function (pi: ExtensionAPI) {
 	// Opened lazily by the ticket tools. Presence may still use it on each
 	// heartbeat to reconcile ownership changes made by another instance (most
 	// importantly: the planner completing a worker's ticket after review).
-	let moaStorage: SQLiteOrchestratorStorage | null = null;
+	let yanoStorage: SQLiteOrchestratorStorage | null = null;
 	let presenceRevision = 0;
 	let presencePublishChain: Promise<void> = Promise.resolve();
 	// ticket_id::running_since -> highest "how many WATCHDOG_STALL_MS multiples
@@ -2480,7 +2480,7 @@ export default function (pi: ExtensionAPI) {
 	const watchdogRunAlerted = new Set<string>();
 	// Revisione 42 — same "alert once per running episode" discipline as
 	// watchdogAlertLevel above, for the two new checks: orphaned tickets
-	// (instance confirmably gone — moaFindOrphanedTickets) and, opt-in,
+	// (instance confirmably gone — yanoFindOrphanedTickets) and, opt-in,
 	// hard-stuck-but-still-connected tickets (WATCHDOG_AUTO_TERMINATE_*).
 	// Keyed the same way (ticket_id::running_since) so a fresh ticket_claim
 	// after reassignment starts a new episode and re-arms both.
@@ -2496,11 +2496,11 @@ export default function (pi: ExtensionAPI) {
 	// reflects EITHER signal, not just inboundQueue.
 	const activeTicketIds = new Set<string>();
 	function refreshActiveTicketIdsFromStorage(): void {
-		if (!identity || !moaStorage) return;
+		if (!identity || !yanoStorage) return;
 		try {
 			const current = new Set<string>();
-			for (const run of moaStorage.listRuns(identity.project)) {
-				for (const ticket of moaStorage.listTickets(run.id)) {
+			for (const run of yanoStorage.listRuns(identity.project)) {
+				for (const ticket of yanoStorage.listTickets(run.id)) {
 					if (ticket.status === "running" && ticket.assigned_instance === identity.instance) current.add(ticket.id);
 				}
 			}
@@ -2853,7 +2853,7 @@ export default function (pi: ExtensionAPI) {
 		// Revisione 30: a real incident traced back to an instance launched with
 		// its cwd already INSIDE a task worktree (".../.worktrees/<slug>/")
 		// instead of the project root. Every path this extension computes
-		// (worktreePaths, moaWorkspaceDir → the SQLite orchestrator.db,
+		// (worktreePaths, yanoWorkspaceDir → the SQLite orchestrator.db,
 		// reportPath, locksPath, ...) is built by joining onto identity.cwd on
 		// the assumption that it IS the project root — launched from inside a
 		// worktree instead, they all silently resolve one level too deep (a
@@ -2938,8 +2938,8 @@ export default function (pi: ExtensionAPI) {
 			trace_expected_mode: expectedTraceMode || null,
 			trace_root: getTraceConfig({ cwd, project }).root,
 			yano_expected_version: process.env.YANO_EXPECTED_YANO_VERSION || null,
-			yano_runtime_version: MOA_RUNTIME_PACKAGE_VERSION,
-			extension_version: MOA_EXTENSION_VERSION,
+			yano_runtime_version: YANO_RUNTIME_PACKAGE_VERSION,
+			extension_version: YANO_EXTENSION_VERSION,
 			...(flags.project && flags.project !== defaultProject ? { project_scope_override: true, default_project: defaultProject } : {}),
 		});
 		logEvent("trace_preflight", {
@@ -2947,10 +2947,10 @@ export default function (pi: ExtensionAPI) {
 			expected_mode: expectedTraceMode || null,
 			data_dir: getTraceConfig({ cwd, project }).root,
 			yano_expected_version: process.env.YANO_EXPECTED_YANO_VERSION || null,
-			yano_runtime_version: MOA_RUNTIME_PACKAGE_VERSION,
-			extension_version: MOA_EXTENSION_VERSION,
-			version_match: process.env.YANO_EXPECTED_YANO_VERSION && MOA_RUNTIME_PACKAGE_VERSION
-				? process.env.YANO_EXPECTED_YANO_VERSION === MOA_RUNTIME_PACKAGE_VERSION
+			yano_runtime_version: YANO_RUNTIME_PACKAGE_VERSION,
+			extension_version: YANO_EXTENSION_VERSION,
+			version_match: process.env.YANO_EXPECTED_YANO_VERSION && YANO_RUNTIME_PACKAGE_VERSION
+				? process.env.YANO_EXPECTED_YANO_VERSION === YANO_RUNTIME_PACKAGE_VERSION
 				: null,
 		});
 
@@ -3126,12 +3126,12 @@ export default function (pi: ExtensionAPI) {
 		// mai da una copia locale del progetto, che prima (Revisione 37-46)
 		// restava silenziosamente indietro ad ogni `yano update`. Solo
 		// --custom-prompts fa eccezione: guarda PRIMA nella cartella locale del
-		// progetto (--prompts-dir, default .pi/extensions/multiAgentOrchestrator/prompts,
+		// progetto (--prompts-dir, default .pi/extensions/yano-orchestrator/prompts,
 		// creata da `yano copy-prompts`), poi ricade sul pacchetto installato per
 		// qualunque file quella cartella non abbia — file per file, non tutto o
 		// niente: personalizzare un solo ruolo non fa "congelare" gli altri.
 		const globalPromptsDir = resolveGlobalPromptsDir();
-		const localPromptsDirRaw = flags.promptsDir || path.join(".pi", "extensions", "multiAgentOrchestrator", "prompts");
+		const localPromptsDirRaw = flags.promptsDir || path.join(".pi", "extensions", "yano-orchestrator", "prompts");
 		const localPromptsDir = path.isAbsolute(localPromptsDirRaw) ? localPromptsDirRaw : path.join(identity.cwd, localPromptsDirRaw);
 		const primaryDir = flags.customPrompts ? localPromptsDir : globalPromptsDir;
 		const fallbackDir = flags.customPrompts ? globalPromptsDir : null;
@@ -3166,8 +3166,8 @@ export default function (pi: ExtensionAPI) {
 		// this instance. Refresh the SQLite progress clock so a long but active
 		// implementation/review cycle is not mistaken for a stalled ticket.
 		try {
-			if (identity && moaStorage && activeTicketIds.size > 0) {
-				for (const ticketId of activeTicketIds) moaStorage.touchTicketProgress(ticketId, identity.instance, "tool_execution_start");
+			if (identity && yanoStorage && activeTicketIds.size > 0) {
+				for (const ticketId of activeTicketIds) yanoStorage.touchTicketProgress(ticketId, identity.instance, "tool_execution_start");
 			}
 		} catch {
 			// Progress telemetry is advisory and must never break the tool call.
@@ -3266,26 +3266,26 @@ export default function (pi: ExtensionAPI) {
 		}
 	}
 
-	// ━━ MultiAgentOrchestrator storage handle ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+	// ━━ YanoOrchestrator storage handle ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 	// Opened lazily (first tool call that needs it, or an explicit
 	// orchestrator_init) rather than at session_start, so every role that
 	// never touches the ticket layer never pays for it. One open handle per
 	// process, closed on shutdown alongside the MQTT client.
-	function ensureMoaStorage(): OrchestratorStorage {
+	function ensureYanoStorage(): OrchestratorStorage {
 		if (!identity) throw new Error("orchestrator not initialised");
-		if (moaStorage) return moaStorage;
-		moaEnsureWorkspace(identity.cwd, identity.project);
-		const dbPath = path.join(moaSubdirs(moaWorkspaceDir(identity.cwd)).orchestratorStorage, "orchestrator.db");
+		if (yanoStorage) return yanoStorage;
+		yanoEnsureWorkspace(identity.cwd, identity.project);
+		const dbPath = path.join(yanoSubdirs(yanoWorkspaceDir(identity.cwd)).orchestratorStorage, "orchestrator.db");
 		const storage = new SQLiteOrchestratorStorage(dbPath);
 		storage.init();
-		moaStorage = storage;
+		yanoStorage = storage;
 		return storage;
 	}
 	// Best-effort MQTT signal on top of the SQLite write that already
 	// happened — SQLite is the source of truth (already durable by the time
 	// this is called), MQTT is just "something happened" visibility, so a
 	// lost/failed publish here is never allowed to fail the tool call.
-	async function moaPublishEvent(runId: string, type: string, payload: unknown): Promise<void> {
+	async function yanoPublishEvent(runId: string, type: string, payload: unknown): Promise<void> {
 		try {
 			if (client && T) await client.publishAsync(T.runEvents(runId), JSON.stringify({ type, run_id: runId, payload, timestamp: nowIso() }), { qos: 0 });
 		} catch {
@@ -3295,7 +3295,7 @@ export default function (pi: ExtensionAPI) {
 
 	// Planner-only (a coder/specialist instance can't act on a stalled ticket
 	// anyway — reassignment/escalation is a planning decision). No-op for every
-	// other role and a no-op until the workspace/DB actually exists (moaStorage
+	// other role and a no-op until the workspace/DB actually exists (yanoStorage
 	// null before the first orchestrator_init/run_create) — the timer below
 	// runs unconditionally from session_start, this function is what makes it
 	// harmless before there's anything to watch. Never throws: every side
@@ -3304,12 +3304,12 @@ export default function (pi: ExtensionAPI) {
 	// this file — a watchdog that can itself crash the planner defeats its
 	// purpose.
 	async function watchdogSweep(nowMs: number): Promise<StalledTicketInfo[]> {
-		if (!identity || identity.role !== "planner" || !moaStorage) return [];
+		if (!identity || identity.role !== "planner" || !yanoStorage) return [];
 		try {
-			const expired = moaStorage.expireDecisionHolds(new Date(nowMs).toISOString());
+			const expired = yanoStorage.expireDecisionHolds(new Date(nowMs).toISOString());
 			for (const hold of expired) {
-				moaStorage.recordEvent(hold.run_id, "decision_hold_expired", { hold_id: hold.id, generation: hold.generation, expires_at: hold.expires_at }, hold.ticket_id);
-				void moaPublishEvent(hold.run_id, "decision_hold_expired", { hold_id: hold.id, generation: hold.generation });
+				yanoStorage.recordEvent(hold.run_id, "decision_hold_expired", { hold_id: hold.id, generation: hold.generation, expires_at: hold.expires_at }, hold.ticket_id);
+				void yanoPublishEvent(hold.run_id, "decision_hold_expired", { hold_id: hold.id, generation: hold.generation });
 				logEvent("decision_hold_expired", { run_id: hold.run_id, hold_id: hold.id, ticket_id: hold.ticket_id });
 			}
 		} catch {
@@ -3317,11 +3317,11 @@ export default function (pi: ExtensionAPI) {
 			// not suppress the independent stalled-ticket sweep below.
 		}
 		try {
-			for (const item of moaStorage.drainDecisionHoldOutbox()) {
+			for (const item of yanoStorage.drainDecisionHoldOutbox()) {
 				const payload = item.payload as { hold_id?: string; generation?: number; needs_replan?: boolean };
 				const message = `[decision-hold-resume] hold ${payload.hold_id ?? item.hold_id} answered (generation ${payload.generation ?? "?"}). ` +
 					(payload.needs_replan ? "Replan is required before dispatch." : "Resume the current plan from persisted state.");
-				void moaPublishEvent(item.run_id, "decision_hold_resume_requested", { ...payload, outbox_id: item.id });
+				void yanoPublishEvent(item.run_id, "decision_hold_resume_requested", { ...payload, outbox_id: item.id });
 				try {
 					pi.sendMessage({ customType: "decision-hold-resume", content: message, display: true, details: { run_id: item.run_id, ...payload, outbox_id: item.id } }, { deliverAs: "followUp", triggerTurn: true });
 				} catch {
@@ -3334,7 +3334,7 @@ export default function (pi: ExtensionAPI) {
 		}
 		let stalled: StalledTicketInfo[];
 		try {
-			stalled = moaFindStalledTickets(moaStorage, identity.project, nowMs, WATCHDOG_STALL_MS);
+			stalled = yanoFindStalledTickets(yanoStorage, identity.project, nowMs, WATCHDOG_STALL_MS);
 		} catch {
 			return [];
 		}
@@ -3347,11 +3347,11 @@ export default function (pi: ExtensionAPI) {
 
 			const minutes = Math.round(s.elapsed_ms / 60_000);
 			try {
-				moaStorage.recordEvent(s.run_id, "ticket_stalled", { ticket_id: s.ticket_id, assigned_instance: s.assigned_instance, elapsed_ms: s.elapsed_ms }, s.ticket_id);
+				yanoStorage.recordEvent(s.run_id, "ticket_stalled", { ticket_id: s.ticket_id, assigned_instance: s.assigned_instance, elapsed_ms: s.elapsed_ms }, s.ticket_id);
 			} catch {
 				// best-effort — never let a logging failure hide a real stall from the other channels below
 			}
-			void moaPublishEvent(s.run_id, "ticket_stalled", { ticket_id: s.ticket_id, title: s.title, assigned_instance: s.assigned_instance, elapsed_ms: s.elapsed_ms });
+			void yanoPublishEvent(s.run_id, "ticket_stalled", { ticket_id: s.ticket_id, title: s.title, assigned_instance: s.assigned_instance, elapsed_ms: s.elapsed_ms });
 			logEvent("watchdog_stall_detected", { run_id: s.run_id, ticket_id: s.ticket_id, assigned_instance: s.assigned_instance, elapsed_ms: s.elapsed_ms, threshold_level: thresholdLevel });
 
 			const waMessage =
@@ -3380,7 +3380,7 @@ export default function (pi: ExtensionAPI) {
 		}
 
 		// Revisione 42 — orphaned tickets: assigned instance confirmably not
-		// connected (see moaFindOrphanedTickets() above). Fires independently of
+		// connected (see yanoFindOrphanedTickets() above). Fires independently of
 		// the elapsed-time stall check above — no waiting needed, the presence
 		// snapshot already tells us the instance is gone. Deterministic,
 		// code-only action: mark the ticket "failed" itself (freeing the slot)
@@ -3389,7 +3389,7 @@ export default function (pi: ExtensionAPI) {
 		// exactly the planner treating "the coder never showed up" as license
 		// to do the work itself instead of relaunching one.
 		try {
-			const orphaned = moaFindOrphanedTickets(moaStorage, identity.project, presence);
+			const orphaned = yanoFindOrphanedTickets(yanoStorage, identity.project, presence);
 			for (const o of orphaned) {
 				const episodeKey = `${o.ticket_id}::${o.running_since}`;
 				if (watchdogOrphanAlerted.has(episodeKey)) continue;
@@ -3397,12 +3397,12 @@ export default function (pi: ExtensionAPI) {
 
 				const summary = `istanza "${o.assigned_instance}" risultata offline/disconnessa (nessuna presence viva) — rilevato dal watchdog, ticket riportato a failed automaticamente.`;
 				try {
-					moaStorage.updateTicketStatus(o.ticket_id, "failed", { result_summary: summary });
-					moaStorage.recordEvent(o.run_id, "ticket_failed", { ticket_id: o.ticket_id, result_summary: summary, auto: true, reason: "orphaned_instance" }, o.ticket_id);
+					yanoStorage.updateTicketStatus(o.ticket_id, "failed", { result_summary: summary });
+					yanoStorage.recordEvent(o.run_id, "ticket_failed", { ticket_id: o.ticket_id, result_summary: summary, auto: true, reason: "orphaned_instance" }, o.ticket_id);
 				} catch {
 					// best-effort — the notification below still fires even if the DB write fails
 				}
-				void moaPublishEvent(o.run_id, "ticket_failed", { ticket_id: o.ticket_id, auto: true, reason: "orphaned_instance" });
+				void yanoPublishEvent(o.run_id, "ticket_failed", { ticket_id: o.ticket_id, auto: true, reason: "orphaned_instance" });
 				logEvent("watchdog_orphaned_ticket_auto_failed", { run_id: o.run_id, ticket_id: o.ticket_id, assigned_instance: o.assigned_instance });
 
 				const waMessage =
@@ -3442,7 +3442,7 @@ export default function (pi: ExtensionAPI) {
 		// handled by the orphan block above instead, nothing left to terminate.
 		if (WATCHDOG_AUTO_TERMINATE_ENABLED && client && T) {
 			try {
-				const hardStuck = moaFindStalledTickets(moaStorage, identity.project, nowMs, WATCHDOG_AUTO_TERMINATE_MS);
+				const hardStuck = yanoFindStalledTickets(yanoStorage, identity.project, nowMs, WATCHDOG_AUTO_TERMINATE_MS);
 				for (const s of hardStuck) {
 					if (!s.assigned_instance) continue;
 					const episodeKey = `${s.ticket_id}::${s.running_since}`;
@@ -3465,7 +3465,7 @@ export default function (pi: ExtensionAPI) {
 						// best-effort — the notification/log below still happen regardless
 					}
 					try {
-						moaStorage.recordEvent(s.run_id, "ticket_auto_terminated", { ticket_id: s.ticket_id, assigned_instance: s.assigned_instance, elapsed_ms: s.elapsed_ms });
+						yanoStorage.recordEvent(s.run_id, "ticket_auto_terminated", { ticket_id: s.ticket_id, assigned_instance: s.assigned_instance, elapsed_ms: s.elapsed_ms });
 					} catch {
 						// best-effort
 					}
@@ -3499,7 +3499,7 @@ export default function (pi: ExtensionAPI) {
 			}
 		}
 
-		// Revisione 40 — see moaFindUnfinalizedRuns() above. Independent of the
+		// Revisione 40 — see yanoFindUnfinalizedRuns() above. Independent of the
 		// ticket-stall loop above: a run can be fully "completed" at the DAG
 		// layer (nothing running, nothing to flag there) while still missing its
 		// operator-facing follow-up. `pi.sendMessage(..., {triggerTurn: true})`
@@ -3511,14 +3511,14 @@ export default function (pi: ExtensionAPI) {
 		// operator even if that revival attempt does nothing (process actually
 		// dead, or wedged deeper than a turn boundary).
 		try {
-			const unfinalized = moaFindUnfinalizedRuns(moaStorage, identity.project, nowMs, WATCHDOG_FINALIZE_GRACE_MS);
+			const unfinalized = yanoFindUnfinalizedRuns(yanoStorage, identity.project, nowMs, WATCHDOG_FINALIZE_GRACE_MS);
 			for (const r of unfinalized) {
 				if (watchdogRunAlerted.has(r.run_id)) continue;
 				watchdogRunAlerted.add(r.run_id);
 
 				const minutes = Math.round(r.elapsed_ms / 60_000);
 				try {
-					moaStorage.recordEvent(r.run_id, "run_unfinalized_stall", { elapsed_ms: r.elapsed_ms });
+					yanoStorage.recordEvent(r.run_id, "run_unfinalized_stall", { elapsed_ms: r.elapsed_ms });
 				} catch {
 					// best-effort — never let a logging failure hide this from the other channels below
 				}
@@ -4304,7 +4304,7 @@ export default function (pi: ExtensionAPI) {
 			} else if (!observed) {
 				throw new Error(`finalize_evidence_collect: ${params.kind} requires observed_value from its adapter.`);
 			}
-			const storage = ensureMoaStorage();
+			const storage = ensureYanoStorage();
 			const evidence = storage.recordFinalizeEvidence({ run_id: params.run_id ?? null, slug: params.slug, kind: params.kind, source: params.source, observed_value: observed, commit_hash: commit, status, idempotency_key: params.idempotency_key });
 			if (status === "verified" && params.run_id) storage.recordEvent(params.run_id, "finalize_evidence_verified", { slug: params.slug, kind: params.kind, source: params.source, commit_hash: commit });
 			return { content: [{ type: "text" as const, text: `finalize_evidence_collect: ${params.kind} ${status} for ${params.slug}.` }], details: { evidence: redactRuntimeProjection(evidence) } };
@@ -4319,7 +4319,7 @@ export default function (pi: ExtensionAPI) {
 		description: "List redacted finalize evidence for a task slug.",
 		parameters: Type.Object({ slug: Type.String() }),
 		async execute(_callId, params) {
-			const evidence = ensureMoaStorage().listFinalizeEvidence(params.slug).map((item) => redactRuntimeProjection(item));
+			const evidence = ensureYanoStorage().listFinalizeEvidence(params.slug).map((item) => redactRuntimeProjection(item));
 			return { content: [{ type: "text" as const, text: `${evidence.length} finalize evidence record(s) for ${params.slug}.` }], details: { evidence } };
 		},
 		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("finalize_evidence_list ")) + theme.fg("accent", (args as any).slug ?? "?"), 0, 0); },
@@ -4419,7 +4419,7 @@ export default function (pi: ExtensionAPI) {
 			// Validate the association before any commit, merge, worktree removal or
 			// notification. A bad run id must be a harmless rejected call, never a
 			// successful merge followed by an exception while updating SQLite.
-			const finalizationStorage = params.run_id ? ensureMoaStorage() : null;
+			const finalizationStorage = params.run_id ? ensureYanoStorage() : null;
 			if (params.run_id && !finalizationStorage?.getRun(params.run_id)) {
 				throw new Error(`worktree_finalize: run_id "${params.run_id}" non trovato.`);
 			}
@@ -4719,8 +4719,8 @@ export default function (pi: ExtensionAPI) {
 
 	// Revisione 37: spostato da `<worktreePath>/reports/<slug>.md` (root del
 	// progetto o del worktree, tracciato da git) a
-	// `<worktreePath>/.pi/extensions/multiAgentOrchestrator/reports/<slug>.md`
-	// (gitignored) — stessa logica di logsDir()/moaSubdirs più sopra: i
+	// `<worktreePath>/.pi/extensions/yano-orchestrator/reports/<slug>.md`
+	// (gitignored) — stessa logica di logsDir()/yanoSubdirs più sopra: i
 	// report sono reportistica di sviluppo di QUESTO progetto, non
 	// deliverable applicativo, e non devono finire in un repo pubblico.
 	// worktreePath può essere sia un worktree attivo (`.worktrees/<slug>`)
@@ -4729,7 +4729,7 @@ export default function (pi: ExtensionAPI) {
 	// che copia da wtPath a identity.cwd dopo il merge continua a funzionare
 	// invariato.
 	function reportsDir(base: string): string {
-		return moaSubdirs(moaWorkspaceDir(base)).reports;
+		return yanoSubdirs(yanoWorkspaceDir(base)).reports;
 	}
 
 	function reportPath(worktreePath: string, slug: string): string {
@@ -5082,7 +5082,7 @@ export default function (pi: ExtensionAPI) {
 			if (params.run_id && params.ticket_ids === undefined) throw new Error("plan_advance: ticket_ids are required when run_id is provided; phase completion must be backed by persisted tickets.");
 			if (params.run_id && params.ticket_ids) {
 				if (params.ticket_ids.length === 0) throw new Error("plan_advance: ticket_ids must contain at least one persisted ticket when run_id is provided.");
-				const storage = ensureMoaStorage();
+				const storage = ensureYanoStorage();
 				const tickets = params.ticket_ids.map((id) => storage.getTicket(id));
 				if (tickets.some((ticket) => !ticket || ticket.run_id !== params.run_id)) throw new Error("plan_advance: every ticket_id must exist and belong to run_id.");
 				const incomplete = tickets.filter((ticket) => ticket!.status !== "done");
@@ -5260,7 +5260,7 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
-	// ━━ MultiAgentOrchestrator ticket/dependency tools (Revisione 26) ━━━━━━
+	// ━━ YanoOrchestrator ticket/dependency tools (Revisione 26) ━━━━━━
 	// See the module-scope section above for the storage/scheduler design.
 	// This is a first vertical slice, additive on top of the existing
 	// plan_set/plan_advance phase gate (not a replacement) — a task may use
@@ -5274,7 +5274,7 @@ export default function (pi: ExtensionAPI) {
 		async execute(_callId, params) {
 			if (!identity) throw new Error("orchestrator not initialised");
 			if (identity.role !== "planner") throw new Error(`playbook_bind: only the planner role may bind a Playbook (this instance is "${identity.role}").`);
-			const storage = ensureMoaStorage();
+			const storage = ensureYanoStorage();
 			const playbook = loadPlaybook(path.resolve(identity.cwd, params.source), { expectedChecksum: params.expected_checksum });
 			const binding = storage.bindPlaybook(params.run_id, { id: playbook.id, schema_version: playbook.schema_version, metadata: playbook.metadata, snapshot: playbook });
 			storage.recordEvent(params.run_id, "playbook_bound", { playbook_id: binding.playbook_id, checksum: binding.checksum, origin: binding.origin });
@@ -5292,7 +5292,7 @@ export default function (pi: ExtensionAPI) {
 		async execute(_callId, params) {
 			if (!identity) throw new Error("orchestrator not initialised");
 			if (identity.role !== "planner") throw new Error(`playbook_evidence_record: only the planner role may record Playbook evidence (this instance is "${identity.role}").`);
-			const storage = ensureMoaStorage();
+			const storage = ensureYanoStorage();
 			const evidence = storage.recordPlaybookEvidence(params.run_id, { ...params, cwd: identity.cwd });
 			if ((evidence as any).created) storage.recordEvent(params.run_id, "playbook_evidence_recorded", { requirement: params.requirement, source: params.source, idempotency_key: params.idempotency_key });
 			return { content: [{ type: "text" as const, text: `playbook_evidence_record: evidence recorded for run ${params.run_id}.` }], details: { evidence: redactRuntimeProjection(evidence) } };
@@ -5325,7 +5325,7 @@ export default function (pi: ExtensionAPI) {
 									? role === "coder" || role === "frontend-developer" || (teamRole && role !== "reviewer")
 									: actor === role;
 			if (!actorAllowed) throw new Error(`playbook_transition: actor "${params.actor}" is not authorised for runtime role "${identity.role}".`);
-			const result = ensureMoaStorage().transitionPlaybook(params.run_id, params);
+			const result = ensureYanoStorage().transitionPlaybook(params.run_id, params);
 			return { content: [{ type: "text" as const, text: `playbook_transition: ${result.from} → ${result.to} (${result.transition_id}, generation ${result.generation}).` }], details: { transition: redactRuntimeProjection(result) } };
 		},
 		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("playbook_transition ")) + theme.fg("accent", (args as any).transition_id ?? "?"), 0, 0); },
@@ -5345,7 +5345,7 @@ export default function (pi: ExtensionAPI) {
 		async execute(_callId, params) {
 			if (!identity || identity.role !== "planner") throw new Error("playbook_reconcile: only planner may reconcile a run.");
 			if (!params.idempotency_key.trim()) throw new Error("playbook_reconcile: idempotency_key is required.");
-			const storage = ensureMoaStorage();
+			const storage = ensureYanoStorage();
 			const binding = storage.getPlaybookBinding(params.run_id);
 			if (!binding) throw new Error(`playbook_reconcile: run "${params.run_id}" has no bound Playbook.`);
 			const plan = readPlan(requireWorktree(params.slug).path, params.slug);
@@ -5393,7 +5393,7 @@ export default function (pi: ExtensionAPI) {
 		description: "Read persisted Playbook guard evidence for a run.",
 		parameters: Type.Object({ run_id: Type.String() }),
 		async execute(_callId, params) {
-			const evidence = ensureMoaStorage().listPlaybookEvidence(params.run_id).map((item) => redactRuntimeProjection(item));
+			const evidence = ensureYanoStorage().listPlaybookEvidence(params.run_id).map((item) => redactRuntimeProjection(item));
 			return { content: [{ type: "text" as const, text: `${evidence.length} Playbook evidence record(s) for run ${params.run_id}.` }], details: { evidence } };
 		},
 		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("playbook_evidence_list ")) + theme.fg("accent", (args as any).run_id ?? "?"), 0, 0); },
@@ -5407,7 +5407,7 @@ export default function (pi: ExtensionAPI) {
 		parameters: Type.Object({ run_id: Type.String(), capability: Type.String(), source: Type.String(), requirement: Type.String(), idempotency_key: Type.String(), scope: Type.Optional(Type.String()), expires_at: Type.Optional(Type.String()) }),
 		async execute(_callId, params) {
 			if (!identity || identity.role !== "planner") throw new Error("capability_card_verify: only planner may verify run capability cards.");
-			const storage = ensureMoaStorage();
+			const storage = ensureYanoStorage();
 			const binding = storage.getPlaybookBinding(params.run_id);
 			if (!binding) throw new Error(`capability_card_verify: run "${params.run_id}" has no bound Playbook.`);
 			const scope = params.scope ?? `project:${identity.project}:run:${params.run_id}`;
@@ -5434,7 +5434,7 @@ export default function (pi: ExtensionAPI) {
 		description: "Read redacted capability cards persisted for a run.",
 		parameters: Type.Object({ run_id: Type.String() }),
 		async execute(_callId, params) {
-			const cards = ensureMoaStorage().listCapabilityCards(params.run_id).map((card) => redactRuntimeProjection(card));
+			const cards = ensureYanoStorage().listCapabilityCards(params.run_id).map((card) => redactRuntimeProjection(card));
 			return { content: [{ type: "text" as const, text: `${cards.length} capability card(s) for run ${params.run_id}.` }], details: { cards } };
 		},
 		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("capability_card_list ")) + theme.fg("accent", (args as any).run_id ?? "?"), 0, 0); },
@@ -5448,8 +5448,8 @@ export default function (pi: ExtensionAPI) {
 		parameters: Type.Object({ run_id: Type.String(), role: Type.String(), instance: Type.String(), capability: Type.String(), reason: Type.String() }),
 		async execute(_callId, params) {
 			if (!identity || identity.role !== "planner") throw new Error("capability_card_invalidate: only planner may invalidate cards.");
-			const card = ensureMoaStorage().invalidateCapabilityCard(params.run_id, params.role, params.instance, params.capability, params.reason);
-			ensureMoaStorage().recordEvent(params.run_id, "capability_card_invalidated", { role: params.role, instance: params.instance, capability: params.capability, reason: params.reason });
+			const card = ensureYanoStorage().invalidateCapabilityCard(params.run_id, params.role, params.instance, params.capability, params.reason);
+			ensureYanoStorage().recordEvent(params.run_id, "capability_card_invalidated", { role: params.role, instance: params.instance, capability: params.capability, reason: params.reason });
 			return { content: [{ type: "text" as const, text: `capability_card_invalidate: ${params.capability} is blocked.` }], details: { card: redactRuntimeProjection(card) } };
 		},
 		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("capability_card_invalidate ")) + theme.fg("accent", (args as any).capability ?? "?"), 0, 0); },
@@ -5462,7 +5462,7 @@ export default function (pi: ExtensionAPI) {
 		description: "Read the explicit Playbook effect outbox for a run. This tool never executes an external effect.",
 		parameters: Type.Object({ run_id: Type.String(), status: Type.Optional(Type.Union([Type.Literal("pending"), Type.Literal("dispatched")])) }),
 		async execute(_callId, params) {
-			const effects = ensureMoaStorage().listPlaybookEffects(params.run_id, params.status).map((effect) => redactRuntimeProjection(effect));
+			const effects = ensureYanoStorage().listPlaybookEffects(params.run_id, params.status).map((effect) => redactRuntimeProjection(effect));
 			return { content: [{ type: "text" as const, text: `${effects.length} Playbook effect(s) for run ${params.run_id}.` }], details: { effects } };
 		},
 		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("playbook_effect_list ")) + theme.fg("accent", (args as any).run_id ?? "?"), 0, 0); },
@@ -5477,7 +5477,7 @@ export default function (pi: ExtensionAPI) {
 		async execute(_callId, params) {
 			if (!identity) throw new Error("orchestrator not initialised");
 			if (identity.role !== "planner" && identity.role !== "effect-adapter") throw new Error(`playbook_effect_ack: role "${identity.role}" is not authorised.`);
-			const effect = ensureMoaStorage().ackPlaybookEffect(params.id, { ...params, actor_role: identity.role });
+			const effect = ensureYanoStorage().ackPlaybookEffect(params.id, { ...params, actor_role: identity.role });
 			return { content: [{ type: "text" as const, text: `playbook_effect_ack: effect ${effect.id} is ${effect.status}.` }], details: { effect: redactRuntimeProjection(effect) } };
 		},
 		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("playbook_effect_ack ")) + theme.fg("accent", String((args as any).id ?? "?")), 0, 0); },
@@ -5491,7 +5491,7 @@ export default function (pi: ExtensionAPI) {
 		parameters: Type.Object({ id: Type.Integer({ minimum: 1 }), owner: Type.String(), token: Type.String(), lease_until: Type.String() }),
 		async execute(_callId, params) {
 			if (!identity || identity.role !== "effect-adapter") throw new Error("playbook_effect_claim: only effect-adapter may claim effects.");
-			const effect = ensureMoaStorage().claimPlaybookEffect(params.id, params);
+			const effect = ensureYanoStorage().claimPlaybookEffect(params.id, params);
 			return { content: [{ type: "text" as const, text: `playbook_effect_claim: effect ${effect.id} leased.` }], details: { effect: redactRuntimeProjection(effect) } };
 		},
 		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("playbook_effect_claim ")) + theme.fg("accent", String((args as any).id ?? "?")), 0, 0); },
@@ -5505,7 +5505,7 @@ export default function (pi: ExtensionAPI) {
 		parameters: Type.Object({ id: Type.Integer({ minimum: 1 }), owner: Type.String(), token: Type.String(), error: Type.String(), max_attempts: Type.Integer({ minimum: 1 }), next_attempt_at: Type.Optional(Type.String()) }),
 		async execute(_callId, params) {
 			if (!identity || identity.role !== "effect-adapter") throw new Error("playbook_effect_fail: only effect-adapter may fail effects.");
-			const effect = ensureMoaStorage().failPlaybookEffect(params.id, params);
+			const effect = ensureYanoStorage().failPlaybookEffect(params.id, params);
 			return { content: [{ type: "text" as const, text: `playbook_effect_fail: effect ${effect.id} is ${effect.delivery_state}.` }], details: { effect: redactRuntimeProjection(effect) } };
 		},
 		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("playbook_effect_fail ")) + theme.fg("accent", String((args as any).id ?? "?")), 0, 0); },
@@ -5516,7 +5516,7 @@ export default function (pi: ExtensionAPI) {
 		name: "orchestrator_init",
 		label: "Orchestrator Init",
 		description:
-			"Idempotently create/open the MultiAgentOrchestrator project workspace (.pi/extensions/multiAgentOrchestrator/ — " +
+			"Idempotently create/open the YanoOrchestrator project workspace (.pi/extensions/yano-orchestrator/ — " +
 			"config/specs/playbooks/diagrams/knowledge/policies/artifacts/overrides/orchestratorStorage) and its SQLite " +
 			"database. Safe to call every session start: never destroys existing state. Any role may call it (it's just " +
 			"workspace setup) — planner normally does it once before run_create. Optional project_name (Revisione 28) sets/" +
@@ -5528,13 +5528,13 @@ export default function (pi: ExtensionAPI) {
 		}),
 		async execute(_callId, params) {
 			if (!identity) throw new Error("orchestrator not initialised");
-			const cfg = moaEnsureWorkspace(identity.cwd, identity.project, params.project_name);
-			const storage = ensureMoaStorage();
-			const reconciledRuns = identity.role === "planner" ? moaReconcilePersistedState(storage, identity.project, presence) : 0;
+			const cfg = yanoEnsureWorkspace(identity.cwd, identity.project, params.project_name);
+			const storage = ensureYanoStorage();
+			const reconciledRuns = identity.role === "planner" ? yanoReconcilePersistedState(storage, identity.project, presence) : 0;
 			const schemaVersion = storage.getSchemaVersion();
-			logEvent("moa_init", { schema_version: schemaVersion, extension_version: cfg.extension_version, project: cfg.project, reconciled_runs: reconciledRuns });
+			logEvent("yano_init", { schema_version: schemaVersion, extension_version: cfg.extension_version, project: cfg.project, reconciled_runs: reconciledRuns });
 			return {
-				content: [{ type: "text" as const, text: `orchestrator_init: workspace ready at .pi/extensions/multiAgentOrchestrator/ (schema v${schemaVersion}, extension ${cfg.extension_version}, project "${cfg.project}").${reconciledRuns ? ` Reconciled ${reconciledRuns} active run(s).` : ""}` }],
+				content: [{ type: "text" as const, text: `orchestrator_init: workspace ready at .pi/extensions/yano-orchestrator/ (schema v${schemaVersion}, extension ${cfg.extension_version}, project "${cfg.project}").${reconciledRuns ? ` Reconciled ${reconciledRuns} active run(s).` : ""}` }],
 				details: { config: cfg, schema_version: schemaVersion, reconciled_runs: reconciledRuns },
 			};
 		},
@@ -5560,11 +5560,11 @@ export default function (pi: ExtensionAPI) {
 		async execute(_callId, params) {
 			if (!identity) throw new Error("orchestrator not initialised");
 			if (identity.role !== "planner") throw new Error(`run_create: only the planner role may start a run (this instance is "${identity.role}").`);
-			const storage = ensureMoaStorage();
+			const storage = ensureYanoStorage();
 			const run = storage.createRun({ project: identity.project, objective: params.objective, domain: params.domain || "generic" });
 			storage.recordEvent(run.id, "run_created", { objective: run.objective, domain: run.domain });
-			logEvent("moa_run_created", { run_id: run.id, domain: run.domain });
-			await moaPublishEvent(run.id, "run_created", { objective: run.objective, domain: run.domain });
+			logEvent("yano_run_created", { run_id: run.id, domain: run.domain });
+			await yanoPublishEvent(run.id, "run_created", { objective: run.objective, domain: run.domain });
 			return {
 				content: [{ type: "text" as const, text: `run_create: run "${run.id}" started (domain: ${run.domain}).` }],
 				details: { run },
@@ -5595,18 +5595,18 @@ export default function (pi: ExtensionAPI) {
 		async execute(_callId, params) {
 			if (!identity) throw new Error("orchestrator not initialised");
 			if (identity.role !== "planner") throw new Error(`spec_create: only the planner role may create a specification (this instance is "${identity.role}").`);
-			const storage = ensureMoaStorage();
+			const storage = ensureYanoStorage();
 			const run = storage.getRun(params.run_id);
 			if (!run) throw new Error(`spec_create: no run "${params.run_id}" — call run_create first.`);
-			const specsDir = moaSubdirs(moaWorkspaceDir(identity.cwd)).specs;
+			const specsDir = yanoSubdirs(yanoWorkspaceDir(identity.cwd)).specs;
 			const slugTitle = params.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "").slice(0, 60) || "spec";
 			const specId = ulid();
 			const filePath = path.join(specsDir, `${specId}-${slugTitle}.md`);
 			fs.writeFileSync(filePath, `# ${params.title}\n\n${params.content}\n`);
 			const spec = storage.createSpec({ id: specId, run_id: params.run_id, title: params.title, content: params.content, file_path: path.relative(identity.cwd, filePath) });
 			storage.recordEvent(run.id, "spec_created", { spec_id: spec.id, title: spec.title });
-			logEvent("moa_spec_created", { run_id: run.id, spec_id: spec.id });
-			await moaPublishEvent(run.id, "spec_created", { spec_id: spec.id, title: spec.title });
+			logEvent("yano_spec_created", { run_id: run.id, spec_id: spec.id });
+			await yanoPublishEvent(run.id, "spec_created", { spec_id: spec.id, title: spec.title });
 			return {
 				content: [{ type: "text" as const, text: `spec_create: "${spec.title}" saved (${spec.id}), at ${spec.file_path}.` }],
 				details: { spec },
@@ -5643,7 +5643,7 @@ export default function (pi: ExtensionAPI) {
 		async execute(_callId, params) {
 			if (!identity) throw new Error("orchestrator not initialised");
 			if (identity.role !== "planner") throw new Error(`ticket_create: only the planner role may create tickets (this instance is "${identity.role}").`);
-			const storage = ensureMoaStorage();
+			const storage = ensureYanoStorage();
 			const run = storage.getRun(params.run_id);
 			if (!run) throw new Error(`ticket_create: no run "${params.run_id}" — call run_create first.`);
 			if (params.spec_id && !storage.getSpec(params.spec_id)) throw new Error(`ticket_create: no spec "${params.spec_id}" in this run.`);
@@ -5675,11 +5675,11 @@ export default function (pi: ExtensionAPI) {
 			});
 			for (const depId of depIds) storage.addDependency(ticket.id, depId);
 			storage.recordEvent(run.id, "ticket_created", { ticket_id: ticket.id, title: ticket.title, depends_on: depIds }, ticket.id);
-			logEvent("moa_ticket_created", { run_id: run.id, ticket_id: ticket.id, depends_on: depIds });
-			await moaPublishEvent(run.id, "ticket_created", { ticket_id: ticket.id, title: ticket.title });
+			logEvent("yano_ticket_created", { run_id: run.id, ticket_id: ticket.id, depends_on: depIds });
+			await yanoPublishEvent(run.id, "ticket_created", { ticket_id: ticket.id, title: ticket.title });
 			if (depIds.length === 0) {
 				storage.recordEvent(run.id, "ticket_ready", { ticket_id: ticket.id }, ticket.id);
-				await moaPublishEvent(run.id, "ticket_ready", { ticket_id: ticket.id, title: ticket.title });
+				await yanoPublishEvent(run.id, "ticket_ready", { ticket_id: ticket.id, title: ticket.title });
 			}
 			return {
 				content: [{ type: "text" as const, text: `ticket_create: "${ticket.title}" created (${ticket.id})${depIds.length ? `, depends on ${depIds.join(", ")}` : " — READY immediately (no dependencies)"}.` }],
@@ -5705,13 +5705,13 @@ export default function (pi: ExtensionAPI) {
 		parameters: Type.Object({ run_id: Type.String() }),
 		async execute(_callId, params) {
 			if (!identity) throw new Error("orchestrator not initialised");
-			const storage = ensureMoaStorage();
+			const storage = ensureYanoStorage();
 			const run = storage.getRun(params.run_id);
 			if (!run) throw new Error(`tickets_ready: no run "${params.run_id}".`);
 			const tickets = storage.listTickets(params.run_id);
 			const deps = storage.listDependencies(params.run_id);
-			const buckets = moaComputeReadyBlocked(tickets, deps);
-			const waves = moaComputeExecutionWaves(tickets, deps);
+			const buckets = yanoComputeReadyBlocked(tickets, deps);
+			const waves = yanoComputeExecutionWaves(tickets, deps);
 			const byId = new Map(tickets.map((t) => [t.id, t]));
 			const describe = (ids: string[]) => ids.map((id) => `${id} (${byId.get(id)?.title ?? "?"})`).join(", ") || "—";
 			return {
@@ -5759,7 +5759,7 @@ export default function (pi: ExtensionAPI) {
 						"then let THAT instance call ticket_claim.",
 				);
 			}
-			const storage = ensureMoaStorage();
+			const storage = ensureYanoStorage();
 			const ticket = storage.getTicket(params.ticket_id);
 			if (!ticket) throw new Error(`ticket_claim: no ticket "${params.ticket_id}".`);
 			if (ticket.required_playbook) {
@@ -5773,7 +5773,7 @@ export default function (pi: ExtensionAPI) {
 			}
 			const tickets = storage.listTickets(ticket.run_id);
 			const deps = storage.listDependencies(ticket.run_id);
-			const buckets = moaComputeReadyBlocked(tickets, deps);
+			const buckets = yanoComputeReadyBlocked(tickets, deps);
 			if (!buckets.ready.includes(ticket.id)) {
 				throw new Error(`ticket_claim: "${ticket.id}" is not READY right now (status: ${ticket.status}${buckets.blocked.includes(ticket.id) ? ", blocked on unfinished dependencies" : ""}).`);
 			}
@@ -5786,8 +5786,8 @@ export default function (pi: ExtensionAPI) {
 			}
 			const updated = storage.updateTicketStatus(ticket.id, "running", { assigned_instance: identity.instance });
 			storage.recordEvent(ticket.run_id, "ticket_started", { ticket_id: ticket.id, assigned_instance: identity.instance }, ticket.id);
-			logEvent("moa_ticket_claimed", { run_id: ticket.run_id, ticket_id: ticket.id });
-			await moaPublishEvent(ticket.run_id, "ticket_started", { ticket_id: ticket.id, assigned_instance: identity.instance });
+			logEvent("yano_ticket_claimed", { run_id: ticket.run_id, ticket_id: ticket.id });
+			await yanoPublishEvent(ticket.run_id, "ticket_started", { ticket_id: ticket.id, assigned_instance: identity.instance });
 			// Revisione 40 — see activeTicketIds declaration: this instance is now
 			// genuinely doing ticket work regardless of whatever inboundQueue looks
 			// like, so the MQTT presence widget must reflect that immediately, not
@@ -5827,7 +5827,7 @@ export default function (pi: ExtensionAPI) {
 		}),
 		async execute(_callId, params) {
 			if (!identity) throw new Error("orchestrator not initialised");
-			const storage = ensureMoaStorage();
+			const storage = ensureYanoStorage();
 			const ticket = storage.getTicket(params.ticket_id);
 			if (!ticket) throw new Error(`ticket_complete: no ticket "${params.ticket_id}".`);
 			if (ticket.status !== "running") throw new Error(`ticket_complete: "${ticket.id}" is not running (status: ${ticket.status}) — only a running ticket can be completed.`);
@@ -5836,8 +5836,8 @@ export default function (pi: ExtensionAPI) {
 			}
 			const updated = storage.updateTicketStatus(ticket.id, params.status, { result_summary: params.result_summary ?? null });
 			storage.recordEvent(ticket.run_id, params.status === "done" ? "ticket_done" : "ticket_failed", { ticket_id: ticket.id, result_summary: params.result_summary ?? null }, ticket.id);
-			logEvent("moa_ticket_completed", { run_id: ticket.run_id, ticket_id: ticket.id, status: params.status });
-			await moaPublishEvent(ticket.run_id, params.status === "done" ? "ticket_done" : "ticket_failed", { ticket_id: ticket.id });
+			logEvent("yano_ticket_completed", { run_id: ticket.run_id, ticket_id: ticket.id, status: params.status });
+			await yanoPublishEvent(ticket.run_id, params.status === "done" ? "ticket_done" : "ticket_failed", { ticket_id: ticket.id });
 			// Revisione 40 — counterpart of the activeTicketIds.add() in
 			// ticket_claim: this ticket is no longer "why this instance is busy"
 			// (done or failed, either way the running work stopped), so drop it
@@ -5855,21 +5855,21 @@ export default function (pi: ExtensionAPI) {
 			if (params.status === "done") {
 				const tickets = storage.listTickets(ticket.run_id);
 				const deps = storage.listDependencies(ticket.run_id);
-				const buckets = moaComputeReadyBlocked(tickets, deps);
+				const buckets = yanoComputeReadyBlocked(tickets, deps);
 				for (const readyId of buckets.ready) {
 					const dependsOnCompleted = deps.some((d) => d.ticket_id === readyId && d.depends_on_id === ticket.id);
 					if (dependsOnCompleted) newlyReady.push(readyId);
 				}
 				for (const readyId of newlyReady) {
 					storage.recordEvent(ticket.run_id, "ticket_ready", { ticket_id: readyId }, readyId);
-					await moaPublishEvent(ticket.run_id, "ticket_ready", { ticket_id: readyId });
+					await yanoPublishEvent(ticket.run_id, "ticket_ready", { ticket_id: readyId });
 				}
 				const allTickets = storage.listTickets(ticket.run_id);
 				const allDone = allTickets.length > 0 && allTickets.every((t) => t.status === "done");
 				if (allDone) {
 					storage.updateRunStatus(ticket.run_id, "completed");
 					storage.recordEvent(ticket.run_id, "run_completed", {});
-					await moaPublishEvent(ticket.run_id, "run_completed", {});
+					await yanoPublishEvent(ticket.run_id, "run_completed", {});
 				}
 			}
 
@@ -5894,7 +5894,7 @@ export default function (pi: ExtensionAPI) {
 		parameters: Type.Object({ ticket_id: Type.String(), reason: Type.String(), max_retries: Type.Integer({ minimum: 1 }), max_replans: Type.Optional(Type.Integer({ minimum: 1 })) }),
 		async execute(_callId, params) {
 			if (!identity || identity.role !== "planner") throw new Error("ticket_requeue: only planner may replace a failed worker.");
-			const result = ensureMoaStorage().requeueTicketForRecovery(params.ticket_id, params) as any;
+			const result = ensureYanoStorage().requeueTicketForRecovery(params.ticket_id, params) as any;
 			return { content: [{ type: "text" as const, text: `ticket_requeue: ${params.ticket_id} is pending (recovery generation ${result.recovery.recovery_generation}).` }], details: { ...result, recovery: redactRuntimeProjection(result.recovery) } };
 		},
 		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("ticket_requeue ")) + theme.fg("accent", (args as any).ticket_id ?? "?"), 0, 0); },
@@ -5907,7 +5907,7 @@ export default function (pi: ExtensionAPI) {
 		description: "Read the persisted retry/replan budget for a ticket.",
 		parameters: Type.Object({ ticket_id: Type.String() }),
 		async execute(_callId, params) {
-			const recovery = ensureMoaStorage().getTicketRecovery(params.ticket_id);
+			const recovery = ensureYanoStorage().getTicketRecovery(params.ticket_id);
 			return { content: [{ type: "text" as const, text: recovery ? `ticket_recovery: ${params.ticket_id} retry ${recovery.retry_count}/${recovery.max_retries}.` : `ticket_recovery: no recovery record for ${params.ticket_id}.` }], details: { recovery: redactRuntimeProjection(recovery) } };
 		},
 		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("ticket_recovery_get ")) + theme.fg("accent", (args as any).ticket_id ?? "?"), 0, 0); },
@@ -5926,7 +5926,7 @@ export default function (pi: ExtensionAPI) {
 		async execute(_callId, params) {
 			if (!identity) throw new Error("orchestrator not initialised");
 			if (identity.role !== "planner" && identity.role !== "user") throw new Error(`decision_hold_create: role "${identity.role}" is not authorised.`);
-			const storage = ensureMoaStorage();
+			const storage = ensureYanoStorage();
 			const hold = storage.createDecisionHold({ ...params, ticket_id: params.ticket_id ?? null, context: params.context ?? {}, idempotency_key: params.idempotency_key });
 			storage.recordEvent(hold.run_id, "decision_hold_created", { hold_id: hold.id, generation: hold.generation, owner: hold.owner, expires_at: hold.expires_at }, hold.ticket_id);
 			return { content: [{ type: "text" as const, text: `decision hold ${hold.id}: ${hold.status} (generation ${hold.generation})` }], details: { hold: redactRuntimeProjection(hold) } };
@@ -5941,7 +5941,7 @@ export default function (pi: ExtensionAPI) {
 		description: "Read one persisted decision hold by id.",
 		parameters: Type.Object({ id: Type.String() }),
 		async execute(_callId, params) {
-			const hold = ensureMoaStorage().getDecisionHold(params.id);
+			const hold = ensureYanoStorage().getDecisionHold(params.id);
 			if (!hold) throw new Error(`decision_hold_get: no hold "${params.id}".`);
 			return { content: [{ type: "text" as const, text: `decision hold ${hold.id}: ${hold.status}` }], details: { hold: redactRuntimeProjection(hold) } };
 		},
@@ -5955,7 +5955,7 @@ export default function (pi: ExtensionAPI) {
 		description: "List persisted decision holds for a run, optionally filtered by status.",
 		parameters: Type.Object({ run_id: Type.String(), status: Type.Optional(Type.Union([Type.Literal("open"), Type.Literal("answered"), Type.Literal("expired"), Type.Literal("cancelled"), Type.Literal("blocked")])) }),
 		async execute(_callId, params) {
-			const holds = ensureMoaStorage().listDecisionHolds(params.run_id, params.status as DecisionHoldStatus | undefined).map((hold) => redactRuntimeProjection(hold));
+			const holds = ensureYanoStorage().listDecisionHolds(params.run_id, params.status as DecisionHoldStatus | undefined).map((hold) => redactRuntimeProjection(hold));
 			return { content: [{ type: "text" as const, text: `${holds.length} decision hold(s) for run ${params.run_id}.` }], details: { holds } };
 		},
 		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("decision_hold_list ")) + theme.fg("accent", (args as any).run_id ?? "?"), 0, 0); },
@@ -5970,10 +5970,10 @@ export default function (pi: ExtensionAPI) {
 		async execute(_callId, params) {
 			if (!identity) throw new Error("orchestrator not initialised");
 			if (identity.role !== "planner" && identity.role !== "user") throw new Error(`decision_hold_answer: role "${identity.role}" is not authorised.`);
-			const storage = ensureMoaStorage();
+			const storage = ensureYanoStorage();
 			const hold = storage.answerDecisionHold(params.id, params);
 			storage.recordEvent(hold.run_id, "decision_hold_answered", { hold_id: hold.id, generation: hold.generation, idempotency_key: params.idempotency_key }, hold.ticket_id);
-			await moaPublishEvent(hold.run_id, "decision_hold_answered", { hold_id: hold.id, generation: hold.generation });
+			await yanoPublishEvent(hold.run_id, "decision_hold_answered", { hold_id: hold.id, generation: hold.generation });
 			return { content: [{ type: "text" as const, text: `decision hold ${hold.id}: answered` }], details: { hold: redactRuntimeProjection(hold) } };
 		},
 		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("decision_hold_answer ")) + theme.fg("accent", (args as any).id ?? "?"), 0, 0); },
@@ -5988,10 +5988,10 @@ export default function (pi: ExtensionAPI) {
 		async execute(_callId, params) {
 			if (!identity) throw new Error("orchestrator not initialised");
 			if (identity.role !== "planner" && identity.role !== "user") throw new Error(`decision_hold_cancel: role "${identity.role}" is not authorised.`);
-			const storage = ensureMoaStorage();
+			const storage = ensureYanoStorage();
 			const hold = storage.cancelDecisionHold(params.id, params);
 			storage.recordEvent(hold.run_id, "decision_hold_cancelled", { hold_id: hold.id, generation: hold.generation, idempotency_key: params.idempotency_key, reason_provided: Boolean(params.reason) }, hold.ticket_id);
-			await moaPublishEvent(hold.run_id, "decision_hold_cancelled", { hold_id: hold.id, generation: hold.generation });
+			await yanoPublishEvent(hold.run_id, "decision_hold_cancelled", { hold_id: hold.id, generation: hold.generation });
 			return { content: [{ type: "text" as const, text: `decision hold ${hold.id}: cancelled` }], details: { hold: redactRuntimeProjection(hold) } };
 		},
 		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("decision_hold_cancel ")) + theme.fg("accent", (args as any).id ?? "?"), 0, 0); },
@@ -6006,8 +6006,8 @@ export default function (pi: ExtensionAPI) {
 		async execute(_callId, params) {
 			if (!identity) throw new Error("orchestrator not initialised");
 			if (identity.role !== "planner" && identity.role !== "user") throw new Error(`decision_hold_escalate: role "${identity.role}" is not authorised.`);
-			const hold = ensureMoaStorage().escalateDecisionHold(params.id, params);
-			ensureMoaStorage().recordEvent(hold.run_id, "decision_hold_escalated", { hold_id: hold.id, generation: hold.generation, escalated_to: hold.escalated_to, escalation_version: hold.escalation_version }, hold.ticket_id);
+			const hold = ensureYanoStorage().escalateDecisionHold(params.id, params);
+			ensureYanoStorage().recordEvent(hold.run_id, "decision_hold_escalated", { hold_id: hold.id, generation: hold.generation, escalated_to: hold.escalated_to, escalation_version: hold.escalation_version }, hold.ticket_id);
 			return { content: [{ type: "text" as const, text: `decision hold ${hold.id}: escalated to ${hold.escalated_to}` }], details: { hold: redactRuntimeProjection(hold) } };
 		},
 		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("decision_hold_escalate ")) + theme.fg("accent", (args as any).id ?? "?"), 0, 0); },
@@ -6021,7 +6021,7 @@ export default function (pi: ExtensionAPI) {
 		parameters: Type.Object({ project: Type.String(), event_days: Type.Integer({ minimum: 1 }), evidence_days: Type.Integer({ minimum: 1 }), outbox_days: Type.Integer({ minimum: 1 }), dead_letter_days: Type.Integer({ minimum: 1 }), policy_version: Type.Integer({ minimum: 1 }) }),
 		async execute(_callId, params) {
 			if (!identity || identity.role !== "planner") throw new Error("retention_policy_set: only planner may set policy.");
-			const policy = ensureMoaStorage().setRetentionPolicy(params);
+			const policy = ensureYanoStorage().setRetentionPolicy(params);
 			return { content: [{ type: "text" as const, text: `retention_policy_set: version ${policy.policy_version} for ${policy.project}.` }], details: { policy: redactRuntimeProjection(policy) } };
 		},
 		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("retention_policy_set ")) + theme.fg("accent", (args as any).project ?? "?"), 0, 0); },
@@ -6034,7 +6034,7 @@ export default function (pi: ExtensionAPI) {
 		description: "Preview retention candidates and counts without deleting audit, evidence or effect data.",
 		parameters: Type.Object({ project: Type.String() }),
 		async execute(_callId, params) {
-			const preview = ensureMoaStorage().previewRetention(params.project);
+			const preview = ensureYanoStorage().previewRetention(params.project);
 			return { content: [{ type: "text" as const, text: `retention_policy_preview: ${JSON.stringify(preview.counts)}.` }], details: { preview: redactRuntimeProjection(preview) } };
 		},
 		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("retention_policy_preview ")) + theme.fg("accent", (args as any).project ?? "?"), 0, 0); },
@@ -6049,7 +6049,7 @@ export default function (pi: ExtensionAPI) {
 		async execute(_callId, params) {
 			if (!identity || identity.role !== "planner") throw new Error("retention_policy_apply: only planner may apply retention.");
 			if (!params.confirm) throw new Error("retention_policy_apply: confirm must be true after reviewing retention_policy_preview.");
-			const result = ensureMoaStorage().applyRetention(params.project);
+			const result = ensureYanoStorage().applyRetention(params.project);
 			return { content: [{ type: "text" as const, text: `retention_policy_apply: deleted ${JSON.stringify(result.deleted)} for ${params.project}.` }], details: { result: redactRuntimeProjection(result) } };
 		},
 		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("retention_policy_apply ")) + theme.fg("accent", (args as any).project ?? "?"), 0, 0); },
@@ -6063,7 +6063,7 @@ export default function (pi: ExtensionAPI) {
 		parameters: Type.Object({ project: Type.String(), name: Type.String(), dataset: Type.String(), metrics: Type.Record(Type.String(), Type.Number()), thresholds: Type.Record(Type.String(), Type.Number()) }),
 		async execute(_callId, params) {
 			if (!identity || identity.role !== "planner") throw new Error("benchmark_record: only planner may record benchmarks.");
-			const benchmark = ensureMoaStorage().recordBenchmark(params);
+			const benchmark = ensureYanoStorage().recordBenchmark(params);
 			return { content: [{ type: "text" as const, text: `benchmark_record: ${benchmark.name} ${benchmark.status}.` }], details: { benchmark: redactRuntimeProjection(benchmark) } };
 		},
 		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("benchmark_record ")) + theme.fg("accent", (args as any).name ?? "?"), 0, 0); },
@@ -6077,7 +6077,7 @@ export default function (pi: ExtensionAPI) {
 		parameters: Type.Object({ kind: Type.Union([Type.Literal("playbook"), Type.Literal("role")]), identifier: Type.String(), document: Type.String(), required_capabilities: Type.Optional(Type.Array(Type.String())) }),
 		async execute(_callId, params) {
 			if (!identity || (identity.role !== "planner" && identity.role !== "playbook-author" && identity.role !== "role-definition")) throw new Error("governance_proposal_create: role is not authorised.");
-			const proposal = ensureMoaStorage().createGovernanceProposal(params) as any;
+			const proposal = ensureYanoStorage().createGovernanceProposal(params) as any;
 			return { content: [{ type: "text" as const, text: `governance_proposal_create: ${proposal.kind}/${proposal.identifier} sandboxed.` }], details: { proposal: redactRuntimeProjection(proposal) } };
 		},
 		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("governance_proposal_create ")) + theme.fg("accent", (args as any).identifier ?? "?"), 0, 0); },
@@ -6091,7 +6091,7 @@ export default function (pi: ExtensionAPI) {
 		parameters: Type.Object({ id: Type.Integer({ minimum: 1 }) }),
 		async execute(_callId, params) {
 			if (!identity || identity.role !== "planner") throw new Error("governance_proposal_validate: only planner may validate proposals.");
-			const proposal = ensureMoaStorage().validateGovernanceProposal(params.id) as any;
+			const proposal = ensureYanoStorage().validateGovernanceProposal(params.id) as any;
 			return { content: [{ type: "text" as const, text: `governance_proposal_validate: ${proposal.id} validated.` }], details: { proposal: redactRuntimeProjection(proposal) } };
 		},
 		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("governance_proposal_validate ")) + theme.fg("accent", String((args as any).id ?? "?")), 0, 0); },
@@ -6105,7 +6105,7 @@ export default function (pi: ExtensionAPI) {
 		parameters: Type.Object({ id: Type.Integer({ minimum: 1 }) }),
 		async execute(_callId, params) {
 			if (!identity || identity.role !== "user") throw new Error("governance_proposal_approve: explicit user approval is required.");
-			const proposal = ensureMoaStorage().approveGovernanceProposal(params.id) as any;
+			const proposal = ensureYanoStorage().approveGovernanceProposal(params.id) as any;
 			return { content: [{ type: "text" as const, text: `governance_proposal_approve: ${proposal.id} approved.` }], details: { proposal: redactRuntimeProjection(proposal) } };
 		},
 		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("governance_proposal_approve ")) + theme.fg("accent", String((args as any).id ?? "?")), 0, 0); },
@@ -6119,7 +6119,7 @@ export default function (pi: ExtensionAPI) {
 		parameters: Type.Object({ id: Type.Integer({ minimum: 1 }), reason: Type.String() }),
 		async execute(_callId, params) {
 			if (!identity || (identity.role !== "planner" && identity.role !== "user")) throw new Error("governance_proposal_reject: role is not authorised.");
-			const proposal = ensureMoaStorage().rejectGovernanceProposal(params.id, params.reason) as any;
+			const proposal = ensureYanoStorage().rejectGovernanceProposal(params.id, params.reason) as any;
 			return { content: [{ type: "text" as const, text: `governance_proposal_reject: ${proposal.id} rejected.` }], details: { proposal: redactRuntimeProjection(proposal) } };
 		},
 		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("governance_proposal_reject ")) + theme.fg("accent", String((args as any).id ?? "?")), 0, 0); },
@@ -6133,7 +6133,7 @@ export default function (pi: ExtensionAPI) {
 		parameters: Type.Object({}),
 		async execute(_callId, _params) {
 			if (!identity || identity.role !== "planner") throw new Error("package_manifest_audit: only planner may audit the package.");
-			const audit = ensureMoaStorage().auditPackageManifest();
+			const audit = ensureYanoStorage().auditPackageManifest();
 			return { content: [{ type: "text" as const, text: `package_manifest_audit: ${audit.status}.` }], details: { audit: redactRuntimeProjection(audit) } };
 		},
 		renderCall(_args, theme) { return new Text(theme.fg("toolTitle", theme.bold("package_manifest_audit")), 0, 0); },
@@ -6154,13 +6154,13 @@ export default function (pi: ExtensionAPI) {
 		parameters: Type.Object({ run_id: Type.String() }),
 		async execute(_callId, params) {
 			if (!identity) throw new Error("orchestrator not initialised");
-			const storage = ensureMoaStorage();
+			const storage = ensureYanoStorage();
 			const run = storage.getRun(params.run_id);
 			if (!run) throw new Error(`run_status: no run "${params.run_id}".`);
 			const tickets = storage.listTickets(params.run_id);
 			const deps = storage.listDependencies(params.run_id);
-			const buckets = moaComputeReadyBlocked(tickets, deps);
-			const waves = moaComputeExecutionWaves(tickets, deps);
+			const buckets = yanoComputeReadyBlocked(tickets, deps);
+			const waves = yanoComputeExecutionWaves(tickets, deps);
 			const events = storage.listEvents(params.run_id, { limit: 50 });
 			const checkpoints = storage.listCheckpoints(params.run_id);
 			const playbook_binding = redactRuntimeProjection(storage.getPlaybookBinding(params.run_id));
@@ -6169,8 +6169,8 @@ export default function (pi: ExtensionAPI) {
 			const capability_cards = storage.listCapabilityCards(params.run_id).map((card) => redactRuntimeProjection(card));
 			const playbook_effects = storage.listPlaybookEffects(params.run_id).map((effect) => redactRuntimeProjection(effect));
 			const decision_holds = storage.listDecisionHolds(params.run_id).map((hold) => redactRuntimeProjection(hold));
-			const stalled = moaFindStalledTickets(storage, identity.project, Date.now(), WATCHDOG_STALL_MS).filter((s) => s.run_id === params.run_id);
-			const unfinalized = moaFindUnfinalizedRuns(storage, identity.project, Date.now(), WATCHDOG_FINALIZE_GRACE_MS).filter((r) => r.run_id === params.run_id);
+			const stalled = yanoFindStalledTickets(storage, identity.project, Date.now(), WATCHDOG_STALL_MS).filter((s) => s.run_id === params.run_id);
+			const unfinalized = yanoFindUnfinalizedRuns(storage, identity.project, Date.now(), WATCHDOG_FINALIZE_GRACE_MS).filter((r) => r.run_id === params.run_id);
 			return {
 				content: [
 					{
@@ -6216,12 +6216,12 @@ export default function (pi: ExtensionAPI) {
 		parameters: Type.Object({ run_id: Type.Optional(Type.String({ description: "Limit to one run; omit to check every active run for this project." })) }),
 		async execute(_callId, params) {
 			if (!identity) throw new Error("orchestrator not initialised");
-			const storage = ensureMoaStorage();
-			const all = moaFindStalledTickets(storage, identity.project, Date.now(), WATCHDOG_STALL_MS);
+			const storage = ensureYanoStorage();
+			const all = yanoFindStalledTickets(storage, identity.project, Date.now(), WATCHDOG_STALL_MS);
 			const stalled = params.run_id ? all.filter((s) => s.run_id === params.run_id) : all;
-			const allUnfinalized = moaFindUnfinalizedRuns(storage, identity.project, Date.now(), WATCHDOG_FINALIZE_GRACE_MS);
+			const allUnfinalized = yanoFindUnfinalizedRuns(storage, identity.project, Date.now(), WATCHDOG_FINALIZE_GRACE_MS);
 			const unfinalized = params.run_id ? allUnfinalized.filter((r) => r.run_id === params.run_id) : allUnfinalized;
-			const allOrphaned = moaFindOrphanedTickets(storage, identity.project, presence);
+			const allOrphaned = yanoFindOrphanedTickets(storage, identity.project, presence);
 			const orphaned = params.run_id ? allOrphaned.filter((o) => o.run_id === params.run_id) : allOrphaned;
 			const lines = [
 				...stalled.map((s) => `⚠️ ${s.ticket_id} "${s.title}" — assegnato a ${s.assigned_instance ?? "?"}, running da ${Math.round(s.elapsed_ms / 60_000)} min.`),
@@ -6401,9 +6401,9 @@ export default function (pi: ExtensionAPI) {
 		if (currentCtx?.hasUI) {
 			try { currentCtx.ui.setWidget("orchestrator-pool", undefined); } catch { /* ignore */ }
 		}
-		if (moaStorage) {
-			try { moaStorage.close(); } catch { /* ignore */ }
-			moaStorage = null;
+		if (yanoStorage) {
+			try { yanoStorage.close(); } catch { /* ignore */ }
+			yanoStorage = null;
 		}
 	}
 

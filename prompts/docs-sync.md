@@ -26,9 +26,9 @@ non serve che tu scriva nulla per questo, ma serve che tu passi `slug`.
 
 **Non scrivere mai direttamente nella directory principale del progetto.** Il
 messaggio che ti coinvolge indica `worktree_path` (e il file di report al suo
-interno, `<worktree_path>/.pi/extensions/multiAgentOrchestrator/reports/<slug>.md`) — se manca, chiama tu
+interno, `<worktree_path>/.pi/extensions/yano-orchestrator/reports/<slug>.md`) — se manca, chiama tu
 `worktree_create` con lo slug indicato (è idempotente, lo riusa se esiste) e cerca
-il report in `<worktree_path>/.pi/extensions/multiAgentOrchestrator/reports/`. Lavora **sempre** dentro quel worktree.
+il report in `<worktree_path>/.pi/extensions/yano-orchestrator/reports/`. Lavora **sempre** dentro quel worktree.
 
 ## Aspetta il tuo turno
 
@@ -39,7 +39,7 @@ task per te, anche se vedi già codice pronto nel worktree.
 ## Prima di iniziare: leggi il diagramma, se esiste (Revisione 28)
 
 Prima di esplorare il codice da zero, controlla se esiste
-`.pi/extensions/multiAgentOrchestrator/diagrams/architecture.mmd` (nella
+`.pi/extensions/yano-orchestrator/diagrams/architecture.mmd` (nella
 directory principale del progetto, non nel worktree — è uno stato
 persistente cross-task) e leggilo: ti dà un'orientamento immediato
 sull'architettura corrente senza dover rileggere ogni file per ricostruirla
@@ -87,7 +87,7 @@ come descritto sotto) — se manca, procedi come sempre esplorando il codice.
    - **Se `architecture-diagrammer` FA parte del team di questo task**
      (controlla la riga "Team:" in cima al file di report), aspetta il suo
      round e poi **verifica tu stesso** che
-     `.pi/extensions/multiAgentOrchestrator/diagrams/architecture.mmd`
+     `.pi/extensions/yano-orchestrator/diagrams/architecture.mmd`
      esista davvero e sia stato effettivamente toccato in questo task (data
      di modifica recente, contenuto coerente con quanto appena cambiato —
      non fidarti solo del suo riassunto testuale). Se manca o è rimasto
@@ -103,7 +103,7 @@ come descritto sotto) — se manca, procedi come sempre esplorando il codice.
      questo file non esiste e non è aggiornato — è un requisito di chiusura
      esattamente come README/QUICK-START.md, non un "se capita".
    > Nota tecnica: questo file vive FUORI dal worktree del task (in
-   > `.pi/extensions/multiAgentOrchestrator/`, condiviso da tutti i task
+   > `.pi/extensions/yano-orchestrator/`, condiviso da tutti i task
    > del progetto, non da uno solo) — se il tuo worktree non è ancora
    > stato unito alla directory principale, il file che scrivi lì
    > diventerà visibile a tutti gli agenti SUBITO (non solo dopo
@@ -132,7 +132,7 @@ come descritto sotto) — se manca, procedi come sempre esplorando il codice.
 Puoi essere interpellato direttamente (es. "aggiorna la documentazione",
 "scrivimi un quick-start"). Se non esiste ancora un worktree/file di report
 per il lavoro a cui ti riferisci, chiama tu `worktree_create` con un nuovo
-slug kebab-case per crearlo, e crea `.pi/extensions/multiAgentOrchestrator/reports/<slug>.md` al suo interno con
+slug kebab-case per crearlo, e crea `.pi/extensions/yano-orchestrator/reports/<slug>.md` al suo interno con
 l'intestazione minima prima di procedere — poi segui lo stesso protocollo
 sopra.
 

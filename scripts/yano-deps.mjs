@@ -105,7 +105,7 @@ export async function runPoDeps({ cwd, argv }) {
 		console.log("  --auth gh                CLI da verificare come già autenticata (es. gh auth status).");
 		console.log("  --role coder             importa le CLI dichiarate dal ruolo da agents/roles.yaml.");
 		console.log("  --json                   stampa solo il report machine-readable.");
-		console.log("  --record                 salva il report in .pi/extensions/multiAgentOrchestrator/config/capabilities.json.");
+		console.log("  --record                 salva il report in .pi/extensions/yano-orchestrator/config/capabilities.json.");
 		return { hints: true };
 	}
 	if (!opts.cli.length && !opts.env.length && !opts.auth.length) {
@@ -132,7 +132,7 @@ export async function runPoDeps({ cwd, argv }) {
 	const okCount = results.length - missing.length;
 	const report = { ok: missing.length === 0, role: opts.role, results, missing, checked_at: new Date().toISOString() };
 	if (opts.record) {
-		const destination = path.join(cwd, ".pi", "extensions", "multiAgentOrchestrator", "config", "capabilities.json");
+		const destination = path.join(cwd, ".pi", "extensions", "yano-orchestrator", "config", "capabilities.json");
 		const { mkdirSync, writeFileSync } = await import("node:fs");
 		mkdirSync(path.dirname(destination), { recursive: true });
 		writeFileSync(destination, JSON.stringify(report, null, 2) + "\n");

@@ -1,4 +1,4 @@
-// REAL test of the MultiAgentOrchestrator ticket/dependency layer
+// REAL test of the YanoOrchestrator ticket/dependency layer
 // (Revisione 26) — orchestrator_init, run_create, spec_create,
 // ticket_create, tickets_ready, ticket_claim, ticket_complete, run_status.
 //
@@ -56,7 +56,7 @@ async function git(args, cwd) {
 }
 
 async function bootstrapScratchRepo() {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "moa-ticket-engine-"));
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "yano-ticket-engine-"));
 	await git(["init", "-q"], dir);
 	await git(["config", "user.email", "ticket-engine-test@test.local"], dir);
 	await git(["config", "user.name", "Ticket Engine Test"], dir);
@@ -132,7 +132,7 @@ class FakeInstance {
 		// instance fully isolated state, exactly like separate `pi` processes.
 		// Deliberately NOT cached across bootstrapScratchRepo() reuse in the
 		// "resumability" scenario below: a NEW FakeInstance still gets its own
-		// closure state (presence maps, moaStorage handle, etc.) even though
+		// closure state (presence maps, yanoStorage handle, etc.) even though
 		// the underlying module object is the same — that's the whole point:
 		// it proves state survives via the FILESYSTEM (SQLite), not via any
 		// in-process cache.
@@ -192,17 +192,17 @@ async function runScenario(cwd, project) {
 	const planner = await makeInstance("planner", "planner-01", "planner", cwd, project);
 	const effectAdapter = await makeInstance("effect-adapter", "effect-adapter-01", "effect-adapter", cwd, project);
 	const initResult1 = await planner.call("orchestrator_init", {});
-	const dbPath = path.join(cwd, ".pi", "extensions", "multiAgentOrchestrator", "orchestratorStorage", "orchestrator.db");
+	const dbPath = path.join(cwd, ".pi", "extensions", "yano-orchestrator", "orchestratorStorage", "orchestrator.db");
 	ok(fs.existsSync(dbPath), "orchestrator.db created on disk");
 	for (const dir of ["config", "specs", "playbooks", "diagrams", "knowledge", "policies", "artifacts", "overrides", "reports", "prompts", "logs"]) {
-		ok(fs.existsSync(path.join(cwd, ".pi", "extensions", "multiAgentOrchestrator", dir)), `workspace subdir "${dir}" created`);
+		ok(fs.existsSync(path.join(cwd, ".pi", "extensions", "yano-orchestrator", dir)), `workspace subdir "${dir}" created`);
 	}
 	// Revisione 37 re-added reports/prompts/logs as real workspace subdirs
 	// (moved here from the project root, so they're gitignored by default),
 	// superseding the older Revisione 28 note that called logs a dead
 	// scaffold. The loop above now asserts the exact set the temporal
 	// processor creates — kept explicit here, not relying only on the loop.
-	const configPath = path.join(cwd, ".pi", "extensions", "multiAgentOrchestrator", "config", "project.json");
+	const configPath = path.join(cwd, ".pi", "extensions", "yano-orchestrator", "config", "project.json");
 	const cfg1 = JSON.parse(fs.readFileSync(configPath, "utf-8"));
 	ok(cfg1.schema_version === 1, "config records schema_version 1");
 	ok(cfg1.project === project, "config.project defaults to the MQTT --project scope value when no project_name override is given");
@@ -533,7 +533,7 @@ async function runScenario(cwd, project) {
 }
 
 async function main() {
-	const project = "moa-ticket-engine-e2e";
+	const project = "yano-ticket-engine-e2e";
 	const cwd = await bootstrapScratchRepo();
 	console.log(`scratch repo: ${cwd}`);
 

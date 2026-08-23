@@ -49,7 +49,7 @@ import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 
-const moaRequire = createRequire(import.meta.url);
+const yanoRequire = createRequire(import.meta.url);
 const VALID_STATUSES = new Set(["completed", "cancelled", "failed"]);
 
 function printHelp() {
@@ -127,19 +127,19 @@ export async function runEndProject({ cwd, argv }) {
 	// scripts/launch-planner.mjs (Revisione 33) — niente più dipendenza da
 	// extensions/orchestrator.ts locale, vedi quel file per il perché.
 	const projectMarkers = [
-		path.join(cwd, ".pi", "extensions", "multiAgentOrchestrator", "config", "project.json"),
+		path.join(cwd, ".pi", "extensions", "yano-orchestrator", "config", "project.json"),
 		path.join(cwd, "agents", "roles.yaml"),
 	];
 	if (!projectMarkers.some((p) => existsSync(p))) {
 		console.error(
 			`yano end: questa directory non sembra un progetto yano-orchestrator inizializzato ` +
-				`(nessun agents/roles.yaml, nessun .pi/extensions/multiAgentOrchestrator/config/project.json).\n` +
+				`(nessun agents/roles.yaml, nessun .pi/extensions/yano-orchestrator/config/project.json).\n` +
 				`Esegui prima \`yano init --name "<nome progetto>"\` da questa cartella.`,
 		);
 		process.exit(1);
 	}
 
-	const dbPath = path.join(cwd, ".pi", "extensions", "multiAgentOrchestrator", "orchestratorStorage", "orchestrator.db");
+	const dbPath = path.join(cwd, ".pi", "extensions", "yano-orchestrator", "orchestratorStorage", "orchestrator.db");
 	if (!existsSync(dbPath)) {
 		console.log("yano end: nessun database ticket/DAG trovato per questo progetto (mai eseguito un task di sviluppo) — niente da chiudere.");
 		return;
@@ -147,7 +147,7 @@ export async function runEndProject({ cwd, argv }) {
 
 	let DatabaseSync;
 	try {
-		({ DatabaseSync } = moaRequire("node:sqlite"));
+		({ DatabaseSync } = yanoRequire("node:sqlite"));
 	} catch (err) {
 		console.error(
 			`yano end: node:sqlite non disponibile su questa versione di Node (${err instanceof Error ? err.message : String(err)}) — ` +

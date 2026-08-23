@@ -34,7 +34,7 @@ function ok(cond, msg) {
 }
 
 async function bootstrapScratchRepo() {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "moa-watch-stalls-"));
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "yano-watch-stalls-"));
 	await execFileP("git", ["init", "-q", "-b", "main"], { cwd: dir });
 	await execFileP("git", ["config", "user.email", "smoke@test.local"], { cwd: dir });
 	await execFileP("git", ["config", "user.name", "Smoke Test"], { cwd: dir });
@@ -108,8 +108,8 @@ async function backdateTicket(dbPath, ticketId, msAgo) {
 	const { DatabaseSync } = await import("node:sqlite").catch(() => ({}));
 	// fallback: use createRequire
 	const { createRequire } = await import("node:module");
-	const moaRequire = createRequire(import.meta.url);
-	const { DatabaseSync: DS } = moaRequire("node:sqlite");
+	const yanoRequire = createRequire(import.meta.url);
+	const { DatabaseSync: DS } = yanoRequire("node:sqlite");
 	const db = new DS(dbPath);
 	db.prepare("UPDATE tickets SET updated_at = ? WHERE id = ?").run(new Date(Date.now() - msAgo).toISOString(), ticketId);
 	db.close();
@@ -141,7 +141,7 @@ async function main() {
 	ok(true, "tool_execution_start hook is registered and can be driven by the harness");
 
 	// Backdate the first ticket's updated_at so it is past the stall threshold.
-	const dbPath = path.join(cwd, ".pi", "extensions", "multiAgentOrchestrator", "orchestratorStorage", "orchestrator.db");
+	const dbPath = path.join(cwd, ".pi", "extensions", "yano-orchestrator", "orchestratorStorage", "orchestrator.db");
 	await backdateTicket(dbPath, stalled.id, 1_200_000); // 20 min ago (> 15 min default stall)
 	ok(true, "stalled ticket backdated to 20 min ago; fresh ticket left as-is");
 
@@ -213,8 +213,8 @@ console.log("\n=== PART 3b — idempotency: a second pass surfaces the same find
 	ok(markers2.length >= 2, "second pass appended a duplicate marker (still read-only — actually the pass re-appends, proving it only reads + appends)");
 	// The ticket is unchanged (still 'running') — the watcher never acted on it.
 	const { createRequire } = await import("node:module");
-	const moaRequire = createRequire(import.meta.url);
-	const { DatabaseSync } = moaRequire("node:sqlite");
+	const yanoRequire = createRequire(import.meta.url);
+	const { DatabaseSync } = yanoRequire("node:sqlite");
 	const db = new DatabaseSync(dbPath, { readOnly: true });
 	const row = db.prepare("SELECT status FROM tickets WHERE id = ?").get(stalled.id);
 	db.close();

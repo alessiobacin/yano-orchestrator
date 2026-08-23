@@ -181,7 +181,7 @@ function parseArgs(argv) {
 // un progetto inizializzato" non può quindi più dipendere dall'esistenza di
 // extensions/orchestrator.ts (Revisione 31) — usa invece i marker che
 // `yano init` scrive sempre: agents/roles.yaml oppure
-// .pi/extensions/multiAgentOrchestrator/config/project.json.
+// .pi/extensions/yano-orchestrator/config/project.json.
 export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 	const { passthrough, printOnly, role, traceMode } = parseArgs(argv);
 	if (!isSupportedNodeRuntime()) {
@@ -195,14 +195,14 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 	const orchestratorPath = path.join(cwd, "extensions", "orchestrator.ts");
 	const hasLocalExtension = existsSync(orchestratorPath);
 	const projectMarkers = [
-		path.join(cwd, ".pi", "extensions", "multiAgentOrchestrator", "config", "project.json"),
+		path.join(cwd, ".pi", "extensions", "yano-orchestrator", "config", "project.json"),
 		path.join(cwd, "agents", "roles.yaml"),
 	];
 	const looksInitialized = hasLocalExtension || projectMarkers.some((p) => existsSync(p));
 	if (!looksInitialized) {
 		console.error(
 			`launch-planner: questa directory non sembra un progetto yano-orchestrator inizializzato ` +
-				`(nessun agents/roles.yaml, nessun .pi/extensions/multiAgentOrchestrator/config/project.json, ` +
+				`(nessun agents/roles.yaml, nessun .pi/extensions/yano-orchestrator/config/project.json, ` +
 				`nessun extensions/orchestrator.ts locale).\n` +
 				`Esegui prima \`yano init --name "<nome progetto>"\` (o \`node scripts/create-project.mjs ...\` in locale), poi rilancia da lì.`,
 		);

@@ -161,11 +161,11 @@ export function runUpdate({ packageRoot, argv }) {
 		return;
 	}
 
-	console.log("\npo update: 1/2 — reinstallo il pacchetto npm globale da GitHub (npm install -g ...)...\n");
+	console.log("\nyano update: 1/2 — reinstallo il pacchetto npm globale da GitHub (npm install -g ...)...\n");
 	try {
 		execFileSync("npm", ["install", "-g", repoUrl], { stdio: "inherit", shell: process.platform === "win32" });
 	} catch (err) {
-		console.error(`\npo update: "npm install -g ${repoUrl}" fallito (${err instanceof Error ? err.message : String(err)}).`);
+		console.error(`\nyano update: "npm install -g ${repoUrl}" fallito (${err instanceof Error ? err.message : String(err)}).`);
 		console.error(
 			"Su alcuni sistemi npm install -g richiede permessi elevati (sudo su macOS/Linux, un terminale da Amministratore su Windows) — riprova con quelli se l'errore riguarda i permessi.",
 		);
@@ -183,12 +183,12 @@ export function runUpdate({ packageRoot, argv }) {
 	}
 
 	if (hasGitClone) {
-		console.log(`\npo update: 2/2 — aggiorno la copia di \`pi extension install\` in ${gitDir} (git pull)...\n`);
+		console.log(`\nyano update: 2/2 — aggiorno la copia di \`pi extension install\` in ${gitDir} (git pull)...\n`);
 		const before = currentGitCommit(gitDir);
 		try {
 			execFileSync("git", ["-C", gitDir, "pull", "--ff-only"], { stdio: "inherit" });
 		} catch (err) {
-			console.error(`\npo update: "git -C ${gitDir} pull" fallito (${err instanceof Error ? err.message : String(err)}).`);
+			console.error(`\nyano update: "git -C ${gitDir} pull" fallito (${err instanceof Error ? err.message : String(err)}).`);
 			console.error(
 				"Se il pull fallisce per modifiche locali o divergenza (--ff-only si rifiuta apposta di riscrivere la history), " +
 					"la via più sicura resta reinstallare da capo con `pi extension install <url>`.",
@@ -206,7 +206,7 @@ export function runUpdate({ packageRoot, argv }) {
 		}
 	} else {
 		console.log(
-			"\npo update: nessuna copia di `pi extension install` trovata in " +
+			"\nyano update: nessuna copia di `pi extension install` trovata in " +
 				`${gitDir ?? "(percorso non deducibile dal repository.url)"} — se l'hai installato SOLO con \`pi extension install\`, ` +
 				"controlla comunque con `yano --version`/riavviando `pi`; se non risulta aggiornato, il modo più sicuro resta rilanciare " +
 				"`pi extension install <url>`.",
@@ -214,7 +214,7 @@ export function runUpdate({ packageRoot, argv }) {
 	}
 
 	console.log(
-		"\npo update: i prompt di ruolo di OGNI progetto (anche già scaffoldato prima di questo update) si leggono " +
+		"\nyano update: i prompt di ruolo di OGNI progetto (anche già scaffoldato prima di questo update) si leggono " +
 			"sempre dal pacchetto installato (Revisione 47) — nessun passo aggiuntivo necessario, a meno che tu " +
 			"non abbia attivato `--custom-prompts` per un progetto specifico (vedi `yano copy-prompts`), nel qual " +
 			"caso solo i file che hai personalizzato lì restano tuoi: qualunque altro ruolo/file continua comunque " +

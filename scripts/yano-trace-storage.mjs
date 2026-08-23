@@ -32,12 +32,12 @@ export function slugify(value) {
 export function resolveTraceProject(cwd, explicitProject = null) {
 	if (explicitProject && String(explicitProject).trim()) return String(explicitProject).trim();
 	try {
-		const config = JSON.parse(fs.readFileSync(path.join(cwd, ".pi", "extensions", "multiAgentOrchestrator", "config", "project.json"), "utf8"));
+		const config = JSON.parse(fs.readFileSync(path.join(cwd, ".pi", "extensions", "yano-orchestrator", "config", "project.json"), "utf8"));
 		if (config.project) return String(config.project);
 	} catch { /* fall through */ }
 	try {
 		const pkg = JSON.parse(fs.readFileSync(path.join(cwd, "package.json"), "utf8"));
-		if (pkg.name && !String(pkg.name).startsWith("@otomatik/pi-mqtt-")) return String(pkg.name);
+		if (pkg.name && !String(pkg.name).startsWith("@otomatik/yano-")) return String(pkg.name);
 	} catch { /* fall through */ }
 	return path.basename(path.resolve(cwd)) || "default";
 }
@@ -79,7 +79,7 @@ export function traceProjectKeys({ cwd = process.cwd(), project } = {}) {
 
 function runProjectFromWorkspace(cwd, runId) {
 	if (!runId) return null;
-	const dbPath = path.join(cwd, ".pi", "extensions", "multiAgentOrchestrator", "orchestratorStorage", "orchestrator.db");
+	const dbPath = path.join(cwd, ".pi", "extensions", "yano-orchestrator", "orchestratorStorage", "orchestrator.db");
 	if (!fs.existsSync(dbPath)) return null;
 	try {
 		const { DatabaseSync } = require("node:sqlite");

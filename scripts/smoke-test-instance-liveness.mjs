@@ -4,7 +4,7 @@
 // and the restarted planner just did the coding work itself instead of
 // relaunching one. Three independent fixes are covered here:
 //
-//   1. moaFindOrphanedTickets()/the watchdog's orphan sweep — a RUNNING
+//   1. yanoFindOrphanedTickets()/the watchdog's orphan sweep — a RUNNING
 //      ticket whose assigned instance has no live MQTT presence (offline or
 //      never seen) is detected immediately (no elapsed-time threshold),
 //      auto-marked "failed", and the planner is woken with a MANDATORY
@@ -74,7 +74,7 @@ async function git(args, cwd) {
 }
 
 async function bootstrapScratchRepo() {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "moa-liveness-"));
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "yano-liveness-"));
 	await git(["init", "-q"], dir);
 	await git(["config", "user.email", "liveness-test@test.local"], dir);
 	await git(["config", "user.name", "Liveness Test"], dir);

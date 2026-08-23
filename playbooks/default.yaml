@@ -1,7 +1,7 @@
 ---
 schema_version: 1
 id: default-orchestration
-label: Default Pi MQTT orchestration flow
+label: Default Yano orchestration flow
 description: Contratto deterministico del ciclo
   planner/coder/reviewer/specialisti per un task gestito da
   yano-orchestrator.

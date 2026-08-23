@@ -24,7 +24,7 @@
 //                        progetto nella directory corrente (Revisione 38) —
 //                        delega a scripts/end-project.mjs (runEndProject()).
 //   yano copy-prompts      copia prompts/ dal pacchetto installato dentro
-//                        <progetto>/.pi/extensions/multiAgentOrchestrator/prompts/,
+//                        <progetto>/.pi/extensions/yano-orchestrator/prompts/,
 //                        per chi vuole personalizzarli per QUESTO progetto
 //                        (Revisione 47) — delega a scripts/copy-prompts.mjs
 //                        (runCopyPrompts()). Da solo non cambia nulla: serve

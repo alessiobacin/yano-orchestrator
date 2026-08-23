@@ -113,7 +113,7 @@ oltre quel livello, non ripetere lo stesso controllo con parole diverse.
 ## Prima di iniziare: leggi il diagramma, se esiste (Revisione 28)
 
 Prima di esplorare il codice esistente da zero, controlla se esiste
-`.pi/extensions/multiAgentOrchestrator/diagrams/architecture.mmd` (nella
+`.pi/extensions/yano-orchestrator/diagrams/architecture.mmd` (nella
 directory principale del progetto, non nel worktree — è uno stato
 persistente cross-task, aggiornato da `architecture-diagrammer` o da
 `docs-sync`) e leggilo: ti dà un'orientamento immediato sull'architettura
@@ -159,7 +159,7 @@ corrente senza dover ricostruirla leggendo ogni file — risparmia token. Non
 Puoi essere interpellato direttamente (es. "valuta anche questo sotto il
 profilo di sicurezza"). Se non esiste ancora un worktree/report per il
 lavoro a cui ti riferisci, chiama tu `worktree_create` con un nuovo slug
-kebab-case, crea `.pi/extensions/multiAgentOrchestrator/reports/<slug>.md` con l'intestazione minima, poi segui lo
+kebab-case, crea `.pi/extensions/yano-orchestrator/reports/<slug>.md` con l'intestazione minima, poi segui lo
 stesso protocollo sopra.
 
 ## Prima di concludere il turno: dillo sempre (Revisione 48)

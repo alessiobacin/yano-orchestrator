@@ -13,10 +13,10 @@
 // Verifica: Node.js (già garantito se questo script gira, ma la versione è
 // comunque riportata), git (richiesto per l'isolamento in worktree), `pi`
 // (richiesto per lanciare qualunque istanza — questo pacchetto non gestisce
-// la sua installazione, vedi nota onesta sotto), e un modo per far girare un
-// broker MQTT: Docker con il daemon attivo (per `docker compose`), OPPURE
-// Mosquitto nativo sul PATH, OPPURE un broker già raggiungibile su
-// 127.0.0.1:1883 (qualcuno potrebbe già averne uno acceso altrove).
+// la sua installazione, vedi nota onesta sotto), Ollama + il modello locale
+// `nomic-embed-text` per gli embeddings, e un modo per far girare un broker
+// MQTT: Docker con il daemon attivo (per `docker compose`), OPPURE Mosquitto
+// nativo sul PATH, OPPURE un broker già raggiungibile su 127.0.0.1:1883.
 //
 // Uso:
 //   node scripts/doctor.mjs   (anche: yano doctor — e automaticamente in coda a `yano init`)
@@ -28,7 +28,7 @@
 // all'operatore (evita di richiedere permessi di sistema/sudo a sua
 // insaputa).
 
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as net from "node:net";
 import path from "node:path";
@@ -65,6 +65,167 @@ const LAZY_CLI_INSTALLERS = {
 	"playwright-cli": ["npm", ["install", "-g", PLAYWRIGHT_CLI_PACKAGE]],
 	postman: ["npm", ["install", "-g", "postman-cli"]],
 };
+
+export const OLLAMA_DEFAULT_URL = "http://127.0.0.1:11434";
+export const DEFAULT_EMBEDDING_MODEL = "nomic-embed-text";
+
+export function resolveEmbeddingModel() {
+	return process.env.YANO_EMBEDDING_MODEL?.trim() || DEFAULT_EMBEDDING_MODEL;
+}
+
+function ollamaUrl() {
+	const configured = process.env.YANO_OLLAMA_URL?.trim() || process.env.OLLAMA_HOST?.trim() || OLLAMA_DEFAULT_URL;
+	return /^https?:\/\//i.test(configured) ? configured.replace(/\/+$/, "") : `http://${configured.replace(/\/+$/, "")}`;
+}
+
+async function ollamaJson(pathname, options = {}, timeoutMs = 5_000) {
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), timeoutMs);
+	try {
+		const response = await fetch(`${ollamaUrl()}${pathname}`, { ...options, signal: controller.signal });
+		const body = await response.text();
+		let data = null;
+		try { data = body ? JSON.parse(body) : null; } catch { /* diagnostic below is enough */ }
+		if (!response.ok) throw new Error(`HTTP ${response.status}${body ? `: ${body.slice(0, 240)}` : ""}`);
+		return data;
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
+function embeddingInstallHint() {
+	return osInstallHint("ollama");
+}
+
+function installOllama() {
+	if (process.platform === "darwin" && commandExists("brew")) return runInstall("brew", ["install", "--cask", "ollama"]);
+	if (process.platform === "linux") return runInstall("sh", ["-c", "curl -fsSL https://ollama.com/install.sh | sh"]);
+	if (process.platform === "win32" && commandExists("winget")) return runInstall("winget", ["install", "--id", "Ollama.Ollama", "--exact", "--accept-source-agreements", "--accept-package-agreements"]);
+	return false;
+}
+
+function startOllamaServer() {
+	try {
+		const child = spawn("ollama", ["serve"], { detached: true, stdio: "ignore" });
+		child.once("error", () => { /* final check below reports the actionable failure */ });
+		child.unref();
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+async function waitForOllama(maxAttempts = 20) {
+	for (let attempt = 0; attempt < maxAttempts; attempt++) {
+		try {
+			await ollamaJson("/api/version", {}, 1_500);
+			return true;
+		} catch {
+			await new Promise((resolve) => setTimeout(resolve, 500));
+		}
+	}
+	return false;
+}
+
+export async function embedTexts(inputs, { model = resolveEmbeddingModel() } = {}) {
+	const values = Array.isArray(inputs) ? inputs : [inputs];
+	if (!values.length) return [];
+	if (values.some((value) => typeof value !== "string" || !value.trim())) throw new Error("embedding: ogni testo deve essere una stringa non vuota");
+	const result = await ollamaJson("/api/embed", {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ model, input: values }),
+	}, 120_000);
+	if (!Array.isArray(result?.embeddings) || result.embeddings.length !== values.length || result.embeddings.some((vector) => !Array.isArray(vector) || vector.length === 0)) {
+		throw new Error(`embedding: Ollama ha restituito una risposta non valida per ${values.length} testo/i`);
+	}
+	return result.embeddings;
+}
+
+export async function checkEmbeddingPrerequisites({ model = resolveEmbeddingModel() } = {}) {
+	const cliOk = commandExists("ollama", ["--version"]);
+	const cli = {
+		ok: cliOk,
+		detail: cliOk ? "trovato" : `non trovato — ${embeddingInstallHint()}`,
+		hint: embeddingInstallHint(),
+	};
+	if (!cliOk) {
+		return {
+			ok: false,
+			model,
+			url: ollamaUrl(),
+			cli,
+			server: { ok: false, detail: "non verificabile: Ollama non è installato" },
+			modelCheck: { ok: false, detail: `non verificabile: installa Ollama e fai il pull di ${model}` },
+			probe: { ok: false, detail: "non verificabile: server Ollama non disponibile" },
+		};
+	}
+
+	let serverVersion = null;
+	try {
+		serverVersion = await ollamaJson("/api/version", {}, 2_500);
+	} catch (error) {
+		return {
+			ok: false,
+			model,
+			url: ollamaUrl(),
+			cli,
+			server: { ok: false, detail: `non raggiungibile su ${ollamaUrl()} — avvia Ollama` },
+			modelCheck: { ok: false, detail: `non verificabile: fai partire Ollama e installa ${model}` },
+			probe: { ok: false, detail: "non verificabile: server Ollama non disponibile", error: error instanceof Error ? error.message : String(error) },
+		};
+	}
+
+	const server = { ok: true, detail: `raggiungibile su ${ollamaUrl()}${serverVersion?.version ? ` (v${serverVersion.version})` : ""}` };
+	let tags;
+	try {
+		tags = await ollamaJson("/api/tags", {}, 5_000);
+	} catch (error) {
+		return { ok: false, model, url: ollamaUrl(), cli, server, modelCheck: { ok: false, detail: `impossibile leggere i modelli locali: ${error instanceof Error ? error.message : String(error)}` }, probe: { ok: false, detail: "non verificabile" } };
+	}
+	const models = Array.isArray(tags?.models) ? tags.models : [];
+	const found = models.some((item) => item?.name === model || item?.model === model || String(item?.name || item?.model || "").split(":")[0] === model);
+	const modelCheck = {
+		ok: found,
+		detail: found ? `installato (${model})` : `mancante — esegui: ollama pull ${model}`,
+	};
+	if (!found) return { ok: false, model, url: ollamaUrl(), cli, server, modelCheck, probe: { ok: false, detail: "non verificabile: modello non installato" } };
+
+	try {
+		const result = await ollamaJson("/api/embed", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ model, input: "yano embedding health check" }),
+		}, 30_000);
+		const vector = result?.embeddings?.[0];
+		const probe = Array.isArray(vector) && vector.length > 0
+			? { ok: true, detail: `probe riuscito (${vector.length} dimensioni)` }
+			: { ok: false, detail: "risposta senza un vettore valido" };
+		return { ok: cli.ok && server.ok && modelCheck.ok && probe.ok, model, url: ollamaUrl(), cli, server, modelCheck, probe };
+	} catch (error) {
+		return { ok: false, model, url: ollamaUrl(), cli, server, modelCheck, probe: { ok: false, detail: `probe fallito: ${error instanceof Error ? error.message : String(error)}` } };
+	}
+}
+
+export async function ensureEmbeddingPrerequisites({ install = false, model = resolveEmbeddingModel() } = {}) {
+	let check = await checkEmbeddingPrerequisites({ model });
+	if (check.ok || !install) return check;
+
+	if (!check.cli.ok) {
+		console.log("yano init: Ollama non trovato — provo a installarlo...");
+		if (!installOllama()) return check;
+	}
+	if (!check.server.ok) {
+		startOllamaServer();
+		if (!(await waitForOllama())) return await checkEmbeddingPrerequisites({ model });
+	}
+	check = await checkEmbeddingPrerequisites({ model });
+	if (!check.modelCheck.ok && check.server.ok) {
+		console.log(`yano init: installo il modello locale ${model}...`);
+		if (!runInstall("ollama", ["pull", model])) return check;
+	}
+	return await checkEmbeddingPrerequisites({ model });
+}
 
 function playwrightSkillPaths() {
 	const roots = [
@@ -313,6 +474,11 @@ function osInstallHint(tool) {
 			win32: "winget install EclipseFoundation.Mosquitto   (poi, in una finestra separata: mosquitto -c mqtt\\mosquitto.native.conf)",
 			linux: "sudo apt-get install -y mosquitto   (Debian/Ubuntu — poi: mosquitto -c mqtt/mosquitto.native.conf)",
 		},
+		ollama: {
+			darwin: "brew install --cask ollama   (oppure scarica Ollama da https://ollama.com/download e avvialo)",
+			win32: "winget install --id Ollama.Ollama   (oppure scarica Ollama da https://ollama.com/download)",
+			linux: "curl -fsSL https://ollama.com/install.sh | sh",
+		},
 	};
 	return hints[tool]?.[platform] ?? hints[tool]?.linux ?? "vedi la documentazione ufficiale del progetto.";
 }
@@ -374,6 +540,13 @@ export async function runDoctor({ cwd = process.cwd(), json = false, autoStartBr
 			if (!present) ok = false;
 		}
 	}
+
+	const embeddings = await ensureEmbeddingPrerequisites({ install: false });
+	rows.push(["Ollama", embeddings.cli.ok, embeddings.cli.detail]);
+	rows.push(["Ollama server", embeddings.server.ok, embeddings.server.detail]);
+	rows.push([`embedding ${embeddings.model}`, embeddings.modelCheck.ok, embeddings.modelCheck.detail]);
+	rows.push(["embedding probe", embeddings.probe.ok, embeddings.probe.detail]);
+	if (!embeddings.ok) ok = false;
 
 	const dockerOk = dockerDaemonRunning();
 	const hasMosquitto = commandExists("mosquitto", ["-h"]);

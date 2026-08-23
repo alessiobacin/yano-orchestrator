@@ -8,6 +8,7 @@ fino al feedback dell'utente.
 - Node.js 22.5 o superiore;
 - Git;
 - Yano installato globalmente o collegato dal repository;
+- Ollama con `nomic-embed-text` (installato/verificato automaticamente da `yano init` quando possibile);
 - un broker MQTT locale, normalmente Docker.
 
 Dal repository di Yano:
@@ -16,6 +17,10 @@ Dal repository di Yano:
 npm install -g /percorso/yano-orchestrator
 yano doctor
 ```
+
+`yano doctor` verifica anche Ollama, il modello `nomic-embed-text` e una
+richiesta reale all'endpoint locale `/api/embed`. Se Ollama manca, segui il
+comando di installazione stampato dal doctor, poi ripeti `yano init`.
 
 ## 1. Crea e inizializza il progetto
 
@@ -135,6 +140,21 @@ Se il problema può ripetersi, confronta anche i progetti:
 ```bash
 yano trace overview --all-projects --json
 ```
+
+Quando il contesto è ampio, crea l'indice semantico locale e chiedi solo le
+evidenze pertinenti al problema:
+
+```bash
+yano trace index --run <run-id>
+yano trace search \
+  --run <run-id> \
+  --query "perché la verifica del frontend è fallita?" \
+  --limit 10 --json
+```
+
+L'indice è incrementale, vive nella stessa `temp/` globale e può essere
+ricreato dai JSONL. Usa `--project`, `--round`, `--task`, `--instance`,
+`--type` o `--since` per restringere ulteriormente la ricerca.
 
 Infine il planner salva `yano trace opinion` e apre un nuovo round nello
 stesso worktree. Coder e reviewer possono leggere il contesto filtrato per

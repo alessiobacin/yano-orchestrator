@@ -1,4 +1,4 @@
-# yano-orchestrator
+# yano-orchestrator (Yet-Another-New-Orchestrator)
 
 [![CI](https://github.com/alessiobacin/yano-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/alessiobacin/yano-orchestrator/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -26,6 +26,8 @@ Everything communicates over a local MQTT broker, using role/instance identity a
 - **WhatsApp notifications** (via Evolution API) when a task completes or needs your input, so you don't have to watch the terminal
 - **A global `yano` CLI** (`yano init`, `yano start`, `yano doctor`, `yano update`, `yano copy-prompts`, `yano uninstall`, `yano end`) for scaffolding, launching, verifying the environment, keeping new orchestrated projects up to date, and closing them out — `yano start` now composes the right launch command for *any* role, not just planner, which is what the planner itself uses when it launches new team members over herdr/tmux
 - **Shared trace-analysis skill** for planner, coder, reviewer and specialists — workers can inspect the filtered origin of a mismatch, while the planner records cross-project opinions and systemic interventions
+- **Local embeddings prerequisite** — `yano doctor` verifies Ollama, the `nomic-embed-text` model and a real `/api/embed` probe; `yano init` installs/pulls them when missing (no extra npm embedding library is required)
+- **Semantic trace index** — `yano trace index` incrementally stores local Ollama vectors in SQLite and `yano trace search` retrieves only the most relevant observable evidence with project/run/round filters
 - **Role prompts are always read live from the installed package by default — no per-project copy to keep in sync** — `yano update` alone is enough to bring every project current; `yano copy-prompts` + `yano start --custom-prompts` are there only if you actually want to customize a role's prompt for one specific project
 - **Automatic per-project MQTT scoping** — two different projects never collide on a shared broker without you having to pass `--project` yourself
 - **Frontend prerequisites are deterministic** — every `yano init` verifies/installs global `@playwright/cli@latest` and the global `playwright-cli` skill; `frontend-developer` and `frontend-reviewer` receive the browser skill, while backend `reviewer` remains backend-only. The optional `chrome-devtools` MCP remains project-wide because Pi cannot scope MCP servers per role
@@ -65,7 +67,13 @@ docker compose -f mqtt/compose.yaml up -d   # with Docker Desktop
 yano start --instance planner-01
 ```
 
-`yano init` detects your OS automatically and prints the right commands either way, and finishes by running `yano doctor` for you — a quick check that git, `pi`, and an MQTT broker are all available, with OS-specific install hints for anything that's missing. Run it again any time with `yano doctor`.
+`yano init` detects your OS automatically and prints the right commands either way. It also verifies Ollama plus the local `nomic-embed-text` model, pulling them when possible, and finishes by running `yano doctor` for you — a quick check that git, `pi`, embeddings, and an MQTT broker are all available, with OS-specific install hints for anything that's missing. Run it again any time with `yano doctor`.
+
+Yano uses Ollama's local HTTP API for embeddings. The default endpoint is
+`http://127.0.0.1:11434`; override it with `YANO_OLLAMA_URL` if needed. The
+model can be changed for an experimental setup with `YANO_EMBEDDING_MODEL`,
+and the semantic index is created on demand under the same global `temp/`
+directory with `yano trace index`.
 
 The ticket/DAG layer uses Node's built-in `node:sqlite` API, so Node 22.5 or newer is required. `yano doctor` refuses unsupported runtimes before initialization.
 
@@ -115,6 +123,8 @@ yano trace enable --mode full  # trace completo dei dati osservabili
 yano trace events --follow     # segue gli eventi raw mentre gli agenti lavorano
 yano trace feedback --status rejected --text "<verdetto utente>" --run <id> --round <n> --task <slug>
 yano trace context --run <id> --round <n> --task <slug> --json
+yano trace index --project <name> --run <id>
+yano trace search --project <name> --run <id> --query "<problema>" --limit 10 --json
 yano trace overview --all-projects --json
 yano trace opinion --text "<analisi planner>" --change prompt --confidence medium
 yano trace clear --all --yes   # elimina tutti i dati temporanei di Yano

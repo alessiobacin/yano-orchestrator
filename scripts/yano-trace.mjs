@@ -13,6 +13,12 @@ import {
 	setTraceMode,
 	tracePaths,
 } from "./yano-trace-storage.mjs";
+import {
+	clearTraceIndexData,
+	indexTraceRecords,
+	searchTraceRecords,
+	traceIndexStatus,
+} from "./yano-trace-index.mjs";
 
 function value(argv, flag) {
 	const index = argv.indexOf(flag);
@@ -34,7 +40,7 @@ function validDate(value, flag) {
 
 function usage() {
 	console.log([
-		"Uso: yano trace <status|enable|disable|events|clear> [opzioni]",
+		"Uso: yano trace <status|enable|disable|events|index|search|clear> [opzioni]",
 		"",
 		"  status                         mostra modalità e directory globale",
 		"  enable --mode <mode>           attiva off|events|standard|full",
@@ -44,6 +50,8 @@ function usage() {
 		"  context [filtri]               prepara il contesto compatto per il planner",
 		"  opinion --text <testo>         salva l'opinione del planner sul fallimento",
 		"  overview [--all-projects]      aggrega errori e pattern tra progetti/round",
+		"  index [filtri]                 crea/aggiorna l'indice semantico SQLite",
+		"  search --query <testo>         cerca evidenza simile nel trace indicizzato",
 		"  clear --yes                    cancella il tracing del progetto corrente",
 		"  clear --run <id> --yes         cancella solo gli eventi di un run",
 		"  clear --instance <id> --yes   cancella solo gli eventi di un agente",
@@ -51,7 +59,8 @@ function usage() {
 		"  clear --all --yes              cancella tutto il temp globale di Yano",
 		"",
 		"Opzioni comuni: --project <nome>, --data-dir <directory>",
-		"Filtri: --run <id>, --round <n>, --task <slug>, --since <ISO>, --limit <n>, --json",
+		"Filtri: --run <id>, --round <n>, --task <slug>, --instance <id>, --type <tipo>, --since <ISO>, --limit <n>, --json",
+		"Search: --include-payload restituisce anche il payload JSON originale",
 	].join("\n"));
 }
 
@@ -121,6 +130,8 @@ export async function runTrace({ cwd, argv }) {
 		console.log(`yano trace: progetto "${cfg.project}" — modalità ${cfg.mode}`);
 		console.log(`   root globale: ${cfg.root}`);
 		console.log(`   progetto trace: ${paths.projectDir}`);
+		const index = traceIndexStatus();
+		console.log(`   indice semantico: ${index.exists ? `${index.documents} documenti` : "non ancora creato"} (${index.path})`);
 		const projects = listTraceProjects();
 		if (projects.length) console.log(`   progetti indicizzati: ${projects.length}`);
 		return cfg;
@@ -260,6 +271,51 @@ export async function runTrace({ cwd, argv }) {
 		return overview;
 	}
 
+	if (sub === "index") {
+		const since = validDate(value(argv, "--since"), "--since");
+		const result = await indexTraceRecords({
+			cwd,
+			project,
+			allProjects: has(argv, "--all-projects"),
+			run: value(argv, "--run"),
+			round: value(argv, "--round"),
+			task: value(argv, "--task"),
+			instance: value(argv, "--instance"),
+			type: value(argv, "--type"),
+			since,
+			limit: Math.max(1, Number(value(argv, "--limit") || 1000000)),
+			batchSize: Math.max(1, Number(value(argv, "--batch-size") || 32)),
+			force: has(argv, "--force"),
+		});
+		if (has(argv, "--json")) console.log(JSON.stringify(result, null, 2));
+		else console.log(`yano trace index: ${result.indexed} indicizzati, ${result.skipped} già aggiornati, ${result.failed} falliti su ${result.total}; modello ${result.model}\n   db: ${result.db_path}`);
+		return result;
+	}
+
+	if (sub === "search") {
+		const since = validDate(value(argv, "--since"), "--since");
+		const result = await searchTraceRecords({
+			cwd,
+			project,
+			allProjects: has(argv, "--all-projects"),
+			query: value(argv, "--query"),
+			run: value(argv, "--run"),
+			round: value(argv, "--round"),
+			task: value(argv, "--task"),
+			instance: value(argv, "--instance"),
+			type: value(argv, "--type"),
+			since,
+			limit: Math.max(1, Number(value(argv, "--limit") || 10)),
+			includePayload: has(argv, "--include-payload"),
+		});
+		if (has(argv, "--json")) console.log(JSON.stringify(result, null, 2));
+		else {
+			console.log(result.message || `yano trace search: ${result.results.length} risultato/i (da ${result.total} documenti)`);
+			for (const item of result.results) console.log(`\n[${item.score.toFixed(4)}] ${item.ts || "?"} ${item.project || "?"} ${item.instance || "?"} ${item.event_type || item.record_type || "?"}\n${item.text}`);
+		}
+		return result;
+	}
+
 	if (sub === "clear" || sub === "purge") {
 		if (!has(argv, "--yes")) throw new Error("cancellazione distruttiva: aggiungi --yes per confermare");
 		const all = has(argv, "--all");
@@ -269,6 +325,16 @@ export async function runTrace({ cwd, argv }) {
 		const result = clearTraceData({
 			cwd,
 			project,
+			run: value(argv, "--run"),
+			instance: value(argv, "--instance"),
+			type: value(argv, "--type"),
+			before,
+			all,
+		});
+		result.semantic_index = clearTraceIndexData({
+			cwd,
+			project,
+			allProjects: all,
 			run: value(argv, "--run"),
 			instance: value(argv, "--instance"),
 			type: value(argv, "--type"),

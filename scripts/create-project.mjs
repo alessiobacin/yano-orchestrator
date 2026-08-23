@@ -75,7 +75,7 @@ import { createInterface } from "node:readline/promises";
 import * as fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { runDoctor, ensurePlaywrightPrerequisites, ensureCorePrerequisites, isSupportedNodeRuntime } from "./doctor.mjs";
+import { runDoctor, ensurePlaywrightPrerequisites, ensureCorePrerequisites, ensureEmbeddingPrerequisites, isSupportedNodeRuntime } from "./doctor.mjs";
 
 function parseArgs(argv) {
 	let name;
@@ -263,6 +263,16 @@ export async function runCreateProject({ packageRoot, cwd, argv }) {
 		if (!core.mcp.adapter) console.error("  MCP adapter: pi install npm:pi-mcp-adapter");
 		if (!core.mcp.chromePackage) console.error("  MCP chrome-devtools: npx -y chrome-devtools-mcp@latest --help");
 		if (!core.mcp.githubEndpoint) console.error("  MCP GitHub: endpoint non raggiungibile; verifica connessione e accesso OAuth");
+		process.exitCode = 1;
+		return;
+	}
+	const embeddings = await ensureEmbeddingPrerequisites({ install: true });
+	if (!embeddings.ok) {
+		console.error("yano init: prerequisiti embeddings non disponibili — nessun file di scaffold è stato scritto.");
+		console.error(`  Ollama: ${embeddings.cli.detail}`);
+		console.error(`  server: ${embeddings.server.detail}`);
+		console.error(`  modello: ${embeddings.modelCheck.detail}`);
+		console.error(`  probe: ${embeddings.probe.detail}`);
 		process.exitCode = 1;
 		return;
 	}

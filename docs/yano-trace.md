@@ -18,6 +18,7 @@ Per impostazione predefinita i dati sono fuori dal progetto, nella directory
 ```text
 <installazione-yano>/temp/
 ├── tracing.json
+├── semantic-index.sqlite
 └── traces/<project-key>/
     ├── events/*.jsonl
     ├── terminal/*.jsonl
@@ -182,3 +183,58 @@ La skill condivisa
 [`yano-planner-trace-analysis`](../skills-vendor/yano/yano-planner-trace-analysis/SKILL.md)
 contiene il contratto operativo che tutti gli agenti ricevono; al planner
 spetta la decisione finale sulle modifiche sistemiche.
+
+## Embeddings locali
+
+Yano usa `nomic-embed-text` tramite Ollama come backend locale per
+l'indicizzazione semantica dei trace. `yano doctor` verifica quattro
+livelli distinti: CLI Ollama, server HTTP, modello scaricato e probe reale su
+`/api/embed`. `yano init` tenta di installare Ollama e di eseguire:
+
+```bash
+ollama pull nomic-embed-text
+```
+
+Non viene aggiunta una dipendenza npm: Node usa `fetch` verso l'API locale di
+Ollama. Il server predefinito è `http://127.0.0.1:11434`; si può modificare con
+`YANO_OLLAMA_URL`. Il modello non è `EmbeddingGemma`, ma svolge lo stesso
+ruolo tecnico di encoder per la fase embeddings e viene mantenuto come default
+riproducibile di Yano.
+
+## Indicizzazione e ricerca semantica
+
+L'indice è un database SQLite globale, separato dai JSONL: i JSONL restano la
+fonte forense originale e l'indice può essere ricreato. Ogni documento contiene
+metadati, testo osservabile, payload JSON e il vettore generato da Ollama. I
+vettori sono memorizzati come JSON in SQLite e confrontati con cosine similarity
+in Node; non è richiesta un'estensione nativa `sqlite-vec`.
+
+L'indicizzazione è esplicita e incrementale, così il runtime degli agenti non
+subisce la latenza di una chiamata Ollama per ogni evento:
+
+```bash
+yano trace index --project <nome> --run <run-id>
+yano trace index --project <nome> --since 2026-08-23T00:00:00Z --batch-size 16
+yano trace index --project <nome> --run <run-id> --force
+```
+
+La seconda esecuzione salta i documenti invariati tramite hash del contenuto e
+modello. La ricerca genera un solo embedding per la domanda e restituisce le
+evidenze più simili:
+
+```bash
+yano trace search \
+  --project <nome> --run <run-id> \
+  --query "perché la migrazione è andata in timeout?" \
+  --limit 10 --json
+```
+
+La risposta è compatta e non include il payload completo. Aggiungi
+`--include-payload` solo quando servono i campi esatti dell'evento.
+
+Sono disponibili anche `--round`, `--task`, `--instance`, `--type`, `--since`
+e `--all-projects`. Il planner deve preferire run/round/task mirati; la vista
+cross-project è utile per pattern sistemici, ma va usata solo quando serve.
+`yano trace clear` elimina anche i documenti corrispondenti dall'indice, mentre
+`yano trace clear --all --yes` elimina l'intero database semantico insieme al
+temp globale.

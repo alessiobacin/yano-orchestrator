@@ -58,6 +58,7 @@ flowchart TD
     subgraph GLOBAL_TRACE["Global Yano installation / temp"]
         TRACE["traces/<project-key>/events\nJSONL forensic trace\nevents / standard / full"]
         TRACE_ANALYSIS["feedback / summaries / opinions\nfiltered context + cross-project overview"]
+        TRACE_INDEX["semantic-index.sqlite\nOllama embeddings\nfiltered cosine search"]
         TRACE_CONFIG["tracing.json\nper-project mode"]
     end
 
@@ -71,6 +72,9 @@ flowchart TD
     CLI --> TRACE_CONFIG
     TRACE_CONFIG --> TRACE
     TRACE --> TRACE_ANALYSIS
+    TRACE --> TRACE_INDEX
+    TRACE_ANALYSIS --> TRACE_INDEX
+    TRACE_INDEX --> PLANNER
     PLANNER --> TRACE_ANALYSIS
     SQLITE --> DASHBOARD["local read-only dashboard\nGantt + status"]
     OBS --> DASHBOARD

@@ -23,6 +23,8 @@ yano trace status
 yano trace feedback --status accepted|partial|rejected --text "<verbatim user verdict>" [--run <id>] [--round <n>] [--task <slug>]
 yano trace context --run <id> --round <n> --limit 120 --json
 yano trace overview --all-projects --json
+yano trace index --project <nome> --run <id> --batch-size 32
+yano trace search --project <nome> --run <id> --query "timeout nella migrazione" --limit 10 --json
 yano trace opinion --text "<analysis>" --summary "..." --root-cause "..." --recommendation "..." --change existing-agent|new-agent|prompt|tool|playbook|none --confidence low|medium|high --roles planner,coder [--run <id>] [--round <n>] [--task <slug>]
 ```
 
@@ -37,6 +39,16 @@ Expected behavior:
 - `overview --all-projects` aggregates user verdicts, recurring feedback
   patterns, delegation/timeouts, stalls, orphaned agents, tool failures and
   merge conflicts across projects.
+- `index` incrementally embeds the observable trace records selected by the
+  filters into Yano's global SQLite semantic index. It uses local Ollama and
+  does not replace the JSONL source of truth. Use `--force` after changing the
+  embedding model or when deliberately rebuilding a scope.
+- `search` embeds only the query, then ranks matching indexed records with
+  cosine similarity. Filter by project, run, round, task, instance, type or
+  time window so the planner receives only relevant evidence. The compact
+  result omits the stored payload by default; add `--include-payload` only
+  when exact event fields are needed. If the index is stale or absent, run
+  `index` first.
 - `opinion` stores the planner's analysis so later planners can compare the
   hypothesis with future outcomes. It is an observation, not an automatic
   authorization to change Yano.
@@ -81,14 +93,18 @@ When the user says the result is wrong, incomplete, or still broken:
 2. Run `yano trace context --run <id> --round <n> --task <slug> --json` and
    inspect the relevant tool, delegation, timeout, reviewer, test, worktree
    and response events.
-3. Run `yano trace overview --all-projects --json` when the failure may be a
+3. Run `yano trace index --project <name> --run <id>` and then
+   `yano trace search --project <name> --run <id> --query "<problema>" --json`
+   when the filtered context is too broad or the relevant evidence is spread
+   across several observable records.
+4. Run `yano trace overview --all-projects --json` when the failure may be a
    recurring Yano problem. If the data set is large, use `--since` and
    `--limit` first, then widen the query deliberately.
-4. Separate the user's product defect from an orchestration defect. Classify
+5. Separate the user's product defect from an orchestration defect. Classify
    the hypothesis as one or more of:
    `requirements_missed`, `wrong_implementation`, `verification_gap`,
    `orchestration_gap`, `missing_capability`, `environment_or_tooling`.
-5. Decide the smallest durable intervention:
+6. Decide the smallest durable intervention:
    - modify an existing role prompt/playbook when the role had the right
      capability but followed an unclear or missing rule;
    - modify a tool, gate, schema or launcher when the system allowed an
@@ -97,9 +113,9 @@ When the user says the result is wrong, incomplete, or still broken:
      missing across independent projects/rounds and cannot be expressed as a
      rule or existing role responsibility;
    - do not create an agent merely because one worker made a one-off mistake.
-6. Save the planner's opinion with `yano trace opinion`, including evidence,
+7. Save the planner's opinion with `yano trace opinion`, including evidence,
    confidence, affected roles and the proposed intervention.
-7. Continue the task using the existing worktree when it is the same task.
+8. Continue the task using the existing worktree when it is the same task.
    Start a genuine correction cycle with `agent_send(..., new_round: true)`;
    do not hide the rejection by opening an unrelated task or silently
    finalizing the worktree.

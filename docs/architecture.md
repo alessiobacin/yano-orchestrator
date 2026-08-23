@@ -60,6 +60,8 @@ yano trace enable --mode events|standard|full
 yano trace disable
 yano trace feedback --status rejected --text "<verdetto utente>" --run <id> --round <n> --task <slug>
 yano trace context --run <id> --round <n> --task <slug> --json
+yano trace index --project <name> --run <id>
+yano trace search --project <name> --run <id> --query "<problema>" --json
 yano trace opinion --text "<analisi planner>" --change prompt --confidence medium
 yano trace overview --all-projects --json
 yano trace clear --run <run-id> --yes
@@ -75,6 +77,12 @@ messages, tool lifecycle and events supplied by MQTT, Git, filesystem and
 terminal adapters when those adapters are active.
 The operational SQLite database remains project-local because it is the
 orchestrator's live state, not forensic trace data.
+
+The optional semantic layer is stored at `<yano-install>/temp/semantic-index.sqlite`.
+`yano trace index` incrementally embeds observable trace records through local
+Ollama, and `yano trace search` retrieves a small ranked evidence set using
+cosine similarity. JSONL remains the source of truth; the SQLite index is
+rebuildable and is deleted or pruned together with `yano trace clear`.
 
 The feedback log stores the user's verdict verbatim. Each verdict also creates
 a deterministic snapshot; the planner's evidence-based diagnosis is stored

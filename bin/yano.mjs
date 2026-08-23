@@ -36,7 +36,7 @@
 //   yano deps              capability preflight per CLI, credenziali e auth
 //   yano gantt              dashboard web locale live dei run/ticket
 //   yano watch              watcher dei ticket stalled
-//   yano trace              attiva, consulta e cancella il tracing globale
+//   yano trace              attiva, consulta, indicizza e cancella il tracing globale
 //
 // Installazione: `npm install -g <repo>` (o `npm link` in locale, per lo
 // sviluppo di questo pacchetto stesso) espone `yano` sul PATH — campo "bin" di
@@ -92,7 +92,7 @@ function printTopUsage() {
 			"  deps [opzioni]   Verifica CLI, credenziali e autenticazione richieste dal task",
 			"  gantt [opzioni]  Avvia la dashboard web live dei run/ticket",
 			"  watch [opzioni]  Osserva e pubblica i ticket stalled",
-			"  trace [opzioni]  Attiva/disattiva e cancella il tracing globale — `yano trace --help`",
+			"  trace [opzioni]  Attiva/disattiva, cerca e cancella il tracing globale — `yano trace --help`",
 			"",
 			"  --version, -v    Stampa la versione del pacchetto installato",
 			"  --help, -h       Mostra questo messaggio",

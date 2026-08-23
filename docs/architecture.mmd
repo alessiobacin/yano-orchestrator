@@ -2,8 +2,10 @@
 flowchart TD
     USER["👤 User"] --> CLI["yano CLI"]
     CLI --> INIT["init / doctor / start"]
+    INIT --> HERDR_INIT["init --herdr\nHerdr workspace + root pane"]
     CLI --> OBS["status / fleet / deps / gantt / watch / trace"]
     INIT --> PLANNER["pi planner\nrole + instance identity"]
+    HERDR_INIT --> PLANNER
 
     subgraph CONFIG["Project configuration"]
         ROLES["agents/roles.yaml\ncapabilities + playbook defaults"]

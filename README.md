@@ -176,6 +176,23 @@ you do not want Herdr to own the project terminal.
 `yano start` usa `full` come modalità predefinita e la propaga agli agenti;
 usa `--trace-mode events|standard|off` per ridurla intenzionalmente.
 
+### Inizializzare un progetto già esistente
+
+Puoi eseguire `yano init` direttamente nella root di un'applicazione già
+presente, anche se contiene già `package.json`, codice e configurazioni:
+
+```bash
+cd /percorso/llmProxy
+yano init --name "llmProxy"
+```
+
+In questa modalità Yano non richiede `--force` e non sovrascrive il
+`package.json`, il codice, `.env.example` o le configurazioni già presenti.
+Aggiunge soltanto l'infrastruttura mancante. Se la root contiene già una
+cartella `agents/` dell'applicazione, il roster Yano viene collocato in
+`.pi/agents/`, layout supportato dal launcher, così i file dell'app non vengono
+mescolati con quelli dell'orchestratore.
+
 Then, in the planner's chat, describe what you want built:
 
 ```

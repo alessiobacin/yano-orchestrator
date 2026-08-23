@@ -44,6 +44,12 @@ Herdr e la root reale del progetto puntino a directory diverse.
 copiarvi il codice dell'estensione; il database SQLite operativo viene creato
 quando il primo planner inizializza l'orchestratore.
 
+Se la directory contiene già un'applicazione, puoi eseguire lo stesso comando
+senza `--force`: Yano adotta la root in modo non distruttivo, preservando
+`package.json`, codice, configurazioni e `.env.example`, e aggiungendo solo i
+file d'infrastruttura mancanti. Se `agents/` è già una cartella applicativa,
+il roster Yano viene scritto in `.pi/agents/`.
+
 Lo scope MQTT predefinito viene derivato da `config/project.json`, poi dal
 `package.json` e infine dal nome della cartella. Non aggiungere un
 `--project` basato arbitrariamente sul nome della directory: se lo usi,

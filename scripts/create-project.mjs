@@ -1,9 +1,7 @@
 #!/usr/bin/env node
-// Scaffolda un nuovo progetto "vuoto" pronto per yano-orchestrator, in una
-// directory a scelta — copia agents/prompts/mqtt/.env.example da QUESTO
-// pacchetto e scrive un package.json NUOVO, specifico del progetto (mai
-// quello del pacchetto), inizializza un repo git (serve per l'isolamento in
-// worktree, vedi docs/development-notes.md Revisioni 13/14).
+// Prepara un progetto nuovo o già esistente per yano-orchestrator, in una
+// directory a scelta. Nei progetti già esistenti copia soltanto file Yano
+// mancanti e preserva package.json, codice, configurazioni e file applicativi.
 //
 // Revisione 33 — NON copia più extensions/: da quando l'estensione si
 // installa globalmente (`pi extension install`, Revisione 31), `pi` la
@@ -58,6 +56,7 @@
 // Uso:
 //   node scripts/create-project.mjs --name "URL Shortener" [--target <dir>] [--force]
 //   yano init --name "URL Shortener" [--target <dir>] [--force]   (dopo `npm install -g` o `npm link`)
+//   yano init --name "Applicazione Esistente"                  (adotta la cwd in-place)
 //
 // --target di default (Revisione 31): la directory CORRENTE, in place — NON
 // più una sottocartella nuova (scelta esplicita dell'operatore: "inizializza
@@ -68,7 +67,9 @@
 // sovrascrivere lavoro esistente) — una directory che contiene SOLO una
 // `.git/` (es. dopo `mkdir progetto && cd progetto && git init`) non conta
 // come "non vuota" ai fini di questo controllo, per non costringere
-// all'uso di --force nel caso comune dello scaffolding in place.
+// all'uso di --force nel caso comune dello scaffolding in place. Per un
+// progetto già esistente inizializzato in-place il controllo è volutamente
+// non bloccante: l'infrastruttura viene aggiunta con merge non distruttivo.
 
 import { execFileSync } from "node:child_process";
 import { createInterface } from "node:readline/promises";
@@ -108,19 +109,22 @@ function printUsage() {
 			'Uso: yano init --name "<Nome Progetto>" [--target <dir>] [--force] [--llmp] [--herdr]',
 			'     (in locale, senza npm install -g: node scripts/create-project.mjs --name "<Nome Progetto>" [--target <dir>] [--force] [--llmp] [--herdr])',
 			"",
-			'  --name    Nome del progetto (obbligatorio) — finisce in package.json ("name", slug kebab-case)',
-			"            e viene pre-scritto in .pi/extensions/yano-orchestrator/config/project.json,",
-			"            così il planner lo trova già impostato al primo orchestrator_init e non deve chiederlo.",
+			'  --name    Nome del progetto (obbligatorio) — per un progetto esistente viene scritto solo nella',
+			"            configurazione Yano: il package.json applicativo già presente non viene mai sovrascritto.",
 			"  --target  Directory da scaffoldare (default: la directory CORRENTE, in place). Se passato,",
 			"            scaffolda invece in quella sottocartella/percorso (creandolo se non esiste).",
-			"  --force   Permette di scrivere in una directory di destinazione già esistente e non vuota",
+			"  --force   Permette di usare --target su una directory già esistente e non vuota",
 			"            (una directory che contiene solo \".git\" non conta come non vuota); con --llmp,",
 			"            permette anche di sovrascrivere .pi/agent/models.json e settings.json già esistenti.",
+			"            In-place su un progetto esistente yano init è già non distruttivo e non richiede --force.",
 			"  --llmp    Scrive anche .pi/agent/models.json e .pi/agent/settings.json, configurazione locale",
 			'            di `pi` per un llmproxy su http://127.0.0.1:7045 (provider "llmproxy", tema dark) —',
 			"            utile se usi un proxy LLM locale invece di un provider cloud diretto.",
 			"  --herdr   Crea/riusa un workspace Herdr con il nome della cartella corrente e",
 			"            avvia lì `yano init`, seguito dal planner-01. Richiede l'init in place: non usare --target.",
+			"",
+			"Progetto esistente: yano init aggiunge solo file Yano mancanti, preserva codice, package.json,",
+			"configurazioni e .env.example; se root agents/ è già dell'applicazione, usa .pi/agents/ per il roster Yano.",
 		].join("\n"),
 	);
 }
@@ -141,14 +145,53 @@ function nowIso() {
 	return new Date().toISOString();
 }
 
-function copyDir(src, dest) {
+function copyDirMissing(src, dest) {
 	fs.mkdirSync(dest, { recursive: true });
 	for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
-		const s = path.join(src, entry.name);
-		const d = path.join(dest, entry.name);
-		if (entry.isDirectory()) copyDir(s, d);
-		else fs.copyFileSync(s, d);
+		const source = path.join(src, entry.name);
+		const destination = path.join(dest, entry.name);
+		if (entry.isDirectory()) {
+			if (fs.existsSync(destination) && !fs.statSync(destination).isDirectory()) continue;
+			copyDirMissing(source, destination);
+		} else if (!fs.existsSync(destination)) {
+			fs.copyFileSync(source, destination);
+		}
 	}
+}
+
+function copyFileMissing(source, destination) {
+	if (!fs.existsSync(source) || fs.existsSync(destination)) return false;
+	fs.mkdirSync(path.dirname(destination), { recursive: true });
+	fs.copyFileSync(source, destination);
+	return true;
+}
+
+function resolveAgentsDestination(targetDir) {
+	const rootAgents = path.join(targetDir, "agents");
+	const rootRoster = path.join(rootAgents, "roles.yaml");
+	const existingLegacyAgents = path.join(targetDir, ".pi", "agents");
+	const existingLegacyRoster = path.join(existingLegacyAgents, "roles.yaml");
+	if (!fs.existsSync(rootAgents) && fs.existsSync(existingLegacyRoster)) return existingLegacyAgents;
+	if (fs.existsSync(rootAgents) && !fs.existsSync(rootRoster) && fs.readdirSync(rootAgents).length > 0) {
+		// An application may already own a root `agents/` directory. Keep it
+		// untouched and place Yano's roster in the supported project-local
+		// compatibility location instead of polluting the application folder.
+		return existingLegacyAgents;
+	}
+	return rootAgents;
+}
+
+function ensureGitignore(targetDir) {
+	const file = path.join(targetDir, ".gitignore");
+	const required = ["node_modules/", ".worktrees/", ".env", ".pi/", "*.db", "*.db-journal"];
+	if (!fs.existsSync(file)) {
+		fs.writeFileSync(file, `${required.join("\n")}\n`);
+		return;
+	}
+	const current = fs.readFileSync(file, "utf8");
+	const lines = new Set(current.split(/\r?\n/).map((line) => line.trim()));
+	const missing = required.filter((entry) => !lines.has(entry));
+	if (missing.length) fs.appendFileSync(file, `${current.endsWith("\n") || current.length === 0 ? "" : "\n"}${missing.join("\n")}\n`);
 }
 
 async function ensureMcpCredentials(targetDir) {
@@ -202,9 +245,14 @@ function mergeEssentialMcpServers(targetDir, packageRoot) {
 		const current = JSON.parse(fs.readFileSync(activePath, "utf8"));
 		const example = JSON.parse(fs.readFileSync(examplePath, "utf8"));
 		current.mcpServers ??= {};
+		let changed = false;
 		for (const [name, definition] of Object.entries(example.mcpServers ?? {})) {
-			if (!current.mcpServers[name]) current.mcpServers[name] = definition;
+			if (!current.mcpServers[name]) {
+				current.mcpServers[name] = definition;
+				changed = true;
+			}
 		}
+		if (!changed) return true;
 		const temporaryPath = `${activePath}.yano-init-mcp-${process.pid}`;
 		fs.writeFileSync(temporaryPath, `${JSON.stringify(current, null, 2)}\n`, { mode: 0o600 });
 		fs.renameSync(temporaryPath, activePath);
@@ -221,7 +269,13 @@ function mergeEssentialMcpServers(targetDir, packageRoot) {
 // directory dell'operatore (default per --target, Revisione 31: in place,
 // non più una sottocartella — vedi commento in testa al file); argv sono gli
 // argomenti (senza node/nome-script).
-export async function runCreateProject({ packageRoot, cwd, argv }) {
+export async function runCreateProject({ packageRoot, cwd, argv, preflightTools = {} }) {
+	const {
+		ensurePlaywright = ensurePlaywrightPrerequisites,
+		ensureCore = ensureCorePrerequisites,
+		ensureEmbeddings = ensureEmbeddingPrerequisites,
+		doctor = runDoctor,
+	} = preflightTools;
 	const { name, target, force, llmp, herdr } = parseArgs(argv);
 	if (!name) {
 		console.error("create-project: --name è obbligatorio (vedi --help).");
@@ -247,7 +301,7 @@ export async function runCreateProject({ packageRoot, cwd, argv }) {
 		// place) non conta come "non vuota" — altrimenti --force servirebbe
 		// quasi sempre nel caso d'uso di default (Revisione 31).
 		const existing = fs.readdirSync(targetDir).filter((e) => e !== ".git");
-		if (existing.length > 0 && !force) {
+		if (existing.length > 0 && target && !force) {
 			console.error(`create-project: "${targetDir}" esiste già e non è vuota — usa --force per scrivere comunque, o scegli un --target diverso.`);
 			process.exit(1);
 		}
@@ -263,7 +317,7 @@ export async function runCreateProject({ packageRoot, cwd, argv }) {
 		process.exitCode = 1;
 		return;
 	}
-	const playwright = ensurePlaywrightPrerequisites({ install: true });
+	const playwright = ensurePlaywright({ install: true });
 	if (!playwright.ok) {
 		console.error("yano init: prerequisiti Playwright non installabili — nessun file di scaffold è stato scritto.");
 		console.error(`  CLI: ${playwright.cli.hint}`);
@@ -271,7 +325,7 @@ export async function runCreateProject({ packageRoot, cwd, argv }) {
 		process.exitCode = 1;
 		return;
 	}
-	const core = ensureCorePrerequisites({ packageRoot, cwd: targetDir, install: true });
+	const core = ensureCore({ packageRoot, cwd: targetDir, install: true });
 	if (!core.ok) {
 		console.error("yano init: skill/MCP prerequisiti non installabili — nessun file di scaffold è stato scritto.");
 		for (const skill of core.skills.filter((item) => !item.ok)) console.error(`  skill ${skill.name}: installa da ${skill.repo}`);
@@ -281,7 +335,7 @@ export async function runCreateProject({ packageRoot, cwd, argv }) {
 		process.exitCode = 1;
 		return;
 	}
-	const embeddings = await ensureEmbeddingPrerequisites({ install: true });
+	const embeddings = await ensureEmbeddings({ install: true });
 	if (!embeddings.ok) {
 		console.error("yano init: prerequisiti embeddings non disponibili — nessun file di scaffold è stato scritto.");
 		console.error(`  Ollama: ${embeddings.cli.detail}`);
@@ -301,15 +355,16 @@ export async function runCreateProject({ packageRoot, cwd, argv }) {
 		process.exitCode = 1;
 		return;
 	}
-	const preflight = await runDoctor({ cwd: targetDir, autoStartBroker: true, packageRoot });
-	if (!preflight.ok) {
+	const doctorResult = await doctor({ cwd: targetDir, autoStartBroker: true, packageRoot });
+	if (!doctorResult.ok) {
 		console.error("yano init: preflight fallito — nessun file è stato scritto. Risolvi i prerequisiti indicati sopra e ripeti lo stesso comando.");
 		process.exitCode = 1;
 		return;
 	}
 	fs.mkdirSync(targetDir, { recursive: true });
 
-	console.log(`create-project: creo il progetto "${name}" in ${targetDir}${inPlace ? " (in place)" : ""}`);
+	const adoptingExistingProject = inPlace && fs.readdirSync(targetDir).some((entry) => entry !== ".git");
+	console.log(`create-project: ${adoptingExistingProject ? "inizializzo il progetto esistente" : "creo il progetto"} "${name}" in ${targetDir}${inPlace ? " (in place)" : ""}`);
 
 	// 1. Copia SOLO configurazione (agents/mqtt qui, prompts/ poco più sotto
 	//    con una destinazione diversa — vedi quel commento) dal pacchetto —
@@ -320,12 +375,15 @@ export async function runCreateProject({ packageRoot, cwd, argv }) {
 	//    un progetto nuovo erediti l'identità/il nome del pacchetto invece
 	//    del proprio, il problema reale osservato in yano-test-project — vedi
 	//    docs/development-notes.md, Revisione 28).
-	for (const dir of ["agents", "mqtt"]) {
+	const agentsDestination = resolveAgentsDestination(targetDir);
+	for (const dir of ["mqtt"]) {
 		const src = path.join(packageRoot, dir);
-		if (fs.existsSync(src)) copyDir(src, path.join(targetDir, dir));
+		if (fs.existsSync(src)) copyDirMissing(src, path.join(targetDir, dir));
 	}
+	const packagedAgents = path.join(packageRoot, "agents");
+	if (fs.existsSync(packagedAgents)) copyDirMissing(packagedAgents, agentsDestination);
 	const envExample = path.join(packageRoot, ".env.example");
-	if (fs.existsSync(envExample)) fs.copyFileSync(envExample, path.join(targetDir, ".env.example"));
+	copyFileMissing(envExample, path.join(targetDir, ".env.example"));
 
 	// Revisione 49 — il template MCP diventa attivo automaticamente: i server
 	// essenziali sono parte del preflight e devono essere disponibili a ogni
@@ -335,8 +393,8 @@ export async function runCreateProject({ packageRoot, cwd, argv }) {
 	// scope MCP per ruolo.
 	const mcpExample = path.join(packageRoot, "mcp.json.example");
 	if (fs.existsSync(mcpExample)) {
-		fs.copyFileSync(mcpExample, path.join(targetDir, "mcp.json.example"));
-		fs.copyFileSync(mcpExample, path.join(targetDir, ".mcp.json.example"));
+		copyFileMissing(mcpExample, path.join(targetDir, "mcp.json.example"));
+		copyFileMissing(mcpExample, path.join(targetDir, ".mcp.json.example"));
 		const activeMcp = path.join(targetDir, ".mcp.json");
 		if (!fs.existsSync(activeMcp)) {
 			fs.copyFileSync(mcpExample, activeMcp);
@@ -350,7 +408,7 @@ export async function runCreateProject({ packageRoot, cwd, argv }) {
 	const packagedPlaybooks = path.join(packageRoot, "playbooks");
 	const projectPlaybooks = path.join(targetDir, ".pi", "extensions", "yano-orchestrator", "playbooks");
 	if (fs.existsSync(packagedPlaybooks) && !fs.existsSync(projectPlaybooks)) {
-		copyDir(packagedPlaybooks, projectPlaybooks);
+		copyDirMissing(packagedPlaybooks, projectPlaybooks);
 	}
 
 	// Revisione 47: prompts/ NON viene più copiato qui — vedi il commento in
@@ -358,7 +416,9 @@ export async function runCreateProject({ packageRoot, cwd, argv }) {
 	// prompts/ finché non si esegue `yano copy-prompts` (facoltativo, solo per
 	// chi vuole personalizzare i prompt di UN progetto specifico).
 
-	// 2. package.json NUOVO, minimo, specifico del progetto — solo
+	// 2. package.json minimo, specifico del progetto. Per un progetto già
+	//    esistente è intoccabile: package manager, framework e identità
+	//    applicativa appartengono al progetto, non all'infrastruttura Yano.
 	//    identità/metadata (Revisione 33: nessuna dipendenza da installare
 	//    per far girare l'estensione, dato che il codice e le sue
 	//    dipendenze npm vivono nell'installazione globale del pacchetto, non
@@ -371,7 +431,8 @@ export async function runCreateProject({ packageRoot, cwd, argv }) {
 		type: "module",
 		description: `Progetto "${name}", orchestrato con yano-orchestrator.`,
 	};
-	fs.writeFileSync(path.join(targetDir, "package.json"), `${JSON.stringify(projectPkg, null, 2)}\n`);
+	const packageJsonPath = path.join(targetDir, "package.json");
+	if (!fs.existsSync(packageJsonPath)) fs.writeFileSync(packageJsonPath, `${JSON.stringify(projectPkg, null, 2)}\n`);
 
 	// 3. Pre-scrivi config/project.json con il nome scelto — così il primo
 	//    orchestrator_init lo trova già impostato e il planner non deve
@@ -449,17 +510,11 @@ export async function runCreateProject({ packageRoot, cwd, argv }) {
 	// 4. .gitignore minimo (worktree/node_modules), git init se non è già un
 	//    repo — richiesto per l'isolamento in worktree (docs/development-notes.md,
 	//    Revisioni 13/14).
-	const gitignorePath = path.join(targetDir, ".gitignore");
-	if (!fs.existsSync(gitignorePath)) {
-		// .pi/ qui è la workspace runtime dell'estensione nel progetto scaffoldato
-		// (SQLite orchestrator.db, config/project.json, specs/tickets — Revisioni
-		// 26-28; report, prompt di ruolo, e log di debug per-istanza dalla
-		// Revisione 37 — vedi extensions/orchestrator.ts, yanoSubdirs), non
-		// codice: locale per macchina/progetto, mai da condividere. Non serve
-		// più una voce "logs/" separata a livello di root: dalla Revisione 37
-		// quel log vive dentro .pi/, già coperto qui.
-		fs.writeFileSync(gitignorePath, ["node_modules/", ".worktrees/", ".env", ".pi/", "*.db", "*.db-journal", ""].join("\n"));
-	}
+	// .pi/ qui è la workspace runtime dell'estensione nel progetto scaffoldato
+	// (SQLite, config, specs, report e trace locali), non codice applicativo.
+	// In un progetto esistente le regole mancanti vengono aggiunte in coda,
+	// senza sostituire il .gitignore del progetto.
+	ensureGitignore(targetDir);
 	if (!fs.existsSync(path.join(targetDir, ".git"))) {
 		try {
 			execFileSync("git", ["init"], { cwd: targetDir, stdio: "ignore" });

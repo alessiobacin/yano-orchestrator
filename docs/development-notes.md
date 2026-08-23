@@ -6,6 +6,32 @@ l'equivalente diretto di `coms.ts`/`coms-net.ts` del repo
 `disler/pi-vs-claude-code`, ma su MQTT 5 e con il paradigma role/instance al
 posto della chat P2P piatta.
 
+## Revisione 52 — init non distruttivo di progetti esistenti
+
+**Incidente reale**: `yano init` rifiutava una root applicativa già esistente
+solo perché conteneva file, mostrando un invito a usare `--force`. Quel flag
+era adatto a una destinazione scaffold nuova, non all'adozione di un progetto
+con `package.json`, codice e configurazioni proprie.
+
+**Fix**:
+
+- l'init in-place non richiede più `--force` e distingue la root corrente da
+  una destinazione `--target` potenzialmente accidentale;
+- `package.json`, sorgenti, `.env.example`, configurazioni e file già presenti
+  non vengono sovrascritti;
+- `agents/`, `mqtt/`, esempi MCP, playbook e `.gitignore` usano merge/add-only;
+- se `agents/` è già occupata dall'applicazione, il roster Yano viene scritto
+  in `.pi/agents/`, layout riconosciuto dal launcher;
+- il package JSON e le impostazioni locali restano di proprietà del progetto;
+  `--force` conserva il solo significato esplicito per `--target` e reset
+  opzionale della configurazione `--llmp`.
+
+**Uso**: dalla root di un progetto già esistente, `yano init --name
+"Nome Progetto"`.
+
+**Verifica**: smoke test dedicato con package JSON, sorgente, `.env.example`,
+cartella `agents/` applicativa e `.gitignore` preesistenti; tutti preservati.
+
 ## Revisione 51 — `agent_list` include il planner corrente
 
 **Incidente reale**: in `code-mem` il pannello `planner-01` era online e

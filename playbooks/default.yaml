@@ -1,16 +1,17 @@
+---
 schema_version: 1
 id: default-orchestration
 label: Default Pi MQTT orchestration flow
-description: >-
-  Contratto deterministico del ciclo planner/coder/reviewer/specialisti per un
-  task gestito da yano-orchestrator.
+description: Contratto deterministico del ciclo
+  planner/coder/reviewer/specialisti per un task gestito da
+  yano-orchestrator.
 enforcement:
   status: partial
-  note: >-
-    binding immutabile, guardie con evidence persistite, transizioni atomiche,
-    approval hold, outbox effect e gate actor sono applicati dal runtime; la
-    riconciliazione completa ticket↔fase, dispatch adapter e chiusura completa
-    restano in parte affidati al planner e ai prompt.
+  note: binding immutabile, guardie con evidence persistite, transizioni
+    atomiche, approval hold, outbox effect e gate actor sono applicati
+    dal runtime; la riconciliazione completa ticket↔fase, dispatch
+    adapter e chiusura completa restano in parte affidati al planner e
+    ai prompt.
   existing_runtime:
     - playbook_bind_immutable_snapshot
     - playbook_evidence_verified_sources
@@ -26,7 +27,6 @@ enforcement:
     - ticket_claim_authorization
     - worktree_finalize_checklist
     - watchdog_stall_detection
-
 states:
   - id: received
     owner: planner
@@ -76,13 +76,13 @@ states:
   - id: cancelled
     owner: planner_and_human
     terminal: true
-
 transitions:
   - id: receive_to_scope
     from: received
     to: scoping
     actor: planner
-    requires: [objective_received]
+    requires:
+      - objective_received
     effects:
       - id: scope-entered-audit
         kind: audit
@@ -96,7 +96,10 @@ transitions:
     from: scoping
     to: awaiting_team_confirmation
     actor: planner
-    requires: [scope_defined, team_selected, phases_proposed]
+    requires:
+      - scope_defined
+      - team_selected
+      - phases_proposed
     effects:
       - id: team-confirmation-hold
         kind: human_approval
@@ -107,12 +110,15 @@ transitions:
     from: awaiting_team_confirmation
     to: awaiting_worktree_confirmation
     actor: human
-    requires: [explicit_team_and_plan_confirmation]
+    requires:
+      - explicit_team_and_plan_confirmation
   - id: confirm_reuse_or_new_worktree
     from: awaiting_worktree_confirmation
     to: bootstrapping
     actor: human
-    requires: [worktree_list_open_checked, reuse_or_new_decision]
+    requires:
+      - worktree_list_open_checked
+      - reuse_or_new_decision
   - id: bootstrap_task
     from: bootstrapping
     to: preflight
@@ -147,17 +153,25 @@ transitions:
     from: awaiting_phase_review
     to: phase_rework
     actor: planner_or_reviewer
-    requires: [concrete_findings, same_worktree, new_round_true]
+    requires:
+      - concrete_findings
+      - same_worktree
+      - new_round_true
   - id: retry_phase
     from: phase_rework
     to: phase_active
     actor: planner
-    requires: [round_count_less_than_or_equal_to_three, target_role_online]
+    requires:
+      - round_count_less_than_or_equal_to_three
+      - target_role_online
   - id: stop_after_retries
     from: phase_rework
     to: blocked
     actor: planner
-    requires: [three_complete_rounds_without_resolution, report_updated, whatsapp_sent]
+    requires:
+      - three_complete_rounds_without_resolution
+      - report_updated
+      - whatsapp_sent
   - id: complete_phase
     from: awaiting_phase_review
     to: awaiting_next_phase
@@ -170,22 +184,31 @@ transitions:
     from: awaiting_next_phase
     to: phase_active
     actor: planner
-    requires: [tickets_ready_checked, next_phase_unlocked, next_phase_delegated]
+    requires:
+      - tickets_ready_checked
+      - next_phase_unlocked
+      - next_phase_delegated
   - id: enter_final_checks
     from: awaiting_next_phase
     to: final_checks
     actor: planner
-    requires: [last_phase_completed, final_ticket_status_verified]
+    requires:
+      - last_phase_completed
+      - final_ticket_status_verified
   - id: request_final_confirmation
     from: final_checks
     to: awaiting_final_confirmation
     actor: planner
-    requires: [final_report_written, test_results_recorded, user_confirmation_requested]
+    requires:
+      - final_report_written
+      - test_results_recorded
+      - user_confirmation_requested
   - id: confirm_final_result
     from: awaiting_final_confirmation
     to: finalizing
     actor: human
-    requires: [explicit_user_confirmation]
+    requires:
+      - explicit_user_confirmation
   - id: finalize_success
     from: finalizing
     to: completed
@@ -201,23 +224,40 @@ transitions:
     from: finalizing
     to: blocked
     actor: runtime
-    requires: [main_checkout_dirty]
+    requires:
+      - main_checkout_dirty
   - id: finalize_merge_conflict
     from: finalizing
     to: blocked
     actor: runtime
-    requires: [merge_conflict]
+    requires:
+      - merge_conflict
   - id: manual_conflict_resolution
     from: blocked
     to: completed
     actor: planner
-    requires: [human_confirmed_changes_in_main, worktree_abandon_called]
+    requires:
+      - human_confirmed_changes_in_main
+      - worktree_abandon_called
   - id: cancel_task
-    from: [scoping, awaiting_team_confirmation, awaiting_worktree_confirmation, bootstrapping, preflight, phase_active, awaiting_phase_review, phase_rework, awaiting_next_phase, final_checks, awaiting_final_confirmation, finalizing]
+    from:
+      - scoping
+      - awaiting_team_confirmation
+      - awaiting_worktree_confirmation
+      - bootstrapping
+      - preflight
+      - phase_active
+      - awaiting_phase_review
+      - phase_rework
+      - awaiting_next_phase
+      - final_checks
+      - awaiting_final_confirmation
+      - finalizing
     to: cancelled
     actor: human
-    requires: [explicit_cancellation, report_updated]
-
+    requires:
+      - explicit_cancellation
+      - report_updated
 failure_routes:
   - condition: assigned_instance_offline
     action: auto_fail_ticket_then_relaunch_and_replan
@@ -237,7 +277,6 @@ failure_routes:
   - condition: ticket_failed
     action: create_replacement_ticket_or_escalate
     terminal: false
-
 invariants:
   - planner_never_claims_ticket
   - planner_never_implements_substantive_work
@@ -256,11 +295,18 @@ invariants:
   - no_finalize_before_explicit_user_confirmation
   - no_finalize_with_dirty_main_checkout
   - merge_conflict_is_never_resolved_automatically
-
 non_code_tasks:
   enabled: true
   plan_set: false
-  flow: [scoping, awaiting_team_confirmation, bootstrapping, phase_active, awaiting_phase_review, final_checks, awaiting_final_confirmation, finalizing]
-  rule: >-
-    Sono esenti dal piano a fasi solo perché plan_set richiede coder in fase 1;
-    restano soggetti a worktree/report, delega, verifica, conferma e chiusura.
+  flow:
+    - scoping
+    - awaiting_team_confirmation
+    - bootstrapping
+    - phase_active
+    - awaiting_phase_review
+    - final_checks
+    - awaiting_final_confirmation
+    - finalizing
+  rule: Sono esenti dal piano a fasi solo perché plan_set richiede coder
+    in fase 1; restano soggetti a worktree/report, delega, verifica,
+    conferma e chiusura.

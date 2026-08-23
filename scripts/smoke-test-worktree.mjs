@@ -52,7 +52,7 @@ async function ensureWorktreesGitignored(projectCwd) {
 	const alreadyIgnored = lines.some((l) => l === ".worktrees" || l === ".worktrees/" || l === "/.worktrees" || l === "/.worktrees/" || l === "*" || l === ".*");
 	if (alreadyIgnored) return;
 	const needsLeadingNewline = existing.length > 0 && !existing.endsWith("\n");
-	const addition = `${needsLeadingNewline ? "\n" : ""}# yano-orchestrator: per-task git worktrees (see docs/mvp-notes.md)\n.worktrees/\n`;
+	const addition = `${needsLeadingNewline ? "\n" : ""}# yano-orchestrator: per-task git worktrees (see docs/development-notes.md)\n.worktrees/\n`;
 	fs.writeFileSync(gitignorePath, existing + addition);
 	try {
 		await execGit(["add", ".gitignore"], projectCwd);

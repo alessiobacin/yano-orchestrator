@@ -1304,10 +1304,10 @@ chiarito il punto reale, più specifico del semplice "ordine mentale":
 "MVP" dal progetto — va gestito e comunicato come un progetto vero e
 proprio, non come un minimum viable product. Un controllo di tutte le
 occorrenze (`grep -rni mvp`) ha mostrato che quasi ogni menzione era in
-realtà solo il nome del file `docs/mvp-notes.md` citato in un commento — la
+realtà solo il nome del file `docs/development-notes.md` citato in un commento — la
 vera "narrazione MVP" si limitava a una manciata di frasi sparse in
 `extensions/orchestrator.ts` e in questo stesso documento. Rinominato questo
-file da `docs/mvp-notes.md` a `docs/development-notes.md` (titolo interno
+file da `docs/development-notes.md` a `docs/development-notes.md` (titolo interno
 aggiornato da "MVP scope notes" a "Development notes"), aggiornati tutti i
 riferimenti in ogni file del repository che lo citava (`extensions/orchestrator.ts`,
 script, prompt, README, AGENTS.md, CI, ecc.), e riformulate le poche frasi

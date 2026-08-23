@@ -1,0 +1,78 @@
+---
+schema_version: 1
+id: security-review
+label: Security and dependency evaluation
+description: Security specialist flow for SAST, dependency CVEs,
+  secrets, injection and authentication checks, with concrete findings
+  routed to coder.
+enforcement:
+  status: partial
+  note: Scanner availability and repository-specific auth boundaries are
+    recorded as capability evidence.
+states:
+  - id: received
+    owner: planner
+    terminal: false
+  - id: preflight
+    owner: planner
+    terminal: false
+  - id: assessment
+    owner: security_evaluator
+    terminal: false
+  - id: remediation
+    owner: coder
+    terminal: false
+  - id: completed
+    owner: planner
+    terminal: true
+  - id: blocked
+    owner: planner_and_human
+    terminal: true
+transitions:
+  - id: scope
+    from: received
+    to: preflight
+    actor: planner
+    requires:
+      - objective_received
+      - security_scope_defined
+  - id: start_assessment
+    from: preflight
+    to: assessment
+    actor: planner
+    requires:
+      - security_tools_checked
+      - phase_unlocked
+  - id: request_fix
+    from: assessment
+    to: remediation
+    actor: security_evaluator
+    requires:
+      - finding_has_file_line_and_reproduction
+  - id: accept
+    from: remediation
+    to: completed
+    actor: planner
+    requires:
+      - finding_resolved_or_risk_accepted
+      - regression_tests_run
+      - docs_synced_or_skipped_with_reason
+  - id: block
+    from: assessment
+    to: blocked
+    actor: planner
+    requires:
+      - critical_finding_unresolved
+      - report_updated
+failure_routes:
+  - condition: secret_detected
+    action: stop_and_rotate_without_printing_value
+    terminal: true
+  - condition: critical_vulnerability
+    action: block_release
+    terminal: true
+invariants:
+  - never_echo_secret
+  - finding_is_concrete
+  - reviewer_checklist_not_duplicated
+  - no_finalize_before_explicit_user_confirmation

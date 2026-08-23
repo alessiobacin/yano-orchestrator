@@ -78,11 +78,13 @@ function loadRolePrompt(primaryDir, fallbackDir, role, roleCfg) {
 }
 
 function render(text, identity, roleCfg) {
+	const capabilities = `Skill autorizzate: ${(roleCfg?.skills || []).join(", ") || "nessuna skill dichiarata"}\nCLI autorizzate: ${(roleCfg?.cli || []).join(", ") || "nessuna CLI dichiarata"}\nMCP autorizzati: ${(roleCfg?.mcp || []).join(", ") || "nessun MCP dichiarato"}`;
 	return text
 		.replaceAll("{{INSTANCE}}", identity.instance)
 		.replaceAll("{{ROLE}}", identity.role)
 		.replaceAll("{{ROLE_LABEL}}", roleCfg?.label || identity.role)
 		.replaceAll("{{BRIEF}}", roleCfg?.brief || "")
+		.replaceAll("{{CAPABILITIES}}", capabilities)
 		.replaceAll("{{PROJECT}}", identity.project)
 		.replaceAll("{{TEAM}}", identity.team.join(", "));
 }

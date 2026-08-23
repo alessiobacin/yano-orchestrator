@@ -1,0 +1,78 @@
+---
+schema_version: 1
+id: documentation-release
+label: Documentation and release delivery
+description: Documentation, architecture, changelog and release-note
+  flow that closes a task only after the written surface matches the
+  verified implementation.
+enforcement:
+  status: partial
+  note: Documentation evidence is command- and diff-based; publication
+    remains human-approved.
+states:
+  - id: received
+    owner: planner
+    terminal: false
+  - id: preflight
+    owner: planner
+    terminal: false
+  - id: writing
+    owner: documentation_specialist
+    terminal: false
+  - id: verification
+    owner: docs_sync
+    terminal: false
+  - id: completed
+    owner: planner
+    terminal: true
+  - id: blocked
+    owner: planner_and_human
+    terminal: true
+transitions:
+  - id: scope
+    from: received
+    to: preflight
+    actor: planner
+    requires:
+      - objective_received
+      - changed_surface_identified
+  - id: start_writing
+    from: preflight
+    to: writing
+    actor: planner
+    requires:
+      - source_of_truth_checked
+      - phase_unlocked
+  - id: sync
+    from: writing
+    to: verification
+    actor: documentation_specialist
+    requires:
+      - docs_diff_recorded
+      - examples_checked
+  - id: accept
+    from: verification
+    to: completed
+    actor: planner
+    requires:
+      - docs_sync_approved
+      - docs_synced_or_skipped_with_reason
+  - id: block
+    from: verification
+    to: blocked
+    actor: docs_sync
+    requires:
+      - implementation_doc_drift
+      - report_updated
+failure_routes:
+  - condition: undocumented_public_change
+    action: return_to_owner
+    terminal: false
+  - condition: release_metadata_unknown
+    action: request_human_decision
+    terminal: false
+invariants:
+  - docs_describe_current_behavior
+  - commands_are_executable_or_marked_example
+  - no_release_publish_without_confirmation
+  - no_finalize_before_explicit_user_confirmation

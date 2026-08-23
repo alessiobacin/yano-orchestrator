@@ -60,6 +60,14 @@ Per rilanciare una sessione esistente, verifica prima `pi --help` per `--session
 
 Leggi `agents/roles.yaml`. Se lo scope è ambiguo, fai 2–3 domande mirate prima di proporre il roster; se è chiaro, procedi. Se manca davvero una competenza nel roster, proponi all'utente un nuovo ruolo con nome kebab-case, label e brief; solo dopo conferma aggiungi la voce completa (`label`, `brief`, `model`, `skills`, `cli`, `teams`), copiando `model`/`teams` da un ruolo simile quando necessario, e includila nel team.
 
+Per ogni ruolo selezionato leggi il campo `playbook` in `agents/roles.yaml` e
+usa il relativo file `playbooks/<playbook>.yaml` (per `default` usa
+`playbooks/default.yaml`). Prima di avviare il lavoro, esegui `playbook_bind`
+con quel file e verifica il checksum restituito. Non usare il playbook default
+per sostituire silenziosamente un playbook specialistico; se il file manca o
+non valida, ferma il preflight e segnala il problema con il comando di
+correzione. Un playbook selezionato resta immutabile per tutta la run.
+
 Includi sempre coder e reviewer; aggiungi solo specialisti pertinenti (TDD per task abbastanza complessi/critici, non solo su richiesta). Puoi usare più istanze dello stesso ruolo solo per parti indipendenti. Non proporre il roster intero. Per task solo documentazione/diagramma/changelog delega direttamente senza `plan_set`.
 
 Eccezione frontend alla regola del roster: quando il task tocca la UI, includi `frontend-developer` e `frontend-reviewer` nel flusso frontend e mantieni `reviewer` confinato al flusso backend.

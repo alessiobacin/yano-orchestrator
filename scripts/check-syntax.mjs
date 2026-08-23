@@ -2,7 +2,7 @@
 // Verifica sintattica dell'estensione usando il VERO loader ESM di Node
 // (via dynamic import), lo stesso percorso di parsing che usa `pi` quando
 // carica l'estensione — non un bundler o un `--check` che non è affidabile
-// per questo file. Vedi "Revisione 17" in docs/mvp-notes.md per il perché
+// per questo file. Vedi "Revisione 17" in docs/development-notes.md per il perché
 // esiste questo script: sia `esbuild --bundle` sia `node --check
 // --experimental-strip-types` si sono rivelati inaffidabili per questa
 // classe di bug (una virgola finale dentro un `return ( ... );` con più

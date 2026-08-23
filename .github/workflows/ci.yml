@@ -29,7 +29,7 @@ jobs:
           node-version: "22"
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Recreate local @mariozechner/pi-tui stub (dev/test only — see scripts/setup-dev-stubs.mjs)
         run: npm run setup-dev-stubs
@@ -38,7 +38,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y mosquitto
-          nohup mosquitto -c mqtt/mosquitto.conf > /tmp/mosquitto.log 2>&1 &
+          nohup mosquitto -c mqtt/mosquitto.native.conf > /tmp/mosquitto.log 2>&1 &
           disown
           for i in $(seq 1 20); do
             (echo > /dev/tcp/127.0.0.1/1883) >/dev/null 2>&1 && echo "mosquitto up" && exit 0
@@ -46,48 +46,8 @@ jobs:
           done
           echo "mosquitto never came up"; cat /tmp/mosquitto.log; exit 1
 
-      - name: check-syntax (real syntax check of extensions/orchestrator.ts)
-        run: npm run check-syntax
-
-      - name: check-skill-isolation (mattpocock skills wired ONLY to planner, chrome-devtools ONLY to reviewer/frontend-developer)
-        run: npm run check-skill-isolation
-
-      - name: launch-planner legacy-scaffold handling (stale extensions/ never re-added to -e)
-        run: node scripts/smoke-test-launch-planner-legacy.mjs
-
-      - name: launch-planner any-role support (Revisione 44 — yano start for coder/reviewer/specialists too)
-        run: node scripts/smoke-test-launch-any-role.mjs
-
-      - name: yano copy-prompts (Revisione 47 — materialize a per-project prompts/ copy to customize, superseding the old yano sync-prompts)
-        run: node scripts/smoke-test-copy-prompts.mjs
-
-      - name: Smoke tests (transport / pipeline / worktree / coordination / etc.)
-        run: |
-          node scripts/smoke-test.mjs
-          node scripts/smoke-test-pipeline.mjs
-          node scripts/smoke-test-multiround.mjs
-          node scripts/smoke-test-worktree.mjs
-          node scripts/smoke-test-specialist-prompt.mjs
-          node scripts/smoke-test-coordination.mjs
-          node scripts/smoke-test-debug-log.mjs
-          node scripts/smoke-test-late-broker.mjs
-          node scripts/smoke-test-shutdown-hang.mjs
-          node scripts/smoke-test-report-audit.mjs
-          node scripts/smoke-test-whatsapp-notify.mjs
-          node scripts/smoke-test-plan-gate.mjs
-
-      - name: Real e2e tests (import and execute the REAL extensions/orchestrator.ts)
-        run: |
-          node --experimental-strip-types scripts/smoke-test-watchdog.mjs
-          node --experimental-strip-types scripts/smoke-test-response-wakeup.mjs
-          node --experimental-strip-types scripts/smoke-test-worktree-cwd-guard.mjs
-          node --experimental-strip-types scripts/smoke-test-ticket-engine.mjs
-          node --experimental-strip-types scripts/smoke-test-project-scoping.mjs
-          node --experimental-strip-types scripts/smoke-test-end-project.mjs
-          node --experimental-strip-types scripts/smoke-test-agent-send-presence-warning.mjs
-          node --experimental-strip-types scripts/smoke-test-instance-liveness.mjs
-          node --experimental-strip-types scripts/smoke-test-custom-prompts.mjs
-          node --experimental-strip-types scripts/e2e-full-flow.mjs
+      - name: Full test suite (static checks, every smoke test and real E2E)
+        run: npm test
 
       - name: yano CLI smoke test (init in place + start --print-only, via a real global install)
         run: |

@@ -1,0 +1,79 @@
+---
+schema_version: 1
+id: qa-hardening
+label: Test hardening and quality verification
+description: Specialist QA flow for TDD follow-up, mutation, E2E,
+  accessibility and regression testing without duplicating the core
+  reviewer.
+enforcement:
+  status: partial
+  note: Test runner and mutation command are selected from the
+    repository evidence.
+states:
+  - id: received
+    owner: planner
+    terminal: false
+  - id: preflight
+    owner: planner
+    terminal: false
+  - id: testing
+    owner: qa-specialist
+    terminal: false
+  - id: findings
+    owner: planner
+    terminal: false
+  - id: completed
+    owner: planner
+    terminal: true
+  - id: blocked
+    owner: planner_and_human
+    terminal: true
+transitions:
+  - id: scope
+    from: received
+    to: preflight
+    actor: planner
+    requires:
+      - objective_received
+      - test_scope_defined
+      - tickets_created_for_all_phases
+  - id: start_testing
+    from: preflight
+    to: testing
+    actor: planner
+    requires:
+      - required_cli_skill_mcp_checked
+      - phase_unlocked
+  - id: report_findings
+    from: testing
+    to: findings
+    actor: qa-specialist
+    requires:
+      - test_commands_recorded
+      - report_updated
+  - id: accept
+    from: findings
+    to: completed
+    actor: planner
+    requires:
+      - findings_resolved_or_accepted
+      - docs_synced_or_skipped_with_reason
+  - id: block
+    from: findings
+    to: blocked
+    actor: planner
+    requires:
+      - unresolved_failure
+      - report_updated
+failure_routes:
+  - condition: flaky_test
+    action: reproduce_then_classify
+    terminal: false
+  - condition: mutation_survives
+    action: send_test_gap_to_coder
+    terminal: false
+invariants:
+  - no_test_deleted_to_hide_failure
+  - evidence_has_command_and_exit_status
+  - production_data_never_used
+  - no_finalize_before_explicit_user_confirmation

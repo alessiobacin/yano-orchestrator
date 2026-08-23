@@ -1,0 +1,78 @@
+---
+schema_version: 1
+id: performance-observability
+label: Performance and observability verification
+description: Evidence-driven flow for performance regressions,
+  structured logging, metrics, traces and browser/runtime benchmarks.
+enforcement:
+  status: partial
+  note: Baselines must be measured in the target project environment
+  never invented.: null
+states:
+  - id: received
+    owner: planner
+    terminal: false
+  - id: preflight
+    owner: planner
+    terminal: false
+  - id: measuring
+    owner: performance_specialist
+    terminal: false
+  - id: remediation
+    owner: coder_or_frontend_developer
+    terminal: false
+  - id: completed
+    owner: planner
+    terminal: true
+  - id: blocked
+    owner: planner_and_human
+    terminal: true
+transitions:
+  - id: scope
+    from: received
+    to: preflight
+    actor: planner
+    requires:
+      - objective_received
+      - baseline_scope_defined
+  - id: start_measurement
+    from: preflight
+    to: measuring
+    actor: planner
+    requires:
+      - benchmark_tools_checked
+      - baseline_or_reason_recorded
+  - id: request_change
+    from: measuring
+    to: remediation
+    actor: performance_specialist
+    requires:
+      - measurement_reproducible
+      - regression_or_opportunity_reported
+  - id: accept
+    from: remediation
+    to: completed
+    actor: planner
+    requires:
+      - benchmark_rerun
+      - observability_reviewed
+      - docs_synced_or_skipped_with_reason
+  - id: block
+    from: measuring
+    to: blocked
+    actor: planner
+    requires:
+      - unstable_environment_or_missing_baseline
+      - report_updated
+failure_routes:
+  - condition: regression_not_reproducible
+    action: repeat_with_fixed_environment
+    terminal: false
+  - condition: telemetry_changes_sensitive_data
+    action: block_and_redact
+    terminal: true
+invariants:
+  - measurement_has_units_and_sample_context
+  - no_telemetry_secrets
+  - compare_before_after
+  - no_finalize_before_explicit_user_confirmation

@@ -32,6 +32,10 @@
 //                        usare davvero (default: i prompt si leggono sempre
 //                        dal pacchetto installato, mai da una copia locale
 //                        — vedi extensions/orchestrator.ts).
+//   yano status|logs|fleet|mcp|skills  viste read-only del progetto e della flotta
+//   yano deps              capability preflight per CLI, credenziali e auth
+//   yano gantt              dashboard web locale live dei run/ticket
+//   yano watch              watcher dei ticket stalled
 //
 // Installazione: `npm install -g <repo>` (o `npm link` in locale, per lo
 // sviluppo di questo pacchetto stesso) espone `yano` sul PATH — campo "bin" di
@@ -54,6 +58,10 @@ import { runUpdate } from "../scripts/update.mjs";
 import { runUninstall } from "../scripts/uninstall.mjs";
 import { runEndProject } from "../scripts/end-project.mjs";
 import { runCopyPrompts } from "../scripts/copy-prompts.mjs";
+import { runPoStatus } from "../scripts/yano-status.mjs";
+import { runPoDeps } from "../scripts/yano-deps.mjs";
+import { runGantt } from "../scripts/gantt-server.mjs";
+import { runWatch } from "../scripts/watch-stalls.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, "..");
@@ -72,6 +80,10 @@ function printTopUsage() {
 			"  uninstall [--yes] Rimuove l'installazione globale",
 			'  end [opzioni]    Chiude i run "active" del progetto nella directory corrente — `yano end --help`',
 			"  copy-prompts     Copia prompts/ dal pacchetto installato nel progetto corrente, per personalizzarli",
+			"  status|logs|fleet|mcp|skills  Viste read-only del progetto e della flotta",
+			"  deps [opzioni]   Verifica CLI, credenziali e autenticazione richieste dal task",
+			"  gantt [opzioni]  Avvia la dashboard web live dei run/ticket",
+			"  watch [opzioni]  Osserva e pubblica i ticket stalled",
 			"",
 			"  --version, -v    Stampa la versione del pacchetto installato",
 			"  --help, -h       Mostra questo messaggio",
@@ -104,6 +116,10 @@ async function main() {
 		return;
 	}
 	if (sub === "doctor") {
+		if (rest.includes("--network")) {
+			await runPoStatus({ cwd, argv: ["doctor", "--network"] });
+			return;
+		}
 		const { ok } = await runDoctor({ cwd, json: rest.includes("--json") });
 		process.exit(ok ? 0 : 1);
 	}
@@ -121,6 +137,22 @@ async function main() {
 	}
 	if (sub === "copy-prompts") {
 		runCopyPrompts({ packageRoot, cwd });
+		return;
+	}
+	if (["status", "logs", "fleet", "mcp", "skills"].includes(sub)) {
+		await runPoStatus({ cwd, argv: [sub, ...rest] });
+		return;
+	}
+	if (sub === "deps") {
+		await runPoDeps({ cwd, argv: rest });
+		return;
+	}
+	if (sub === "gantt") {
+		await runGantt({ cwd, argv: rest, packageRoot });
+		return;
+	}
+	if (sub === "watch") {
+		await runWatch({ cwd, argv: rest });
 		return;
 	}
 

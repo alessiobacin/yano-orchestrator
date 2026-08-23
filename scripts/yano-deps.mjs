@@ -27,16 +27,19 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { readFileSync as rfs } from "node:fs";
+import { parse as parseYaml } from "yaml";
 
 function parseArgs(argv) {
-	const o = { cli: [], env: [], auth: [], listHints: false };
+	const o = { cli: [], env: [], auth: [], role: null, listHints: false, json: false, record: false };
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i];
 		if (a === "--cli") o.cli = (argv[++i] || "").split(",").map((s) => s.trim()).filter(Boolean);
 		else if (a === "--env") o.env = (argv[++i] || "").split(",").map((s) => s.trim()).filter(Boolean);
 		else if (a === "--auth") o.auth = (argv[++i] || "").split(",").map((s) => s.trim()).filter(Boolean);
+		else if (a === "--role") o.role = argv[++i] || null;
 		else if (a === "--list-hints") o.listHints = true;
+		else if (a === "--json") o.json = true;
+		else if (a === "--record") o.record = true;
 	}
 	return o;
 }
@@ -44,6 +47,19 @@ function parseArgs(argv) {
 function which(cmd) {
 	try { const r = spawnSync(cmd, ["--version"], { stdio: "ignore" }); return !r.error || r.error.code !== "ENOENT"; }
 	catch { return false; }
+}
+
+function loadRoleCli(cwd, role) {
+	if (!role) return [];
+	try {
+		const file = path.join(cwd, "agents", "roles.yaml");
+		const doc = parseYaml(readFileSync(file, "utf8"));
+		const config = doc?.roles?.[role];
+		if (!config) throw new Error(`ruolo "${role}" non trovato in agents/roles.yaml`);
+		return Array.isArray(config.cli) ? config.cli : [];
+	} catch (error) {
+		throw new Error(error instanceof Error ? error.message : String(error));
+	}
 }
 
 function authOk(cmd) {
@@ -76,11 +92,20 @@ function readEnv(cwd) {
 
 export async function runPoDeps({ cwd, argv }) {
 	const opts = parseArgs(argv);
+	try {
+		for (const cli of loadRoleCli(cwd, opts.role)) if (!opts.cli.includes(cli)) opts.cli.push(cli);
+	} catch (error) {
+		console.error(`yano deps: ${error.message}`);
+		return { ok: false, results: [], missing: [{ kind: "role", name: opts.role, hint: error.message }] };
+	}
 	if (opts.listHints) {
 		console.log("Suggerimenti `yano deps`:");
 		console.log("  --cli gh,docker          CLI da controllare (which).");
 		console.log("  --env GITHUB_TOKEN,..    variabili attese nel .env del progetto.");
 		console.log("  --auth gh                CLI da verificare come già autenticata (es. gh auth status).");
+		console.log("  --role coder             importa le CLI dichiarate dal ruolo da agents/roles.yaml.");
+		console.log("  --json                   stampa solo il report machine-readable.");
+		console.log("  --record                 salva il report in .pi/extensions/multiAgentOrchestrator/config/capabilities.json.");
 		return { hints: true };
 	}
 	if (!opts.cli.length && !opts.env.length && !opts.auth.length) {
@@ -105,15 +130,23 @@ export async function runPoDeps({ cwd, argv }) {
 
 	const missing = results.filter((r) => !r.present);
 	const okCount = results.length - missing.length;
-	console.log(`yano deps: ${okCount}/${results.length} soddisfatt${results.length === 1 ? "o" : "i"}.`);
-	for (const r of results) {
-		console.log(`   ${r.present ? "✓" : "✗"} [${r.kind}] ${r.name}${r.present ? "" : ` — ${r.hint}`}`);
+	const report = { ok: missing.length === 0, role: opts.role, results, missing, checked_at: new Date().toISOString() };
+	if (opts.record) {
+		const destination = path.join(cwd, ".pi", "extensions", "multiAgentOrchestrator", "config", "capabilities.json");
+		const { mkdirSync, writeFileSync } = await import("node:fs");
+		mkdirSync(path.dirname(destination), { recursive: true });
+		writeFileSync(destination, JSON.stringify(report, null, 2) + "\n");
 	}
-	if (missing.length) console.log(`\n${missing.length} voce/i mancante/i — forniscile (wait) oppure procedi (async) e verrà rivista quando serve.`);
+	if (opts.json) console.log(JSON.stringify(report));
+	else {
+		console.log(`yano deps: ${okCount}/${results.length} soddisfatt${results.length === 1 ? "o" : "i"}.`);
+		for (const r of results) console.log(`   ${r.present ? "✓" : "✗"} [${r.kind}] ${r.name}${r.present ? "" : ` — ${r.hint}`}`);
+		if (missing.length) console.log(`\n${missing.length} voce/i mancante/i — forniscile (wait) oppure procedi (async) e verrà rivista quando serve.`);
+	}
 
 	// Planner actionability: a compact machine-readable summary in details-adjacent
 	// form for the planner to pass into decision_hold_create context.
-	return { ok: missing.length === 0, results, missing };
+	return report;
 }
 
 const invokedDirectly = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);

@@ -1,0 +1,82 @@
+---
+schema_version: 1
+id: frontend-browser
+label: Frontend implementation and browser review
+description: Frontend flow using frontend-developer and
+  frontend-reviewer with Playwright CLI and Chrome DevTools evidence;
+  backend reviewer is not substituted.
+enforcement:
+  status: partial
+  note: Browser commands are recorded as evidence by the planner;
+    runtime does not guess application URLs.
+states:
+  - id: received
+    owner: planner
+    terminal: false
+  - id: preflight
+    owner: planner
+    terminal: false
+  - id: implementing
+    owner: frontend-developer
+    terminal: false
+  - id: browser_review
+    owner: frontend-reviewer
+    terminal: false
+  - id: completed
+    owner: planner
+    terminal: true
+  - id: blocked
+    owner: planner_and_human
+    terminal: true
+transitions:
+  - id: scope
+    from: received
+    to: preflight
+    actor: planner
+    requires:
+      - objective_received
+      - spec_created
+      - frontend_scope_defined
+  - id: start_frontend
+    from: preflight
+    to: implementing
+    actor: planner
+    requires:
+      - playwright_cli_available
+      - chrome_devtools_available
+      - phase_one_unlocked
+  - id: submit_browser_review
+    from: implementing
+    to: browser_review
+    actor: frontend-developer
+    requires:
+      - frontend_tests_run
+      - screenshot_or_trace_recorded
+      - frontend_sent_to_frontend_reviewer
+  - id: accept
+    from: browser_review
+    to: completed
+    actor: planner
+    requires:
+      - frontend_reviewer_approved
+      - console_and_network_checked
+      - docs_synced_or_skipped_with_reason
+  - id: reject
+    from: browser_review
+    to: blocked
+    actor: frontend-reviewer
+    requires:
+      - concrete_browser_finding
+      - report_updated
+failure_routes:
+  - condition: browser_unreachable
+    action: report_url_and_environment_blocker
+    terminal: false
+  - condition: accessibility_regression
+    action: return_to_frontend_developer
+    terminal: false
+invariants:
+  - frontend_reviewer_is_separate_from_backend_reviewer
+  - snapshot_first
+  - no_fixed_waits_when_web_assertion_exists
+  - no_finalize_before_explicit_user_confirmation

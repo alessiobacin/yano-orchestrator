@@ -17,8 +17,8 @@ const result = spawnSync(node, [path.join(root, "bin", "yano.mjs"), "init", "--n
 const output = `${result.stdout}\n${result.stderr}`;
 const checks = [
 	[result.status === 1, "missing pi makes yano init fail with exit code 1"],
-	[/preflight fallito/.test(output), "failure explains that preflight blocked initialization"],
-	[/nessun file è stato scritto/.test(output), "failure explains that no files were written"],
+	[/(preflight fallito|prerequisiti .* non installabili)/.test(output), "failure explains that preflight blocked initialization"],
+	[/nessun file (?:è stato scritto|di scaffold è stato scritto)/.test(output), "failure explains that no files were written"],
 	[fs.readdirSync(target).length === 0, "target remains empty after preflight failure"],
 ];
 for (const [ok, message] of checks) {

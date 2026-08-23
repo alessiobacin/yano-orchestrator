@@ -1,0 +1,77 @@
+---
+schema_version: 1
+id: data-api-contract
+label: Database migration and API contract
+description: Data and API flow for schema changes, fixtures,
+  OpenAPI/AsyncAPI and optional Postman collection validation.
+enforcement:
+  status: partial
+  note: Database engine and API runtime are detected from repository
+    evidence before commands run.
+states:
+  - id: received
+    owner: planner
+    terminal: false
+  - id: preflight
+    owner: planner
+    terminal: false
+  - id: contract
+    owner: api_or_schema_specialist
+    terminal: false
+  - id: verification
+    owner: planner
+    terminal: false
+  - id: completed
+    owner: planner
+    terminal: true
+  - id: blocked
+    owner: planner_and_human
+    terminal: true
+transitions:
+  - id: scope
+    from: received
+    to: preflight
+    actor: planner
+    requires:
+      - objective_received
+      - data_or_api_scope_defined
+  - id: start_contract
+    from: preflight
+    to: contract
+    actor: planner
+    requires:
+      - database_or_api_stack_detected
+      - required_cli_skill_mcp_checked
+  - id: verify
+    from: contract
+    to: verification
+    actor: api_or_schema_specialist
+    requires:
+      - migration_or_spec_validated
+      - fixtures_or_examples_safe
+  - id: accept
+    from: verification
+    to: completed
+    actor: planner
+    requires:
+      - backward_compatibility_checked
+      - docs_synced_or_skipped_with_reason
+  - id: block
+    from: verification
+    to: blocked
+    actor: planner
+    requires:
+      - breaking_change_or_data_risk
+      - report_updated
+failure_routes:
+  - condition: migration_not_reversible
+    action: require_human_approval
+    terminal: false
+  - condition: contract_drift
+    action: return_to_coder_or_api_writer
+    terminal: false
+invariants:
+  - no_real_pii_in_fixtures
+  - migration_has_rollback_or_explicit_exception
+  - contract_matches_runtime
+  - no_finalize_before_explicit_user_confirmation

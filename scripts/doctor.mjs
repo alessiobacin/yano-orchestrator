@@ -33,6 +33,7 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { parse as parseYaml } from "yaml";
 
 const PLAYWRIGHT_CLI_PACKAGE = "@playwright/cli@latest";
 const PLAYWRIGHT_CLI_SKILL_REPO = "https://github.com/microsoft/playwright-cli";
@@ -49,6 +50,20 @@ const ESSENTIAL_SKILLS = [
 	{ name: "playwright-cli", repo: PLAYWRIGHT_CLI_SKILL_REPO },
 ];
 const ESSENTIAL_MCP_SERVERS = ["chrome-devtools", "github"];
+const LAZY_SKILL_SOURCES = {
+	"playwright-cli": PLAYWRIGHT_CLI_SKILL_REPO,
+	"chrome-devtools": CHROME_SKILLS_REPO,
+	"code-review": MATT_SKILLS_REPO,
+	wayfinder: MATT_SKILLS_REPO,
+	"to-spec": MATT_SKILLS_REPO,
+	grilling: MATT_SKILLS_REPO,
+	"domain-modeling": MATT_SKILLS_REPO,
+	"setup-matt-pocock-skills": MATT_SKILLS_REPO,
+};
+const LAZY_CLI_INSTALLERS = {
+	"playwright-cli": ["npm", ["install", "-g", PLAYWRIGHT_CLI_PACKAGE]],
+	postman: ["npm", ["install", "-g", "postman-cli"]],
+};
 
 function playwrightSkillPaths() {
 	const roots = [
@@ -114,6 +129,23 @@ function readMcpConfig(cwd) {
 	try { return { file, servers: JSON.parse(fs.readFileSync(file, "utf8")).mcpServers ?? {} }; } catch { return { file, servers: {}, invalid: true }; }
 }
 
+function ensureDeclaredMcp(cwd, packageRoot, server) {
+	const current = readMcpConfig(cwd);
+	if (Object.hasOwn(current.servers, server)) return true;
+	if (!packageRoot || !["github", "chrome-devtools"].includes(server)) return false;
+	const example = path.join(packageRoot, "mcp.json.example");
+	try {
+		const template = JSON.parse(fs.readFileSync(example, "utf8"));
+		const target = current.file ?? path.join(cwd, ".mcp.json");
+		const merged = { ...(current.file ? JSON.parse(fs.readFileSync(target, "utf8")) : {}), mcpServers: { ...(current.servers ?? {}), ...(template.mcpServers ?? {}) } };
+		fs.mkdirSync(path.dirname(target), { recursive: true });
+		fs.writeFileSync(target, `${JSON.stringify(merged, null, 2)}\n`, { mode: 0o600 });
+		return Object.hasOwn(merged.mcpServers, server);
+	} catch {
+		return false;
+	}
+}
+
 export function ensureCorePrerequisites({ packageRoot, cwd, install = false } = {}) {
 	const skills = checkEssentialSkills(packageRoot);
 	const missingSkills = skills.filter((skill) => !skill.ok);
@@ -165,6 +197,57 @@ export function ensurePlaywrightPrerequisites({ install = false } = {}) {
 	};
 }
 
+function readRoleConfig(packageRoot, cwd, role) {
+	const candidates = [path.join(cwd ?? process.cwd(), "agents", "roles.yaml"), path.join(packageRoot ?? "", "agents", "roles.yaml")];
+	const file = candidates.find((candidate) => fs.existsSync(candidate));
+	if (!file) return null;
+	try { return parseYaml(fs.readFileSync(file, "utf8"))?.roles?.[role] ?? null; } catch { return null; }
+}
+
+// Lazy, role-scoped gate. `yano init` calls only ensureCorePrerequisites;
+// this function is called by `yano start --role <specialist>`, so optional
+// capabilities are installed exactly when the planner asks for that role.
+// Unknown OS-level tools are never guessed or installed through sudo: the
+// launch is stopped with a deterministic manual command instead.
+export function ensureRolePrerequisites({ packageRoot, cwd, role, install = true } = {}) {
+	const cfg = readRoleConfig(packageRoot, cwd, role);
+	if (!cfg || cfg.activation !== "lazy") return { ok: true, role, skipped: true, missing: [] };
+	const missing = [];
+	for (const skill of cfg.skills ?? []) {
+		if (skillFile(skill, packageRoot)) continue;
+		const source = LAZY_SKILL_SOURCES[skill];
+		if (!source) {
+			missing.push({ kind: "skill", name: skill, hint: `installa/verifica la skill '${skill}' nel tuo catalogo Codex` });
+			continue;
+		}
+		if (!skillFile(skill, packageRoot) && install) {
+			runInstall("npx", ["-y", "skills", "add", source, "--skill", skill, "--global", "--yes"]);
+		}
+		if (!skillFile(skill, packageRoot)) missing.push({ kind: "skill", name: skill, hint: `npx -y skills add ${source} --skill ${skill} --global --yes` });
+	}
+	for (const cli of cfg.cli ?? []) {
+		if (cli === "git" || cli === "npm" || cli === "npx") continue;
+		let ok = commandExists(cli, ["--version"]);
+		const installer = LAZY_CLI_INSTALLERS[cli];
+		if (!ok && installer && install) {
+			runInstall(installer[0], installer[1]);
+			ok = commandExists(cli, ["--version"]);
+		}
+		if (!ok) missing.push({ kind: "cli", name: cli, hint: installer ? `${installer[0]} ${installer[1].join(" ")}` : `installa '${cli}' con il package manager ufficiale del tuo sistema` });
+	}
+	const mcp = readMcpConfig(cwd ?? process.cwd());
+	for (const server of cfg.mcp ?? []) {
+		let present = Object.hasOwn(mcp.servers, server);
+		if (!present && install) present = ensureDeclaredMcp(cwd ?? process.cwd(), packageRoot, server);
+		if (!present) missing.push({ kind: "mcp", name: server, hint: `aggiungi il server '${server}' a ${mcp.file ?? ".mcp.json"} seguendo la documentazione ufficiale` });
+	}
+	if (missing.length) {
+		console.error(`yano start: prerequisiti mancanti per il ruolo lazy '${role}'; avvio annullato (nessun worktree modificato).`);
+		for (const item of missing) console.error(`  - ${item.kind} ${item.name}: ${item.hint}`);
+	}
+	return { ok: missing.length === 0, role, skipped: false, missing };
+}
+
 function commandExists(cmd, args = ["--version"]) {
 	try {
 		const result = spawnSync(cmd, args, { stdio: "ignore", shell: process.platform === "win32" });
@@ -197,6 +280,16 @@ function tcpReachable(host, port, timeoutMs = 400) {
 	});
 }
 
+const MIN_NODE = { major: 22, minor: 5, patch: 0 };
+
+export function isSupportedNodeRuntime(version = process.versions.node) {
+	const [major, minor, patch] = String(version).split(".").map((part) => Number.parseInt(part, 10));
+	if (![major, minor, patch].every(Number.isFinite)) return false;
+	if (major !== MIN_NODE.major) return major > MIN_NODE.major;
+	if (minor !== MIN_NODE.minor) return minor > MIN_NODE.minor;
+	return patch >= MIN_NODE.patch;
+}
+
 function osInstallHint(tool) {
 	const platform = process.platform;
 	const hints = {
@@ -211,9 +304,9 @@ function osInstallHint(tool) {
 			linux: "segui https://docs.docker.com/engine/install/ per la tua distribuzione, poi: sudo systemctl start docker",
 		},
 		mosquitto: {
-			darwin: "brew install mosquitto   (poi: mosquitto -c mqtt/mosquitto.conf)",
-			win32: "winget install EclipseFoundation.Mosquitto   (poi, in una finestra separata: mosquitto -c mqtt\\mosquitto.conf)",
-			linux: "sudo apt-get install -y mosquitto   (Debian/Ubuntu — poi: mosquitto -c mqtt/mosquitto.conf)",
+			darwin: "brew install mosquitto   (poi: mosquitto -c mqtt/mosquitto.native.conf)",
+			win32: "winget install EclipseFoundation.Mosquitto   (poi, in una finestra separata: mosquitto -c mqtt\\mosquitto.native.conf)",
+			linux: "sudo apt-get install -y mosquitto   (Debian/Ubuntu — poi: mosquitto -c mqtt/mosquitto.native.conf)",
 		},
 	};
 	return hints[tool]?.[platform] ?? hints[tool]?.linux ?? "vedi la documentazione ufficiale del progetto.";
@@ -233,7 +326,9 @@ export async function runDoctor({ cwd = process.cwd(), json = false, autoStartBr
 	const rows = [];
 	let ok = true;
 
-	rows.push(["Node.js", true, process.version]);
+	const nodeOk = isSupportedNodeRuntime();
+	rows.push(["Node.js", nodeOk, nodeOk ? `${process.version} (minimo 22.5.0)` : `${process.version} — richiesto almeno Node 22.5.0`]);
+	if (!nodeOk) ok = false;
 
 	const hasGit = commandExists("git");
 	rows.push(["git", hasGit, hasGit ? "trovato" : `non trovato — ${osInstallHint("git")}`]);
@@ -293,7 +388,7 @@ export async function runDoctor({ cwd = process.cwd(), json = false, autoStartBr
 	} else if (dockerOk) {
 		rows.push(["Docker", true, "installato e in esecuzione — usa: docker compose -f mqtt/compose.yaml up -d"]);
 	} else if (hasMosquitto) {
-		rows.push(["Mosquitto (nativo)", true, "trovato sul PATH — usa: mosquitto -c mqtt/mosquitto.conf"]);
+		rows.push(["Mosquitto (nativo)", true, "trovato sul PATH — usa: mosquitto -c mqtt/mosquitto.native.conf"]);
 	} else {
 		const dockerInstalled = commandExists("docker");
 		rows.push([

@@ -24,7 +24,7 @@
 //
 // What this does NOT verify: the Playbook engine, replanning, the
 // integration phase, budget enforcement, or automatic crash/timeout retry
-// with fencing tokens — all explicitly deferred, see docs/mvp-notes.md
+// with fencing tokens — all explicitly deferred, see docs/development-notes.md
 // Revisione 26. Also does not touch the existing plan_set/plan_advance
 // phase gate (already covered by scripts/smoke-test-plan-gate.mjs) — the
 // two mechanisms are independent and this script only exercises the new one.
@@ -66,6 +66,7 @@ async function bootstrapScratchRepo() {
 	}
 	fs.mkdirSync(path.join(dir, "playbooks"), { recursive: true });
 	fs.copyFileSync(path.join(PROJECT_ROOT, "playbooks", "default.yaml"), path.join(dir, "playbooks", "default.yaml"));
+	fs.copyFileSync(path.join(PROJECT_ROOT, "playbooks", "backend-change.yaml"), path.join(dir, "playbooks", "backend-change.yaml"));
 	fs.writeFileSync(path.join(dir, ".gitignore"), "node_modules/\nlogs/\n.pi/\n");
 	await git(["add", "-A"], dir);
 	await git(["commit", "-q", "-m", "initial scratch repo (ticket-engine test)"], dir);
@@ -491,6 +492,21 @@ async function runScenario(cwd, project) {
 	// though D — the "main" chain — is about to finish.
 	const completeD = await coder.call("ticket_complete", { ticket_id: ticketD.id, status: "done" });
 	ok(completeD.details.ticket.status === "done", "D marked done");
+
+	console.log("\n=== TEST 6b — explicit Playbook contract and safe retention apply ===");
+	const scopedRun = (await planner.call("run_create", { objective: "Playbook-scoped ticket" })).details.run;
+	await planner.call("playbook_bind", { run_id: scopedRun.id, source: "playbooks/backend-change.yaml" });
+	const scopedTicket = (await planner.call("ticket_create", { run_id: scopedRun.id, title: "Backend-scoped work", required_playbook: "backend-change" })).details.ticket;
+	ok(scopedTicket.required_playbook === "backend-change", "ticket persists its explicit required Playbook contract");
+	const wrongPlaybook = await specialist.callExpectError("ticket_claim", { ticket_id: scopedTicket.id });
+	ok(/mapped to playbook/.test(wrongPlaybook.message), "ticket_claim refuses a role mapped to a different Playbook");
+	await coder.call("ticket_claim", { ticket_id: scopedTicket.id });
+	await coder.call("ticket_complete", { ticket_id: scopedTicket.id, status: "done" });
+	await planner.call("retention_policy_set", { project, event_days: 30, evidence_days: 30, outbox_days: 30, dead_letter_days: 30, policy_version: 1 });
+	const retentionPreview = await planner.call("retention_policy_preview", { project });
+	ok(retentionPreview.details.preview.destructive_apply_required === true, "retention preview advertises the destructive confirmation boundary");
+	const retentionApply = await planner.call("retention_policy_apply", { project, confirm: true });
+	ok(retentionApply.details.result.deleted.events >= 0, "retention apply executes only after explicit confirmation and returns deletion counts");
 	const runAfterD = (await coder.call("run_status", { run_id: runId })).details.run;
 	ok(runAfterD.status === "active", "run stays active — ticket Y (blocked, since X failed) is still outstanding");
 

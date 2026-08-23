@@ -75,7 +75,7 @@ import { createInterface } from "node:readline/promises";
 import * as fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { runDoctor, ensurePlaywrightPrerequisites, ensureCorePrerequisites } from "./doctor.mjs";
+import { runDoctor, ensurePlaywrightPrerequisites, ensureCorePrerequisites, isSupportedNodeRuntime } from "./doctor.mjs";
 
 function parseArgs(argv) {
 	let name;
@@ -243,6 +243,11 @@ export async function runCreateProject({ packageRoot, cwd, argv }) {
 	// the exact doctor diagnostics and can fix the machine before retrying the
 	// same command. Installation of system-level tools remains explicit and
 	// version-controlled by the operator (doctor prints the platform command).
+	if (!isSupportedNodeRuntime()) {
+		console.error(`yano init: Node.js ${process.version} non supportato — serve Node 22.5.0 o superiore. Nessun file di scaffold è stato scritto.`);
+		process.exitCode = 1;
+		return;
+	}
 	const playwright = ensurePlaywrightPrerequisites({ install: true });
 	if (!playwright.ok) {
 		console.error("yano init: prerequisiti Playwright non installabili — nessun file di scaffold è stato scritto.");
@@ -459,7 +464,7 @@ export async function runCreateProject({ packageRoot, cwd, argv }) {
 	console.log("  docker compose -f mqtt/compose.yaml up -d   # broker MQTT locale (Docker Desktop su Windows), oppure punta --broker a uno esistente");
 	if (isWindows) {
 		console.log("  # senza Docker Desktop: installa Mosquitto nativo (https://mosquitto.org/download/ o `winget install EclipseFoundation.Mosquitto`)");
-		console.log("  #   poi: mosquitto -c mqtt\\mosquitto.conf   (in una finestra PowerShell separata)");
+		console.log("  #   poi: mosquitto -c mqtt\\mosquitto.native.conf   (in una finestra PowerShell separata)");
 	}
 	console.log("  yano start --instance planner-01   # planner SEMPRE così, mai `pi` a mano — vedi sotto");
 	console.log("");

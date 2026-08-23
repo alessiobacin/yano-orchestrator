@@ -74,6 +74,7 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { ensureRolePrerequisites, isSupportedNodeRuntime } from "./doctor.mjs";
 
 // Le 5 skill vendorizzate destinate al ruolo planner (Revisione 22) — vedi
 // skills-vendor/mattpocock/VERSION.md per la motivazione di ciascuna
@@ -163,6 +164,13 @@ function parseArgs(argv) {
 // .pi/extensions/multiAgentOrchestrator/config/project.json.
 export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 	const { passthrough, printOnly, role } = parseArgs(argv);
+	if (!isSupportedNodeRuntime()) {
+		console.error(`launch-planner: Node.js ${process.version} non supportato — serve Node 22.5.0 o superiore.`);
+		return;
+	}
+	const prerequisites = ensureRolePrerequisites({ packageRoot, cwd, role, install: !printOnly });
+	if (!prerequisites.ok && !printOnly) return;
+	if (!prerequisites.ok && printOnly) console.warn("launch-planner: print-only — prerequisiti lazy non installati/verificati; comando mostrato soltanto.");
 
 	const orchestratorPath = path.join(cwd, "extensions", "orchestrator.ts");
 	const hasLocalExtension = existsSync(orchestratorPath);

@@ -5,7 +5,7 @@ aggiorna da solo) di alcune skill del repo pubblico di Matt Pocock. Vive
 FUORI da `.pi/skills/`, `~/.pi/agent/skills/` e `.agents/skills/`
 deliberatamente, per non attivare la discovery automatica di Pi su tutti i
 ruoli — vengono caricate esplicitamente solo per il ruolo `planner` (vedi
-`extensions/orchestrator.ts` e Revisione 22 in `docs/mvp-notes.md`).
+`extensions/orchestrator.ts` e Revisione 22 in `docs/development-notes.md`).
 
 - **Repo sorgente**: https://github.com/mattpocock/skills
 - **Commit pinnato**: `9c9f36ccd3995266cd675468af71639c8dde1ec5`
@@ -93,7 +93,7 @@ Su richiesta esplicita dell'utente, nessuna dipendenza da GitHub Issues.
 scegliendo il tracker **"Local Markdown"** (`issue-tracker-local.md`) —
 mappa e ticket di wayfinder vivono come file in `.scratch/<effort>/` nel
 repo di lavoro del task (dentro il worktree del task, non nel repo di
-`yano-orchestrator` stesso — vedi Revisione 22 in `docs/mvp-notes.md`
+`yano-orchestrator` stesso — vedi Revisione 22 in `docs/development-notes.md`
 per il dettaglio). Nessun CLI `gh`/`glab` richiesto.
 
 ## Aggiornare il pin in futuro
@@ -110,4 +110,4 @@ consapevolmente:
    sono comparse nuove dipendenze da altre skill del repo sorgente).
 3. Aggiornare commit hash e data in questo file.
 4. Rieseguire la suite di smoke test e il controllo di isolamento per-ruolo
-   (vedi Revisione 22 in `docs/mvp-notes.md`).
+   (vedi Revisione 22 in `docs/development-notes.md`).

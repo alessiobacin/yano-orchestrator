@@ -1,0 +1,81 @@
+---
+schema_version: 1
+id: backend-change
+label: Backend change with TDD and review
+description: "Deterministic flow for backend implementation: contract,
+  tests, isolated change, reviewer approval, regression evidence and
+  documentation."
+enforcement:
+  status: partial
+  note: Runtime gates plan phases, tickets, evidence and finalization;
+    role-specific commands remain project-dependent.
+states:
+  - id: received
+    owner: planner
+    terminal: false
+  - id: preflight
+    owner: planner
+    terminal: false
+  - id: implementing
+    owner: coder
+    terminal: false
+  - id: review
+    owner: reviewer
+    terminal: false
+  - id: completed
+    owner: planner
+    terminal: true
+  - id: blocked
+    owner: planner_and_human
+    terminal: true
+transitions:
+  - id: scope
+    from: received
+    to: preflight
+    actor: planner
+    requires:
+      - objective_received
+      - spec_created
+      - tickets_created_for_all_phases
+  - id: start_implementation
+    from: preflight
+    to: implementing
+    actor: planner
+    requires:
+      - required_cli_skill_mcp_checked
+      - phase_one_unlocked
+  - id: submit_review
+    from: implementing
+    to: review
+    actor: coder
+    requires:
+      - tests_run
+      - report_updated
+      - coder_sent_to_reviewer_when_code_changed
+  - id: accept
+    from: review
+    to: completed
+    actor: planner
+    requires:
+      - reviewer_approved_when_code_changed
+      - docs_synced_or_skipped_with_reason
+  - id: reject
+    from: review
+    to: blocked
+    actor: reviewer
+    requires:
+      - concrete_findings
+      - report_updated
+failure_routes:
+  - condition: test_failed
+    action: return_to_coder_with_evidence
+    terminal: false
+  - condition: retry_budget_exhausted
+    action: stop_and_escalate
+    terminal: true
+invariants:
+  - isolated_worktree
+  - tests_before_implementation_when_tdd_selected
+  - reviewer_required_for_code
+  - docs_sync_last
+  - no_finalize_before_explicit_user_confirmation

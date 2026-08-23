@@ -46,7 +46,7 @@ npm install -g .
 
 ### Windows
 
-Works the same way from PowerShell — no WSL required, just Node.js 18+ and Git for Windows:
+Works the same way from PowerShell — no WSL required, just Node.js 22.5+ and Git for Windows:
 
 ```powershell
 npm install -g .
@@ -59,12 +59,14 @@ copy .env.example .env   # optional: WhatsApp notifications
 docker compose -f mqtt/compose.yaml up -d   # with Docker Desktop
 # or, without Docker Desktop, native Mosquitto for Windows:
 #   install from https://mosquitto.org/download/ (or `winget install EclipseFoundation.Mosquitto`)
-#   then, in a separate window: mosquitto -c mqtt\mosquitto.conf
+#   then, in a separate window: mosquitto -c mqtt\mosquitto.native.conf
 
 yano start --instance planner-01
 ```
 
 `yano init` detects your OS automatically and prints the right commands either way, and finishes by running `yano doctor` for you — a quick check that git, `pi`, and an MQTT broker are all available, with OS-specific install hints for anything that's missing. Run it again any time with `yano doctor`.
+
+The ticket/DAG layer uses Node's built-in `node:sqlite` API, so Node 22.5 or newer is required. `yano doctor` refuses unsupported runtimes before initialization.
 
 ### Keeping `yano` up to date
 
@@ -94,6 +96,11 @@ yano end --list                # just list them, no changes
 yano end --run <run_id>        # close one specific run instead of every active one
 yano end --status cancelled    # mark as cancelled instead of completed (also accepts "failed")
 yano end --yes                 # skip the confirmation prompt
+yano status                    # run/ticket summary from SQLite
+yano fleet                     # live MQTT presence of the agent pool
+yano deps --cli git,npm        # capability preflight
+yano gantt                     # local live dashboard at 127.0.0.1:8174
+yano watch --once              # one stalled-ticket scan
 ```
 
 A run (the ticket/DAG layer's top-level container for one objective — see "Layer ticket/DAG persistente" in `docs/development-notes.md`, Revisione 26) normally closes itself once every one of its tickets is marked done. `yano end` is for when that doesn't happen — a session ended before every ticket was formally completed, the goal changed, or you're simply satisfied with where things landed and want to declare it done. It never touches tickets, worktrees, or any file outside this project's own `orchestrator.db` — closing a run just changes its own status and records the change in its event history, visible later via `run_status` from inside a planner session.
@@ -169,9 +176,9 @@ skills-vendor/mattpocock/         vendored planner-only skills (wayfinder, to-sp
 skills-vendor/awesome-copilot/    vendored chrome-devtools skill, reviewer/frontend-developer only —
                                    see VERSION.md
 mqtt/                             local Mosquitto broker config for development
-docs/                             architecture diagrams and detailed development notes
+docs/                             architecture documentation, Mermaid diagrams and detailed development notes
 .env.example                      WhatsApp notification configuration template
-.mcp.json.example                 chrome-devtools MCP server configuration template
+mcp.json.example                  chrome-devtools MCP server configuration template
 ```
 
 ## Contributing

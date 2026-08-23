@@ -1,0 +1,58 @@
+# Canonical capability registry used by `yano deps --role` and CI linting.
+# Roles may still declare project-specific skills/MCPs, but executable probes
+# belong here so the same command and version signal is used everywhere.
+schema_version: 1
+
+capabilities:
+  node:
+    kind: cli
+    command: node
+    probe: [--version]
+  git:
+    kind: cli
+    command: git
+    probe: [--version]
+  npm:
+    kind: cli
+    command: npm
+    probe: [--version]
+  npx:
+    kind: cli
+    command: npx
+    probe: [--version]
+  gh:
+    kind: cli
+    command: gh
+    probe: [--version]
+  docker:
+    kind: cli
+    command: docker
+    probe: [--version]
+  docker-compose:
+    kind: cli
+    command: docker
+    probe: [compose, version]
+  kubectl:
+    kind: cli
+    command: kubectl
+    probe: [version, --client=true]
+  helm:
+    kind: cli
+    command: helm
+    probe: [version]
+  mongosh:
+    kind: cli
+    command: mongosh
+    probe: [--version]
+  postman:
+    kind: cli
+    command: postman
+    probe: [--version]
+  playwright-cli:
+    kind: cli
+    command: playwright-cli
+    probe: [--version]
+  semgrep:
+    kind: cli
+    command: semgrep
+    probe: [--version]

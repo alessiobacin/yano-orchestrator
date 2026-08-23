@@ -3,6 +3,9 @@
   "version": "1.2.9",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22.5.0"
+  },
   "description": "MQTT-based multi-agent orchestration extension for Yano (planner/coder/reviewer + a ticket/DAG layer), with a global `yano` CLI (yano init / yano start / yano end) for scaffolding, launching, and closing out orchestrated projects.",
   "homepage": "https://github.com/alessiobacin/yano-orchestrator",
   "repository": {
@@ -19,7 +22,10 @@
   },
   "files": [".env.example", "agents", "bin", "docs", "extensions", "mcp.json.example", "mqtt", "playbooks", "prompts", "scripts", "skills-vendor", "README.md", "LICENSE"],
   "scripts": {
+    "test": "node scripts/test-all.mjs",
     "check-syntax": "node --experimental-strip-types scripts/check-syntax.mjs extensions/orchestrator.ts",
+    "lint:capabilities": "node scripts/lint-capabilities.mjs",
+    "lint:playbooks": "node scripts/lint-playbooks.mjs",
     "review-log": "node scripts/review-log.mjs",
     "launch-planner": "node scripts/launch-planner.mjs",
     "check-skill-isolation": "node scripts/check-skill-isolation.mjs",

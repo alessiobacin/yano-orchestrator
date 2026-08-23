@@ -1,0 +1,78 @@
+---
+schema_version: 1
+id: platform-delivery
+label: Container, Kubernetes and CI delivery
+description: Platform flow separating image/container work, cluster
+  manifests and CI/CD policy; each specialist consumes the previous
+  artifact instead of rewriting it.
+enforcement:
+  status: partial
+  note: Cluster access and cloud cost evidence are environment-specific
+    and must be explicitly probed.
+states:
+  - id: received
+    owner: planner
+    terminal: false
+  - id: preflight
+    owner: planner
+    terminal: false
+  - id: packaging
+    owner: dockerizer
+    terminal: false
+  - id: deployment
+    owner: k8s_or_cicd
+    terminal: false
+  - id: completed
+    owner: planner
+    terminal: true
+  - id: blocked
+    owner: planner_and_human
+    terminal: true
+transitions:
+  - id: scope
+    from: received
+    to: preflight
+    actor: planner
+    requires:
+      - objective_received
+      - platform_scope_defined
+  - id: start_packaging
+    from: preflight
+    to: packaging
+    actor: planner
+    requires:
+      - docker_or_native_runtime_checked
+      - phase_unlocked
+  - id: deploy_artifact
+    from: packaging
+    to: deployment
+    actor: dockerizer
+    requires:
+      - image_build_verified
+      - security_scan_recorded
+  - id: accept
+    from: deployment
+    to: completed
+    actor: planner
+    requires:
+      - manifest_or_pipeline_validated
+      - docs_synced_or_skipped_with_reason
+  - id: block
+    from: deployment
+    to: blocked
+    actor: planner
+    requires:
+      - deployment_risk_or_missing_access
+      - report_updated
+failure_routes:
+  - condition: cluster_unreachable
+    action: report_context_and_stop
+    terminal: false
+  - condition: image_scan_failed
+    action: block_release
+    terminal: true
+invariants:
+  - no_production_apply_without_explicit_approval
+  - immutable_image_reference
+  - declarative_kubernetes_changes
+  - no_finalize_before_explicit_user_confirmation

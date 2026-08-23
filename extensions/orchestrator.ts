@@ -267,6 +267,8 @@ interface InboundContext {
 // ━━ Config: agents.yaml / roles.yaml (architecture.md §2-4) ━━━━━━━━━━━━━━━━
 
 interface RoleConfig {
+	activation?: "always" | "lazy";
+	playbook?: string;
 	model?: { provider?: string; model?: string };
 	skills?: string[];
 	cli?: string[];
@@ -316,9 +318,10 @@ function loadConfig(cwd: string, configDir: string): {
 function resolveCapabilities(
 	instanceId: string,
 	cfg: { roles: Record<string, RoleConfig>; agents: Record<string, InstanceConfig> },
-): { role: string; model: string; skills: string[]; cli: string[]; mcp: string[]; teams: string[]; capacity: number } {
+	roleOverride?: string,
+): { role: string; playbook: string | null; model: string; skills: string[]; cli: string[]; mcp: string[]; teams: string[]; capacity: number } {
 	const inst = cfg.agents[instanceId];
-	const role = inst?.role || "unassigned";
+	const role = roleOverride || inst?.role || "unassigned";
 	const roleCfg = cfg.roles[role] || {};
 	const inheritRoleTools = inst?.inherit_role_tools !== false; // default true
 
@@ -332,6 +335,7 @@ function resolveCapabilities(
 
 	return {
 		role,
+		playbook: roleCfg.playbook ?? null,
 		model,
 		skills: dedupe(roleCfg.skills, inst?.skills),
 		cli: dedupe(roleCfg.cli, inst?.cli),
@@ -488,6 +492,10 @@ interface CliFlags {
 	brokerUrl?: string;
 	mqttUsername?: string;
 	mqttPassword?: string;
+	mqttTlsCa?: string;
+	mqttTlsCert?: string;
+	mqttTlsKey?: string;
+	mqttAllowInsecure?: boolean;
 	configDir?: string;
 	promptsDir?: string;
 	customPrompts?: boolean;
@@ -503,6 +511,10 @@ function readCliFlags(pi: ExtensionAPI): CliFlags {
 		brokerUrl: (pi.getFlag("broker") as string | undefined) || undefined,
 		mqttUsername: (pi.getFlag("mqtt-username") as string | undefined) || undefined,
 		mqttPassword: (pi.getFlag("mqtt-password") as string | undefined) || undefined,
+		mqttTlsCa: (pi.getFlag("mqtt-tls-ca") as string | undefined) || undefined,
+		mqttTlsCert: (pi.getFlag("mqtt-tls-cert") as string | undefined) || undefined,
+		mqttTlsKey: (pi.getFlag("mqtt-tls-key") as string | undefined) || undefined,
+		mqttAllowInsecure: !!pi.getFlag("mqtt-allow-insecure"),
 		configDir: (pi.getFlag("config-dir") as string | undefined) || undefined,
 		promptsDir: (pi.getFlag("prompts-dir") as string | undefined) || undefined,
 		customPrompts: !!pi.getFlag("custom-prompts"),
@@ -576,7 +588,7 @@ function readRolePromptFile(dir: string, name: string): string | null {
 
 const BUILTIN_SPECIALIST_PROMPT =
 	"Sei un agente specialista di ruolo {{ROLE}} ({{ROLE_LABEL}}), istanza {{INSTANCE}} nel progetto {{PROJECT}} (team: {{TEAM}}).\n" +
-	"La tua missione specifica in questo ruolo: {{BRIEF}}\n" +
+	"La tua missione specifica in questo ruolo: {{BRIEF}}\n{{CAPABILITIES}}\n" +
 	"Lavora sempre dentro worktree_path (mai nella directory principale del progetto — usa worktree_create con lo slug indicato se manca). Usa report_append (non il tool generico di scrittura file) per aggiungere una sezione \"## Round N — {{ROLE}}\" al report, e file_claim/file_release prima di modificare un file che altri agenti dello stesso team potrebbero toccare in parallelo. Quando hai finito rispondi con agent_send a chi ti ha coinvolto (o a target_role: \"coder\" se hai trovato un problema che richiede una modifica al codice). Non chiamare mai worktree_finalize: lo fa solo il planner a fine ciclo.";
 
 // primaryDir is consulted FIRST, file by file (<role>.md, then specialist.md
@@ -606,6 +618,15 @@ function loadRolePrompt(primaryDir: string, fallbackDir: string | null, role: st
 		return BUILTIN_SPECIALIST_PROMPT;
 	}
 	return DEFAULT_ROLE_PROMPTS[role] || `Sei l'agente ${role}, istanza {{INSTANCE}} nel progetto {{PROJECT}}. Usa agent_list/agent_send/agent_get/agent_await per collaborare con gli altri agenti.`;
+}
+
+function roleCapabilitiesPrompt(roleCfg?: RoleConfig): string {
+	const skills = roleCfg?.skills?.length ? roleCfg.skills.join(", ") : "nessuna skill dichiarata";
+	const cli = roleCfg?.cli?.length ? roleCfg.cli.join(", ") : "nessuna CLI dichiarata";
+	const mcp = roleCfg?.mcp?.length ? roleCfg.mcp.join(", ") : "nessun MCP dichiarato";
+	const activation = roleCfg?.activation === "lazy" ? "lazy: installazione/verifica eseguita quando il planner lancia questo ruolo" : "core: prerequisiti verificati da yano init/doctor";
+	const playbook = roleCfg?.playbook || "default-orchestration";
+	return `## Contratto delle capacità (enforced da roles.yaml)\n- Playbook: ${playbook}\n- Attivazione: ${activation}\n- Skill autorizzate: ${skills}\n- CLI autorizzate: ${cli}\n- MCP autorizzati: ${mcp}\nUsa solo queste capacità. Se una è mancante, interrompi il round, descrivi il comando/documentazione per risolvere e informa il planner; non sostituirla silenziosamente con strumenti equivalenti.`;
 }
 
 // Sets the terminal window/tab title via the standard OSC 0/2 escape
@@ -889,7 +910,7 @@ async function findExistingWorktree(projectCwd: string, wtPath: string): Promise
 // herdr/tmux elsewhere in this file.
 
 const MOA_SCHEMA_VERSION = 1;
-const MOA_STORAGE_SCHEMA_VERSION = 8;
+const MOA_STORAGE_SCHEMA_VERSION = 9;
 const MOA_EXTENSION_VERSION = "0.1.0-slice1";
 
 function moaWorkspaceDir(projectCwd: string): string {
@@ -1023,6 +1044,7 @@ interface TicketRecord {
 	domain: string;
 	status: TicketStatus;
 	required_capabilities: string[];
+	required_playbook: string | null;
 	acceptance_criteria: string[];
 	assigned_instance: string | null;
 	result_summary: string | null;
@@ -1089,6 +1111,7 @@ interface OrchestratorStorage {
 		domain?: string;
 		required_capabilities?: string[];
 		acceptance_criteria?: string[];
+		required_playbook?: string | null;
 	}): TicketRecord;
 	getTicket(id: string): TicketRecord | null;
 	listTickets(run_id: string): TicketRecord[];
@@ -1099,6 +1122,7 @@ interface OrchestratorStorage {
 	listFinalizeEvidence(slug: string): unknown[];
 	setRetentionPolicy(input: { project: string; event_days: number; evidence_days: number; outbox_days: number; dead_letter_days: number; policy_version: number }): unknown;
 	previewRetention(project: string): unknown;
+	applyRetention(project: string): unknown;
 	recordBenchmark(input: { project: string; name: string; dataset: string; metrics: Record<string, number>; thresholds: Record<string, number> }): unknown;
 	createGovernanceProposal(input: { kind: string; identifier: string; document: string; required_capabilities?: string[] }): unknown;
 	listGovernanceProposals(kind?: string): unknown[];
@@ -1173,6 +1197,7 @@ CREATE TABLE IF NOT EXISTS tickets (
 	domain TEXT NOT NULL DEFAULT 'generic',
 	status TEXT NOT NULL DEFAULT 'pending',
 	required_capabilities TEXT NOT NULL DEFAULT '[]',
+	required_playbook TEXT,
 	acceptance_criteria TEXT NOT NULL DEFAULT '[]',
 	assigned_instance TEXT,
 	result_summary TEXT,
@@ -1387,6 +1412,16 @@ CREATE INDEX IF NOT EXISTS idx_deps_depends_on ON ticket_dependencies(depends_on
 CREATE INDEX IF NOT EXISTS idx_events_run ON events(run_id);
 `;
 
+function retentionCutoffs(policy: { event_days: number; evidence_days: number; outbox_days: number; dead_letter_days: number }) {
+	const cutoff = (days: number) => new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+	return {
+		events: cutoff(policy.event_days),
+		evidence: cutoff(policy.evidence_days),
+		outbox: cutoff(policy.outbox_days),
+		dead_letter: cutoff(policy.dead_letter_days),
+	};
+}
+
 class SQLiteOrchestratorStorage implements OrchestratorStorage {
 	private db: import("node:sqlite").DatabaseSync;
 
@@ -1453,6 +1488,7 @@ class SQLiteOrchestratorStorage implements OrchestratorStorage {
 				this.db.prepare("SELECT 1 FROM governance_proposals LIMIT 1").get();
 				this.db.prepare("SELECT 1 FROM package_manifest_audits LIMIT 1").get();
 			}
+			if (current < 9) this.db.exec("ALTER TABLE tickets ADD COLUMN required_playbook TEXT");
 			// Advance the marker only after every additive statement succeeds.
 			this.db.prepare("UPDATE schema_meta SET value = ? WHERE key = 'schema_version'").run(String(MOA_STORAGE_SCHEMA_VERSION));
 		}
@@ -1517,6 +1553,7 @@ class SQLiteOrchestratorStorage implements OrchestratorStorage {
 			domain: input.domain ?? "generic",
 			status: "pending",
 			required_capabilities: input.required_capabilities ?? [],
+			required_playbook: input.required_playbook ?? null,
 			acceptance_criteria: input.acceptance_criteria ?? [],
 			assigned_instance: null,
 			result_summary: null,
@@ -1525,9 +1562,9 @@ class SQLiteOrchestratorStorage implements OrchestratorStorage {
 		};
 		this.db
 			.prepare(
-				"INSERT INTO tickets (id, run_id, spec_id, title, description, domain, status, required_capabilities, acceptance_criteria, assigned_instance, result_summary, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+				"INSERT INTO tickets (id, run_id, spec_id, title, description, domain, status, required_capabilities, required_playbook, acceptance_criteria, assigned_instance, result_summary, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 			)
-			.run(rec.id, rec.run_id, rec.spec_id, rec.title, rec.description, rec.domain, rec.status, JSON.stringify(rec.required_capabilities), JSON.stringify(rec.acceptance_criteria), rec.assigned_instance, rec.result_summary, rec.created_at, rec.updated_at);
+			.run(rec.id, rec.run_id, rec.spec_id, rec.title, rec.description, rec.domain, rec.status, JSON.stringify(rec.required_capabilities), rec.required_playbook, JSON.stringify(rec.acceptance_criteria), rec.assigned_instance, rec.result_summary, rec.created_at, rec.updated_at);
 		return rec;
 	}
 
@@ -1619,11 +1656,28 @@ class SQLiteOrchestratorStorage implements OrchestratorStorage {
 	previewRetention(project: string) {
 		const policy = this.db.prepare("SELECT * FROM retention_policies WHERE project = ?").get(project) as any;
 		if (!policy) throw new Error(`retention_policy: no policy for project "${project}".`);
-		const events = this.db.prepare("SELECT COUNT(*) AS count FROM events e JOIN runs r ON r.id = e.run_id WHERE r.project = ?").get(project) as any;
-		const evidence = this.db.prepare("SELECT COUNT(*) AS count FROM playbook_evidence e JOIN runs r ON r.id = e.run_id WHERE r.project = ?").get(project) as any;
-		const outbox = this.db.prepare("SELECT COUNT(*) AS count FROM playbook_effect_outbox e JOIN runs r ON r.id = e.run_id WHERE r.project = ? AND e.status = 'pending'").get(project) as any;
-		const dead_letter = this.db.prepare("SELECT COUNT(*) AS count FROM playbook_effect_outbox e JOIN runs r ON r.id = e.run_id WHERE r.project = ? AND e.delivery_state = 'dead_letter'").get(project) as any;
-		return { policy, counts: { events: Number(events.count), evidence: Number(evidence.count), pending_outbox: Number(outbox.count), dead_letter: Number(dead_letter.count) }, destructive_apply_required: true };
+		const cutoffs = retentionCutoffs(policy);
+		const events = this.db.prepare("SELECT COUNT(*) AS count FROM events e JOIN runs r ON r.id = e.run_id WHERE r.project = ? AND r.status <> 'active' AND e.created_at < ?").get(project, cutoffs.events) as any;
+		const evidence = this.db.prepare("SELECT COUNT(*) AS count FROM playbook_evidence e JOIN runs r ON r.id = e.run_id WHERE r.project = ? AND e.created_at < ?").get(project, cutoffs.evidence) as any;
+		const outbox = this.db.prepare("SELECT COUNT(*) AS count FROM playbook_effect_outbox e JOIN runs r ON r.id = e.run_id WHERE r.project = ? AND e.delivery_state IN ('delivered','failed') AND e.created_at < ?").get(project, cutoffs.outbox) as any;
+		const pending = this.db.prepare("SELECT COUNT(*) AS count FROM playbook_effect_outbox e JOIN runs r ON r.id = e.run_id WHERE r.project = ? AND e.delivery_state IN ('pending','leased')").get(project) as any;
+		const deadLetter = this.db.prepare("SELECT COUNT(*) AS count FROM playbook_effect_outbox e JOIN runs r ON r.id = e.run_id WHERE r.project = ? AND e.delivery_state = 'dead_letter' AND e.created_at < ?").get(project, cutoffs.dead_letter) as any;
+		return { policy, cutoffs, counts: { events: Number(events.count), evidence: Number(evidence.count), outbox: Number(outbox.count), pending_outbox: Number(pending.count), dead_letter: Number(deadLetter.count) }, destructive_apply_required: true };
+	}
+
+	applyRetention(project: string) {
+		const preview = this.previewRetention(project) as any;
+		const { cutoffs } = preview;
+		this.db.exec("BEGIN IMMEDIATE");
+		try {
+			const events = this.db.prepare("DELETE FROM events WHERE run_id IN (SELECT id FROM runs WHERE project = ? AND status <> 'active') AND created_at < ?").run(project, cutoffs.events);
+			const evidence = this.db.prepare("DELETE FROM playbook_evidence WHERE run_id IN (SELECT id FROM runs WHERE project = ?) AND created_at < ?").run(project, cutoffs.evidence);
+			const outbox = this.db.prepare("DELETE FROM playbook_effect_outbox WHERE run_id IN (SELECT id FROM runs WHERE project = ?) AND delivery_state IN ('delivered','failed') AND created_at < ?").run(project, cutoffs.outbox);
+			const deadLetter = this.db.prepare("DELETE FROM playbook_effect_outbox WHERE run_id IN (SELECT id FROM runs WHERE project = ?) AND delivery_state = 'dead_letter' AND created_at < ?").run(project, cutoffs.dead_letter);
+			const result = { project, cutoffs, deleted: { events: Number(events.changes), evidence: Number(evidence.changes), outbox: Number(outbox.changes), dead_letter: Number(deadLetter.changes) }, applied_at: nowIso() };
+			this.db.exec("COMMIT");
+			return result;
+		} catch (error) { try { this.db.exec("ROLLBACK"); } catch {} throw error; }
 	}
 
 	recordBenchmark(input: { project: string; name: string; dataset: string; metrics: Record<string, number>; thresholds: Record<string, number> }) {
@@ -2317,6 +2371,10 @@ export default function (pi: ExtensionAPI) {
 	});
 	pi.registerFlag("mqtt-username", { description: "MQTT username, if the broker requires auth", type: "string", default: undefined });
 	pi.registerFlag("mqtt-password", { description: "MQTT password, if the broker requires auth", type: "string", default: undefined });
+	pi.registerFlag("mqtt-tls-ca", { description: "CA certificate path for mqtts:// brokers", type: "string", default: undefined });
+	pi.registerFlag("mqtt-tls-cert", { description: "Client certificate path for mutual TLS", type: "string", default: undefined });
+	pi.registerFlag("mqtt-tls-key", { description: "Client private key path for mutual TLS", type: "string", default: undefined });
+	pi.registerFlag("mqtt-allow-insecure", { description: "Disable TLS certificate verification (development only)", type: "boolean", default: false });
 	pi.registerFlag("config-dir", { description: "Directory containing agents.yaml/roles.yaml", type: "string", default: "agents" });
 	pi.registerFlag("prompts-dir", {
 		description:
@@ -2351,6 +2409,7 @@ export default function (pi: ExtensionAPI) {
 		instance: string;
 		displayName: string; // instance by default; overridable with --name, used for the terminal title (herdr et al.) and local status/notify text — never for MQTT topics/addressing, which always use `instance`
 		role: string;
+		playbook: string | null;
 		project: string;
 		team: string[];
 		model: string;
@@ -2745,7 +2804,7 @@ export default function (pi: ExtensionAPI) {
 		}
 
 		const cfg = loadConfig(cwd, flags.configDir || "agents");
-		const resolved = resolveCapabilities(flags.instance, cfg);
+		const resolved = resolveCapabilities(flags.instance, cfg, flags.role);
 		const role = flags.role || resolved.role;
 		const project = flags.project || resolveDefaultProject(cwd);
 		const color = flags.color && isValidHex(flags.color) ? flags.color : fallbackColor(flags.instance);
@@ -2755,6 +2814,7 @@ export default function (pi: ExtensionAPI) {
 			instance: flags.instance,
 			displayName,
 			role,
+			playbook: resolved.playbook,
 			project,
 			team: resolved.teams,
 			model: resolved.model,
@@ -2806,11 +2866,16 @@ export default function (pi: ExtensionAPI) {
 		// never "gives up": if the broker isn't reachable yet, or drops later,
 		// it just keeps retrying in the background and self-heals once it's up.
 		try {
+			const tlsFile = (file?: string) => file ? fs.readFileSync(path.resolve(cwd, file)) : undefined;
 			client = mqtt.connect(brokerUrl, {
 				protocolVersion: 5,
 				clientId: `pi-${project}-${identity.instance}-${ulid().slice(-8)}`,
 				username: flags.mqttUsername,
 				password: flags.mqttPassword,
+				ca: tlsFile(flags.mqttTlsCa),
+				cert: tlsFile(flags.mqttTlsCert),
+				key: tlsFile(flags.mqttTlsKey),
+				rejectUnauthorized: !flags.mqttAllowInsecure,
 				clean: true,
 				reconnectPeriod: 2000,
 				connectTimeout: 10_000,
@@ -2966,6 +3031,7 @@ export default function (pi: ExtensionAPI) {
 			.replaceAll("{{ROLE}}", identity.role)
 			.replaceAll("{{ROLE_LABEL}}", roleCfg?.label || identity.role)
 			.replaceAll("{{BRIEF}}", roleCfg?.brief || "")
+			.replaceAll("{{CAPABILITIES}}", roleCapabilitiesPrompt(roleCfg))
 			.replaceAll("{{PROJECT}}", identity.project)
 			.replaceAll("{{TEAM}}", identity.team.join(", "));
 		herdrReportAgent(identity.displayName, "working", identity.instance);
@@ -5413,6 +5479,7 @@ export default function (pi: ExtensionAPI) {
 			description: Type.Optional(Type.String()),
 			domain: Type.Optional(Type.String()),
 			required_capabilities: Type.Optional(Type.Array(Type.String(), { description: 'e.g. ["backend", "typescript"] — matched against the claiming agent\'s role + skills by ticket_claim.' })),
+			required_playbook: Type.Optional(Type.String({ description: "Optional Playbook id required by this ticket; when present it must match the run's immutable binding." })),
 			acceptance_criteria: Type.Optional(Type.Array(Type.String())),
 			depends_on: Type.Optional(Type.Array(Type.String(), { description: "Ticket ids (in the same run) this ticket cannot start before." })),
 		}),
@@ -5423,6 +5490,11 @@ export default function (pi: ExtensionAPI) {
 			const run = storage.getRun(params.run_id);
 			if (!run) throw new Error(`ticket_create: no run "${params.run_id}" — call run_create first.`);
 			if (params.spec_id && !storage.getSpec(params.spec_id)) throw new Error(`ticket_create: no spec "${params.spec_id}" in this run.`);
+			const binding = storage.getPlaybookBinding(params.run_id);
+			const requiredPlaybook = params.required_playbook || null;
+			if (params.required_playbook && binding && binding.playbook_id !== params.required_playbook) {
+				throw new Error(`ticket_create: required_playbook "${params.required_playbook}" does not match the run binding "${binding.playbook_id}".`);
+			}
 			// Validate every dependency BEFORE creating anything — an invalid
 			// depends_on must leave NO trace (no orphan ticket row) when this
 			// tool call fails, not just fail to wire the dependency. Found by
@@ -5441,6 +5513,7 @@ export default function (pi: ExtensionAPI) {
 				description: params.description,
 				domain: params.domain || run.domain,
 				required_capabilities: params.required_capabilities,
+				required_playbook: requiredPlaybook,
 				acceptance_criteria: params.acceptance_criteria,
 			});
 			for (const depId of depIds) storage.addDependency(ticket.id, depId);
@@ -5532,6 +5605,15 @@ export default function (pi: ExtensionAPI) {
 			const storage = ensureMoaStorage();
 			const ticket = storage.getTicket(params.ticket_id);
 			if (!ticket) throw new Error(`ticket_claim: no ticket "${params.ticket_id}".`);
+			if (ticket.required_playbook) {
+				const binding = storage.getPlaybookBinding(ticket.run_id);
+				if (!binding || binding.playbook_id !== ticket.required_playbook) {
+					throw new Error(`ticket_claim: ticket "${ticket.id}" requires playbook "${ticket.required_playbook}", but the run has no matching immutable binding.`);
+				}
+				if (identity.playbook && identity.playbook !== ticket.required_playbook) {
+					throw new Error(`ticket_claim: role "${identity.role}" is mapped to playbook "${identity.playbook}" and cannot claim a "${ticket.required_playbook}" ticket.`);
+				}
+			}
 			const tickets = storage.listTickets(ticket.run_id);
 			const deps = storage.listDependencies(ticket.run_id);
 			const buckets = moaComputeReadyBlocked(tickets, deps);
@@ -5807,6 +5889,21 @@ export default function (pi: ExtensionAPI) {
 		},
 		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("retention_policy_preview ")) + theme.fg("accent", (args as any).project ?? "?"), 0, 0); },
 		renderResult(result, _options, theme) { return new Text(theme.fg("success", "→ preview"), 0, 0); },
+	});
+
+	pi.registerTool({
+		name: "retention_policy_apply",
+		label: "Apply Retention",
+		description: "Delete only expired, non-active audit/evidence/outbox records after an explicit preview and confirmation. Pending outbox work and active-run events are never deleted.",
+		parameters: Type.Object({ project: Type.String(), confirm: Type.Boolean({ description: "Must be true after reviewing retention_policy_preview for the same project." }) }),
+		async execute(_callId, params) {
+			if (!identity || identity.role !== "planner") throw new Error("retention_policy_apply: only planner may apply retention.");
+			if (!params.confirm) throw new Error("retention_policy_apply: confirm must be true after reviewing retention_policy_preview.");
+			const result = ensureMoaStorage().applyRetention(params.project);
+			return { content: [{ type: "text" as const, text: `retention_policy_apply: deleted ${JSON.stringify(result.deleted)} for ${params.project}.` }], details: { result: redactRuntimeProjection(result) } };
+		},
+		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("retention_policy_apply ")) + theme.fg("accent", (args as any).project ?? "?"), 0, 0); },
+		renderResult(result, _options, theme) { return new Text(theme.fg("success", "→ ") + theme.fg("accent", JSON.stringify((result.details as any)?.result?.deleted ?? {})), 0, 0); },
 	});
 
 	pi.registerTool({

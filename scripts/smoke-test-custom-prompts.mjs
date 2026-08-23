@@ -181,7 +181,9 @@ function renderTemplate(text, instance, project) {
 		.replaceAll("{{ROLE_LABEL}}", "")
 		.replaceAll("{{BRIEF}}", "")
 		.replaceAll("{{PROJECT}}", project)
-		.replaceAll("{{TEAM}}", "");
+		// An explicit --role now resolves the role defaults even when the
+		// instance has no agents.yaml entry (including its team membership).
+		.replaceAll("{{TEAM}}", "core");
 }
 
 main().catch((err) => {

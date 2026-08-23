@@ -24,7 +24,7 @@
 // chiamate di self-report/rename verso herdr e per `git` (vedi
 // herdrReportAgent()/herdrRenamePane()/gitExec... più sotto nel file). Le
 // istanze del team vengono lanciate dal planner stesso via shell, seguendo
-// il testo di prompts/planner.md (herdr o tmux) — mai per un altro
+// il testo di prompts/planner.md (Herdr) — mai per un altro
 // planner, visto che l'architettura attuale non ne spawna mai un secondo.
 // planner-01 stesso viene avviato a mano dall'utente (vedi README
 // Quickstart). Questo script è quindi il vero "punto" in cui gli argomenti
@@ -45,7 +45,7 @@
 // ha più quel file, l'estensione si carica da sola). Il planner, componendo
 // quel comando a mano dal proprio prompt (mai passando da questo script),
 // lanciava esattamente quel comando stale per lanciare coder/reviewer/
-// specialisti via herdr/tmux — il processo `pi` falliva subito
+// specialisti via Herdr — il processo `pi` falliva subito
 // (`extensions/orchestrator.ts` non esiste nel progetto), il pannello/sessione
 // moriva immediatamente, e il planner doveva ridiagnosticare il problema da
 // capo ogni volta (osservato realmente: ~58k token di ragionamento sprecati
@@ -75,7 +75,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureRolePrerequisites, isSupportedNodeRuntime } from "./doctor.mjs";
-import { TRACE_MODES, getTraceConfig, resolveTraceProject, setTraceMode } from "./yano-trace-storage.mjs";
+import { TRACE_MODES, getTraceConfig, resolveTraceProject, setTraceMode, slugify } from "./yano-trace-storage.mjs";
 
 // Le 5 skill vendorizzate destinate al ruolo planner (Revisione 22) — vedi
 // skills-vendor/mattpocock/VERSION.md per la motivazione di ciascuna
@@ -197,7 +197,21 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 	const projectMarkers = [
 		path.join(cwd, ".pi", "extensions", "yano-orchestrator", "config", "project.json"),
 		path.join(cwd, "agents", "roles.yaml"),
+		// Projects created by earlier Yano scaffolds kept the roster under
+		// `.pi/agents`. Keep them launchable while deriving the project scope
+		// from the current root and passing it explicitly below.
+		path.join(cwd, ".pi", "agents", "roles.yaml"),
 	];
+	// Recovery launches a worker from its preserved Git worktree while passing
+	// the main checkout's roster with --config-dir. A worktree need not carry
+	// the ignored .pi/agents directory itself; the explicit config is enough to
+	// prove that this is an intentional Yano launch.
+	const configDirIndex = passthrough.indexOf("--config-dir");
+	const explicitConfigDir = configDirIndex >= 0 ? passthrough[configDirIndex + 1] : null;
+	if (explicitConfigDir) {
+		const resolvedConfigDir = path.resolve(cwd, explicitConfigDir);
+		if (existsSync(path.join(resolvedConfigDir, "roles.yaml"))) projectMarkers.push(path.join(resolvedConfigDir, "roles.yaml"));
+	}
 	const looksInitialized = hasLocalExtension || projectMarkers.some((p) => existsSync(p));
 	if (!looksInitialized) {
 		console.error(
@@ -214,7 +228,14 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 	// could silently use different modes/stores, making a post-mortem blind.
 	const projectFlagIndex = passthrough.indexOf("--project");
 	const explicitProject = projectFlagIndex >= 0 ? passthrough[projectFlagIndex + 1] : null;
-	const traceProject = explicitProject || resolveTraceProject(cwd);
+	// Always pass a derived scope explicitly to the child. Pi can auto-load a
+	// different Yano package from its own extension registry than the npm
+	// package that launched this script; relying on the child extension to
+	// repeat project discovery made a stale install able to fall back to a
+	// shared/default MQTT namespace and mix projects. An operator-supplied
+	// --project remains verbatim for deliberate shared scopes.
+	const derivedProject = slugify(resolveTraceProject(cwd));
+	const traceProject = explicitProject || derivedProject;
 	const requestedTraceMode = traceMode || process.env.YANO_TRACE_MODE || "full";
 	if (!TRACE_MODES.includes(requestedTraceMode)) {
 		console.error(`launch-planner: modalità trace non valida "${requestedTraceMode}".`);
@@ -287,7 +308,12 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 	// è esattamente ciò che mancava quando il planner componeva a mano
 	// `pi -e extensions/orchestrator.ts` per lanciare altri ruoli.
 	const extensionFlags = hasLocalExtension && looksLikePackageRepo ? ["-e", "extensions/orchestrator.ts"] : [];
-	const piArgs = [...extensionFlags, ...passthrough, "--role", role, ...skillFlags];
+	const projectScopeFlags = explicitProject ? [] : ["--project", derivedProject];
+	const hasExplicitConfigDir = passthrough.includes("--config-dir");
+	const legacyConfigDirFlags = !hasExplicitConfigDir && !existsSync(path.join(cwd, "agents", "roles.yaml")) && existsSync(path.join(cwd, ".pi", "agents", "roles.yaml"))
+		? ["--config-dir", path.join(".pi", "agents")]
+		: [];
+	const piArgs = [...extensionFlags, ...passthrough, ...projectScopeFlags, ...legacyConfigDirFlags, "--role", role, ...skillFlags];
 
 	const printable = ["pi", ...piArgs].map((a) => (a.includes(" ") ? `"${a}"` : a)).join(" ");
 	console.log(`launch-planner: comando composto (cwd ${cwd}, trace ${traceConfig.mode}, progetto ${traceProject}):\n  ${printable}\n`);

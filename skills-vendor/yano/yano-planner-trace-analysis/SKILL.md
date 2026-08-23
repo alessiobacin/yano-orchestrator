@@ -31,6 +31,9 @@ yano trace search --project <nome> --run <id> --query "timeout" --memory-only --
 yano trace opinion --text "<analysis>" --summary "..." --root-cause "..." --recommendation "..." --change existing-agent|new-agent|prompt|tool|playbook|none --confidence low|medium|high --roles planner,coder [--run <id>] [--round <n>] [--task <slug>]
 yano trace export --project <nome> --run <id> --output ./trace-bundle.json
 yano trace import --project <nome> --input ./trace-bundle.json --reindex
+yano pause --project <nome> --run <id> --yes
+yano resume --project <nome> --run <id> --yes
+yano recovery status --project <nome>
 ```
 
 Expected behavior:
@@ -74,10 +77,47 @@ Expected behavior:
 - `opinion` stores the planner's analysis so later planners can compare the
   hypothesis with future outcomes. It is an observation, not an automatic
   authorization to change Yano.
+- `pause` creates a non-destructive recovery snapshot under Yano's global
+  `temp/recovery/` directory before sending graceful `terminate` messages. It
+  preserves the SQLite run/ticket state, Git worktrees, branches, presence
+  cards and the filtered observable trace. Without `--yes` it only saves the
+  checkpoint and does not stop agents; it never means `end` and never marks a
+  run completed.
+- `resume` reads the latest snapshot and the durable ticket assignments,
+  compares them with the current MQTT presence, and relaunches only missing
+  instances. With `--yes` it starts them exclusively in the active Herdr
+  workspace and wakes the planner with `--continue`; if Herdr is unavailable
+  it stops with an actionable prerequisite error. Without `--yes` it prints
+  the exact Herdr launch plan. It does not recreate tickets or delete/reset
+  worktrees. Use `--dry-run` for an explicit preview.
+- `recovery status` lists available checkpoints. If a project was created with
+  an older workspace layout, the command resolves its existing project
+  database instead of creating a second one.
 
 Do not use `yano trace clear` during diagnosis. Destructive cleanup is an
 operator action and requires explicit `--yes`; preserve evidence until the
 investigation is complete.
+
+## Pause/resume protocol
+
+When a terminal, laptop, broker or planner session must be stopped during an
+active task, use the recovery protocol before closing the terminal:
+
+```text
+yano pause --project <nome> --all --yes
+yano recovery status --project <nome>
+yano resume --project <nome> --all --dry-run
+yano resume --project <nome> --all --yes
+```
+
+The planner must treat `runs`, `tickets`, checkpoints and Git worktrees as the
+source of truth. A ticket with status `done` is not sent again; a `running`
+ticket whose assigned instance is absent is resumed by relaunching that exact
+instance, while a pending unassigned ticket remains a planner decision. If a
+snapshot is missing, reconstruct the minimal recovery set from active ticket
+assignments and the roster, and state that the original presence snapshot was
+not available. Never call `yano end` as a substitute for pause: `end` closes a
+run and is intentionally irreversible at the orchestration layer.
 
 For explicit operator cleanup, the supported forms are:
 
@@ -117,6 +157,12 @@ Workers may use `status`, `context`, `events`, scoped `index`, `search` and
 use scoped `consolidate` when a compact report is needed, but should not run
 `overview --all-projects` or `consolidate --all-projects` to claim a systemic
 finding: cross-project interpretation belongs to the planner.
+
+During a resumed task, coder/reviewer/specialist workers should use the same
+skill to inspect the recovery evidence relevant to their ticket, but they must
+not independently pause/resume the whole project, mark a run closed, or infer
+that an absent retained card is proof that another agent never worked. Report
+the observed ticket, worktree and trace evidence back to the planner.
 
 ## After a task round
 

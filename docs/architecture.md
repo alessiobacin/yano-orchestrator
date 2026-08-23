@@ -23,11 +23,11 @@ pi planner ── reads prompts + agents/roles.yaml
   └── optional adapters: WhatsApp, MCP, effect delivery, browser tooling
 ```
 
-Every instance has an `instance`, `role`, `project` and `team` identity. MQTT topics are scoped as `pi/<project>/...`, so two projects sharing a broker remain isolated unless the operator deliberately passes the same `--project` value. An explicit scope override is reported at startup when it differs from the scope derived by the current project root; all instances that must collaborate must use the same value.
+Every instance has an `instance`, `role`, `project` and `team` identity. MQTT topics are scoped as `pi/<project>/...`, so two projects sharing a broker remain isolated unless the operator deliberately passes the same `--project` value. `yano start` resolves the root identity and passes the derived scope explicitly to the child `pi` process, so an auto-loaded extension from a different installation cannot silently choose a shared/default namespace. The runtime also validates both the status topic and the `project` field in every retained presence card before adding it to the roster. An explicit scope override is reported at startup when it differs from the scope derived by the current project root; all instances that must collaborate must use the same value.
 
 ## Main flow
 
-1. `yano init` validates Node, Pi-facing prerequisites, MCP configuration and broker availability before writing a scaffold.
+1. `yano init` validates Node, Pi-facing prerequisites, MCP configuration and broker availability before writing a scaffold. Older projects whose roster is still under `.pi/agents/` remain launchable; the launcher selects that directory explicitly instead of assuming the modern root `agents/` layout.
 2. `yano start` launches any configured role. The trace-analysis skill is attached to every worker; planner-only vendor skills remain restricted to the planner, and browser skills remain restricted to frontend roles.
 3. The planner creates or reuses a Git worktree, initializes the persistent workspace and declares a phase plan.
 4. `agent_send` routes work by instance or role. Presence is advisory but immediately warns when no live target is available. Structured phase gates can refuse sends to locked phases.

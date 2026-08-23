@@ -126,6 +126,34 @@ async function main() {
 		await waitUntil(async () => (await restartedPlanner.call("agent_list")).details.agents.some((agent) => agent.instance === "coder-01"), "restarted planner receives coder retained presence");
 		ok(true, "planner restart rebuilds its peer map from retained MQTT presence");
 
+		// A retained card can carry a valid-looking status topic while claiming
+		// another project. The roster must reject it even though the broker
+		// subscription itself is scoped correctly; this protects against stale or
+		// duplicate extension versions and bad retained data.
+		const injector = await mqtt.connectAsync(BROKER_URL, { protocolVersion: 5 });
+		const foreignTopic = `pi/${PROJECT}/agents/foreign-project-agent/status`;
+		await injector.publishAsync(foreignTopic, JSON.stringify({
+			instance: "foreign-project-agent",
+			role: "coder",
+			project: "another-project",
+			team: [],
+			model: "test",
+			skills: [],
+			tools: [],
+			mcp: [],
+			status: "idle",
+			capacity: 1,
+			current_load: 0,
+			color: "#ffffff",
+			started_at: new Date().toISOString(),
+			last_heartbeat: new Date().toISOString(),
+		}), { qos: 1, retain: true });
+		await new Promise((resolve) => setTimeout(resolve, 150));
+		const scopedAgents = (await restartedPlanner.call("agent_list")).details.agents;
+		ok(!scopedAgents.some((agent) => agent.instance === "foreign-project-agent"), "presence card with a foreign project identity is rejected");
+		await injector.publishAsync(foreignTopic, Buffer.alloc(0), { qos: 1, retain: true });
+		await injector.endAsync();
+
 		const run = (await restartedPlanner.call("run_create", { objective: "presence refresh" })).details.run;
 		const ticket = (await restartedPlanner.call("ticket_create", { run_id: run.id, title: "worker ticket" })).details.ticket;
 		await coder.call("ticket_claim", { ticket_id: ticket.id });

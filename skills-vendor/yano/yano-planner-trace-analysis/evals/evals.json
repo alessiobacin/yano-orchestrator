@@ -30,6 +30,18 @@
       "prompt": "Devi trasferire l'indagine di un run su un'altra installazione Yano senza perdere gli eventi osservabili né fidarti di link derivati dal vecchio progetto.",
       "expected_output": "Il planner usa yano trace export/import, tratta il JSONL raw come fonte primaria, usa --reindex e poi consolidate per ricostruire memoria e link nel progetto di destinazione.",
       "files": []
+    },
+    {
+      "id": 6,
+      "prompt": "Il laptop deve essere chiuso mentre due ticket sono running e il planner è attivo. Come salvi il lavoro e come lo ripristini senza chiudere il run o ricreare ticket?",
+      "expected_output": "Il planner usa yano pause --all --yes, verifica recovery status, poi resume --all; tratta SQLite, checkpoint, snapshot e worktree come fonte di verità e rilancia solo gli agenti mancanti.",
+      "files": []
+    },
+    {
+      "id": 7,
+      "prompt": "Dopo un riavvio il progetto ha un workspace Yano precedente, due ticket done e uno running assegnato a coderA-01. Cosa deve fare il planner?",
+      "expected_output": "Il planner usa la risoluzione compatibile del progetto, non crea un secondo database, non rilancia il ticket done, riapre coderA-01 se assente e riprende lo stesso run/worktree.",
+      "files": []
     }
   ]
 }

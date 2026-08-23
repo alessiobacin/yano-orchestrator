@@ -64,6 +64,7 @@ import { runPoDeps } from "../scripts/yano-deps.mjs";
 import { runGantt } from "../scripts/gantt-server.mjs";
 import { runWatch } from "../scripts/watch-stalls.mjs";
 import { runTrace } from "../scripts/yano-trace.mjs";
+import { runRecovery } from "../scripts/yano-recovery.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, "..");
@@ -93,6 +94,9 @@ function printTopUsage() {
 			"  gantt [opzioni]  Avvia la dashboard web live dei run/ticket",
 			"  watch [opzioni]  Osserva e pubblica i ticket stalled",
 			"  trace [opzioni]  Attiva/disattiva, cerca e cancella il tracing globale — `yano trace --help`",
+			"  pause [opzioni]  Salva uno snapshot non distruttivo e mette in pausa i run",
+			"  resume [opzioni] Ripristina uno snapshot e riapre gli agenti mancanti",
+			"  recovery [opzioni] Ispeziona gli snapshot e lo stato di ripristino",
 			"",
 			"  --version, -v    Stampa la versione del pacchetto installato",
 			"  --help, -h       Mostra questo messaggio",
@@ -166,6 +170,10 @@ async function main() {
 	}
 	if (sub === "trace") {
 		await runTrace({ cwd, argv: rest });
+		return;
+	}
+	if (["pause", "resume", "recovery"].includes(sub)) {
+		await runRecovery({ cwd, argv: [sub, ...rest], packageRoot });
 		return;
 	}
 

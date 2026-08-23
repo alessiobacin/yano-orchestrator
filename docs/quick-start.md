@@ -40,6 +40,17 @@ Lo scope MQTT predefinito viene derivato da `config/project.json`, poi dal
 riportalo identico su ogni istanza. Yano mostra un avviso all'avvio quando lo
 scope esplicito diverge da quello della root corrente.
 
+Quando il flag è omesso, `yano start` passa comunque lo scope risolto in modo
+esplicito al processo `pi` figlio. Questo evita che una copia obsoleta o
+installata da un'altra registry di Pi scelga accidentalmente lo scope
+condiviso predefinito. Il runtime verifica inoltre che ogni card retained di
+presenza dichiari lo stesso progetto del topic MQTT prima di mostrarla.
+
+Un progetto creato con il layout precedente, che conserva il roster in
+`.pi/agents/roles.yaml`, viene riconosciuto automaticamente e avviato con
+quella directory di configurazione. Per i nuovi progetti il layout consigliato
+resta `agents/roles.yaml` nella root.
+
 ## 2. Avvia il broker MQTT
 
 Con il broker Docker incluso:
@@ -205,7 +216,25 @@ stesso worktree. Coder e reviewer possono leggere il contesto filtrato per
 capire se l'errore nasce da requisito, implementazione, verifica o
 orchestrazione.
 
-## 7. Chiudi o conserva il progetto
+## 7. Metti in pausa e ripristina un task
+
+Se devi chiudere il laptop o interrompere il lavoro senza perdere il punto di
+ripresa, usa il checkpoint non distruttivo:
+
+```bash
+yano pause --all --yes
+yano recovery status
+yano resume --all --dry-run
+yano resume --all --yes --supervisor auto
+```
+
+La pausa conserva SQLite, ticket, worktree, branch, presenza disponibile e
+trace nella `temp/` globale dell'installazione Yano. Il ripristino controlla
+quali istanze sono ancora vive, riapre solo quelle mancanti e riattiva il
+planner con la sessione precedente. Non usare `yano end`: quel comando chiude
+formalmente il run.
+
+## 8. Chiudi o conserva il progetto
 
 Quando il lavoro è approvato il planner esegue la checklist finale e completa
 il merge. Per chiudere eventuali run ancora attivi:

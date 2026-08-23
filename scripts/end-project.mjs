@@ -48,6 +48,7 @@ import path from "node:path";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
+import { projectDbPath, projectConfig, resolveYanoWorkspaceDir } from "./yano-project.mjs";
 
 const yanoRequire = createRequire(import.meta.url);
 const VALID_STATUSES = new Set(["completed", "cancelled", "failed"]);
@@ -128,6 +129,7 @@ export async function runEndProject({ cwd, argv }) {
 	// extensions/orchestrator.ts locale, vedi quel file per il perché.
 	const projectMarkers = [
 		path.join(cwd, ".pi", "extensions", "yano-orchestrator", "config", "project.json"),
+		path.join(cwd, ".pi", "agents", "roles.yaml"),
 		path.join(cwd, "agents", "roles.yaml"),
 	];
 	if (!projectMarkers.some((p) => existsSync(p))) {
@@ -139,7 +141,8 @@ export async function runEndProject({ cwd, argv }) {
 		process.exit(1);
 	}
 
-	const dbPath = path.join(cwd, ".pi", "extensions", "yano-orchestrator", "orchestratorStorage", "orchestrator.db");
+	const project = projectConfig(cwd).config?.project;
+	const dbPath = projectDbPath(cwd, project);
 	if (!existsSync(dbPath)) {
 		console.log("yano end: nessun database ticket/DAG trovato per questo progetto (mai eseguito un task di sviluppo) — niente da chiudere.");
 		return;

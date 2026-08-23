@@ -161,26 +161,25 @@ async function main() {
 
 	console.log("\n=== PART 2 — process-piloting verbs are planner-only and binary-allowlisted ===");
 	const coder = await makeInstance("coder", "coder-01", "coder", cwd, "control-smoke");
-	const coderErr = await coder.callExpectError("agent_control", { verb: "relaunch", target: "tmux", args: [] });
+	const coderErr = await coder.callExpectError("agent_control", { verb: "relaunch", target: "herdr", args: [] });
 	ok(/planner-only/.test(coderErr.message), "a process-piloting verb is refused for a non-planner role");
 
 	// planner + a NON-allowlisted binary (e.g. 'bash') must be refused for launch.
 	const nonAllowedBinErr = await planner.callExpectError("agent_control", { verb: "launch", target: "bash", args: [] });
 	ok(/not allowlisted/.test(nonAllowedBinErr.message), "a launch targeting a non-allowlisted binary is refused (no arbitrary shell)");
 
-	// planner + an allowlisted binary (e.g. 'status' already worked; 'tmux'
-	// is allowlisted) — target 'tmux' with a harmless arg list. If tmux is not
-	// on this machine the postcondition is false but the tool must still not
-	// throw (it reports the failed postcondition rather than crashing).
-	const pilotCall = await planner.call("agent_control", { verb: "launch", target: "tmux", args: ["ls"] });
-	ok(pilotCall.details?.verb === "launch", "an allow-listed launch is accepted (binary tmux is allowlisted); postcondition may be false if tmux absent, but the tool must not throw");
+	// planner + the Herdr supervisor with a harmless status argument. If Herdr
+	// is unavailable the postcondition is false, but the control tool must
+	// report that fact rather than throw.
+	const pilotCall = await planner.call("agent_control", { verb: "launch", target: "herdr", args: ["status", "server"] });
+	ok(pilotCall.details?.verb === "launch", "an allow-listed Herdr launch is accepted; postcondition may be false if Herdr is unavailable, but the tool must not throw");
 
 	console.log("\n=== PART 3 — config override can restrict the allow-list ===");
 	fs.mkdirSync(path.join(cwd, "config"), { recursive: true });
 	fs.writeFileSync(path.join(cwd, "config", "control.json"), JSON.stringify({ verbs: ["status"], cli: {} }));
 	const p2 = await makeInstance("planner2", "planner-02", "planner", cwd, "control-smoke");
 	await p2.call("orchestrator_init", {});
-	const restrictedVerbErr = await p2.callExpectError("agent_control", { verb: "relaunch", target: "tmux" });
+	const restrictedVerbErr = await p2.callExpectError("agent_control", { verb: "relaunch", target: "herdr" });
 	ok(/not in the allow-list/.test(restrictedVerbErr.message), "control.json can restrict the allow-list to fewer verbs (explicit operator choice)");
 
 	console.log(`\n${PASS} assertions passed.`);

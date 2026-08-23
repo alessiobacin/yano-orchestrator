@@ -85,6 +85,16 @@ function main() {
 	ok(!modernOut.includes("-e extensions/orchestrator.ts"), "modern scaffold: no -e (relies on the global install, as designed since Revisione 33)");
 	ok(!/IGNORATO/.test(modernOut), "modern scaffold: no warning (nothing stale to report)");
 
+	console.log("\n=== Scenario D — older roster layout is accepted but gets an explicit config directory ===");
+	const oldLayoutDir = scratchDir("yano-old-roster-layout");
+	fs.mkdirSync(path.join(oldLayoutDir, ".pi", "agents"), { recursive: true });
+	fs.writeFileSync(path.join(oldLayoutDir, "package.json"), JSON.stringify({ name: "old-layout-project" }, null, 2));
+	fs.writeFileSync(path.join(oldLayoutDir, ".pi", "agents", "roles.yaml"), "roles: {}\n");
+	const oldLayoutOut = runPrintOnly(oldLayoutDir);
+	ok(/comando composto/.test(oldLayoutOut), "older roster layout: project is recognized as initialized");
+	ok(oldLayoutOut.includes("--project old-layout-project"), "older roster layout: project scope is still explicit");
+	ok(oldLayoutOut.includes("--config-dir .pi/agents"), "older roster layout: child receives the correct roster directory");
+
 	console.log(`\n${PASS} assertions passed.`);
 }
 

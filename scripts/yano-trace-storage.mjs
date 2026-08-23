@@ -3,6 +3,7 @@ import * as path from "node:path";
 import * as crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
+import { resolveYanoWorkspaceDir } from "./yano-project.mjs";
 
 export const TRACE_MODES = Object.freeze(["off", "events", "standard", "full"]);
 export const DEFAULT_TRACE_MODE = "events";
@@ -79,7 +80,7 @@ export function traceProjectKeys({ cwd = process.cwd(), project } = {}) {
 
 function runProjectFromWorkspace(cwd, runId) {
 	if (!runId) return null;
-	const dbPath = path.join(cwd, ".pi", "extensions", "yano-orchestrator", "orchestratorStorage", "orchestrator.db");
+	const dbPath = path.join(resolveYanoWorkspaceDir(cwd), "orchestratorStorage", "orchestrator.db");
 	if (!fs.existsSync(dbPath)) return null;
 	try {
 		const { DatabaseSync } = require("node:sqlite");

@@ -4,10 +4,10 @@
 // planner. Real incident this closes (see docs/development-notes.md,
 // Revisione 44): the planner's own prompt (prompts/planner.md) hand-composed
 // `pi -e extensions/orchestrator.ts --instance <nome> --role <ruolo>` to
-// launch coder/reviewer/specialist instances via herdr/tmux — stale advice
+// launch coder/reviewer/specialist instances via Herdr — stale advice
 // since Revisione 33 (a scaffolded project has no local extensions/orchestrator.ts
 // any more), so the spawned `pi` process errored out immediately and the
-// herdr pane/tmux session died on the spot. This script (and `yano start`)
+// Herdr pane died on the spot. This script (and `yano start`)
 // previously refused any --role other than "planner" outright, pointing
 // operators/the planner right back at that same stale command. Fixed: any
 // role now goes through the identical, already-correct `-e`
@@ -66,6 +66,8 @@ function main() {
 	const coderOut = run(dir, ["--instance", "coder-01", "--role", "coder", "--print-only"]);
 	ok(/comando composto/.test(coderOut), "coder: command is printed (launch not refused, unlike pre-Revisione-44 behavior)");
 	ok(coderOut.includes("--role coder"), "coder: composed command carries --role coder");
+	ok(coderOut.includes("--project any-role-test-project"), "coder: derived project scope is passed explicitly to the child Pi process");
+	ok(!coderOut.includes("--config-dir .pi/agents"), "coder: modern root roster does not inherit a legacy config directory");
 	ok(coderOut.includes(path.join(PACKAGE_ROOT, "skills-vendor", "yano", "yano-planner-trace-analysis")), "coder: receives the shared Yano trace skill");
 	ok(!coderOut.includes(path.join(PACKAGE_ROOT, "skills-vendor", "mattpocock")), "coder: receives no planner-only mattpocock skills");
 	ok(!coderOut.includes("-e extensions/orchestrator.ts"), "coder: no stale -e flag (modern scaffold, relies on global install)");
@@ -96,6 +98,7 @@ function main() {
 	console.log("\n=== TEST 3 — --role omitted still defaults to planner WITH the skill flags (backward compatible) ===");
 	const defaultOut = run(dir, ["--instance", "planner-01", "--print-only"]);
 	ok(defaultOut.includes("--role planner"), "default (no --role passed): resolves to planner");
+	ok(defaultOut.includes("--project any-role-test-project"), "planner: derived project scope is passed explicitly too");
 	ok(defaultOut.includes("--skill"), "default (no --role passed): mattpocock skill flags ARE attached, exactly as before Revisione 44");
 	ok(defaultOut.includes(path.join(PACKAGE_ROOT, "skills-vendor", "yano", "yano-planner-trace-analysis")), "planner: receives the mandatory Yano trace-analysis skill");
 	ok(

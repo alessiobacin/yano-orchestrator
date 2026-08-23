@@ -18,7 +18,7 @@
 // it only reads SQLite and appends markers.
 //
 // Complementary, not a replacement: keep the in-process watchdog for the
-// planner's own wake; run `yano watch` (in a bg pane / tmux / herdr) as a
+// planner's own wake; run `yano watch` in a Herdr pane as a
 // detached tripwire so stalls are still surfaced when no planner is open.
 //
 // Uso:

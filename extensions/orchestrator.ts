@@ -75,7 +75,7 @@ const STALE_AFTER_MS = Number(process.env.PI_ORCH_STALE_AFTER_MS) || HEARTBEAT_M
 const SEEN_ASSIGNMENTS_CAP = 1000;
 const ACTIVITY_LOG_CAP = 200;
 const DEFAULT_CONTROL_VERBS = ["status", "launch", "relaunch", "terminate"] as const;
-const CONTROL_BINARIES = new Set(["tmux", "herdr", "pi", "yano"]);
+const CONTROL_BINARIES = new Set(["herdr", "pi", "yano"]);
 
 function loadControlPolicy(cwd: string): { verbs: string[]; cli: Record<string, unknown> } {
 	const fallback = { verbs: [...DEFAULT_CONTROL_VERBS], cli: {} };
@@ -631,7 +631,7 @@ function roleCapabilitiesPrompt(roleCfg?: RoleConfig): string {
 }
 
 // Sets the terminal window/tab title via the standard OSC 0/2 escape
-// sequence (ESC ] 0 ; <title> BEL) — the convention tmux/iTerm2/Terminal.app
+// sequence (ESC ] 0 ; <title> BEL) — the convention Herdr/iTerm2/Terminal.app
 // read to name a pane. Harmless secondary fallback for whatever multiplexer
 // happens to be hosting `pi` (including a plain terminal tab). NOT relied on
 // for herdr itself — see herdrReportAgent() below for herdr's actual naming
@@ -723,8 +723,8 @@ function herdrRenamePane(name: string): void {
 // subcommand. That means `paseo run` cannot be used to spawn a `pi -e
 // extensions/orchestrator.ts --instance ... --role ...` process the way
 // herdr can; prompts/planner.md no longer offers paseo as a launch option
-// (tmux is the background-launch fallback instead — see "Selezione
-// dinamica del team", punto 8). This detection stub is kept only for the
+// Herdr is the only supported launch supervisor — see "Selezione dinamica
+// del team", punto 8. This detection stub is kept only for the
 // case where a user runs an already-launched instance (started some other
 // way) inside a paseo-managed pty by hand — PASEO_AGENT_ID (confirmed from
 // paseo.sh/docs/cli + CHANGELOG.md, added v0.1.34) still gets set in that
@@ -908,7 +908,7 @@ async function findExistingWorktree(projectCwd: string, wtPath: string): Promise
 // still prints). Whether the Node build `pi` itself bundles/uses also has
 // node:sqlite available is NOT verified here — same class of "verified in
 // isolation, not against the real binary" limit already flagged for
-// herdr/tmux elsewhere in this file.
+// Herdr elsewhere in this file.
 
 const YANO_SCHEMA_VERSION = 1;
 const YANO_STORAGE_SCHEMA_VERSION = 10;
@@ -926,8 +926,27 @@ function loadRuntimePackageVersion(): string | null {
 
 const YANO_RUNTIME_PACKAGE_VERSION = loadRuntimePackageVersion();
 
-function yanoWorkspaceDir(projectCwd: string): string {
-	return path.join(projectCwd, ".pi", "extensions", "yano-orchestrator");
+function yanoWorkspaceDir(projectCwd: string, explicitProject?: string): string {
+	const modern = path.join(projectCwd, ".pi", "extensions", "yano-orchestrator");
+	const readConfig = (dir: string): any | null => {
+		try { return JSON.parse(fs.readFileSync(path.join(dir, "config", "project.json"), "utf8")); } catch { return null; }
+	};
+	const modernConfig = readConfig(modern);
+	if (modernConfig && (!explicitProject || String(modernConfig.project) === String(explicitProject))) return modern;
+	// Compatibility with projects scaffolded before the workspace rename. Do
+	// not move or rewrite that state: select the existing extension directory
+	// by its project config and durable database, then keep writing there.
+	try {
+		const extensionsRoot = path.join(projectCwd, ".pi", "extensions");
+		for (const entry of fs.readdirSync(extensionsRoot, { withFileTypes: true })) {
+			if (!entry.isDirectory()) continue;
+			const candidate = path.join(extensionsRoot, entry.name);
+			if (!fs.existsSync(path.join(candidate, "orchestratorStorage", "orchestrator.db"))) continue;
+			const config = readConfig(candidate);
+			if (config && (!explicitProject || String(config.project) === String(explicitProject))) return candidate;
+		}
+	} catch { /* use the canonical path when no legacy workspace is present */ }
+	return modern;
 }
 
 // Revisione 28: "logs" removed from this list (was created but never
@@ -997,7 +1016,7 @@ interface YanoProjectConfig {
 // this is what lets a project have a real name distinct from the MQTT
 // scope, which the planner never asks the user to change.
 function yanoEnsureWorkspace(projectCwd: string, project: string, projectNameOverride?: string): YanoProjectConfig {
-	const workspaceDir = yanoWorkspaceDir(projectCwd);
+	const workspaceDir = yanoWorkspaceDir(projectCwd, project);
 	const dirs = yanoSubdirs(workspaceDir);
 	for (const dir of Object.values(dirs)) fs.mkdirSync(dir, { recursive: true });
 	const configPath = path.join(dirs.config, "project.json");
@@ -2809,6 +2828,20 @@ export default function (pi: ExtensionAPI) {
 		try {
 			const card = JSON.parse(payload.toString("utf-8")) as PresenceCard;
 			if (!card || typeof card.instance !== "string") return;
+			// Defence in depth: the subscription is already scoped to T.project,
+			// but a stale/duplicate extension, a retained card from an older
+			// session, or a broker wildcard mistake must never be allowed to put a
+			// different project's agent in this roster. Validate both the payload
+			// identity and the exact topic before storing it.
+			if (!identity || !T || card.project !== identity.project || topicStr !== T.agentStatus(card.instance)) {
+				logEvent("presence_ignored_scope_mismatch", {
+					topic: topicStr,
+					card_instance: card.instance,
+					card_project: card.project ?? null,
+					expected_project: identity?.project ?? null,
+				});
+				return;
+			}
 			if (identity && card.instance === identity.instance) return;
 			presence.set(card.instance, card);
 			requestPoolRedraw();
@@ -2870,7 +2903,7 @@ export default function (pi: ExtensionAPI) {
 					"Questa istanza va lanciata dalla ROOT del progetto, non da dentro una worktree, altrimenti ogni percorso " +
 					"che questa estensione calcola (SQLite orchestratorStorage, report, lock file, la worktree stessa) verrebbe " +
 					"risolto in una copia annidata e isolata, invisibile a tutte le altre istanze. Rilanciami con la cwd impostata " +
-					"sulla root del progetto (herdr/tmux: flag `-c <root-progetto>`).",
+					"sulla root del progetto (Herdr: tab con cwd `<root-progetto>`).",
 				"error",
 			);
 			return;
@@ -3275,7 +3308,7 @@ export default function (pi: ExtensionAPI) {
 		if (!identity) throw new Error("orchestrator not initialised");
 		if (yanoStorage) return yanoStorage;
 		yanoEnsureWorkspace(identity.cwd, identity.project);
-		const dbPath = path.join(yanoSubdirs(yanoWorkspaceDir(identity.cwd)).orchestratorStorage, "orchestrator.db");
+		const dbPath = path.join(yanoSubdirs(yanoWorkspaceDir(identity.cwd, identity.project)).orchestratorStorage, "orchestrator.db");
 		const storage = new SQLiteOrchestratorStorage(dbPath);
 		storage.init();
 		yanoStorage = storage;
@@ -3417,7 +3450,7 @@ export default function (pi: ExtensionAPI) {
 							content:
 								`[watchdog] L'istanza "${o.assigned_instance}", a cui era assegnato il ticket "${o.title}" (${o.ticket_id}), risulta OFFLINE (nessuna ` +
 								`presence MQTT viva) — il ticket è già stato riportato automaticamente a "failed" per liberare lo slot. AZIONE OBBLIGATORIA: rilancia ` +
-								`ora "${o.assigned_instance}" (stesso nome o uno nuovo dello stesso ruolo) con lo stesso meccanismo herdr/tmux usato per la selezione ` +
+								`ora "${o.assigned_instance}" (stesso nome o uno nuovo dello stesso ruolo) con Herdr, usando la selezione ` +
 								`iniziale del team, poi ripianifica questo lavoro (ticket_create/ticket_claim) su quell'istanza una volta che agent_list la mostra ` +
 								`viva. NON eseguire tu il lavoro di questo ticket: sei il planner, il tuo compito è pianificare e delegare, mai scrivere codice al ` +
 								`posto di un coder assente. L'utente è già stato avvisato via WhatsApp (se configurato).`,
@@ -3483,7 +3516,7 @@ export default function (pi: ExtensionAPI) {
 								content:
 									`[watchdog] Ho appena inviato una terminazione automatica a "${s.assigned_instance}" (bloccata da ${minutes} minuti sul ticket ` +
 									`"${s.title}", ${s.ticket_id}, senza ticket_complete — soglia PI_ORCH_WATCHDOG_AUTO_TERMINATE_MS superata). AZIONE OBBLIGATORIA: ` +
-									`verifica con agent_list che sia sparita, poi rilanciala (stesso meccanismo herdr/tmux della selezione del team) e marca ` +
+									`verifica con agent_list che sia sparita, poi rilanciala con Herdr e marca ` +
 									`questo ticket come failed con ticket_complete prima di ripianificarlo — NON eseguire tu il lavoro del ticket.`,
 								display: true,
 								details: { run_id: s.run_id, ticket_id: s.ticket_id, assigned_instance: s.assigned_instance, elapsed_ms: s.elapsed_ms },
@@ -3965,7 +3998,7 @@ export default function (pi: ExtensionAPI) {
 	// opt-in WATCHDOG_AUTO_TERMINATE_* hard-stuck tier. "Recreate" is
 	// deliberately NOT this tool's job — see the honest-limit note on
 	// paseoDetectAndLog()/herdrRenamePane() above: there is no verified way
-	// for this extension to spawn a brand-new herdr pane/tmux session from
+	// for this extension to spawn a brand-new Herdr pane from
 	// inside another instance's process, so relaunching stays a planner
 	// action via the same Bash-driven mechanism already used for initial team
 	// selection (prompts/planner.md, "Selezione dinamica del team").
@@ -3977,7 +4010,7 @@ export default function (pi: ExtensionAPI) {
 			"exits) — planner-only. Use this when an instance is confirmably wedged (e.g. agent_list still shows it, but an " +
 			"agent_send to it has already timed out, or a watchdog stall alert named it) and you've decided waiting longer " +
 			"isn't worth it. This does NOT relaunch anything — after calling this, you MUST relaunch the instance yourself " +
-			"(same herdr/tmux mechanism as when you first launched the team) before delegating to it again; if you don't, " +
+			"(same Herdr mechanism as when you first launched the team) before delegating to it again; if you don't, " +
 			"nothing will ever pick up its unfinished ticket. Best-effort delivery only: if the target is already gone, this " +
 			"is a harmless no-op (nobody receives it).",
 		parameters: Type.Object({
@@ -4008,7 +4041,7 @@ export default function (pi: ExtensionAPI) {
 					type: "text" as const,
 					text:
 						`agent_terminate → ${params.target_instance}${wasLive ? "" : " (⚠️ nessuna presence online per questa istanza — probabile no-op)"}\n` +
-						"Verifica con agent_list tra qualche secondo che sia sparita, poi rilanciala tu (stesso meccanismo herdr/tmux della " +
+						"Verifica con agent_list tra qualche secondo che sia sparita, poi rilanciala tu con Herdr (stesso flusso della " +
 						"selezione del team) prima di delegare di nuovo — questo tool non rilancia nulla da solo.",
 				}],
 				details: { target: params.target_instance, was_live: wasLive },
@@ -5755,7 +5788,7 @@ export default function (pi: ExtensionAPI) {
 				throw new Error(
 					"ticket_claim: the planner role may never claim a ticket — planning and delegating is the whole job, doing the " +
 						"work yourself (even once, even to unblock a missing/dead instance) is exactly the failure Revisione 42 closed. " +
-						"Relaunch the instance whose role this ticket needs (same herdr/tmux mechanism as initial team selection), " +
+									"Relaunch the instance whose role this ticket needs through Herdr, following the initial team-selection flow, " +
 						"then let THAT instance call ticket_claim.",
 				);
 			}

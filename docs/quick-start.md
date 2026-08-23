@@ -34,6 +34,12 @@ yano init --name "Mio Progetto"
 copiarvi il codice dell'estensione; il database SQLite operativo viene creato
 quando il primo planner inizializza l'orchestratore.
 
+Lo scope MQTT predefinito viene derivato da `config/project.json`, poi dal
+`package.json` e infine dal nome della cartella. Non aggiungere un
+`--project` basato arbitrariamente sul nome della directory: se lo usi,
+riportalo identico su ogni istanza. Yano mostra un avviso all'avvio quando lo
+scope esplicito diverge da quello della root corrente.
+
 ## 2. Avvia il broker MQTT
 
 Con il broker Docker incluso:
@@ -53,6 +59,15 @@ Attiva almeno `events` prima di avviare il planner:
 yano trace enable --mode events
 yano trace status
 ```
+
+Se `agent_list` è vuoto dopo il riavvio del planner, controlla prima lo scope
+visualizzato dal messaggio di avvio e rilancia tutte le istanze con lo stesso
+`--project` (oppure ometti il flag per usare il default della root). Uno scope
+diverso è una rete MQTT diversa: il refresh non può fondere intenzionalmente
+due progetti separati.
+
+`yano fleet` mostra solo agenti con heartbeat recente; le card retained
+`offline` o scadute vengono indicate come ignorate, non come agenti live.
 
 Per includere risposte visibili e metadati dei tool usa `standard`; per una
 sessione diagnostica completa usa `full`:

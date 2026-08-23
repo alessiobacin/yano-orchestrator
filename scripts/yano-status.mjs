@@ -115,6 +115,7 @@ function runLogs(cwd, argv) {
 function runFleet(cwd, argv) {
 	const project = resolveProject(cwd, argv);
 	const broker = process.env.PI_ORCH_BROKER_URL || "mqtt://127.0.0.1:1883";
+	const staleAfterMs = Number(process.env.PI_ORCH_STALE_AFTER_MS) || 45_000;
 	return new Promise((resolve) => {
 		const client = mqtt.connect(broker, { clean: true, reconnectPeriod: 0 });
 		const timeout = setTimeout(() => { console.error(`yano fleet: broker ${broker} non raggiungibile.`); try { client.end(true); } catch { /* ignore */ } resolve(); }, 3000);
@@ -124,8 +125,20 @@ function runFleet(cwd, argv) {
 			client.on("message", (_t, payload) => { try { const c = JSON.parse(payload.toString()); if (c?.instance) agents.set(c.instance, c); } catch { /* ignore */ } });
 			client.subscribe(`pi/${project}/agents/+/status`, { qos: 0 }, () => {
 				setTimeout(() => {
-					if (!agents.size) { console.log(`yano fleet: nessun agente live per il progetto "${project}".`); }
-					else { console.log(`yano fleet: ${agents.size} agente/i nel progetto "${project}":`); agents.forEach((a) => console.log(`   ${a.instance} (${a.role}) ${a.status} team=[${(a.team || []).join(",")}]`)); }
+					const now = Date.now();
+					const live = [...agents.values()].filter((a) => {
+						if (a.status === "offline") return false;
+						const heartbeat = Date.parse(a.last_heartbeat || "");
+						return Number.isFinite(heartbeat) && now - heartbeat <= staleAfterMs;
+					});
+					const ignored = agents.size - live.length;
+					if (!live.length) {
+						console.log(`yano fleet: nessun agente live per il progetto "${project}"${ignored ? ` (${ignored} card retained offline/stale ignorate)` : ""}.`);
+					} else {
+						console.log(`yano fleet: ${live.length} agente/i live nel progetto "${project}":`);
+						live.forEach((a) => console.log(`   ${a.instance} (${a.role}) ${a.status} team=[${(a.team || []).join(",")}]`));
+						if (ignored) console.log(`   (${ignored} card retained offline/stale ignorate)`);
+					}
 					try { client.end(true); } catch { /* ignore */ }
 					resolve();
 				}, 600);

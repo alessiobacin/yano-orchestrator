@@ -2429,6 +2429,12 @@ export default function (pi: ExtensionAPI) {
 	let heartbeatTimer: NodeJS.Timeout | null = null;
 	let staleSweepTimer: NodeJS.Timeout | null = null;
 	let watchdogTimer: NodeJS.Timeout | null = null;
+	// Opened lazily by the ticket tools. Presence may still use it on each
+	// heartbeat to reconcile ownership changes made by another instance (most
+	// importantly: the planner completing a worker's ticket after review).
+	let moaStorage: SQLiteOrchestratorStorage | null = null;
+	let presenceRevision = 0;
+	let presencePublishChain: Promise<void> = Promise.resolve();
 	// ticket_id::running_since -> highest "how many WATCHDOG_STALL_MS multiples
 	// have we already alerted for THIS running episode" — keyed on running_since
 	// (not just ticket_id) so a fresh ticket_claim after a reassignment starts a
@@ -2456,7 +2462,28 @@ export default function (pi: ExtensionAPI) {
 	// minutes (Revisione 40, docs/development-notes.md). Presence "busy" now
 	// reflects EITHER signal, not just inboundQueue.
 	const activeTicketIds = new Set<string>();
+	function refreshActiveTicketIdsFromStorage(): void {
+		if (!identity || !moaStorage) return;
+		try {
+			const current = new Set<string>();
+			for (const run of moaStorage.listRuns(identity.project)) {
+				for (const ticket of moaStorage.listTickets(run.id)) {
+					if (ticket.status === "running" && ticket.assigned_instance === identity.instance) current.add(ticket.id);
+				}
+			}
+			activeTicketIds.clear();
+			for (const ticketId of current) activeTicketIds.add(ticketId);
+		} catch {
+			// SQLite is advisory for presence. Keep the last local snapshot if the
+			// database is temporarily locked or unavailable.
+		}
+	}
+	function currentLoad(): number {
+		refreshActiveTicketIdsFromStorage();
+		return Math.max(inboundQueue.size, activeTicketIds.size);
+	}
 	function computeSelfStatus(): PresenceStatus {
+		refreshActiveTicketIdsFromStorage();
 		return inboundQueue.size > 0 || activeTicketIds.size > 0 ? "busy" : "idle";
 	}
 	let currentCtx: ExtensionContext | null = null;
@@ -2529,7 +2556,7 @@ export default function (pi: ExtensionAPI) {
 			instance: identity.instance,
 			role: identity.role,
 			status: computeSelfStatus(),
-			current_load: inboundQueue.size,
+			current_load: currentLoad(),
 			capacity: identity.capacity,
 			self: true,
 		};
@@ -2565,29 +2592,39 @@ export default function (pi: ExtensionAPI) {
 		try { (t as any).unref?.(); } catch { /* ignore */ }
 	}
 
-	async function publishPresence(status: PresenceStatus) {
-		if (!identity || !client || !T) return;
-		const card: PresenceCard = {
-			instance: identity.instance,
-			role: identity.role,
-			project: identity.project,
-			team: identity.team,
-			model: identity.model,
-			skills: [],
-			tools: [],
-			mcp: [],
-			status,
-			capacity: identity.capacity,
-			current_load: inboundQueue.size,
-			color: identity.color,
-			started_at: nowIso(),
-			last_heartbeat: nowIso(),
-		};
-		try {
-			await client.publishAsync(T.agentStatus(identity.instance), JSON.stringify(card), { qos: 1, retain: true });
-		} catch {
-			// best-effort — presence is advisory, never fatal to the agent turn
-		}
+	function publishPresence(_requestedStatus: PresenceStatus): Promise<void> {
+		const revision = ++presenceRevision;
+		presencePublishChain = presencePublishChain
+			.catch(() => {})
+			.then(async () => {
+				// If several transitions were queued before MQTT flushed, only the
+				// newest one is allowed to publish. This prevents an older busy
+				// snapshot from landing after a newer idle snapshot.
+				if (revision !== presenceRevision || !identity || !client || !T) return;
+				const heartbeat = nowIso();
+				const card: PresenceCard = {
+					instance: identity.instance,
+					role: identity.role,
+					project: identity.project,
+					team: identity.team,
+					model: identity.model,
+					skills: [],
+					tools: [],
+					mcp: [],
+					status: computeSelfStatus(),
+					capacity: identity.capacity,
+					current_load: currentLoad(),
+					color: identity.color,
+					started_at: heartbeat,
+					last_heartbeat: heartbeat,
+				};
+				try {
+					await client.publishAsync(T.agentStatus(identity.instance), JSON.stringify(card), { qos: 1, retain: true });
+				} catch {
+					// best-effort — presence is advisory, never fatal to the agent turn
+				}
+			});
+		return presencePublishChain;
 	}
 
 	function handleCommand(env: CommandEnvelope) {
@@ -2809,7 +2846,16 @@ export default function (pi: ExtensionAPI) {
 		const cfg = loadConfig(cwd, flags.configDir || "agents");
 		const resolved = resolveCapabilities(flags.instance, cfg, flags.role);
 		const role = flags.role || resolved.role;
-		const project = flags.project || resolveDefaultProject(cwd);
+		const defaultProject = resolveDefaultProject(cwd);
+		const project = flags.project || defaultProject;
+		if (flags.project && flags.project !== defaultProject) {
+			ctx.ui?.notify?.(
+				`orchestrator: questo agente usa lo scope MQTT esplicito "${flags.project}", ` +
+					`ma la root corrente risolverebbe "${defaultProject}". Tutte le istanze dello stesso team ` +
+					`devono usare lo stesso --project; agent_list non mostrerà agenti avviati sull'altro scope.`,
+				"warning",
+			);
+		}
 		const color = flags.color && isValidHex(flags.color) ? flags.color : fallbackColor(flags.instance);
 		const displayName = flags.name || flags.instance;
 
@@ -2843,7 +2889,12 @@ export default function (pi: ExtensionAPI) {
 		paseoDetectAndLog();
 
 		const brokerUrl = flags.brokerUrl || DEFAULT_BROKER_URL;
-		logEvent("session_start", { project, team: resolved.teams, broker: brokerUrl });
+		logEvent("session_start", {
+			project,
+			team: resolved.teams,
+			broker: brokerUrl,
+			...(flags.project && flags.project !== defaultProject ? { project_scope_override: true, default_project: defaultProject } : {}),
+		});
 
 		// Install the widget immediately, BEFORE the broker connection is even
 		// attempted, so there's always something visible at the bottom of the
@@ -2944,7 +2995,10 @@ export default function (pi: ExtensionAPI) {
 				try {
 					await client.subscribeAsync(T.agentCommands(identity.instance), { qos: 1 });
 					await client.subscribeAsync(T.agentResponses(identity.instance), { qos: 1 });
-					await client.subscribeAsync(T.agentStatusWildcard(), { qos: 0 });
+					// Presence is published retained at QoS 1. Subscribe at the same
+					// level so a freshly restarted planner deterministically receives
+					// every retained peer card before it renders/queries the fleet.
+					await client.subscribeAsync(T.agentStatusWildcard(), { qos: 1 });
 					await client.subscribeAsync(T.roleTasks(role), { qos: 1 });
 					for (const team of identity.team) {
 						await client.subscribeAsync(T.teamEvents(team), { qos: 0 });
@@ -3149,7 +3203,6 @@ export default function (pi: ExtensionAPI) {
 	// orchestrator_init) rather than at session_start, so every role that
 	// never touches the ticket layer never pays for it. One open handle per
 	// process, closed on shutdown alongside the MQTT client.
-	let moaStorage: OrchestratorStorage | null = null;
 	function ensureMoaStorage(): OrchestratorStorage {
 		if (!identity) throw new Error("orchestrator not initialised");
 		if (moaStorage) return moaStorage;
@@ -3490,10 +3543,10 @@ export default function (pi: ExtensionAPI) {
 			const agents = [...presence.values()].map((c) => ({
 				instance: c.instance, role: c.role, team: c.team ?? [], status: c.status, capacity: c.capacity ?? 0, current_load: c.current_load ?? 0,
 			}));
-			const lines = agents.length === 0
-				? "No peer agents known yet (they may not have published presence, or you may need to wait for the retained message)."
-				: agents.map((a) => `${a.status === "idle" ? "●" : a.status === "busy" ? "◐" : "✗"} ${a.instance} (${a.role}) team=[${a.team.join(",")}] load=${a.current_load}/${a.capacity}`).join("\n");
-			return { content: [{ type: "text" as const, text: `${agents.length} peer(s):\n${lines}` }], details: { agents } };
+				const lines = agents.length === 0
+					? `No peer agents known yet for MQTT project "${identity?.project ?? "?"}" (they may still be connecting, or were launched with a different --project scope).`
+					: agents.map((a) => `${a.status === "idle" ? "●" : a.status === "busy" ? "◐" : "✗"} ${a.instance} (${a.role}) team=[${a.team.join(",")}] load=${a.current_load}/${a.capacity}`).join("\n");
+				return { content: [{ type: "text" as const, text: `${agents.length} peer(s) in project "${identity?.project ?? "?"}":\n${lines}` }], details: { agents, project: identity?.project ?? null } };
 		},
 		renderCall(_args, theme) {
 			return new Text(theme.fg("toolTitle", theme.bold("agent_list")), 0, 0);
@@ -5709,17 +5762,10 @@ export default function (pi: ExtensionAPI) {
 			// and re-publish immediately rather than waiting for the next
 			// heartbeat — same reasoning as ticket_claim above.
 			//
-			// Honest limit: activeTicketIds is per-process (this instance's own
-			// closure), so this only clears correctly when the SAME instance that
-			// claimed the ticket also completes it. The tool description above
-			// explicitly allows the planner to override and complete a ticket on
-			// another instance's behalf (e.g. after a watchdog stall) — in that
-			// case this delete runs on the PLANNER's own set (a no-op) and the
-			// original assignee's presence stays "busy" until that instance's own
-			// process exits or otherwise republishes. Fixing that fully would mean
-			// tracking per-ticket ownership centrally (MQTT/SQLite) rather than in
-			// each instance's local memory — out of scope for this incident, which
-			// was a same-instance claim→complete flow throughout.
+			// The local delete makes the same-instance path immediate. The heartbeat
+			// reconciliation from SQLite also fixes the planner-override path: when
+			// the planner completes a worker-owned ticket, that worker's next
+			// presence publish rebuilds its set and becomes idle.
 			activeTicketIds.delete(ticket.id);
 			void publishPresence(computeSelfStatus());
 

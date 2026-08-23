@@ -6,6 +6,38 @@ l'equivalente diretto di `coms.ts`/`coms-net.ts` del repo
 `disler/pi-vs-claude-code`, ma su MQTT 5 e con il paradigma role/instance al
 posto della chat P2P piatta.
 
+## Revisione 50 — refresh presenza da SQLite e diagnosi degli scope MQTT divergenti
+
+**Incidente reale**: nella prova `FocusBoard Trace Test` alcuni worker
+risultavano `busy` anche dopo la chiusura del ticket da parte del planner,
+mentre un planner riavviato non vedeva peer già attivi. L'ispezione dei topic
+retained ha separato due cause: lo stato del ticket era posseduto da un set in
+memoria del worker, ma il planner chiude il ticket; inoltre il planner era
+connesso a `pi/focusboard/...` e i worker a `pi/focusboard-trace-test/...`.
+
+**Fix**:
+
+- ogni heartbeat/presence legge i ticket `running` assegnati all'istanza dal
+  database SQLite centrale e ricostruisce `activeTicketIds`; quindi la chiusura
+  eseguita dal planner aggiorna il worker al successivo publish senza
+  richiedere un nuovo claim o un riavvio;
+- publish MQTT retained serializzati e revisionati impediscono che uno snapshot
+  `busy` vecchio arrivi dopo quello `idle` più recente;
+- la sottoscrizione retained della presence usa QoS 1 e un planner appena
+  avviato ricostruisce la mappa dei peer ricevuti dal broker;
+- `agent_list` espone lo scope MQTT corrente e l'avvio avvisa se un
+  `--project` esplicito diverge da quello derivato dalla root. Gli scope diversi
+  restano intenzionalmente isolati e non vengono fusi automaticamente;
+- `yano fleet` filtra le card retained `offline` o con heartbeat scaduto e
+  indica quante sono state ignorate, invece di chiamarle agenti live;
+- `scripts/smoke-test-presence-refresh.mjs` riproduce planner riavviato,
+  claim, completamento esterno e verifica della card retained `idle`.
+
+**Verifica**: syntax check dell'estensione e smoke test presenza superati (4
+asserzioni). Per il progetto già in esecuzione, rilanciare tutte le istanze
+con lo stesso scope MQTT; il codice non può rendere visibili tra loro due reti
+`pi/<project>/...` diverse senza violare l'isolamento tra progetti.
+
 ## Revisione 49 — chrome-devtools MCP + skill vendorizzata per reviewer e frontend-developer (verifica reale nel browser, non solo lettura del codice)
 
 **Richiesta esplicita dell'operatore**: dare a `reviewer` e `frontend-developer`
@@ -1005,14 +1037,11 @@ l'operatore".
    memoria), popolato da `ticket_claim` e svuotato da `ticket_complete`;
    `computeSelfStatus()` ora è `busy` se `inboundQueue.size > 0` OPPURE
    `activeTicketIds.size > 0`, ripubblicato immediatamente su claim/complete
-   (non solo al prossimo heartbeat). **Limite onesto**: `activeTicketIds` è
-   stato locale al processo — se il planner completa un ticket per conto di
-   un'altra istanza (permesso esplicitamente dal tool, es. dopo uno stall), lo
-   svuotamento avviene nel set del PLANNER, non in quello dell'istanza
-   originale, che resterà "busy" finché non si riconnette da sola. Risolverlo
-   del tutto richiederebbe uno stato di ownership centralizzato (MQTT/SQLite)
-   invece che in memoria locale — fuori scope per questo incidente, che era un
-   flusso claim→complete sulla stessa istanza dall'inizio alla fine.
+	   (non solo al prossimo heartbeat). Il limite del set locale è stato poi
+	   chiuso nella Revisione 50: ogni heartbeat ricostruisce l'insieme dai ticket
+	   `running` assegnati all'istanza nel database SQLite, quindi anche il
+	   completamento da parte del planner viene riflesso sul worker senza
+	   riconnessione.
 
 **Verificato**: `scripts/smoke-test-watchdog.mjs` esteso con un TEST 5 (5 nuove
 assertion sul solo watchdog run-non-finalizzato: nessun falso allarme prima

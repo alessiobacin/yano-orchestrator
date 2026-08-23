@@ -23,7 +23,7 @@ pi planner ── reads prompts + agents/roles.yaml
   └── optional adapters: WhatsApp, MCP, effect delivery, browser tooling
 ```
 
-Every instance has an `instance`, `role`, `project` and `team` identity. MQTT topics are scoped as `pi/<project>/...`, so two projects sharing a broker remain isolated unless the operator deliberately passes the same `--project` value.
+Every instance has an `instance`, `role`, `project` and `team` identity. MQTT topics are scoped as `pi/<project>/...`, so two projects sharing a broker remain isolated unless the operator deliberately passes the same `--project` value. An explicit scope override is reported at startup when it differs from the scope derived by the current project root; all instances that must collaborate must use the same value.
 
 ## Main flow
 
@@ -99,7 +99,8 @@ making explicitly playbook-scoped work fail closed on a wrong worker.
 
 ## Failure and recovery
 
-- MQTT presence uses retained status plus LWT; stale peers are removed locally.
+- MQTT presence uses retained status plus LWT; stale peers are removed locally. Each heartbeat reconciles the agent's `busy`/`idle` status and load from SQLite ticket ownership, so a planner completing a worker's ticket cannot leave a stale `busy` card behind. Presence publishes are serialized so an older transition cannot overwrite a newer one.
+- `yano fleet` applies the same live-heartbeat rule to retained cards and does not report offline or stale agents as live; it reports their ignored-card count as a diagnostic.
 - The planner watchdog detects stalled tickets, unfinalized runs and orphaned assignments.
 - A dead worker is surfaced with a durable event/checkpoint and can be replaced without letting the planner silently claim worker work.
 - External Playbook effects are claimed with leases, retried with bounded attempts and moved to a dead-letter outcome when delivery is exhausted.

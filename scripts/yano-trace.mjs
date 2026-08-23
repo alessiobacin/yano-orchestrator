@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import * as fs from "node:fs";
+import * as crypto from "node:crypto";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -9,6 +11,7 @@ import {
 	getTraceConfig,
 	listTraceProjects,
 	readTraceRecords,
+	appendRawTraceRecord,
 	resolveTraceProject,
 	resolveTraceProjectForRun,
 	setTraceMode,
@@ -16,7 +19,10 @@ import {
 } from "./yano-trace-storage.mjs";
 import {
 	clearTraceIndexData,
+	consolidateTraceMemories,
+	exportTraceBundle,
 	indexTraceRecords,
+	planTraceRetrieval,
 	searchTraceRecords,
 	traceIndexStatus,
 } from "./yano-trace-index.mjs";
@@ -41,7 +47,7 @@ function validDate(value, flag) {
 
 function usage() {
 	console.log([
-		"Uso: yano trace <status|enable|disable|events|index|search|clear> [opzioni]",
+		"Uso: yano trace <status|enable|disable|events|feedback|context|opinion|overview|index|consolidate|plan|search|export|import|clear> [opzioni]",
 		"",
 		"  status                         mostra modalità e directory globale",
 		"  enable --mode <mode>           attiva off|events|standard|full",
@@ -52,7 +58,11 @@ function usage() {
 		"  opinion --text <testo>         salva l'opinione del planner sul fallimento",
 		"  overview [--all-projects]      aggrega errori e pattern tra progetti/round",
 		"  index [filtri]                 crea/aggiorna l'indice semantico SQLite",
-		"  search --query <testo>         cerca evidenza simile nel trace indicizzato",
+		"  consolidate [filtri]           costruisce memorie tipizzate e legami di evidenza",
+		"  plan [filtri]                  prepara una strategia di recupero con budget token",
+		"  search --query <testo>         cerca evidenza con ranking ibrido spiegabile",
+		"  export --output <file.json>    esporta raw + indice + memoria in un bundle",
+		"  import --input <file.json>    importa record raw; --reindex ricostruisce l'indice",
 		"  clear --yes                    cancella il tracing del progetto corrente",
 		"  clear --run <id> --yes         cancella solo gli eventi di un run",
 		"  clear --instance <id> --yes   cancella solo gli eventi di un agente",
@@ -61,7 +71,8 @@ function usage() {
 		"",
 		"Opzioni comuni: --project <nome>, --data-dir <directory>",
 		"Filtri: --run <id>, --round <n>, --task <slug>, --instance <id>, --type <tipo>, --since <ISO>, --limit <n>, --json",
-		"Search: --include-payload restituisce anche il payload JSON originale",
+		"Search: --mode keyword|semantic|hybrid, --memory-only, --explain, --include-payload",
+		"Consolidate: genera temp/traces/<project-key>/projections/planner-context.json",
 	].join("\n"));
 }
 
@@ -135,6 +146,7 @@ export async function runTrace({ cwd, argv }) {
 		console.log(`   progetto trace: ${paths.projectDir}`);
 		const index = traceIndexStatus();
 		console.log(`   indice semantico: ${index.exists ? `${index.documents} documenti` : "non ancora creato"} (${index.path})`);
+		if (index.exists) console.log(`   memoria consolidata: ${index.memories} memorie, ${index.links} legami`);
 		const projects = listTraceProjects();
 		if (projects.length) console.log(`   progetti indicizzati: ${projects.length}`);
 		return cfg;
@@ -295,6 +307,31 @@ export async function runTrace({ cwd, argv }) {
 		return result;
 	}
 
+	if (sub === "consolidate") {
+		const since = validDate(value(argv, "--since"), "--since");
+		const result = await consolidateTraceMemories({
+			cwd, project, allProjects: has(argv, "--all-projects"), run: value(argv, "--run"), round: value(argv, "--round"),
+			task: value(argv, "--task"), instance: value(argv, "--instance"), type: value(argv, "--type"), since,
+			limit: Math.max(1, Number(value(argv, "--limit") || 1000000)),
+		});
+		if (has(argv, "--json")) console.log(JSON.stringify(result, null, 2));
+		else console.log(`yano trace consolidate: ${result.memories} memorie, ${result.links} legami da ${result.records} record; ${result.patterns} pattern ricorrenti\n   db: ${result.db_path}\n   projection: ${result.projection.directory}`);
+		return result;
+	}
+
+	if (sub === "plan") {
+		const result = planTraceRetrieval({
+			cwd, project, allProjects: has(argv, "--all-projects"), query: value(argv, "--query") || "", run: value(argv, "--run"),
+			round: value(argv, "--round"), task: value(argv, "--task"), limit: value(argv, "--limit"), budget: value(argv, "--budget"),
+		});
+		if (has(argv, "--json")) console.log(JSON.stringify(result, null, 2));
+		else {
+			console.log(`yano trace plan: budget ${result.budget_tokens} token — ${result.available.consolidated_memories} memorie, ${result.available.raw_records} record raw disponibili`);
+			for (const command of result.commands) console.log(`   ${command}`);
+		}
+		return result;
+	}
+
 	if (sub === "search") {
 		const since = validDate(value(argv, "--since"), "--since");
 		const result = await searchTraceRecords({
@@ -310,12 +347,53 @@ export async function runTrace({ cwd, argv }) {
 			since,
 			limit: Math.max(1, Number(value(argv, "--limit") || 10)),
 			includePayload: has(argv, "--include-payload"),
+			mode: value(argv, "--mode") || "hybrid",
+			memoryOnly: has(argv, "--memory-only"),
+			explain: has(argv, "--explain"),
 		});
 		if (has(argv, "--json")) console.log(JSON.stringify(result, null, 2));
 		else {
 			console.log(result.message || `yano trace search: ${result.results.length} risultato/i (da ${result.total} documenti)`);
-			for (const item of result.results) console.log(`\n[${item.score.toFixed(4)}] ${item.ts || "?"} ${item.project || "?"} ${item.instance || "?"} ${item.event_type || item.record_type || "?"}\n${item.text}`);
+			for (const item of result.results) console.log(`\n[${item.score.toFixed(4)}] ${item.source} ${item.ts || "?"} ${item.project || "?"} ${item.instance || "?"} ${item.event_type || item.record_type || "?"}\n${item.text}${has(argv, "--explain") ? `\n  semantic=${item.semantic_score.toFixed(4)} lexical=${item.lexical_score.toFixed(4)} recency=${item.recency_score.toFixed(4)}` : ""}`);
+			if (result.embedding_warning) console.log(`\nNota: embedding non disponibile, fallback keyword: ${result.embedding_warning}`);
 		}
+		return result;
+	}
+
+	if (sub === "export") {
+		const output = value(argv, "--output");
+		if (!output) throw new Error("trace export: --output <file.json> è obbligatorio");
+		const since = validDate(value(argv, "--since"), "--since");
+		const bundle = exportTraceBundle({ cwd, project, allProjects: has(argv, "--all-projects"), run: value(argv, "--run"), round: value(argv, "--round"), task: value(argv, "--task"), since, limit: Math.max(1, Number(value(argv, "--limit") || 1000000)) });
+		const target = path.resolve(output);
+		fs.mkdirSync(path.dirname(target), { recursive: true });
+		fs.writeFileSync(target, `${JSON.stringify(bundle, null, 2)}\n`, { mode: 0o600 });
+		if (has(argv, "--json")) console.log(JSON.stringify({ ok: true, output: target, records: bundle.records.length, memories: bundle.derived.memories.length }, null, 2));
+		else console.log(`yano trace export: ${bundle.records.length} record, ${bundle.derived.memories.length} memorie → ${target}`);
+		return { ok: true, output: target, bundle };
+	}
+
+	if (sub === "import") {
+		const input = value(argv, "--input");
+		if (!input) throw new Error("trace import: --input <file.json> è obbligatorio");
+		const source = path.resolve(input);
+		let bundle;
+		try { bundle = JSON.parse(fs.readFileSync(source, "utf8")); } catch (error) { throw new Error(`trace import: impossibile leggere ${source} (${error instanceof Error ? error.message : String(error)})`); }
+		if (bundle?.format !== "yano-trace-bundle" || !Array.isArray(bundle.records)) throw new Error("trace import: formato non valido (atteso yano-trace-bundle)");
+		const existing = new Set(readTraceRecords({ cwd, project, limit: 1000000 }).map((record) => record.id || crypto.createHash("sha256").update(JSON.stringify(record)).digest("hex")));
+		let imported = 0;
+		for (const record of bundle.records) {
+			const identity = record.id || crypto.createHash("sha256").update(JSON.stringify(record)).digest("hex");
+			if (existing.has(identity)) continue;
+			appendRawTraceRecord({ cwd, project, record: { ...record, id: record.id || `import-${identity.slice(0, 32)}` } });
+			existing.add(identity);
+			imported++;
+		}
+		let index = null;
+		if (has(argv, "--reindex")) index = await indexTraceRecords({ cwd, project });
+		const result = { ok: true, input: source, imported, skipped: bundle.records.length - imported, reindex: index, next: "yano trace consolidate" };
+		if (has(argv, "--json")) console.log(JSON.stringify(result, null, 2));
+		else console.log(`yano trace import: ${imported} record importati, ${result.skipped} già presenti${index ? `; ${index.indexed} indicizzati` : ""}. Esegui yano trace consolidate per rigenerare la memoria.`);
 		return result;
 	}
 

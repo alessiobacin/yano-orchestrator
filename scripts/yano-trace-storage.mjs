@@ -188,6 +188,27 @@ export function appendTraceRecord({ cwd, project, kind, record }) {
 	return entry;
 }
 
+/** Import one already-observed event without changing its timestamp/payload. */
+export function appendRawTraceRecord({ cwd, project, record }) {
+	const paths = ensureTraceProject({ cwd: cwd || process.cwd(), project });
+	const recordType = record.record_type;
+	const logPath = recordType === "feedback"
+		? paths.feedbackLog
+		: recordType === "opinion"
+			? paths.opinionsLog
+			: recordType === "summary"
+				? paths.summariesLog
+				: path.join(paths.eventsDir, `${slugify(record.instance || "import")}.jsonl`);
+	const entry = {
+		...record,
+		project: paths.project,
+		project_key: paths.projectKey,
+		id: record.id || crypto.randomUUID(),
+	};
+	fs.appendFileSync(logPath, `${JSON.stringify(entry)}\n`, { mode: 0o600 });
+	return entry;
+}
+
 export function readTraceRecords({ cwd, project, allProjects = false, since = null, limit = 10000 } = {}) {
 	const root = traceRoot();
 	const projectKeyFilter = allProjects ? null : new Set(traceProjectKeys({ cwd: cwd || process.cwd(), project }));

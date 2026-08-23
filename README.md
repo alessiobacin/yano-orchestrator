@@ -28,6 +28,8 @@ Everything communicates over a local MQTT broker, using role/instance identity a
 - **Shared trace-analysis skill** for planner, coder, reviewer and specialists — workers can inspect the filtered origin of a mismatch, while the planner records cross-project opinions and systemic interventions
 - **Local embeddings prerequisite** — `yano doctor` verifies Ollama, the `nomic-embed-text` model and a real `/api/embed` probe; `yano init` installs/pulls them when missing (no extra npm embedding library is required)
 - **Semantic trace index** — `yano trace index` incrementally stores local Ollama vectors in SQLite and `yano trace search` retrieves only the most relevant observable evidence with project/run/round filters
+- **Consolidated trace memory** — `yano trace consolidate` derives provenance-preserving summaries, failures, opinions and recurring cross-project patterns; `yano trace plan` selects the smallest useful context within a token budget
+- **Trace backup and restore** — `yano trace export` creates a portable JSON bundle and `yano trace import --reindex` restores raw evidence before rebuilding derived indexes
 - **Role prompts are always read live from the installed package by default — no per-project copy to keep in sync** — `yano update` alone is enough to bring every project current; `yano copy-prompts` + `yano start --custom-prompts` are there only if you actually want to customize a role's prompt for one specific project
 - **Automatic per-project MQTT scoping** — two different projects never collide on a shared broker without you having to pass `--project` yourself
 - **Frontend prerequisites are deterministic** — every `yano init` verifies/installs global `@playwright/cli@latest` and the global `playwright-cli` skill; `frontend-developer` and `frontend-reviewer` receive the browser skill, while backend `reviewer` remains backend-only. The optional `chrome-devtools` MCP remains project-wide because Pi cannot scope MCP servers per role
@@ -124,9 +126,14 @@ yano trace events --follow     # segue gli eventi raw mentre gli agenti lavorano
 yano trace feedback --status rejected --text "<verdetto utente>" --run <id> --round <n> --task <slug>
 yano trace context --run <id> --round <n> --task <slug> --json
 yano trace index --project <name> --run <id>
+yano trace consolidate --project <name> --run <id> --round <n> --json
+yano trace plan --run <id> --query "<problema>" --budget 6000 --json
 yano trace search --project <name> --run <id> --query "<problema>" --limit 10 --json
+yano trace search --query "<problema>" --memory-only --mode hybrid --explain
 yano trace overview --all-projects --json
 yano trace opinion --text "<analisi planner>" --change prompt --confidence medium
+yano trace export --run <id> --output ./trace-bundle.json
+yano trace import --input ./trace-bundle.json --reindex
 yano trace clear --all --yes   # elimina tutti i dati temporanei di Yano
 ```
 

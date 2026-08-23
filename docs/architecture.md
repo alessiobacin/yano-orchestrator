@@ -61,7 +61,11 @@ yano trace disable
 yano trace feedback --status rejected --text "<verdetto utente>" --run <id> --round <n> --task <slug>
 yano trace context --run <id> --round <n> --task <slug> --json
 yano trace index --project <name> --run <id>
+yano trace consolidate --project <name> --run <id> --round <n>
+yano trace plan --run <id> --query "<problema>" --budget 6000 --json
 yano trace search --project <name> --run <id> --query "<problema>" --json
+yano trace export --run <id> --output ./trace-bundle.json
+yano trace import --input ./trace-bundle.json --reindex
 yano trace opinion --text "<analisi planner>" --change prompt --confidence medium
 yano trace overview --all-projects --json
 yano trace clear --run <run-id> --yes
@@ -87,16 +91,27 @@ orchestrator's live state, not forensic trace data.
 The optional semantic layer is stored at `<yano-install>/temp/semantic-index.sqlite`.
 `yano trace index` incrementally embeds observable trace records through local
 Ollama, and `yano trace search` retrieves a small ranked evidence set using
-cosine similarity. JSONL remains the source of truth; the SQLite index is
-rebuildable and is deleted or pruned together with `yano trace clear`.
+hybrid semantic/lexical ranking. The same SQLite database contains a derived
+trace-memory layer: typed episodic observations/failures/opinions, systemic
+recurring patterns, context metadata and explicit evidence links. `consolidate`
+builds it deterministically from raw JSONL, so it is provenance-preserving and
+idempotent; `plan` tells the planner which compact memories and raw filters to
+read within a token budget. JSONL remains the source of truth; the SQLite index
+and projections are rebuildable and are deleted or pruned together with
+`yano trace clear`.
 
 The feedback log stores the user's verdict verbatim. Each verdict also creates
 a deterministic snapshot; the planner's evidence-based diagnosis is stored
 separately as an opinion. `context` and `overview` return filtered or
 aggregated JSON so a later planner can retrieve only one task, round or time
-window instead of injecting the entire trace into its context. The bundled
-planner skill defines this protocol and is attached by the launcher on every
-planner start.
+window instead of injecting the entire trace into its context. Consolidation
+writes compact planner projections under
+`traces/<project-key>/projections/` (`planner-context.json` and
+`recurring-failures.md`). These are views, not an additional source of truth.
+The bundled planner skill defines this protocol and is attached by the launcher
+on every planner start. Yano deliberately stores observable messages, tool
+lifecycle, user feedback and derived summaries, never private model
+chain-of-thought.
 
 Tickets may declare `required_playbook`. When present, `ticket_create` checks it
 against the immutable run binding and `ticket_claim` checks both the binding and

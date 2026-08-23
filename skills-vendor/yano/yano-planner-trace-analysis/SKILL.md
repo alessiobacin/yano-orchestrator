@@ -24,8 +24,13 @@ yano trace feedback --status accepted|partial|rejected --text "<verbatim user ve
 yano trace context --run <id> --round <n> --limit 120 --json
 yano trace overview --all-projects --json
 yano trace index --project <nome> --run <id> --batch-size 32
-yano trace search --project <nome> --run <id> --query "timeout nella migrazione" --limit 10 --json
+yano trace consolidate --project <nome> --run <id> --round <n> --json
+yano trace plan --project <nome> --run <id> --query "timeout nella migrazione" --budget 6000 --json
+yano trace search --project <nome> --run <id> --query "timeout nella migrazione" --mode hybrid --limit 10 --explain --json
+yano trace search --project <nome> --run <id> --query "timeout" --memory-only --limit 8 --json
 yano trace opinion --text "<analysis>" --summary "..." --root-cause "..." --recommendation "..." --change existing-agent|new-agent|prompt|tool|playbook|none --confidence low|medium|high --roles planner,coder [--run <id>] [--round <n>] [--task <slug>]
+yano trace export --project <nome> --run <id> --output ./trace-bundle.json
+yano trace import --project <nome> --input ./trace-bundle.json --reindex
 ```
 
 Expected behavior:
@@ -44,11 +49,28 @@ Expected behavior:
   does not replace the JSONL source of truth. Use `--force` after changing the
   embedding model or when deliberately rebuilding a scope.
 - `search` embeds only the query, then ranks matching indexed records with
-  cosine similarity. Filter by project, run, round, task, instance, type or
-  time window so the planner receives only relevant evidence. The compact
-  result omits the stored payload by default; add `--include-payload` only
-  when exact event fields are needed. If the index is stale or absent, run
-  `index` first.
+  hybrid semantic/lexical scoring by default (`--mode keyword|semantic|hybrid`).
+  Filter by project, run, round, task, instance, type or time window so the
+  planner receives only relevant evidence. `--memory-only` searches the
+  consolidated layer; `--explain` exposes the semantic, lexical, recency and
+  salience components. The compact result omits the stored payload by default;
+  add `--include-payload` only when exact event fields are needed. If the index
+  is stale or absent, run `index` first. Hybrid mode falls back to keyword
+  ranking if Ollama is temporarily unavailable; semantic mode reports the
+  embedding error instead.
+- `consolidate` derives typed, provenance-preserving memories from raw JSONL:
+  episodic summaries, observations, failures and planner opinions, plus
+  systemic `trace_pattern` memories when a signal recurs. It writes evidence
+  links and compact projections under `temp/traces/<project-key>/projections/`.
+  It is deterministic and excludes generated summaries from its input, so it
+  can be safely repeated. It requires the configured local embedding model.
+- `plan` reports the available raw/memory scope, suggested commands and an
+  estimated raw token cost. Use its budget to decide what to retrieve before
+  placing trace data in a model context; it does not claim to prove causality.
+- `export` creates a portable JSON bundle containing raw records and derived
+  index data. `import` restores only raw records as authoritative, skips known
+  IDs, and optionally runs `index`; run `consolidate` afterwards to rebuild
+  destination-scoped memories and links.
 - `opinion` stores the planner's analysis so later planners can compare the
   hypothesis with future outcomes. It is an observation, not an automatic
   authorization to change Yano.
@@ -56,6 +78,19 @@ Expected behavior:
 Do not use `yano trace clear` during diagnosis. Destructive cleanup is an
 operator action and requires explicit `--yes`; preserve evidence until the
 investigation is complete.
+
+For explicit operator cleanup, the supported forms are:
+
+```text
+yano trace clear --run <id> --yes
+yano trace clear --instance <instance> --yes
+yano trace clear --before <ISO-8601> --yes
+yano trace clear --all --yes
+```
+
+`clear` removes matching raw records and derived index documents/memories.
+`--all` removes the entire global Yano temp store, including the tracing
+configuration; never suggest it as part of ordinary diagnosis.
 
 ## Worker protocol: coder, reviewer and specialists
 
@@ -77,6 +112,12 @@ recurring pattern warrants changing Yano. A worker may recommend a likely
 cause or intervention in its report, but must label it as an observation and
 leave the final systemic decision to the planner.
 
+Workers may use `status`, `context`, `events`, scoped `index`, `search` and
+`search --memory-only` to inspect the run they were assigned. They may also
+use scoped `consolidate` when a compact report is needed, but should not run
+`overview --all-projects` or `consolidate --all-projects` to claim a systemic
+finding: cross-project interpretation belongs to the planner.
+
 ## After a task round
 
 When the user explicitly says the result is accepted, record:
@@ -97,14 +138,20 @@ When the user says the result is wrong, incomplete, or still broken:
    `yano trace search --project <name> --run <id> --query "<problema>" --json`
    when the filtered context is too broad or the relevant evidence is spread
    across several observable records.
-4. Run `yano trace overview --all-projects --json` when the failure may be a
+4. Run `yano trace consolidate --run <id> --round <n> --json` after a round
+   (or `--all-projects` for a cross-project analysis) to build typed memories,
+   provenance links and recurring patterns. Then use `yano trace plan --run
+   <id> --round <n> --query "<problema>" --budget <tokens> --json` before
+   reading a large trace: start with consolidated memories and request raw
+   records only when the evidence is insufficient.
+5. Run `yano trace overview --all-projects --json` when the failure may be a
    recurring Yano problem. If the data set is large, use `--since` and
    `--limit` first, then widen the query deliberately.
-5. Separate the user's product defect from an orchestration defect. Classify
+6. Separate the user's product defect from an orchestration defect. Classify
    the hypothesis as one or more of:
    `requirements_missed`, `wrong_implementation`, `verification_gap`,
    `orchestration_gap`, `missing_capability`, `environment_or_tooling`.
-6. Decide the smallest durable intervention:
+7. Decide the smallest durable intervention:
    - modify an existing role prompt/playbook when the role had the right
      capability but followed an unclear or missing rule;
    - modify a tool, gate, schema or launcher when the system allowed an
@@ -113,9 +160,9 @@ When the user says the result is wrong, incomplete, or still broken:
      missing across independent projects/rounds and cannot be expressed as a
      rule or existing role responsibility;
    - do not create an agent merely because one worker made a one-off mistake.
-7. Save the planner's opinion with `yano trace opinion`, including evidence,
+8. Save the planner's opinion with `yano trace opinion`, including evidence,
    confidence, affected roles and the proposed intervention.
-8. Continue the task using the existing worktree when it is the same task.
+9. Continue the task using the existing worktree when it is the same task.
    Start a genuine correction cycle with `agent_send(..., new_round: true)`;
    do not hide the rejection by opening an unrelated task or silently
    finalizing the worktree.

@@ -23,6 +23,8 @@ Per impostazione predefinita i dati sono fuori dal progetto, nella directory
     ├── events/*.jsonl
     ├── terminal/*.jsonl
     ├── snapshots/*.jsonl
+    ├── projections/planner-context.json
+    ├── projections/recurring-failures.md
     ├── feedback.jsonl
     ├── summaries.jsonl
     └── opinions.jsonl
@@ -253,3 +255,80 @@ cross-project è utile per pattern sistemici, ma va usata solo quando serve.
 `yano trace clear` elimina anche i documenti corrispondenti dall'indice, mentre
 `yano trace clear --all --yes` elimina l'intero database semantico insieme al
 temp globale.
+
+## Memoria consolidata e recupero mirato
+
+L'indice contiene anche una seconda proiezione, derivata dai record raw ma non
+sostitutiva: `trace_memories`, `trace_memory_context` e
+`trace_memory_links`. Le memorie hanno tipo e livello espliciti:
+
+- `trace_run_summary`, `trace_observation`, `trace_failure` e `trace_opinion`
+  sono memorie episodiche con gli ID dei record sorgente;
+- `trace_pattern` è una memoria sistemica creata solo quando lo stesso segnale
+  ricorre almeno due volte nello scope analizzato;
+- ogni link dichiara una relazione (`failure_observed_in`,
+  `feedback_observed_in`, `opinion_based_on`, `supports_pattern`) e conserva la
+  propria evidenza.
+
+La consolidazione è deterministica e quindi ripetibile: non pretende di
+ricostruire il chain of thought privato e non trasforma una correlazione in una
+causa certa. L'LLM può leggere le memorie e proporre un'opinione, ma la
+provenienza resta sempre il JSONL osservabile.
+
+```bash
+# Dopo la fine di un round
+yano trace index --run <run-id>
+yano trace consolidate --run <run-id> --round <n> --json
+
+# Pattern tra più progetti
+yano trace consolidate --all-projects --json
+
+# Piano di recupero con limite token e comandi suggeriti
+yano trace plan --run <run-id> --round <n> \
+  --query "perché il risultato è stato rifiutato?" --budget 6000 --json
+```
+
+La consolidazione genera nella cartella globale del progetto:
+
+```text
+traces/<project-key>/projections/
+├── planner-context.json
+└── recurring-failures.md
+```
+
+La ricerca usa per default `hybrid`: embedding 65%, corrispondenza lessicale
+25%, recency 5% e salienza 5%. Si può limitare la ricerca alla memoria
+consolidata oppure chiedere la spiegazione dei punteggi:
+
+```bash
+yano trace search --query "timeout delega agente" --mode hybrid --explain
+yano trace search --query "errore di verifica" --memory-only --limit 8 --json
+yano trace search --query "migration" --mode keyword
+```
+
+`yano trace plan` serve al planner per scegliere prima summary/pattern e solo
+dopo i record raw necessari. Per dataset attuali SQLite + JSONL + Ollama sono
+sufficienti: non è richiesta una vector database esterna né una estensione
+`sqlite-vec`; l'indice è ricostruibile dalla fonte raw.
+
+Le tabelle derivate sono mantenute nello stesso `semantic-index.sqlite`:
+`trace_memories` contiene le memorie e i vettori, `trace_memory_context` i
+ruoli/tool/file/entity associati e `trace_memory_links` i rapporti tra memorie.
+Queste tabelle non sostituiscono i file JSONL e possono essere eliminate e
+ricreate.
+
+## Backup e ripristino
+
+Per spostare o archiviare un'indagine usa un bundle JSON. Contiene i record
+osservabili e, quando presenti, le proiezioni dell'indice e della memoria; il
+JSONL resta comunque la fonte primaria.
+
+```bash
+yano trace export --run <run-id> --output ./trace-run.json
+yano trace import --input ./trace-run.json --reindex
+yano trace consolidate --run <run-id>
+```
+
+L'importazione è idempotente sugli ID dei record e non considera le memorie
+derivate come autorità: le reindicizza e le riconsolida dal raw per evitare di
+portare nel nuovo workspace link o chiavi di progetto obsolete.

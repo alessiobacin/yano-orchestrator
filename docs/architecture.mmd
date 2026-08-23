@@ -58,7 +58,10 @@ flowchart TD
     subgraph GLOBAL_TRACE["Global Yano installation / temp"]
         TRACE["traces/<project-key>/events\nJSONL forensic trace\nevents / standard / full"]
         TRACE_ANALYSIS["feedback / summaries / opinions\nfiltered context + cross-project overview"]
-        TRACE_INDEX["semantic-index.sqlite\nOllama embeddings\nfiltered cosine search"]
+        TRACE_INDEX["semantic-index.sqlite\ntrace_documents + Ollama embeddings\nhybrid filtered search"]
+        TRACE_MEMORY["trace_memories\nepisodic failures/opinions/summaries\nsystemic recurring patterns"]
+        TRACE_LINKS["trace_memory_links + context\nprovenance / causal evidence links"]
+        PROJECTIONS["projections/\nplanner-context.json\nrecurring-failures.md"]
         TRACE_CONFIG["tracing.json\nper-project mode"]
     end
 
@@ -74,7 +77,14 @@ flowchart TD
     TRACE --> TRACE_ANALYSIS
     TRACE --> TRACE_INDEX
     TRACE_ANALYSIS --> TRACE_INDEX
+    TRACE --> TRACE_MEMORY
+    TRACE_ANALYSIS --> TRACE_MEMORY
+    TRACE_MEMORY --> TRACE_LINKS
+    TRACE_MEMORY --> PROJECTIONS
+    TRACE_LINKS --> TRACE_INDEX
     TRACE_INDEX --> PLANNER
+    TRACE_MEMORY --> PLANNER
+    PROJECTIONS --> PLANNER
     PLANNER --> TRACE_ANALYSIS
     SQLITE --> DASHBOARD["local read-only dashboard\nGantt + status"]
     OBS --> DASHBOARD
@@ -102,5 +112,5 @@ flowchart TD
     classDef risk fill:#3a1f1f,stroke:#e06c75,color:#e5e7eb
     class USER user
     class CLI,INIT,OBS,PLANNER,GATES,FINALIZE,MERGE control
-    class SQLITE,WORKTREES,REPORTS,TRACE,TRACE_CONFIG durable
+    class SQLITE,WORKTREES,REPORTS,TRACE,TRACE_MEMORY,TRACE_LINKS,PROJECTIONS,TRACE_CONFIG durable
     class WATCHDOG,ADAPTERS risk

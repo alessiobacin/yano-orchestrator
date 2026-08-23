@@ -167,12 +167,38 @@ yano trace index --run <run-id>
 yano trace search \
   --run <run-id> \
   --query "perché la verifica del frontend è fallita?" \
-  --limit 10 --json
+  --mode hybrid --limit 10 --json --explain
 ```
 
 L'indice è incrementale, vive nella stessa `temp/` globale e può essere
 ricreato dai JSONL. Usa `--project`, `--round`, `--task`, `--instance`,
 `--type` o `--since` per restringere ulteriormente la ricerca.
+
+Per ridurre ancora il contesto del planner, consolida il round e genera un
+piano di recupero con un limite token esplicito:
+
+```bash
+yano trace consolidate --run <run-id> --round 1 --json
+yano trace plan \
+  --run <run-id> --round 1 \
+  --query "perché la verifica del frontend è fallita?" \
+  --budget 6000 --json
+```
+
+La consolidazione crea memorie episodiche e pattern ricorrenti in SQLite, oltre
+alle proiezioni `planner-context.json` e `recurring-failures.md` nella temp
+globale. Sono dati derivati: il trace JSONL resta la fonte primaria.
+
+Per conservare o trasferire un'indagine:
+
+```bash
+yano trace export --run <run-id> --output ./trace-bundle.json
+yano trace import --input ./trace-bundle.json --reindex
+yano trace consolidate --run <run-id>
+```
+
+L'importazione ripristina i record raw in modo idempotente; indice semantico e
+memoria vengono ricostruiti dal progetto di destinazione.
 
 Infine il planner salva `yano trace opinion` e apre un nuovo round nello
 stesso worktree. Coder e reviewer possono leggere il contesto filtrato per

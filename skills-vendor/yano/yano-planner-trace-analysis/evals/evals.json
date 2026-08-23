@@ -18,6 +18,18 @@
       "prompt": "Il cliente conferma che il task è soddisfacente. Come registri il risultato senza contaminare il trace con interpretazioni inventate?",
       "expected_output": "Il planner salva il verdetto accepted con testo fedele, senza fabbricare eventi o una causa di successo.",
       "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "Dopo due round rifiutati in progetti diversi, devi capire se il timeout di delega è ricorrente e fornire al planner solo il contesto necessario entro 4000 token.",
+      "expected_output": "Il planner usa yano trace consolidate --all-projects, yano trace plan con --budget 4000 e yano trace search --mode hybrid/--memory-only; distingue memorie derivate ed evidenza raw e conserva la provenienza.",
+      "files": []
+    },
+    {
+      "id": 5,
+      "prompt": "Devi trasferire l'indagine di un run su un'altra installazione Yano senza perdere gli eventi osservabili né fidarti di link derivati dal vecchio progetto.",
+      "expected_output": "Il planner usa yano trace export/import, tratta il JSONL raw come fonte primaria, usa --reindex e poi consolidate per ricostruire memoria e link nel progetto di destinazione.",
+      "files": []
     }
   ]
 }

@@ -68,6 +68,12 @@ yano trace clear --run <run-id> --yes
 yano trace clear --all --yes
 ```
 
+The project key is derived from the canonical workspace path, while human
+project names and MQTT scope overrides are aliases. Legacy name-scoped trace
+directories remain readable after upgrades. `yano start` defaults to `full` and
+records a preflight event with the expected/actual trace mode, data directory
+and runtime version.
+
 `events` records lifecycle and coordination metadata, `standard` also stores
 visible assistant responses and tool metadata, and `full` stores the visible
 session branch as well. Data is redacted before persistence and tracing is

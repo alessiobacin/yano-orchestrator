@@ -5,7 +5,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import assert from "node:assert/strict";
-import { ensureTraceProject, clearTraceData, getTraceConfig, setTraceMode, tracePaths } from "./yano-trace-storage.mjs";
+import { ensureTraceProject, clearTraceData, getTraceConfig, projectKey, setTraceMode, tracePaths, traceProjectKeys } from "./yano-trace-storage.mjs";
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "yano-trace-cli-"));
 const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "yano-trace-project-"));
@@ -15,6 +15,8 @@ process.env.YANO_DATA_DIR = dataDir;
 try {
 	assert.equal(getTraceConfig({ cwd, project: "trace-smoke" }).mode, "events");
 	assert.equal(setTraceMode({ cwd, project: "trace-smoke", mode: "full" }).mode, "full");
+	assert.equal(projectKey(cwd, "Trace Smoke"), projectKey(cwd, "trace-smoke"), "human project name and MQTT alias share one canonical trace key");
+	assert.ok(traceProjectKeys({ cwd, project: "trace-smoke" }).length >= 1, "trace exposes canonical and legacy alias keys for migration");
 	const paths = ensureTraceProject({ cwd, project: "trace-smoke" });
 	assert.ok(paths.projectDir.startsWith(dataDir));
 	assert.ok(!paths.projectDir.startsWith(cwd));
@@ -36,4 +38,3 @@ try {
 	else process.env.YANO_DATA_DIR = previous;
 	try { fs.rmSync(cwd, { recursive: true, force: true }); } catch { /* cleanup */ }
 }
-

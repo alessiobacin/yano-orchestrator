@@ -208,6 +208,16 @@ async function runScenario(cwd, project) {
 
 	const claimedAt = Date.now();
 	await coder.call("ticket_claim", { ticket_id: ticketId });
+	// Tool activity is real progress. Even if the ticket row is old, a recent
+	// tool start must refresh its progress clock and prevent a false stall.
+	const progressDb = new (await import("node:sqlite")).DatabaseSync(path.join(cwd, ".pi", "extensions", "multiAgentOrchestrator", "orchestratorStorage", "orchestrator.db"));
+	progressDb.prepare("UPDATE tickets SET updated_at = ? WHERE id = ?").run(new Date(Date.now() - 5_000).toISOString(), ticketId);
+	progressDb.close();
+	const toolStartHook = coder.harness.hooks.get("tool_execution_start");
+	if (toolStartHook) await toolStartHook({ type: "tool_execution_start", toolCallId: "progress", toolName: "bash", args: {} }, coder.ctx);
+	const progressCheck = await planner.call("run_watchdog_check", { run_id: runId });
+	ok(!progressCheck.details.stalled.some((item) => item.ticket_id === ticketId), "tool_execution_start refreshes ticket progress and prevents a false stall");
+
 	// Simulate exactly the real incident: the worker claims the ticket, then
 	// its turn hangs/gets truncated — it never calls ticket_complete, never
 	// calls anything else. From here on, coder-01 is simply never touched

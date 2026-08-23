@@ -146,12 +146,15 @@ Scaffold a new project and start the planner:
 ```bash
 mkdir url-shortener && cd url-shortener
 yano init --name "URL Shortener"
-yano trace enable --mode events
+yano trace enable --mode full
 yano trace status
 cp .env.example .env   # optional: WhatsApp notifications, fill in your Evolution API details
 docker compose -f mqtt/compose.yaml up -d   # local MQTT broker
 yano start --instance planner-01
 ```
+
+`yano start` usa `full` come modalità predefinita e la propaga agli agenti;
+usa `--trace-mode events|standard|off` per ridurla intenzionalmente.
 
 Then, in the planner's chat, describe what you want built:
 

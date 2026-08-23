@@ -75,6 +75,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureRolePrerequisites, isSupportedNodeRuntime } from "./doctor.mjs";
+import { TRACE_MODES, getTraceConfig, resolveTraceProject, setTraceMode } from "./yano-trace-storage.mjs";
 
 // Le 5 skill vendorizzate destinate al ruolo planner (Revisione 22) — vedi
 // skills-vendor/mattpocock/VERSION.md per la motivazione di ciascuna
@@ -127,6 +128,7 @@ function parseArgs(argv) {
 	const passthrough = [];
 	let printOnly = false;
 	let role; // undefined finché non trovato — risolto a "planner" più sotto se mai passato
+	let traceMode;
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i];
 		if (a === "--print-only") {
@@ -142,9 +144,17 @@ function parseArgs(argv) {
 			i++; // consuma anche il valore, verrà comunque riaggiunto sotto in modo esplicito
 			continue;
 		}
+		if (a === "--trace-mode") {
+			traceMode = argv[++i];
+			if (!traceMode || !TRACE_MODES.includes(traceMode)) {
+				console.error(`launch-planner: --trace-mode richiede uno tra ${TRACE_MODES.join(", ")}.`);
+				process.exit(1);
+			}
+			continue;
+		}
 		passthrough.push(a);
 	}
-	return { passthrough, printOnly, role: role ?? "planner" };
+	return { passthrough, printOnly, role: role ?? "planner", traceMode };
 }
 
 // runLaunchPlanner({ packageRoot, cwd, argv }) — packageRoot risolve le
@@ -173,7 +183,7 @@ function parseArgs(argv) {
 // `yano init` scrive sempre: agents/roles.yaml oppure
 // .pi/extensions/multiAgentOrchestrator/config/project.json.
 export function runLaunchPlanner({ packageRoot, cwd, argv }) {
-	const { passthrough, printOnly, role } = parseArgs(argv);
+	const { passthrough, printOnly, role, traceMode } = parseArgs(argv);
 	if (!isSupportedNodeRuntime()) {
 		console.error(`launch-planner: Node.js ${process.version} non supportato — serve Node 22.5.0 o superiore.`);
 		return;
@@ -198,6 +208,21 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 		);
 		process.exit(1);
 	}
+
+	// A launcher-created session must have a complete forensic trail unless the
+	// operator explicitly opts down. Previously the CLI and the Pi extension
+	// could silently use different modes/stores, making a post-mortem blind.
+	const projectFlagIndex = passthrough.indexOf("--project");
+	const explicitProject = projectFlagIndex >= 0 ? passthrough[projectFlagIndex + 1] : null;
+	const traceProject = explicitProject || resolveTraceProject(cwd);
+	const requestedTraceMode = traceMode || process.env.YANO_TRACE_MODE || "full";
+	if (!TRACE_MODES.includes(requestedTraceMode)) {
+		console.error(`launch-planner: modalità trace non valida "${requestedTraceMode}".`);
+		process.exit(1);
+	}
+	if (!printOnly) setTraceMode({ cwd, project: traceProject, mode: requestedTraceMode });
+	const traceConfig = getTraceConfig({ cwd, project: traceProject });
+	const packageVersion = JSON.parse(readFileSync(path.join(packageRoot, "package.json"), "utf8")).version;
 
 	// Revisione 34 — caso reale osservato dall'operatore: un progetto
 	// scaffoldato da una versione di `yano init` PRECEDENTE alla Revisione 33
@@ -265,7 +290,7 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 	const piArgs = [...extensionFlags, ...passthrough, "--role", role, ...skillFlags];
 
 	const printable = ["pi", ...piArgs].map((a) => (a.includes(" ") ? `"${a}"` : a)).join(" ");
-	console.log(`launch-planner: comando composto (cwd ${cwd}):\n  ${printable}\n`);
+	console.log(`launch-planner: comando composto (cwd ${cwd}, trace ${traceConfig.mode}, progetto ${traceProject}):\n  ${printable}\n`);
 
 	if (printOnly) {
 		process.exit(0);
@@ -295,7 +320,12 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 		shell: process.platform === "win32",
 		// Keep the CLI and every agent launched by the planner on one trace
 		// store, even when Pi loads Yano from its own git clone.
-		env: { ...process.env, YANO_DATA_DIR: process.env.YANO_DATA_DIR || path.join(packageRoot, "temp") },
+		env: {
+			...process.env,
+			YANO_DATA_DIR: process.env.YANO_DATA_DIR || path.join(packageRoot, "temp"),
+			YANO_EXPECTED_TRACE_MODE: requestedTraceMode,
+			YANO_EXPECTED_YANO_VERSION: packageVersion,
+		},
 	});
 	child.on("error", (err) => {
 		console.error(`launch-planner: impossibile lanciare "pi" (${err.message}) — è nel PATH?`);

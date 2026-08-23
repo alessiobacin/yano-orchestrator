@@ -17,6 +17,7 @@ import {
 	traceRoot,
 	tracePaths,
 	readTraceRecords,
+	traceProjectKeys,
 } from "./yano-trace-storage.mjs";
 import { embedTexts, resolveEmbeddingModel } from "./doctor.mjs";
 
@@ -269,7 +270,11 @@ export async function searchTraceRecords({
 		const vector = (await embedTexts([query.trim()], { model }))[0];
 		const clauses = ["embedding_model = ?"];
 		const params = [model];
-		if (!allProjects) { clauses.push("project_key = ?"); params.push(tracePaths({ cwd, project }).projectKey); }
+		if (!allProjects) {
+			const keys = traceProjectKeys({ cwd, project });
+			clauses.push(`project_key IN (${keys.map(() => "?").join(",")})`);
+			params.push(...keys);
+		}
 		if (run) { clauses.push("run_id = ?"); params.push(run); }
 		if (round !== null && round !== undefined) { clauses.push("round = ?"); params.push(String(round)); }
 		if (task) { clauses.push("task_slug = ?"); params.push(task); }
@@ -308,7 +313,11 @@ export function clearTraceIndexData({ cwd = process.cwd(), project, allProjects 
 	const writable = openDatabase();
 	const clauses = [];
 	const params = [];
-	if (!allProjects) { clauses.push("project_key = ?"); params.push(tracePaths({ cwd, project }).projectKey); }
+	if (!allProjects) {
+		const keys = traceProjectKeys({ cwd, project });
+		clauses.push(`project_key IN (${keys.map(() => "?").join(",")})`);
+		params.push(...keys);
+	}
 	if (run) { clauses.push("run_id = ?"); params.push(run); }
 	if (round !== null && round !== undefined) { clauses.push("round = ?"); params.push(String(round)); }
 	if (task) { clauses.push("task_slug = ?"); params.push(task); }

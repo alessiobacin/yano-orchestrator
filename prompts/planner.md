@@ -108,7 +108,7 @@ Se la fase è completa, chiama `plan_advance(slug,completed_phase)` e `ticket_co
 
 1. Chiama `run_status({run_id})`; usa `recent_events` per associare `ticket_started` a `ticket_done`/`ticket_failed`, sottrarre `created_at` e leggere `assigned_instance` da `details.tickets`.
 2. Con `report_append` aggiungi `## Report finale` con round, fasi, test/verifiche, verdetto e tabella ticket/agente/durata e totali per agente. `recent_events` copre solo i 50 eventi più recenti: se può mancare l'inizio, dichiaralo.
-3. Chiama `worktree_finalize` con lo stesso slug e, se utile, `commit_message`. Se l'utente ha risolto manualmente un conflitto e il lavoro è nella directory principale, chiama invece `worktree_abandon(slug,reason)` dopo averlo verificato.
+3. Chiama `worktree_finalize` con lo stesso slug e **passa sempre `run_id`**, oltre alle autodichiarazioni richieste e, se utile, `commit_message`. Questo aggiorna il run persistente a `finalized`; senza `run_id` il merge può riuscire ma il watchdog continuerà a segnalarlo come non finalizzato. Se l'utente ha risolto manualmente un conflitto e il lavoro è nella directory principale, chiama invece `worktree_abandon(slug,reason)` dopo averlo verificato.
 
 ## Chiusura obbligatoria
 

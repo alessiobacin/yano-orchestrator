@@ -326,6 +326,10 @@ async function test1FullFlow(cwd, project, evo) {
 	const reviewer = await makeInstance("reviewer-01", "reviewer-01", "reviewer", cwd, project);
 	const security = await makeInstance("security-evaluator-01", "security-evaluator-01", "security-evaluator", cwd, project);
 	const docsSync = await makeInstance("docs-sync-01", "docs-sync-01", "docs-sync", cwd, project);
+	const runCreated = await planner.call("run_create", { objective: "e2e finalize state", domain: "software" });
+	const runId = runCreated.details.run.id;
+	const auditTicket = await planner.call("ticket_create", { run_id: runId, title: "e2e finalize evidence", required_capabilities: ["coder"] });
+	await coder.call("ticket_claim", { ticket_id: auditTicket.details.ticket.id });
 
 	// 1. worktree_list_open must be empty before anything is created.
 	const listBefore = await planner.call("worktree_list_open");
@@ -462,8 +466,16 @@ async function test1FullFlow(cwd, project, evo) {
 	);
 
 	const beforeCount = evo.received.length;
-	const finalized = await planner.call("worktree_finalize", { slug, user_confirmed: true, e2e_tests_run: true, version_bumped: true, docs_synced: true, push: false });
+	await planner.call("ticket_complete", { ticket_id: auditTicket.details.ticket.id, status: "done", result_summary: "finalize state test completed" });
+	// The operational SQLite state is project-local by design. Persist the
+	// harness-created state before finalization so the real dirty-main guard is
+	// testing unrelated application changes, not this test's own bookkeeping.
+	await git(["add", ".pi"], cwd);
+	await git(["commit", "-q", "-m", "e2e persist run state"], cwd);
+	const finalized = await planner.call("worktree_finalize", { slug, run_id: runId, user_confirmed: true, e2e_tests_run: true, version_bumped: true, docs_synced: true, push: false });
 	ok(finalized.details.merged === true, "worktree_finalize: real git merge succeeded");
+	const finalizedRun = await planner.call("run_status", { run_id: runId });
+	ok(finalizedRun.details.finalization_status === "finalized", "worktree_finalize: associated run marked finalized");
 	ok(!fs.existsSync(wtPath), "worktree_finalize: worktree directory actually removed from disk");
 	const mainReport = path.join(cwd, reportRel);
 	ok(fs.existsSync(mainReport), "worktree_finalize: report file present in MAIN checkout after merge");

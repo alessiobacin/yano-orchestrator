@@ -28,8 +28,10 @@ Per impostazione predefinita i dati sono fuori dal progetto, nella directory
     └── opinions.jsonl
 ```
 
-`<project-key>` combina il nome del progetto con un hash della directory reale:
-due checkout con lo stesso nome non condividono accidentalmente il trace.
+`<project-key>` è derivato dalla directory reale del workspace. Il nome umano e
+lo scope MQTT sono alias, non identità di persistenza: così `FocusBoard` e
+`focusboard-trace-test` non dividono più lo stesso trace. Le directory legacy
+nome-hash restano leggibili durante la migrazione.
 La posizione può essere cambiata con:
 
 ```bash
@@ -53,6 +55,10 @@ yano trace enable --mode standard
 yano trace enable --mode full
 yano trace disable
 ```
+
+`yano start` imposta automaticamente `full` per la sessione e propaga la stessa
+modalità a tutti gli agenti. Per ridurre intenzionalmente la raccolta usa
+`yano start --trace-mode events|standard|off` oppure `YANO_TRACE_MODE`.
 
 - `off`: nessun nuovo evento di tracing;
 - `events`: lifecycle, coordinamento, MQTT, watchdog e metadati essenziali;
@@ -98,6 +104,15 @@ yano trace context \
 Filtri disponibili: `--project`, `--run`, `--round`, `--task`, `--since` in
 formato ISO-8601 e `--limit`. `--json` produce un bundle strutturato per LLM o
 script.
+
+Quando viene passato `--run`, Yano ricava anche il progetto dal run persistito
+nello SQLite locale, se disponibile. Questo evita che un vecchio nome progetto
+o uno scope MQTT esplicito faccia risultare vuoto un contesto esistente.
+
+Ogni avvio registra un `trace_preflight` con modalità attesa/reale, directory
+dati, versione Yano attesa e versione runtime effettivamente caricata. Serve a
+distinguere un bug di orchestrazione da una CLI o estensione globale rimasta
+vecchia.
 
 Per leggere gli eventi raw del flusso, con filtri mirati:
 

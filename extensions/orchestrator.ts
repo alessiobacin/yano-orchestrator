@@ -48,7 +48,7 @@ import { execFile, execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { loadPlaybook } from "../scripts/playbook-loader.mjs";
-import { ensureTraceProject, getTraceConfig, traceEnabled } from "../scripts/yano-trace-storage.mjs";
+import { ensureTraceProject, getTraceConfig, setTraceMode, traceEnabled } from "../scripts/yano-trace-storage.mjs";
 
 // ESM-safe lazy require, used only inside SQLiteOrchestratorStorage's
 // constructor to resolve node:sqlite on first actual use (see the
@@ -911,8 +911,20 @@ async function findExistingWorktree(projectCwd: string, wtPath: string): Promise
 // herdr/tmux elsewhere in this file.
 
 const MOA_SCHEMA_VERSION = 1;
-const MOA_STORAGE_SCHEMA_VERSION = 9;
+const MOA_STORAGE_SCHEMA_VERSION = 10;
 const MOA_EXTENSION_VERSION = "0.1.0-slice1";
+
+function loadRuntimePackageVersion(): string | null {
+	try {
+		const packagePath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "package.json");
+		const packageJson = JSON.parse(fs.readFileSync(packagePath, "utf8"));
+		return typeof packageJson.version === "string" ? packageJson.version : null;
+	} catch {
+		return null;
+	}
+}
+
+const MOA_RUNTIME_PACKAGE_VERSION = loadRuntimePackageVersion();
 
 function moaWorkspaceDir(projectCwd: string): string {
 	return path.join(projectCwd, ".pi", "extensions", "multiAgentOrchestrator");
@@ -1014,6 +1026,7 @@ function moaEnsureWorkspace(projectCwd: string, project: string, projectNameOver
 // talks to; SQLiteOrchestratorStorage below is just one implementation) ━━
 
 type RunStatus = "active" | "completed" | "failed" | "cancelled";
+type RunFinalizationStatus = "not_started" | "pending_finalize" | "accepted_pending_finalize" | "finalized" | "abandoned" | "not_applicable";
 type TicketStatus = "pending" | "running" | "done" | "failed" | "cancelled";
 type DecisionHoldStatus = "open" | "answered" | "expired" | "cancelled" | "blocked";
 
@@ -1023,6 +1036,7 @@ interface RunRecord {
 	objective: string;
 	domain: string;
 	status: RunStatus;
+	finalization_status: RunFinalizationStatus;
 	created_at: string;
 	updated_at: string;
 }
@@ -1101,6 +1115,7 @@ interface OrchestratorStorage {
 	getRun(id: string): RunRecord | null;
 	listRuns(project?: string): RunRecord[];
 	updateRunStatus(id: string, status: RunStatus): void;
+	updateRunFinalizationStatus(id: string, status: RunFinalizationStatus): void;
 	createSpec(input: { id?: string; run_id: string; title: string; content: string; file_path?: string | null }): SpecRecord;
 	getSpec(id: string): SpecRecord | null;
 	createTicket(input: {
@@ -1117,6 +1132,7 @@ interface OrchestratorStorage {
 	getTicket(id: string): TicketRecord | null;
 	listTickets(run_id: string): TicketRecord[];
 	updateTicketStatus(id: string, status: TicketStatus, extra?: { assigned_instance?: string | null; result_summary?: string | null }): TicketRecord;
+	touchTicketProgress(id: string, instance: string, kind?: string): TicketRecord | null;
 	requeueTicketForRecovery(id: string, input: { reason: string; max_retries: number; max_replans?: number }): unknown;
 	getTicketRecovery(id: string): unknown;
 	recordFinalizeEvidence(input: { run_id?: string | null; slug: string; kind: string; source: string; observed_value: string; commit_hash?: string | null; status: string; idempotency_key: string }): unknown;
@@ -1176,6 +1192,7 @@ CREATE TABLE IF NOT EXISTS runs (
 	objective TEXT NOT NULL,
 	domain TEXT NOT NULL DEFAULT 'generic',
 	status TEXT NOT NULL DEFAULT 'active',
+	finalization_status TEXT NOT NULL DEFAULT 'not_started',
 	created_at TEXT NOT NULL,
 	updated_at TEXT NOT NULL
 );
@@ -1490,6 +1507,7 @@ class SQLiteOrchestratorStorage implements OrchestratorStorage {
 				this.db.prepare("SELECT 1 FROM package_manifest_audits LIMIT 1").get();
 			}
 			if (current < 9) this.db.exec("ALTER TABLE tickets ADD COLUMN required_playbook TEXT");
+			if (current < 10) this.db.exec("ALTER TABLE runs ADD COLUMN finalization_status TEXT NOT NULL DEFAULT 'not_started'");
 			// Advance the marker only after every additive statement succeeds.
 			this.db.prepare("UPDATE schema_meta SET value = ? WHERE key = 'schema_version'").run(String(MOA_STORAGE_SCHEMA_VERSION));
 		}
@@ -1502,10 +1520,10 @@ class SQLiteOrchestratorStorage implements OrchestratorStorage {
 
 	createRun(input: { id?: string; project: string; objective: string; domain?: string }): RunRecord {
 		const now = nowIso();
-		const rec: RunRecord = { id: input.id || ulid(), project: input.project, objective: input.objective, domain: input.domain || "generic", status: "active", created_at: now, updated_at: now };
+		const rec: RunRecord = { id: input.id || ulid(), project: input.project, objective: input.objective, domain: input.domain || "generic", status: "active", finalization_status: "not_started", created_at: now, updated_at: now };
 		this.db
-			.prepare("INSERT INTO runs (id, project, objective, domain, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-			.run(rec.id, rec.project, rec.objective, rec.domain, rec.status, rec.created_at, rec.updated_at);
+			.prepare("INSERT INTO runs (id, project, objective, domain, status, finalization_status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+			.run(rec.id, rec.project, rec.objective, rec.domain, rec.status, rec.finalization_status, rec.created_at, rec.updated_at);
 		return rec;
 	}
 
@@ -1520,7 +1538,12 @@ class SQLiteOrchestratorStorage implements OrchestratorStorage {
 	}
 
 	updateRunStatus(id: string, status: RunStatus): void {
-		this.db.prepare("UPDATE runs SET status = ?, updated_at = ? WHERE id = ?").run(status, nowIso(), id);
+		const finalization = status === "completed" ? "pending_finalize" : status === "active" ? "not_started" : "not_applicable";
+		this.db.prepare("UPDATE runs SET status = ?, finalization_status = ?, updated_at = ? WHERE id = ?").run(status, finalization, nowIso(), id);
+	}
+
+	updateRunFinalizationStatus(id: string, status: RunFinalizationStatus): void {
+		this.db.prepare("UPDATE runs SET finalization_status = ?, updated_at = ? WHERE id = ?").run(status, nowIso(), id);
 	}
 
 	createSpec(input: { id?: string; run_id: string; title: string; content: string; file_path?: string | null }): SpecRecord {
@@ -1603,6 +1626,15 @@ class SQLiteOrchestratorStorage implements OrchestratorStorage {
 		return updated;
 	}
 
+	touchTicketProgress(id: string, instance: string, kind = "tool_execution_start"): TicketRecord | null {
+		const ticket = this.getTicket(id);
+		if (!ticket || ticket.status !== "running" || ticket.assigned_instance !== instance) return ticket;
+		const updatedAt = nowIso();
+		this.db.prepare("UPDATE tickets SET updated_at = ? WHERE id = ?").run(updatedAt, id);
+		this.recordEvent(ticket.run_id, "ticket_progress", { ticket_id: id, instance, kind, observed_at: updatedAt }, id);
+		return this.getTicket(id);
+	}
+
 	getTicketRecovery(id: string) {
 		return this.db.prepare("SELECT * FROM ticket_recovery_state WHERE ticket_id = ?").get(id) as any ?? null;
 	}
@@ -1621,7 +1653,7 @@ class SQLiteOrchestratorStorage implements OrchestratorStorage {
 			const maxReplans = input.max_replans ?? Number(current.max_replans ?? 3);
 			if (retries > input.max_retries || Number(current.replan_round ?? 0) >= maxReplans || current.status === "exhausted") {
 				this.db.prepare("INSERT INTO ticket_recovery_state (ticket_id, run_id, retry_count, replan_round, max_retries, max_replans, recovery_generation, status, last_failure, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'exhausted', ?, ?) ON CONFLICT(ticket_id) DO UPDATE SET retry_count=excluded.retry_count, max_retries=excluded.max_retries, max_replans=excluded.max_replans, status='exhausted', last_failure=excluded.last_failure, updated_at=excluded.updated_at").run(id, ticket.run_id, retries, Number(current.replan_round ?? 0), input.max_retries, maxReplans, Number(current.recovery_generation ?? 0), input.reason, now);
-				this.db.prepare("UPDATE runs SET status = 'failed', updated_at = ? WHERE id = ? AND status = 'active'").run(now, ticket.run_id);
+				this.db.prepare("UPDATE runs SET status = 'failed', finalization_status = 'not_applicable', updated_at = ? WHERE id = ? AND status = 'active'").run(now, ticket.run_id);
 				this.db.prepare("INSERT INTO checkpoints (run_id, label, payload, created_at) VALUES (?, 'recovery_budget_exhausted', ?, ?)").run(ticket.run_id, JSON.stringify({ ticket_id: id, retry_count: retries, max_retries: input.max_retries, reason: input.reason }), now);
 				this.recordEvent(ticket.run_id, "recovery_budget_exhausted", { ticket_id: id, retry_count: retries, max_retries: input.max_retries, reason: input.reason }, id);
 				this.db.exec("COMMIT");
@@ -2279,6 +2311,7 @@ function moaFindUnfinalizedRuns(storage: OrchestratorStorage, project: string, n
 	const found: UnfinalizedRunInfo[] = [];
 	for (const run of storage.listRuns(project)) {
 		if (run.status !== "completed") continue;
+		if (run.finalization_status === "finalized" || run.finalization_status === "not_applicable") continue;
 		const elapsed = nowMs - Date.parse(run.updated_at);
 		if (elapsed >= graceMs) {
 			found.push({ run_id: run.id, objective: run.objective, completed_at: run.updated_at, elapsed_ms: elapsed });
@@ -2874,6 +2907,15 @@ export default function (pi: ExtensionAPI) {
 		};
 		T = topics(project);
 
+		// `yano start` supplies an expected mode. Enforce it at the extension
+		// boundary too, so an old project config cannot silently downgrade a new
+		// session back to events-only tracing.
+		const expectedTraceMode = process.env.YANO_EXPECTED_TRACE_MODE;
+		if (expectedTraceMode && ["off", "events", "standard", "full"].includes(expectedTraceMode)) {
+			const currentTrace = getTraceConfig({ cwd, project });
+			if (!traceEnabled(currentTrace.mode, expectedTraceMode)) setTraceMode({ cwd, project, mode: expectedTraceMode });
+		}
+
 		// Names the pane, three ways at once since none could be confirmed
 		// working from this sandbox: herdrRenamePane() directly renames the
 		// pane label (the mechanism confirmed from herdr's own CLI help on
@@ -2893,7 +2935,23 @@ export default function (pi: ExtensionAPI) {
 			project,
 			team: resolved.teams,
 			broker: brokerUrl,
+			trace_expected_mode: expectedTraceMode || null,
+			trace_root: getTraceConfig({ cwd, project }).root,
+			yano_expected_version: process.env.YANO_EXPECTED_YANO_VERSION || null,
+			yano_runtime_version: MOA_RUNTIME_PACKAGE_VERSION,
+			extension_version: MOA_EXTENSION_VERSION,
 			...(flags.project && flags.project !== defaultProject ? { project_scope_override: true, default_project: defaultProject } : {}),
+		});
+		logEvent("trace_preflight", {
+			actual_mode: getTraceConfig({ cwd, project }).mode,
+			expected_mode: expectedTraceMode || null,
+			data_dir: getTraceConfig({ cwd, project }).root,
+			yano_expected_version: process.env.YANO_EXPECTED_YANO_VERSION || null,
+			yano_runtime_version: MOA_RUNTIME_PACKAGE_VERSION,
+			extension_version: MOA_EXTENSION_VERSION,
+			version_match: process.env.YANO_EXPECTED_YANO_VERSION && MOA_RUNTIME_PACKAGE_VERSION
+				? process.env.YANO_EXPECTED_YANO_VERSION === MOA_RUNTIME_PACKAGE_VERSION
+				: null,
 		});
 
 		// Install the widget immediately, BEFORE the broker connection is even
@@ -3104,6 +3162,16 @@ export default function (pi: ExtensionAPI) {
 	// best-effort so older Pi builds can still load the extension; when present
 	// they provide the tool inventory needed by `yano trace --mode full`.
 	pi.on("tool_execution_start", async (event: any) => {
+		// A tool call is observable progress for every running ticket owned by
+		// this instance. Refresh the SQLite progress clock so a long but active
+		// implementation/review cycle is not mistaken for a stalled ticket.
+		try {
+			if (identity && moaStorage && activeTicketIds.size > 0) {
+				for (const ticketId of activeTicketIds) moaStorage.touchTicketProgress(ticketId, identity.instance, "tool_execution_start");
+			}
+		} catch {
+			// Progress telemetry is advisory and must never break the tool call.
+		}
 		logEvent("tool_execution_start", {
 			tool_call_id: event?.toolCallId ?? event?.tool_call_id ?? null,
 			tool: event?.toolName ?? event?.tool_name ?? event?.name ?? null,
@@ -4298,6 +4366,7 @@ export default function (pi: ExtensionAPI) {
 			version_bump_skipped_reason: Type.Optional(Type.String({ description: "Required if version_bumped is not true: why no version bump applies to this task." })),
 			docs_synced: Type.Optional(Type.Boolean({ description: "A docs-sync pass actually compared the project's own README/QUICK-START/architecture diagram/other docs against the real end state of this task and fixed anything stale." })),
 			docs_sync_skipped_reason: Type.Optional(Type.String({ description: "Required if docs_synced is not true: why no docs-sync pass applies to this task." })),
+			run_id: Type.Optional(Type.String({ description: "Run id returned by run_create for this task; when supplied, records the run as finalized after the merge. Always pass it for ticket/DAG runs." })),
 			push: Type.Optional(Type.Boolean({ description: "Push the main branch to its remote after a successful merge. Defaults to true — set false only if you deliberately don't want this task pushed yet." })),
 		}),
 		async execute(_callId, params) {
@@ -4346,6 +4415,13 @@ export default function (pi: ExtensionAPI) {
 
 			if (!(await findExistingWorktree(identity.cwd, wtPath))) {
 				throw new Error(`worktree_finalize: no worktree found for slug "${slug}" at ${wtPath} — was worktree_create ever called for this task?`);
+			}
+			// Validate the association before any commit, merge, worktree removal or
+			// notification. A bad run id must be a harmless rejected call, never a
+			// successful merge followed by an exception while updating SQLite.
+			const finalizationStorage = params.run_id ? ensureMoaStorage() : null;
+			if (params.run_id && !finalizationStorage?.getRun(params.run_id)) {
+				throw new Error(`worktree_finalize: run_id "${params.run_id}" non trovato.`);
 			}
 
 			// Revisione 24: a real incident traced a messy merge-conflict back to
@@ -4448,6 +4524,9 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			logEvent("worktree_finalize", { slug, worktree_path: wtPath, branch, merged: true, conflict: false });
+			if (params.run_id && finalizationStorage) {
+				finalizationStorage.updateRunFinalizationStatus(params.run_id, "finalized");
+			}
 
 			// Revisione 42 — "push" is the missing last step of the closing
 			// procedure the operator asked for: worktree_finalize merged into the
@@ -4471,6 +4550,9 @@ export default function (pi: ExtensionAPI) {
 					pushResult = { ok: false, detail: err instanceof Error ? err.message : String(err) };
 				}
 				logEvent("worktree_finalize_push", { slug, ok: pushResult.ok, detail: pushResult.detail });
+			}
+			if (params.run_id && finalizationStorage) {
+				finalizationStorage.recordEvent(params.run_id, "run_finalized", { slug, branch, pushed: pushResult.ok });
 			}
 
 			// WhatsApp completion notification (Revisione 19) — best-effort, only
@@ -6097,10 +6179,10 @@ export default function (pi: ExtensionAPI) {
 							`run "${run.id}" (${run.status}, domain: ${run.domain}): ${tickets.length} ticket(s) — ` +
 							`${buckets.done.length} done, ${buckets.running.length} running, ${buckets.ready.length} ready, ${buckets.blocked.length} blocked, ${buckets.failed.length} failed.` +
 							(stalled.length ? `\n⚠️ ${stalled.length} ticket bloccato/i: ${stalled.map((s) => `${s.ticket_id} (${Math.round(s.elapsed_ms / 60_000)} min, ${s.assigned_instance ?? "?"})`).join(", ")}.` : "") +
-							(unfinalized.length ? `\n⚠️ run completato da ${Math.round(unfinalized[0].elapsed_ms / 60_000)} min senza finalize/notifica — verifica se worktree_finalize va ancora chiamato.` : ""),
+							(unfinalized.length ? `\n⚠️ run completato da ${Math.round(unfinalized[0].elapsed_ms / 60_000)} min — stato ${run.finalization_status || "pending_finalize"}: verifica se worktree_finalize va ancora chiamato.` : ""),
 					},
 				],
-				details: { run, tickets, dependencies: deps, ...buckets, waves, recent_events: events, checkpoints, playbook_binding, playbook_state, playbook_evidence, capability_cards, playbook_effects, decision_holds, stalled_tickets: stalled, unfinalized_run: unfinalized.length > 0 },
+				details: { run, finalization_status: run.finalization_status || (run.status === "completed" ? "pending_finalize" : "not_started"), tickets, dependencies: deps, ...buckets, waves, recent_events: events, checkpoints, playbook_binding, playbook_state, playbook_evidence, capability_cards, playbook_effects, decision_holds, stalled_tickets: stalled, unfinalized_run: unfinalized.length > 0 },
 			};
 		},
 		renderCall(args, theme) {

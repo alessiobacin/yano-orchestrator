@@ -2,11 +2,13 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 
 export const TRACE_MODES = Object.freeze(["off", "events", "standard", "full"]);
 export const DEFAULT_TRACE_MODE = "events";
 
 const TRACE_SCHEMA_VERSION = 1;
+const require = createRequire(import.meta.url);
 
 function packageRoot() {
 	return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -46,7 +48,52 @@ function canonicalCwd(cwd) {
 
 export function projectKey(cwd, project) {
 	const locationHash = crypto.createHash("sha256").update(canonicalCwd(cwd)).digest("hex").slice(0, 12);
-	return `${slugify(project)}-${locationHash}`;
+	// The directory is the durable project identity; the human-facing name and
+	// the MQTT override are aliases. Including the name here used to fork one
+	// project's evidence into e.g. FocusBoard vs focusboard-trace-test.
+	return `workspace-${locationHash}`;
+}
+
+function locationHash(cwd) {
+	return crypto.createHash("sha256").update(canonicalCwd(cwd)).digest("hex").slice(0, 12);
+}
+
+/**
+ * Return the canonical key plus legacy name-scoped keys for this workspace.
+ * Legacy directories remain readable and clearable so an upgrade does not
+ * make old forensic data disappear.
+ */
+export function traceProjectKeys({ cwd = process.cwd(), project } = {}) {
+	const root = traceRoot();
+	const hash = locationHash(cwd);
+	const keys = new Set([projectKey(cwd, project)]);
+	if (project) keys.add(`${slugify(project)}-${hash}`);
+	const base = path.join(root, "traces");
+	if (fs.existsSync(base)) {
+		for (const entry of fs.readdirSync(base, { withFileTypes: true })) {
+			if (entry.isDirectory() && entry.name.endsWith(`-${hash}`)) keys.add(entry.name);
+		}
+	}
+	return [...keys];
+}
+
+function runProjectFromWorkspace(cwd, runId) {
+	if (!runId) return null;
+	const dbPath = path.join(cwd, ".pi", "extensions", "multiAgentOrchestrator", "orchestratorStorage", "orchestrator.db");
+	if (!fs.existsSync(dbPath)) return null;
+	try {
+		const { DatabaseSync } = require("node:sqlite");
+		const db = new DatabaseSync(dbPath, { readOnly: true });
+		const row = db.prepare("SELECT project FROM runs WHERE id = ?").get(runId);
+		db.close();
+		return row?.project ? String(row.project) : null;
+	} catch {
+		return null;
+	}
+}
+
+export function resolveTraceProjectForRun(cwd, runId, fallback = null) {
+	return runProjectFromWorkspace(cwd, runId) || fallback || resolveTraceProject(cwd);
 }
 
 export function tracePaths({ cwd, project, instance = null } = {}) {
@@ -93,7 +140,7 @@ function writeRegistry(registry) {
 export function getTraceConfig({ cwd, project } = {}) {
 	const paths = tracePaths({ cwd: cwd || process.cwd(), project });
 	const registry = readRegistry();
-	const entry = registry.projects[paths.projectKey];
+	const entry = traceProjectKeys({ cwd: cwd || process.cwd(), project }).map((key) => registry.projects[key]).find(Boolean);
 	const mode = entry?.mode || registry.default_mode || DEFAULT_TRACE_MODE;
 	return {
 		mode: TRACE_MODES.includes(mode) ? mode : DEFAULT_TRACE_MODE,
@@ -143,7 +190,7 @@ export function appendTraceRecord({ cwd, project, kind, record }) {
 
 export function readTraceRecords({ cwd, project, allProjects = false, since = null, limit = 10000 } = {}) {
 	const root = traceRoot();
-	const projectKeyFilter = allProjects ? null : tracePaths({ cwd: cwd || process.cwd(), project }).projectKey;
+	const projectKeyFilter = allProjects ? null : new Set(traceProjectKeys({ cwd: cwd || process.cwd(), project }));
 	const base = path.join(root, "traces");
 	const records = [];
 	for (const file of walkJsonl(base)) {
@@ -159,7 +206,7 @@ export function readTraceRecords({ cwd, project, allProjects = false, since = nu
 			try {
 				const parsed = JSON.parse(line);
 				const item = parsed.project_key ? parsed : { ...parsed, project_key: fileProjectKey };
-				if (projectKeyFilter && item.project_key !== projectKeyFilter) continue;
+				if (projectKeyFilter && !projectKeyFilter.has(item.project_key)) continue;
 				if (since && item.ts && new Date(item.ts).getTime() < since.getTime()) continue;
 				records.push(item);
 			} catch { /* malformed trace lines are handled by review-log; skip them here */ }
@@ -258,13 +305,15 @@ export function clearTraceData({ cwd, project, projectKey: explicitKey, run = nu
 		if (fs.existsSync(root)) fs.rmSync(root, { recursive: true, force: true });
 		return { deleted: true, all: true, files: 0, events: 0, root };
 	}
-	const paths = explicitKey ? { projectKey: explicitKey, projectDir: path.join(traceRoot(), "traces", explicitKey) } : tracePaths({ cwd: cwd || process.cwd(), project });
-	if (!fs.existsSync(paths.projectDir)) return { deleted: true, all: false, files: 0, events: 0, project_key: paths.projectKey };
+	const rootPaths = explicitKey
+		? [{ projectKey: explicitKey, projectDir: path.join(traceRoot(), "traces", explicitKey) }]
+		: traceProjectKeys({ cwd: cwd || process.cwd(), project }).map((key) => ({ projectKey: key, projectDir: path.join(traceRoot(), "traces", key) }));
+	if (!rootPaths.some((item) => fs.existsSync(item.projectDir))) return { deleted: true, all: false, files: 0, events: 0, project_key: rootPaths[0]?.projectKey };
 
 	const hasFilter = !!(run || instance || type || before);
 	let files = 0;
 	let events = 0;
-	for (const file of walkJsonl(paths.projectDir)) {
+	for (const paths of rootPaths) for (const file of walkJsonl(paths.projectDir)) {
 		const original = fs.readFileSync(file, "utf8");
 		const lines = original.split("\n").filter(Boolean);
 		if (!hasFilter) {
@@ -285,8 +334,8 @@ export function clearTraceData({ cwd, project, projectKey: explicitKey, run = nu
 		else fs.rmSync(file, { force: true });
 		files++;
 	}
-	removeEmptyDirs(paths.projectDir);
-	return { deleted: true, all: false, files, events, project_key: paths.projectKey };
+	for (const paths of rootPaths) removeEmptyDirs(paths.projectDir);
+	return { deleted: true, all: false, files, events, project_key: rootPaths[0]?.projectKey };
 }
 
 function* walkJsonl(dir) {

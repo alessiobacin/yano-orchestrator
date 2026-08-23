@@ -10,6 +10,7 @@ import {
 	listTraceProjects,
 	readTraceRecords,
 	resolveTraceProject,
+	resolveTraceProjectForRun,
 	setTraceMode,
 	tracePaths,
 } from "./yano-trace-storage.mjs";
@@ -122,7 +123,9 @@ export async function runTrace({ cwd, argv }) {
 	applyDataDir(argv);
 	const sub = argv[0];
 	if (!sub || sub === "--help" || sub === "-h") { usage(); return; }
-	const project = value(argv, "--project") || resolveTraceProject(cwd);
+	const explicitProject = value(argv, "--project");
+	const runId = value(argv, "--run");
+	const project = explicitProject || (runId ? resolveTraceProjectForRun(cwd, runId, resolveTraceProject(cwd)) : resolveTraceProject(cwd));
 
 	if (sub === "status") {
 		const cfg = getTraceConfig({ cwd, project });

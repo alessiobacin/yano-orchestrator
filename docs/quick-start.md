@@ -53,10 +53,10 @@ necessario.
 
 ## 3. Inizializza il trace prima del primo agente
 
-Attiva almeno `events` prima di avviare il planner:
+Inizializza il trace completo prima di avviare il planner:
 
 ```bash
-yano trace enable --mode events
+yano trace enable --mode full
 yano trace status
 ```
 
@@ -91,6 +91,9 @@ Controlla il percorso effettivo con `yano trace status`.
 ```bash
 yano start --instance planner-01 --role planner
 ```
+
+`yano start` applica comunque `full` automaticamente. Per una raccolta più
+leggera si può usare `yano start --trace-mode events` (oppure `standard`/`off`).
 
 Il launcher carica automaticamente la skill condivisa di analisi trace anche
 per coder, reviewer e specialisti quando sono avviati con `yano start`.

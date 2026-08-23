@@ -34,11 +34,12 @@ function validDate(value, flag) {
 
 function usage() {
 	console.log([
-		"Uso: yano trace <status|enable|disable|clear> [opzioni]",
+		"Uso: yano trace <status|enable|disable|events|clear> [opzioni]",
 		"",
 		"  status                         mostra modalità e directory globale",
 		"  enable --mode <mode>           attiva off|events|standard|full",
 		"  disable                        equivalente a enable --mode off",
+		"  events [--follow]              mostra gli eventi raw del run/agente",
 		"  feedback --status <s> --text  registra il verdetto dell'utente sul round",
 		"  context [filtri]               prepara il contesto compatto per il planner",
 		"  opinion --text <testo>         salva l'opinione del planner sul fallimento",
@@ -52,6 +53,55 @@ function usage() {
 		"Opzioni comuni: --project <nome>, --data-dir <directory>",
 		"Filtri: --run <id>, --round <n>, --task <slug>, --since <ISO>, --limit <n>, --json",
 	].join("\n"));
+}
+
+function eventFilter(argv) {
+	return {
+		run: value(argv, "--run"),
+		instance: value(argv, "--instance"),
+		type: value(argv, "--type"),
+		since: validDate(value(argv, "--since"), "--since"),
+	};
+}
+
+function matchingEvents(records, filters) {
+	return records
+		.filter((record) => !record.record_type)
+		.filter((record) => !filters.run || record.run_id === filters.run)
+		.filter((record) => !filters.instance || record.instance === filters.instance)
+		.filter((record) => !filters.type || record.type === filters.type)
+		.filter((record) => !filters.since || !record.ts || new Date(record.ts).getTime() >= filters.since.getTime());
+}
+
+function eventIdentity(event) {
+	return [event.project_key, event.instance, event.seq, event.ts, event.type, event.tool_call_id].map((part) => String(part ?? "")).join("|");
+}
+
+function printEvents(events, json) {
+	for (const event of events) console.log(json ? JSON.stringify(event) : `${event.ts || "?"} ${event.instance || "?"} ${event.type || "?"}${event.tool ? ` tool=${event.tool}` : ""}${event.ok === false ? " FAILED" : ""}`);
+}
+
+async function followEvents({ cwd, project, argv }) {
+	const filters = eventFilter(argv);
+	const limit = Math.max(1, Number(value(argv, "--limit") || 50));
+	const json = has(argv, "--json");
+	const emitted = new Set();
+	let firstPoll = true;
+	const poll = () => {
+		const all = readTraceRecords({ cwd, project, allProjects: has(argv, "--all-projects"), limit: 100000 });
+		const events = matchingEvents(all, filters);
+		const pending = firstPoll ? events.slice(-limit) : events;
+		const fresh = pending.filter((event) => !emitted.has(eventIdentity(event)));
+		fresh.forEach((event) => emitted.add(eventIdentity(event)));
+		if (fresh.length) printEvents(fresh, json);
+		firstPoll = false;
+	};
+	poll();
+	process.once("SIGINT", () => process.exit(0));
+	while (true) {
+		await new Promise((resolve) => setTimeout(resolve, 500));
+		poll();
+	}
 }
 
 function applyDataDir(argv) {
@@ -147,6 +197,22 @@ export async function runTrace({ cwd, argv }) {
 			for (const record of context.records) console.log(JSON.stringify(record));
 		}
 		return context;
+	}
+
+	if (sub === "events") {
+		const filters = eventFilter(argv);
+		if (has(argv, "--follow")) return followEvents({ cwd, project, argv });
+		const limit = Math.max(1, Number(value(argv, "--limit") || 50));
+		const events = matchingEvents(
+			readTraceRecords({ cwd, project, allProjects: has(argv, "--all-projects"), since: filters.since, limit: 100000 }),
+			filters,
+		).slice(-limit);
+		if (has(argv, "--json")) console.log(JSON.stringify(events, null, 2));
+		else {
+			console.log(`yano trace events: ${events.length} evento/i per "${project}"`);
+			printEvents(events, false);
+		}
+		return events;
 	}
 
 	if (sub === "opinion") {

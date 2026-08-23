@@ -37,6 +37,12 @@ export YANO_DATA_DIR="$HOME/.local/share/yano-trace"
 
 È supportato anche `YANO_TEMP_DIR`; `YANO_DATA_DIR` ha precedenza.
 
+`yano start` propaga automaticamente la stessa directory al processo Pi e agli
+agenti che il planner avvia. Questo evita che CLI npm globale ed estensione
+caricata da un clone Pi scrivano in due `temp/` diversi. Per ispezionare un run
+avviato da una vecchia versione si può indicare temporaneamente il suo store
+con `--data-dir`.
+
 ## Modalità di raccolta
 
 ```bash
@@ -91,6 +97,19 @@ yano trace context \
 Filtri disponibili: `--project`, `--run`, `--round`, `--task`, `--since` in
 formato ISO-8601 e `--limit`. `--json` produce un bundle strutturato per LLM o
 script.
+
+Per leggere gli eventi raw del flusso, con filtri mirati:
+
+```bash
+yano trace events --project <scope-mqtt> --run <run-id> --limit 100
+yano trace events --project <scope-mqtt> --instance coder-01 --type tool_execution_end
+yano trace events --project <scope-mqtt> --follow
+```
+
+`--follow` stampa gli eventi già presenti e poi segue il file mentre gli
+agenti lavorano. Gli eventi legacy privi di `project_key` vengono ricostruiti
+dal percorso canonico del progetto, quindi restano consultabili dopo
+l'aggiornamento.
 
 Coder, reviewer e specialisti usano normalmente questo comando per capire
 una correzione, un disaccordo o un evento inatteso. Nel report devono separare

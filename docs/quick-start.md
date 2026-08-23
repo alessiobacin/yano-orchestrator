@@ -53,7 +53,7 @@ Per includere risposte visibili e metadati dei tool usa `standard`; per una
 sessione diagnostica completa usa `full`:
 
 ```bash
-yano trace enable --mode standard
+yano trace enable --mode full
 ```
 
 I dati restano nella directory globale di Yano, non nel repository. Se
@@ -86,6 +86,16 @@ yano status
 yano fleet
 yano logs
 yano trace status
+```
+
+Se l'avvio usa uno scope MQTT esplicito, usa lo stesso valore anche nelle
+viste read-only:
+
+```bash
+yano status --project mio-progetto
+yano fleet --project mio-progetto
+yano logs --project mio-progetto
+yano trace events --project mio-progetto --follow
 ```
 
 SQLite mantiene run, ticket, dipendenze, evidenze e stato di recupero; il trace

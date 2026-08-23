@@ -289,7 +289,14 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 	// è il fix noto (gestisce il quoting di cmd.exe correttamente), non
 	// ancora aggiunta come dipendenza per non appesantire il pacchetto senza
 	// una verifica reale del problema.
-	const child = spawn("pi", piArgs, { cwd, stdio: "inherit", shell: process.platform === "win32" });
+	const child = spawn("pi", piArgs, {
+		cwd,
+		stdio: "inherit",
+		shell: process.platform === "win32",
+		// Keep the CLI and every agent launched by the planner on one trace
+		// store, even when Pi loads Yano from its own git clone.
+		env: { ...process.env, YANO_DATA_DIR: process.env.YANO_DATA_DIR || path.join(packageRoot, "temp") },
+	});
 	child.on("error", (err) => {
 		console.error(`launch-planner: impossibile lanciare "pi" (${err.message}) — è nel PATH?`);
 		process.exit(1);

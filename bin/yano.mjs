@@ -69,6 +69,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, "..");
 const cwd = process.cwd();
 
+// The CLI and the Pi extension may be loaded from different installations
+// (npm global package vs ~/.pi/agent/git/... clone). Make every child started
+// by this CLI inherit the same trace root. An explicit YANO_DATA_DIR remains
+// authoritative, and `yano trace --data-dir` can still inspect another store.
+process.env.YANO_DATA_DIR ??= path.join(packageRoot, "temp");
+
 function printTopUsage() {
 	console.log(
 		[

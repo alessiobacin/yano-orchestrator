@@ -10,8 +10,10 @@
 // Uso:
 //   yano status                   stato run/ticket del progetto (SQLite)
 //   yano status --run <id>        dettaglio di un singolo run
+//   yano status --project <scope> stato per uno scope MQTT esplicito
 //   yano logs [instance]          ultime righe del log JSONL di un'istanza
-//   yano fleet                    lista agenti live dal broker (retained presence)
+//   yano logs --project <scope>   log per uno scope MQTT esplicito
+//   yano fleet [--project <scope>] lista agenti live dal broker (retained presence)
 //   yano mcp [role]               MCP dichiarati per ruolo/istanza (mcp.json + roles)
 //   yano skills [role]            skill dichiarate per ruolo/istanza (roles.yaml/agents.yaml)
 //   yano doctor --network         verifica raggiungibilità broker + git + pi
@@ -27,7 +29,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { parse as parseYaml } from "yaml";
 import mqtt from "mqtt";
-import { tracePaths } from "./yano-trace-storage.mjs";
+import { slugify, tracePaths } from "./yano-trace-storage.mjs";
 
 const moaRequire = createRequire(import.meta.url);
 
@@ -35,16 +37,38 @@ function workspaceDir(cwd) {
 	return path.join(cwd, ".pi", "extensions", "multiAgentOrchestrator");
 }
 
-function resolveProject(cwd) {
+function optionValue(argv, flag) {
+	const index = argv.indexOf(flag);
+	return index >= 0 ? argv[index + 1] : null;
+}
+
+function applyDataDir(argv) {
+	const dataDir = optionValue(argv, "--data-dir");
+	if (dataDir) process.env.YANO_DATA_DIR = path.resolve(dataDir);
+}
+
+function positionalArg(argv) {
+	const valueFlags = new Set(["--project", "--run", "--data-dir"]);
+	for (let index = 0; index < argv.length; index++) {
+		const arg = argv[index];
+		if (valueFlags.has(arg)) { index++; continue; }
+		if (!arg.startsWith("-")) return arg;
+	}
+	return null;
+}
+
+function resolveProject(cwd, argv = []) {
+	const explicit = optionValue(argv, "--project");
+	if (explicit?.trim()) return explicit.trim();
 	try {
 		const cfg = JSON.parse(readFileSync(path.join(workspaceDir(cwd), "config", "project.json"), "utf-8"));
-		if (cfg.project) return cfg.project;
+		if (cfg.project) return slugify(cfg.project);
 	} catch { /* fallthrough */ }
 	try {
 		const pkg = JSON.parse(readFileSync(path.join(cwd, "package.json"), "utf-8"));
-		if (pkg.name && !String(pkg.name).startsWith("@otomatik/pi-mqtt-")) return pkg.name;
+		if (pkg.name && !String(pkg.name).startsWith("@otomatik/pi-mqtt-")) return slugify(pkg.name);
 	} catch { /* fallthrough */ }
-	return path.basename(cwd);
+	return slugify(path.basename(cwd));
 }
 
 function loadYamlOrNull(file) { try { if (!existsSync(file)) return null; return parseYaml(readFileSync(file, "utf-8")); } catch { return null; } }
@@ -55,8 +79,8 @@ function runStatus(cwd, argv) {
 	let DatabaseSync;
 	try { ({ DatabaseSync } = moaRequire("node:sqlite")); } catch (e) { console.error(`yano status: node:sqlite non disponibile (${e.message})`); process.exit(1); }
 	const db = new DatabaseSync(dbPath, { readOnly: true });
-	const runId = argv.includes("--run") ? argv[argv.indexOf("--run") + 1] : null;
-	const project = resolveProject(cwd);
+	const runId = optionValue(argv, "--run");
+	const project = resolveProject(cwd, argv);
 	const runs = runId
 		? (db.prepare("SELECT * FROM runs WHERE id = ?").get(runId) ? [db.prepare("SELECT * FROM runs WHERE id = ?").get(runId)] : [])
 		: db.prepare("SELECT * FROM runs WHERE project = ? ORDER BY created_at DESC").all(project);
@@ -73,8 +97,8 @@ function runStatus(cwd, argv) {
 }
 
 function runLogs(cwd, argv) {
-	const instance = argv.find((a) => !a.startsWith("-"));
-	const logsDir = tracePaths({ cwd, project: resolveProject(cwd) }).eventsDir;
+	const instance = positionalArg(argv);
+	const logsDir = tracePaths({ cwd, project: resolveProject(cwd, argv) }).eventsDir;
 	if (!existsSync(logsDir)) { console.log("yano logs: nessuna directory logs per questo progetto."); return; }
 	const files = fs.readdirSync(logsDir).filter((f) => f.endsWith(".jsonl")).sort();
 	if (!instance) {
@@ -89,19 +113,19 @@ function runLogs(cwd, argv) {
 }
 
 function runFleet(cwd, argv) {
-	const project = resolveProject(cwd);
+	const project = resolveProject(cwd, argv);
 	const broker = process.env.PI_ORCH_BROKER_URL || "mqtt://127.0.0.1:1883";
 	return new Promise((resolve) => {
 		const client = mqtt.connect(broker, { clean: true, reconnectPeriod: 0 });
 		const timeout = setTimeout(() => { console.error(`yano fleet: broker ${broker} non raggiungibile.`); try { client.end(true); } catch { /* ignore */ } resolve(); }, 3000);
 		client.once("connect", () => {
 			clearTimeout(timeout);
-			const agents = [];
-			client.on("message", (_t, payload) => { try { const c = JSON.parse(payload.toString()); if (c?.instance) agents.push(c); } catch { /* ignore */ } });
+			const agents = new Map();
+			client.on("message", (_t, payload) => { try { const c = JSON.parse(payload.toString()); if (c?.instance) agents.set(c.instance, c); } catch { /* ignore */ } });
 			client.subscribe(`pi/${project}/agents/+/status`, { qos: 0 }, () => {
 				setTimeout(() => {
-					if (!agents.length) { console.log(`yano fleet: nessun agente live per il progetto "${project}".`); }
-					else { console.log(`yano fleet: ${agents.length} agente/i nel progetto "${project}":`); agents.forEach((a) => console.log(`   ${a.instance} (${a.role}) ${a.status} team=[${(a.team || []).join(",")}]`)); }
+					if (!agents.size) { console.log(`yano fleet: nessun agente live per il progetto "${project}".`); }
+					else { console.log(`yano fleet: ${agents.size} agente/i nel progetto "${project}":`); agents.forEach((a) => console.log(`   ${a.instance} (${a.role}) ${a.status} team=[${(a.team || []).join(",")}]`)); }
 					try { client.end(true); } catch { /* ignore */ }
 					resolve();
 				}, 600);
@@ -111,13 +135,13 @@ function runFleet(cwd, argv) {
 }
 
 function runMcp(cwd, argv) {
-	const project = resolveProject(cwd);
+	const project = resolveProject(cwd, argv);
 	const dir = path.join(cwd, ".pi");
 	const mcpJson = loadYamlOrNull(path.join(cwd, "mcp.json")) || loadYamlOrNull(path.join(dir, "mcp.json")) || {};
 	const servers = Object.keys(mcpJson.mcpServers ?? mcpJson);
 	const rolesDoc = loadYamlOrNull(path.join(cwd, "agents", "roles.yaml"));
 	const agentsDoc = loadYamlOrNull(path.join(cwd, "agents", "agents.yaml"));
-	const roleFilter = argv.find((a) => !a.startsWith("-"));
+	const roleFilter = positionalArg(argv);
 	console.log(`yano mcp — server dichiarati per il progetto "${project}":`);
 	if (!servers.length) console.log("   (nessun server MCP dichiarato in mcp.json)");
 	servers.forEach((s) => console.log(`   • ${s}`));
@@ -138,10 +162,10 @@ function runMcp(cwd, argv) {
 }
 
 function runSkills(cwd, argv) {
-	const project = resolveProject(cwd);
+	const project = resolveProject(cwd, argv);
 	const rolesDoc = loadYamlOrNull(path.join(cwd, "agents", "roles.yaml"));
 	const agentsDoc = loadYamlOrNull(path.join(cwd, "agents", "agents.yaml"));
-	const roleFilter = argv.find((a) => !a.startsWith("-"));
+	const roleFilter = positionalArg(argv);
 	console.log(`yano skills — skill per ruolo/istanza nel progetto "${project}":`);
 	if (rolesDoc?.roles) {
 		Object.entries(rolesDoc.roles)
@@ -171,8 +195,8 @@ function cmdExists(cmd, args = ["--version"]) {
 	try { const r = spawnSync(cmd, args, { stdio: "ignore" }); return !r.error || r.error.code !== "ENOENT"; } catch { return false; }
 }
 
-async function runDoctorNetwork(cwd) {
-	console.log(`yano doctor --network — progetto "${resolveProject(cwd)}"\n`);
+async function runDoctorNetwork(cwd, argv = []) {
+	console.log(`yano doctor --network — progetto "${resolveProject(cwd, argv)}"\n`);
 	const rows = [];
 	const brokerUp = await tcpReachable("127.0.0.1", 1883);
 	rows.push(["broker 127.0.0.1:1883", brokerUp]);
@@ -186,6 +210,7 @@ async function runDoctorNetwork(cwd) {
 const SUBCOMMANDS = ["status", "logs", "fleet", "mcp", "skills"];
 
 export async function runPoStatus({ cwd, argv }) {
+	applyDataDir(argv);
 	const sub = argv[0];
 	const subArgs = argv.slice(1);
 	if (sub === "status") return runStatus(cwd, subArgs);
@@ -193,7 +218,7 @@ export async function runPoStatus({ cwd, argv }) {
 	if (sub === "fleet") return await runFleet(cwd, subArgs);
 	if (sub === "mcp") return runMcp(cwd, subArgs);
 	if (sub === "skills") return runSkills(cwd, subArgs);
-	if (sub === "doctor" && subArgs.includes("--network")) return runDoctorNetwork(cwd);
+	if (sub === "doctor" && subArgs.includes("--network")) return runDoctorNetwork(cwd, subArgs);
 	console.log("yano: usa `yano status`, `yano logs`, `yano fleet`, `yano mcp`, `yano skills`, o `yano doctor --network`.");
 	process.exit(1);
 }

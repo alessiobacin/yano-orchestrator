@@ -28,7 +28,6 @@ function appendEvent(cwd, project, event) {
 	fs.appendFileSync(file, `${JSON.stringify({
 		...event,
 		project,
-		project_key: tracePaths({ cwd, project }).projectKey,
 	})}\n`);
 }
 
@@ -52,6 +51,10 @@ try {
 	assert.ok(context.records.length >= 3, "il contesto filtrato deve includere feedback, eventi e snapshot");
 	assert.ok(context.records.every((record) => record.run_id === "run-a"), "il contesto deve rispettare il filtro run");
 	assert.ok(context.records.some((record) => record.record_type === "feedback"), "il contesto deve includere il verdetto utente");
+	const events = JSON.parse(run(cwdA, [
+		"events", "--project", "project-a", "--run", "run-a", "--json",
+	]));
+	assert.ok(events.some((event) => event.type === "tool_execution_end"), "events deve esporre gli eventi raw del run");
 
 	run(cwdA, [
 		"opinion", "--project", "project-a", "--text", "La causa più probabile è un gap di verifica e di orchestrazione.",

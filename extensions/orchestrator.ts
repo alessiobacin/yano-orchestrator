@@ -2492,7 +2492,7 @@ export default function (pi: ExtensionAPI) {
 			const config = getTraceConfig({ cwd: identity.cwd, project: identity.project });
 			if (!traceEnabled(config.mode, "events")) return;
 			const paths = ensureTraceProject({ cwd: identity.cwd, project: identity.project, instance: identity.instance });
-			const line = `${JSON.stringify({ ts: nowIso(), seq: ++logSeq, instance: identity.instance, role: identity.role, project: identity.project, trace_mode: config.mode, type, ...redactRuntimeProjection(data) })}\n`;
+			const line = `${JSON.stringify({ ts: nowIso(), seq: ++logSeq, instance: identity.instance, role: identity.role, project: identity.project, project_key: paths.projectKey, trace_mode: config.mode, type, ...redactRuntimeProjection(data) })}\n`;
 			fs.appendFileSync(paths.instanceLog!, line, { mode: 0o600 });
 		} catch {
 			// best-effort — tracing non deve mai rompere l'orchestrazione reale
@@ -2505,7 +2505,7 @@ export default function (pi: ExtensionAPI) {
 			const config = getTraceConfig({ cwd: identity.cwd, project: identity.project });
 			if (!traceEnabled(config.mode, minimum)) return;
 			const paths = ensureTraceProject({ cwd: identity.cwd, project: identity.project, instance: identity.instance });
-			const line = `${JSON.stringify({ ts: nowIso(), seq: ++logSeq, instance: identity.instance, role: identity.role, project: identity.project, trace_mode: config.mode, type, ...redactRuntimeProjection(data) })}\n`;
+			const line = `${JSON.stringify({ ts: nowIso(), seq: ++logSeq, instance: identity.instance, role: identity.role, project: identity.project, project_key: paths.projectKey, trace_mode: config.mode, type, ...redactRuntimeProjection(data) })}\n`;
 			fs.appendFileSync(paths.instanceLog!, line, { mode: 0o600 });
 		} catch {
 			// best-effort

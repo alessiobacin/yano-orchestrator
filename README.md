@@ -112,6 +112,7 @@ yano gantt                     # local live dashboard at 127.0.0.1:8174
 yano watch --once              # one stalled-ticket scan
 yano trace status              # modalità e percorso del trace globale
 yano trace enable --mode full  # trace completo dei dati osservabili
+yano trace events --follow     # segue gli eventi raw mentre gli agenti lavorano
 yano trace feedback --status rejected --text "<verdetto utente>" --run <id> --round <n> --task <slug>
 yano trace context --run <id> --round <n> --task <slug> --json
 yano trace overview --all-projects --json

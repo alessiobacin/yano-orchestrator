@@ -147,11 +147,18 @@ export function readTraceRecords({ cwd, project, allProjects = false, since = nu
 	const base = path.join(root, "traces");
 	const records = [];
 	for (const file of walkJsonl(base)) {
+		// Events written by versions before project_key was added are still
+		// scoped safely from their canonical path: traces/<project-key>/...
+		const parent = path.basename(path.dirname(file));
+		const fileProjectKey = ["events", "terminal", "snapshots"].includes(parent)
+			? path.basename(path.dirname(path.dirname(file)))
+			: parent;
 		let lines;
 		try { lines = fs.readFileSync(file, "utf8").split("\n").filter(Boolean); } catch { continue; }
 		for (const line of lines) {
 			try {
-				const item = JSON.parse(line);
+				const parsed = JSON.parse(line);
+				const item = parsed.project_key ? parsed : { ...parsed, project_key: fileProjectKey };
 				if (projectKeyFilter && item.project_key !== projectKeyFilter) continue;
 				if (since && item.ts && new Date(item.ts).getTime() < since.getTime()) continue;
 				records.push(item);

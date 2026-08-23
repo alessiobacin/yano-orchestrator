@@ -71,11 +71,13 @@ yano trace enable --mode full
 yano trace status
 ```
 
-Se `agent_list` è vuoto dopo il riavvio del planner, controlla prima lo scope
-visualizzato dal messaggio di avvio e rilancia tutte le istanze con lo stesso
-`--project` (oppure ometti il flag per usare il default della root). Uno scope
-diverso è una rete MQTT diversa: il refresh non può fondere intenzionalmente
-due progetti separati.
+`agent_list` include anche l’istanza che lo ha chiamato, marcata `self: true`;
+questa riga conferma che il planner è online ma non è una destinazione valida
+per una delega. Se dopo il riavvio compare solo `self` e mancano i peer,
+controlla lo scope visualizzato dal messaggio di avvio e rilancia tutte le
+istanze con lo stesso `--project` (oppure ometti il flag per usare il default
+della root). Uno scope diverso è una rete MQTT diversa: il refresh non può
+fondere intenzionalmente due progetti separati.
 
 `yano fleet` mostra solo agenti con heartbeat recente; le card retained
 `offline` o scadute vengono indicate come ignorate, non come agenti live.

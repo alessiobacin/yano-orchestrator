@@ -129,7 +129,11 @@ async function discoverPresence(project, broker = BROKER_URL) {
 		} catch { /* malformed retained presence is ignored */ }
 	};
 	client.on("message", onMessage);
-	await new Promise((resolve) => setTimeout(resolve, 250));
+	// Retained messages are delivered asynchronously after SUBSCRIBE. 250 ms
+	// was too short on a busy broker and made pause see only the first agent,
+	// leaving the other Herdr panes alive. Match the fleet command's settling
+	// window so the checkpoint and graceful-stop set are complete.
+	await new Promise((resolve) => setTimeout(resolve, 650));
 	client.removeListener("message", onMessage);
 	return { client, cards: [...cards.values()] };
 }
@@ -369,7 +373,7 @@ async function recoveryStatus({ cwd, project, argv }) {
 
 export async function runRecovery({ cwd, argv }) {
 	const sub = argv[0];
-	if (!sub || sub === "--help" || sub === "-h") { usage(); return; }
+	if (!sub || sub === "--help" || sub === "-h" || has(argv, "--help") || has(argv, "-h")) { usage(); return; }
 	const project = projectScope(cwd, argv);
 	if (sub === "recovery" || sub === "status" || sub === "list") {
 		await recoveryStatus({ cwd, project, argv });

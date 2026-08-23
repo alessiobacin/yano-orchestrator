@@ -265,8 +265,8 @@ async function runScenario(cwd, project) {
 	ok(timeoutMsg.msg.details.target === "ghost-01", "timeout wake-up details name the target that never answered");
 	ok(timeoutMsg.msg.content.includes("ghost-01"), "timeout wake-up content names the unresponsive target");
 
-	await waitUntil(() => planner.logLines().some((l) => l.type === "whatsapp_notify" && l.reason === "agent_send_timeout" && l.assignment_id === assignmentId3), 2000, "a WhatsApp notification attempt for this timeout is logged (reason agent_send_timeout) — no .env here, so it reports not-configured, but the attempt itself must happen");
-	const waLine = planner.logLines().find((l) => l.type === "whatsapp_notify" && l.assignment_id === assignmentId3);
+	await waitUntil(() => planner.logLines().some((l) => l.type === "notification_dispatch" && l.reason === "agent_send_timeout" && l.assignment_id === assignmentId3), 2000, "a multi-channel notification attempt for this timeout is logged (reason agent_send_timeout) — no .env here, so it reports not-configured, but the attempt itself must happen");
+	const waLine = planner.logLines().find((l) => l.type === "notification_dispatch" && l.assignment_id === assignmentId3);
 	ok(waLine.ok === false, "as expected with no .env in this scratch repo, the WhatsApp send itself reports not-configured rather than throwing");
 
 	console.log("\n=== TEST 4 — agent_await on an assignment that was fire-and-forget-abandoned still works standalone ===");

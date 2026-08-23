@@ -239,7 +239,7 @@ export function readTraceRecords({ cwd, project, allProjects = false, since = nu
 
 const FAILURE_SIGNAL_RULES = [
 	["no_live_target", (r) => r.type === "agent_send_no_live_target"],
-	["delegation_timeout", (r) => r.type === "whatsapp_notify" && r.reason === "agent_send_timeout"],
+	["delegation_timeout", (r) => (r.type === "notification_dispatch" || r.type === "whatsapp_notify") && r.reason === "agent_send_timeout"],
 	["watchdog_stall", (r) => typeof r.type === "string" && r.type.includes("stall")],
 	["orphaned_agent", (r) => typeof r.type === "string" && r.type.includes("orphan")],
 	["merge_conflict", (r) => r.type === "worktree_finalize" && r.conflict === true],

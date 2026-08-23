@@ -88,28 +88,28 @@ async function main() {
 	await planner.call("ticket_create", { run_id: run.id, spec_id: spec.id, title: "t2", required_capabilities: ["planner"], depends_on: [] });
 	ok(true, "seeded a run with 2 tickets and a planner log");
 
-	const { runPoStatus } = await import(pathToFileURL(path.join(PROJECT_ROOT, "scripts", "yano-status.mjs")).href);
+	const { runYanoStatus } = await import(pathToFileURL(path.join(PROJECT_ROOT, "scripts", "yano-status.mjs")).href);
 
 	console.log("\n=== PART 2 — yano status ===");
-	let out = await capture(() => runPoStatus({ cwd, argv: ["status"] }));
+	let out = await capture(() => runYanoStatus({ cwd, argv: ["status"] }));
 	ok(out.includes(run.id) && /tickets: 2/.test(out), "yano status shows the run with its ticket count");
 
 	console.log("\n=== PART 3 — yano skills / mcp (yaml declarations) ===");
-	out = await capture(() => runPoStatus({ cwd, argv: ["skills"] }));
+	out = await capture(() => runYanoStatus({ cwd, argv: ["skills"] }));
 	ok(/planner/.test(out) && /wayfinder/.test(out), "yano skills lists role skills from roles.yaml");
-	out = await capture(() => runPoStatus({ cwd, argv: ["mcp"] }));
+	out = await capture(() => runYanoStatus({ cwd, argv: ["mcp"] }));
 	ok(/github/.test(out), "yano mcp lists declared MCP servers");
 
 	console.log("\n=== PART 4 — yano logs ===");
-	out = await capture(() => runPoStatus({ cwd, argv: ["logs"] }));
+	out = await capture(() => runYanoStatus({ cwd, argv: ["logs"] }));
 	ok(/planner-01\.jsonl/.test(out), "yano logs lists the planner instance log file");
 
 	console.log("\n=== PART 5 — yano doctor --network ===");
-	const netRes = await capture(() => runPoStatus({ cwd, argv: ["doctor", "--network"] }));
+	const netRes = await capture(() => runYanoStatus({ cwd, argv: ["doctor", "--network"] }));
 	ok(/broker/.test(netRes), "yano doctor --network reports broker check (broker is up in CI/local)");
 
 	console.log("\n=== PART 6 — yano fleet ===");
-	out = await capture(() => runPoStatus({ cwd, argv: ["fleet"] }));
+	out = await capture(() => runYanoStatus({ cwd, argv: ["fleet"] }));
 	ok(/planner-01|nessun agente/i.test(out), "yano fleet lists the live planner-01 from retrieved presence (or a graceful empty message)");
 
 	console.log(`\n${PASS} assertions passed.`);

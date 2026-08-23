@@ -59,8 +59,8 @@ import { runUpdate } from "../scripts/update.mjs";
 import { runUninstall } from "../scripts/uninstall.mjs";
 import { runEndProject } from "../scripts/end-project.mjs";
 import { runCopyPrompts } from "../scripts/copy-prompts.mjs";
-import { runPoStatus } from "../scripts/yano-status.mjs";
-import { runPoDeps } from "../scripts/yano-deps.mjs";
+import { runYanoStatus } from "../scripts/yano-status.mjs";
+import { runYanoDeps } from "../scripts/yano-deps.mjs";
 import { runGantt } from "../scripts/gantt-server.mjs";
 import { runWatch } from "../scripts/watch-stalls.mjs";
 import { runTrace } from "../scripts/yano-trace.mjs";
@@ -130,7 +130,7 @@ async function main() {
 	}
 	if (sub === "doctor") {
 		if (rest.includes("--network")) {
-			await runPoStatus({ cwd, argv: ["doctor", "--network"] });
+			await runYanoStatus({ cwd, argv: ["doctor", "--network"] });
 			return;
 		}
 		const { ok } = await runDoctor({ cwd, json: rest.includes("--json") });
@@ -153,11 +153,11 @@ async function main() {
 		return;
 	}
 	if (["status", "logs", "fleet", "mcp", "skills"].includes(sub)) {
-		await runPoStatus({ cwd, argv: [sub, ...rest] });
+		await runYanoStatus({ cwd, argv: [sub, ...rest] });
 		return;
 	}
 	if (sub === "deps") {
-		await runPoDeps({ cwd, argv: rest });
+		await runYanoDeps({ cwd, argv: rest });
 		return;
 	}
 	if (sub === "gantt") {

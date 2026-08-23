@@ -90,7 +90,7 @@ function readEnv(cwd) {
 	} catch { return {}; }
 }
 
-export async function runPoDeps({ cwd, argv }) {
+export async function runYanoDeps({ cwd, argv }) {
 	const opts = parseArgs(argv);
 	try {
 		for (const cli of loadRoleCli(cwd, opts.role)) if (!opts.cli.includes(cli)) opts.cli.push(cli);
@@ -151,5 +151,5 @@ export async function runPoDeps({ cwd, argv }) {
 
 const invokedDirectly = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (invokedDirectly) {
-	runPoDeps({ cwd: process.cwd(), argv: process.argv.slice(2) }).then((r) => process.exit(r.ok ? 0 : 1));
+	runYanoDeps({ cwd: process.cwd(), argv: process.argv.slice(2) }).then((r) => process.exit(r.ok ? 0 : 1));
 }

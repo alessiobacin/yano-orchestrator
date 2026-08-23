@@ -715,6 +715,45 @@ function herdrRenamePane(name: string): void {
 	}
 }
 
+// La tab e il pane sono due entità distinte in Herdr. Il report-agent aggiorna
+// lo stato dell'agente e il rename del pane aggiorna il titolo del terminale,
+// ma la sidebar può mostrare ancora il label della tab. Recuperiamo quindi la
+// tab proprietaria del pane corrente e la rinominiamo esplicitamente.
+function herdrRenameTab(name: string): void {
+	const bin = process.env.HERDR_BIN_PATH;
+	const paneId = process.env.HERDR_PANE_ID;
+	const explicitTabId = process.env.HERDR_TAB_ID;
+	if (process.env.HERDR_ENV !== "1" || !bin || (!paneId && !explicitTabId)) return;
+	const rename = (tabId: string) => {
+		try {
+			execFile(bin, ["tab", "rename", tabId, name], () => {
+				// best-effort: the agent must continue even on older Herdr builds
+				// where tab rename is not available.
+			});
+		} catch {
+			// ignore
+		}
+	};
+	if (explicitTabId) {
+		rename(explicitTabId);
+		return;
+	}
+	try {
+		execFile(bin, ["pane", "get", paneId!], { encoding: "utf8" }, (err, stdout) => {
+			if (err) return;
+			try {
+				const parsed = JSON.parse(stdout);
+				const tabId = parsed?.result?.pane?.tab_id || parsed?.pane?.tab_id;
+				if (typeof tabId === "string" && tabId) rename(tabId);
+			} catch {
+				// ignore malformed/legacy CLI output
+			}
+		});
+	} catch {
+		// ignore
+	}
+}
+
 // paseo (https://paseo.sh) — client-daemon tool for managing agent
 // sessions. NOTE (Revisione 23, see docs/development-notes.md): confirmed in a
 // real user test that `paseo run --provider <x> -- <text>` treats
@@ -2961,6 +3000,7 @@ export default function (pi: ExtensionAPI) {
 		setTerminalTitle(displayName);
 		herdrReportAgent(displayName, "idle", flags.instance);
 		herdrRenamePane(displayName);
+		herdrRenameTab(displayName);
 		paseoDetectAndLog();
 
 		const brokerUrl = flags.brokerUrl || DEFAULT_BROKER_URL;
@@ -3390,7 +3430,7 @@ export default function (pi: ExtensionAPI) {
 			const waMessage =
 				`⚠️ watchdog: il ticket "${s.title}" (${s.ticket_id}), assegnato a ${s.assigned_instance ?? "?"}, è RUNNING da ${minutes} min ` +
 				`senza un ticket_complete — probabile blocco dell'istanza (turno bloccato o troncato). Il planner è stato informato, nessuna azione automatica presa.`;
-			void sendWhatsAppNotification(waMessage).then((r) => logEvent("whatsapp_notify", { ok: r.ok, detail: r.detail, reason: "watchdog_stall", ticket_id: s.ticket_id }));
+			void sendNotifications(waMessage).then((r) => logEvent("notification_dispatch", { ok: r.ok, detail: r.detail, channels: r.channels, reason: "watchdog_stall", ticket_id: s.ticket_id }));
 
 			try {
 				pi.sendMessage(
@@ -3401,14 +3441,14 @@ export default function (pi: ExtensionAPI) {
 							`senza alcun evento di completamento — probabile blocco dell'istanza (turno bloccato o con risposta troncata dal provider). ` +
 							`Decidi tu come procedere: un ping via agent_send verso quell'istanza per capire se è ancora viva, marcare il ticket come fallito con ` +
 							`ticket_complete (status: "failed") e ripianificarlo su una nuova istanza dello stesso ruolo, oppure escalare all'utente se non riesci a ` +
-							`sbloccarlo. L'utente è già stato avvisato via WhatsApp (se configurato). Annota cosa decidi nel report, così resta nell'audit trail.`,
+							`sbloccarlo. L'utente è già stato avvisato tramite i canali configurati (se presenti). Annota cosa decidi nel report, così resta nell'audit trail.`,
 						display: true,
 						details: { run_id: s.run_id, ticket_id: s.ticket_id, assigned_instance: s.assigned_instance, elapsed_ms: s.elapsed_ms, threshold_level: thresholdLevel },
 					},
 					{ deliverAs: "followUp", triggerTurn: true },
 				);
 			} catch {
-				// best-effort — the SQLite event + MQTT publish + WhatsApp above already happened regardless
+				// best-effort — the SQLite event + MQTT publish + notifications above already happened regardless
 			}
 		}
 
@@ -3441,7 +3481,7 @@ export default function (pi: ExtensionAPI) {
 				const waMessage =
 					`🔴 watchdog: l'istanza "${o.assigned_instance}", assegnataria del ticket "${o.title}" (${o.ticket_id}), risulta OFFLINE — ` +
 					`il ticket è stato automaticamente riportato a "failed". Il planner è stato svegliato con l'istruzione di rilanciare l'istanza.`;
-				void sendWhatsAppNotification(waMessage).then((r) => logEvent("whatsapp_notify", { ok: r.ok, detail: r.detail, reason: "watchdog_orphaned_instance", ticket_id: o.ticket_id }));
+				void sendNotifications(waMessage).then((r) => logEvent("notification_dispatch", { ok: r.ok, detail: r.detail, channels: r.channels, reason: "watchdog_orphaned_instance", ticket_id: o.ticket_id }));
 
 				try {
 					pi.sendMessage(
@@ -3453,7 +3493,7 @@ export default function (pi: ExtensionAPI) {
 								`ora "${o.assigned_instance}" (stesso nome o uno nuovo dello stesso ruolo) con Herdr, usando la selezione ` +
 								`iniziale del team, poi ripianifica questo lavoro (ticket_create/ticket_claim) su quell'istanza una volta che agent_list la mostra ` +
 								`viva. NON eseguire tu il lavoro di questo ticket: sei il planner, il tuo compito è pianificare e delegare, mai scrivere codice al ` +
-								`posto di un coder assente. L'utente è già stato avvisato via WhatsApp (se configurato).`,
+								`posto di un coder assente. L'utente è già stato avvisato tramite i canali configurati (se presenti).`,
 							display: true,
 							details: { run_id: o.run_id, ticket_id: o.ticket_id, assigned_instance: o.assigned_instance },
 						},
@@ -3507,7 +3547,7 @@ export default function (pi: ExtensionAPI) {
 					const waMessage =
 						`🔴 watchdog: istanza "${s.assigned_instance}" bloccata da ${minutes} min sul ticket "${s.title}" (${s.ticket_id}) — terminazione ` +
 						`automatica inviata (PI_ORCH_WATCHDOG_AUTO_TERMINATE=true). Il planner deve rilanciarla.`;
-					void sendWhatsAppNotification(waMessage).then((r) => logEvent("whatsapp_notify", { ok: r.ok, detail: r.detail, reason: "watchdog_auto_terminate", ticket_id: s.ticket_id }));
+					void sendNotifications(waMessage).then((r) => logEvent("notification_dispatch", { ok: r.ok, detail: r.detail, channels: r.channels, reason: "watchdog_auto_terminate", ticket_id: s.ticket_id }));
 
 					try {
 						pi.sendMessage(
@@ -3562,7 +3602,7 @@ export default function (pi: ExtensionAPI) {
 					`worktree_finalize/notifica di chiusura risulta ancora arrivato — possibile blocco del planner (es. turno interrotto dal ` +
 					`provider LLM) subito dopo l'ultimo ticket_complete. Se il merge/la notifica finale sono già stati fatti manualmente, ignora ` +
 					`questo avviso — è un'euristica sul tempo trascorso, non una certezza.`;
-				void sendWhatsAppNotification(waMessage).then((r2) => logEvent("whatsapp_notify", { ok: r2.ok, detail: r2.detail, reason: "watchdog_unfinalized_run", run_id: r.run_id }));
+				void sendNotifications(waMessage).then((r2) => logEvent("notification_dispatch", { ok: r2.ok, detail: r2.detail, channels: r2.channels, reason: "watchdog_unfinalized_run", run_id: r.run_id }));
 
 				try {
 					pi.sendMessage(
@@ -3572,14 +3612,14 @@ export default function (pi: ExtensionAPI) {
 								`[watchdog] Il run "${r.objective}" (${r.run_id}) ha tutti i ticket completati da ${minutes} minuti, ma non risulta ancora ` +
 								`nessun worktree_finalize né notifica di chiusura per questo lavoro. Se il task ha un worktree associato ancora aperto, ` +
 								`chiama worktree_finalize ora; se è già stato finalizzato per un'altra via, non serve fare nulla — annota nel report cosa ` +
-								`hai verificato. L'utente è già stato avvisato via WhatsApp (se configurato).`,
+								`hai verificato. L'utente è già stato avvisato tramite i canali configurati (se presenti).`,
 							display: true,
 							details: { run_id: r.run_id, objective: r.objective, elapsed_ms: r.elapsed_ms },
 						},
 						{ deliverAs: "followUp", triggerTurn: true },
 					);
 				} catch {
-					// best-effort — the SQLite event + WhatsApp above already happened regardless
+					// best-effort — the SQLite event + notifications above already happened regardless
 				}
 			}
 		} catch {
@@ -3627,7 +3667,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "agent_list",
 		label: "Agent List",
-		description: "List known agent instances (role, team, status) discovered via MQTT presence. Presence is retained, so peers appear immediately even if they connected before you.",
+		description: "List the current agent and known peer instances (role, team, status) discovered via MQTT presence. The current instance is marked self=true and is not a valid delegation target. Presence is retained, so peers appear immediately even if they connected before you.",
 		parameters: Type.Object({}),
 		async execute() {
 			// Revisione 41 bug fix: the "offline" presence payload published on
@@ -3641,20 +3681,30 @@ export default function (pi: ExtensionAPI) {
 			// found while testing the agent_send presence-warning fix below,
 			// which calls this same map. Default the missing fields instead of
 			// assuming they're always present.
-			const agents = [...presence.values()].map((c) => ({
-				instance: c.instance, role: c.role, team: c.team ?? [], status: c.status, capacity: c.capacity ?? 0, current_load: c.current_load ?? 0,
+			const selfAgent = identity ? {
+				instance: identity.instance,
+				role: identity.role,
+				team: identity.team ?? [],
+				status: computeSelfStatus(),
+				capacity: identity.capacity ?? 0,
+				current_load: currentLoad(),
+				self: true,
+			} : null;
+			const peers = [...presence.values()].map((c) => ({
+				instance: c.instance, role: c.role, team: c.team ?? [], status: c.status, capacity: c.capacity ?? 0, current_load: c.current_load ?? 0, self: false,
 			}));
-				const lines = agents.length === 0
-					? `No peer agents known yet for MQTT project "${identity?.project ?? "?"}" (they may still be connecting, or were launched with a different --project scope).`
-					: agents.map((a) => `${a.status === "idle" ? "●" : a.status === "busy" ? "◐" : "✗"} ${a.instance} (${a.role}) team=[${a.team.join(",")}] load=${a.current_load}/${a.capacity}`).join("\n");
-				return { content: [{ type: "text" as const, text: `${agents.length} peer(s) in project "${identity?.project ?? "?"}":\n${lines}` }], details: { agents, project: identity?.project ?? null } };
+			const agents = selfAgent ? [selfAgent, ...peers] : peers;
+			const lines = agents.length === 0
+				? `No agent identity available for MQTT project "${identity?.project ?? "?"}" (the orchestrator may still be initialising).`
+				: agents.map((a) => `${a.status === "idle" ? "●" : a.status === "busy" ? "◐" : "✗"} ${a.instance} (${a.role}) team=[${a.team.join(",")}] load=${a.current_load}/${a.capacity}${a.self ? " [self — do not delegate to this instance]" : ""}`).join("\n");
+			return { content: [{ type: "text" as const, text: `${agents.length} agent(s) in project "${identity?.project ?? "?"}" (current instance included; self is not a delegation target):\n${lines}` }], details: { agents, project: identity?.project ?? null } };
 		},
 		renderCall(_args, theme) {
 			return new Text(theme.fg("toolTitle", theme.bold("agent_list")), 0, 0);
 		},
 		renderResult(result, _options, theme) {
 			const agents = (result.details as any)?.agents ?? [];
-			return new Text(theme.fg("accent", `⚡ ${agents.length} peer(s)`), 0, 0);
+			return new Text(theme.fg("accent", `⚡ ${agents.length} agent(s)`), 0, 0);
 		},
 	});
 
@@ -3799,7 +3849,7 @@ export default function (pi: ExtensionAPI) {
 				// Wake the sender (unless it's actively blocked in agent_await,
 				// which already gets this via its own race) and, since a
 				// half-hour of silence on a real delegation is a genuinely
-				// actionable signal, also notify WhatsApp — mirrors the
+				// actionable signal, also notify configured channels — mirrors the
 				// watchdog's escalation for the same class of "something's
 				// stuck and nobody would otherwise know" problem, just reached
 				// via a different code path (agent_send timeout vs. a stale
@@ -3820,9 +3870,9 @@ export default function (pi: ExtensionAPI) {
 							{ deliverAs: "followUp", triggerTurn: true },
 						);
 					} catch { /* best-effort, see handleResponse's identical guard */ }
-					void sendWhatsAppNotification(
+					void sendNotifications(
 						`⏱️ Nessuna risposta da ${entry.target} entro ${Math.round(TIMEOUT_MS / 60000)} min (assignment ${assignment_id}) — ${identity?.instance ?? "?"} è stato risvegliato per decidere come procedere.`,
-					).then((r) => logEvent("whatsapp_notify", { ok: r.ok, detail: r.detail, reason: "agent_send_timeout", assignment_id, target: entry.target }));
+					).then((r) => logEvent("notification_dispatch", { ok: r.ok, detail: r.detail, channels: r.channels, reason: "agent_send_timeout", assignment_id, target: entry.target }));
 				}
 			}, TIMEOUT_MS);
 			try { (entry.timer as any).unref?.(); } catch { /* ignore */ }
@@ -4205,16 +4255,11 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
-	// ━━ WhatsApp completion notification via Evolution API (Revisione 19) ━━
-	// On explicit user request: when a task's worktree is successfully
-	// finalized — the exact moment "il lavoro è completato" — send a WhatsApp
-	// message via a self-hosted Evolution API instance
-	// (github.com/EvolutionAPI/evolution-api) to a fixed destination number,
-	// both configured through a .env file in the project root (see
-	// .env.example — real values never committed, .env is gitignored).
-	// Entirely optional and best-effort: if the env vars aren't set, this
-	// silently does nothing rather than failing worktree_finalize, since not
-	// every checkout of this project has (or wants) WhatsApp configured.
+	// ━━ Multi-channel notifications (WhatsApp, Telegram, SendGrid) ━━
+	// When a task finishes or a watchdog needs the operator's attention, the
+	// same message is dispatched independently to every configured channel.
+	// All channels are optional and best-effort: a missing credential or failed
+	// provider never fails the task itself and is recorded per channel in trace.
 	//
 	// NAMING NOTE: Evolution API's own docs call a single WhatsApp
 	// connection/session an "instance" — a COMPLETELY different concept from
@@ -4222,12 +4267,16 @@ export default function (pi: ExtensionAPI) {
 	// EVOLUTION_INSTANCE_NAME below refers only to the former (which
 	// WhatsApp connection to send FROM), never to a pi agent instance.
 	//
-	// Expected .env keys (see .env.example — exact names not yet confirmed
-	// against the user's real .env, see docs/development-notes.md Revisione 19):
+	// Expected .env keys (see .env.example):
 	//   EVOLUTION_API_URL         base URL of the Evolution API server
 	//   EVOLUTION_API_KEY         sent as the `apikey` header
 	//   EVOLUTION_INSTANCE_NAME   which WhatsApp connection to send FROM
 	//   DESTINATION_PHONE_NUMBER  who to send TO (digits + country code, no "+")
+	//   TELEGRAM_BOT_TOKEN        Telegram bot token
+	//   TELEGRAM_DESTINATION_CHAT_ID  Telegram chat/channel id
+	//   SENDGRID_API_KEY          SendGrid API key
+	//   SENDGRID_FROM_EMAIL       verified SendGrid sender
+	//   SENDGRID_TO_EMAIL         recipient email(s), comma-separated
 	function loadEnvFile(cwd: string): Record<string, string> {
 		const result: Record<string, string> = {};
 		try {
@@ -4288,11 +4337,82 @@ export default function (pi: ExtensionAPI) {
 		}
 	}
 
+	async function sendTelegramNotification(message: string): Promise<{ ok: boolean; detail: string }> {
+		if (!identity) return { ok: false, detail: "orchestrator not initialised" };
+		const token = getEnvVar(identity.cwd, "TELEGRAM_BOT_TOKEN");
+		const chatId = getEnvVar(identity.cwd, "TELEGRAM_DESTINATION_CHAT_ID");
+		if (!token || !chatId) {
+			const missing = [!token && "TELEGRAM_BOT_TOKEN", !chatId && "TELEGRAM_DESTINATION_CHAT_ID"].filter(Boolean);
+			return { ok: false, detail: `non configurato — variabili mancanti nel .env: ${missing.join(", ")}` };
+		}
+		try {
+			const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ chat_id: chatId, text: message, disable_web_page_preview: true }),
+			});
+			if (!res.ok) {
+				const body = await res.text().catch(() => "");
+				return { ok: false, detail: `Telegram ha risposto ${res.status}: ${body.slice(0, 200)}` };
+			}
+			const payload = await res.json().catch(() => null) as any;
+			return payload?.ok === false
+				? { ok: false, detail: `Telegram ha rifiutato il messaggio: ${String(payload.description || "errore sconosciuto")}` }
+				: { ok: true, detail: "inviato" };
+		} catch (err) {
+			return { ok: false, detail: err instanceof Error ? err.message : String(err) };
+		}
+	}
+
+	async function sendEmailNotification(message: string): Promise<{ ok: boolean; detail: string }> {
+		if (!identity) return { ok: false, detail: "orchestrator not initialised" };
+		const apiKey = getEnvVar(identity.cwd, "SENDGRID_API_KEY");
+		const from = getEnvVar(identity.cwd, "SENDGRID_FROM_EMAIL");
+		const to = getEnvVar(identity.cwd, "SENDGRID_TO_EMAIL");
+		if (!apiKey || !from || !to) {
+			const missing = [!apiKey && "SENDGRID_API_KEY", !from && "SENDGRID_FROM_EMAIL", !to && "SENDGRID_TO_EMAIL"].filter(Boolean);
+			return { ok: false, detail: `non configurato — variabili mancanti nel .env: ${missing.join(", ")}` };
+		}
+		const recipients = to.split(",").map((email) => email.trim()).filter(Boolean).map((email) => ({ email }));
+		if (!recipients.length) return { ok: false, detail: "non configurato — SENDGRID_TO_EMAIL è vuoto" };
+		try {
+			const res = await fetch("https://api.sendgrid.com/v3/mail/send", {
+				method: "POST",
+				headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+				body: JSON.stringify({
+					personalizations: [{ to: recipients }],
+					from: { email: from },
+					subject: getEnvVar(identity.cwd, "SENDGRID_SUBJECT") || "Yano notification",
+					content: [{ type: "text/plain", value: message }],
+				}),
+			});
+			if (!res.ok) {
+				const body = await res.text().catch(() => "");
+				return { ok: false, detail: `SendGrid ha risposto ${res.status}: ${body.slice(0, 200)}` };
+			}
+			return { ok: true, detail: "inviato" };
+		} catch (err) {
+			return { ok: false, detail: err instanceof Error ? err.message : String(err) };
+		}
+	}
+
+	async function sendNotifications(message: string): Promise<{ ok: boolean; detail: string; channels: Record<string, { ok: boolean; detail: string }> }> {
+		const [whatsapp, telegram, email] = await Promise.all([
+			sendWhatsAppNotification(message),
+			sendTelegramNotification(message),
+			sendEmailNotification(message),
+		]);
+		const channels = { whatsapp, telegram, email };
+		const ok = Object.values(channels).some((result) => result.ok);
+		const detail = Object.entries(channels).map(([channel, result]) => `${channel}: ${result.detail}`).join("; ");
+		return { ok, detail, channels };
+	}
+
 	pi.registerTool({
 		name: "notify_whatsapp",
 		label: "Notify WhatsApp",
 		description:
-			"Send a WhatsApp message via Evolution API to the fixed destination number configured in .env (DESTINATION_PHONE_NUMBER), " +
+			"Send a WhatsApp-only message via Evolution API to the fixed destination number configured in .env (DESTINATION_PHONE_NUMBER), " +
 			"from the WhatsApp connection named in EVOLUTION_INSTANCE_NAME. worktree_finalize already calls this automatically on " +
 			"success (Revisione 19) — use this tool directly only for other cases, e.g. notifying the user when you escalate after " +
 			"repeated failed correction rounds instead of finalizing. Silently reports back if .env isn't configured rather than " +
@@ -4314,6 +4434,32 @@ export default function (pi: ExtensionAPI) {
 		renderResult(result, _options, theme) {
 			const d = result.details as any;
 			return d?.ok ? new Text(theme.fg("success", "✓ sent"), 0, 0) : new Text(theme.fg("error", `✗ ${d?.detail ?? "not sent"}`), 0, 0);
+		},
+	});
+
+	pi.registerTool({
+		name: "notify_all",
+		label: "Notify All Channels",
+		description:
+			"Send a notification through every configured channel: WhatsApp via Evolution API, Telegram via the Bot API, and email via SendGrid. " +
+			"Each channel is optional; the tool reports the result independently and never fails the task because a channel is unavailable.",
+		parameters: Type.Object({
+			message: Type.String({ description: "The notification text to send through all configured channels." }),
+		}),
+		async execute(_callId, params) {
+			const result = await sendNotifications(params.message);
+			logEvent("notification_dispatch", { ok: result.ok, detail: result.detail, channels: result.channels, manual: true });
+			return {
+				content: [{ type: "text" as const, text: result.ok ? `notify_all: ${result.detail}` : `notify_all: no channel sent the message — ${result.detail}` }],
+				details: result,
+			};
+		},
+		renderCall(_args, theme) {
+			return new Text(theme.fg("toolTitle", theme.bold("notify_all")), 0, 0);
+		},
+		renderResult(result, _options, theme) {
+			const d = result.details as any;
+			return d?.ok ? new Text(theme.fg("success", "✓ channels dispatched"), 0, 0) : new Text(theme.fg("warning", "⚠ no channel sent"), 0, 0);
 		},
 	});
 
@@ -4385,13 +4531,13 @@ export default function (pi: ExtensionAPI) {
 			"tool — but an explicit false/lie is now on the record in the event log, instead of the step simply never having " +
 			"been considered at all.\n\n" +
 			"On success, if a .env with Evolution API settings is present (see .env.example, Revisione 19), this also sends a " +
-			"WhatsApp completion notification automatically — you don't need to call notify_whatsapp yourself for the normal " +
-			"case. Pass notify_message to customize the text; otherwise a sensible default naming the task is sent. If the .env " +
-			"isn't configured, this is silently skipped — it never fails the actual merge.",
+			"multi-channel completion notification automatically — you don't need to call notify_all yourself for the normal " +
+			"case. Pass notify_message to customize the text; otherwise a sensible default naming the task is sent. If no channel " +
+			"is configured, dispatch is recorded as skipped — it never fails the actual merge.",
 		parameters: Type.Object({
 			slug: Type.String({ description: "Same slug passed to worktree_create for this task." }),
 			commit_message: Type.Optional(Type.String({ description: "Commit message for any uncommitted changes and for the merge commit. Defaults to a generic message referencing the slug." })),
-			notify_message: Type.Optional(Type.String({ description: "Custom WhatsApp completion message. Defaults to a generic one naming the task slug." })),
+			notify_message: Type.Optional(Type.String({ description: "Custom completion message sent to all configured notification channels. Defaults to a generic one naming the task slug." })),
 			user_confirmed: Type.Boolean({ description: "You explicitly asked the user to confirm this result is what they wanted, and they confirmed — required, no exceptions." }),
 			e2e_tests_run: Type.Optional(Type.Boolean({ description: "The project's end-to-end/full test suite was actually run as part of this task." })),
 			e2e_tests_skipped_reason: Type.Optional(Type.String({ description: "Required if e2e_tests_run is not true: why no e2e run applies to this task." })),
@@ -4473,8 +4619,8 @@ export default function (pi: ExtensionAPI) {
 				const notifyText =
 					`⚠️ Task "${slug}": merge bloccato — la directory principale del progetto ha modifiche non committate. ` +
 					"Serve una decisione dell'utente prima di continuare.";
-				const notifyResult = await sendWhatsAppNotification(notifyText);
-				logEvent("whatsapp_notify", { slug, ok: notifyResult.ok, detail: notifyResult.detail, reason: "dirty_main_blocked_finalize" });
+				const notifyResult = await sendNotifications(notifyText);
+				logEvent("notification_dispatch", { slug, ok: notifyResult.ok, detail: notifyResult.detail, channels: notifyResult.channels, reason: "dirty_main_blocked_finalize" });
 				return {
 					content: [{
 						type: "text" as const,
@@ -4484,7 +4630,7 @@ export default function (pi: ExtensionAPI) {
 							"o peggio un merge \"pulito\" che in realtà mescola due cose diverse senza che nessuno se ne accorga. Committa o metti da " +
 							"parte (git stash) queste modifiche nella directory principale, poi richiama worktree_finalize — il worktree resta intatto " +
 							"nel frattempo." +
-							(notifyResult.ok ? " (Notifica WhatsApp inviata.)" : ` (Notifica WhatsApp non inviata: ${notifyResult.detail}.)`),
+							(notifyResult.ok ? " (Notifiche inviate ai canali configurati.)" : ` (Nessun canale ha inviato la notifica: ${notifyResult.detail}.)`),
 					}],
 					details: { merged: false, conflict: false, blocked_dirty_main: true, worktree_path: wtPath, branch },
 				};
@@ -4527,8 +4673,8 @@ export default function (pi: ExtensionAPI) {
 				logEvent("worktree_finalize", { slug, worktree_path: wtPath, branch, merged: false, conflict: true, conflict_files: conflictFiles });
 				const fileList = conflictFiles.length > 0 ? conflictFiles.map((f) => `  - ${f}`).join("\n") : "(nessun file identificato automaticamente — vedi il messaggio git sotto)";
 				const notifyText = `⚠️ Task "${slug}": CONFLITTO di merge — richiede risoluzione manuale.\nFile in conflitto:\n${fileList}\nWorktree: ${wtPath}`;
-				const notifyResult = await sendWhatsAppNotification(notifyText);
-				logEvent("whatsapp_notify", { slug, ok: notifyResult.ok, detail: notifyResult.detail, reason: "merge_conflict" });
+				const notifyResult = await sendNotifications(notifyText);
+				logEvent("notification_dispatch", { slug, ok: notifyResult.ok, detail: notifyResult.detail, channels: notifyResult.channels, reason: "merge_conflict" });
 				return {
 					content: [{
 						type: "text" as const,
@@ -4539,7 +4685,7 @@ export default function (pi: ExtensionAPI) {
 							"Dopo una risoluzione MANUALE (fuori da worktree_finalize), chiama worktree_abandon per registrare cosa è successo nel " +
 							"report e rimuovere il worktree ormai orfano — altrimenti resta lì per sempre, come nell'incidente che ha portato a " +
 							"questo cambiamento (Revisione 24)." +
-							(notifyResult.ok ? " (Notifica WhatsApp inviata.)" : ` (Notifica WhatsApp non inviata: ${notifyResult.detail}.)`),
+							(notifyResult.ok ? " (Notifiche inviate ai canali configurati.)" : ` (Nessun canale ha inviato la notifica: ${notifyResult.detail}.)`),
 					}],
 					details: { merged: false, conflict: true, worktree_path: wtPath, branch, conflict_files: conflictFiles },
 				};
@@ -4588,19 +4734,18 @@ export default function (pi: ExtensionAPI) {
 				finalizationStorage.recordEvent(params.run_id, "run_finalized", { slug, branch, pushed: pushResult.ok });
 			}
 
-			// WhatsApp completion notification (Revisione 19) — best-effort, only
+			// Multi-channel completion notification — best-effort, only
 			// on the success path, never allowed to affect the merge result above
 			// (which has already happened by this point regardless of what
-			// follows). Silently skipped if .env isn't configured for this
-			// project — see sendWhatsAppNotification().
+			// follows). Silently skipped per channel if .env isn't configured for
+			// this project — see sendNotifications().
 			const notifyText = params.notify_message || `✅ Task "${slug}" completato e verificato — unito nel progetto.`;
-			const notifyResult = await sendWhatsAppNotification(notifyText);
-			logEvent("whatsapp_notify", { slug, ok: notifyResult.ok, detail: notifyResult.detail });
+			const notifyResult = await sendNotifications(notifyText);
+			logEvent("notification_dispatch", { slug, ok: notifyResult.ok, detail: notifyResult.detail, channels: notifyResult.channels });
 			try {
 				const mergedReportFile = reportPath(identity.cwd, slug); // now in the main checkout, not the (removed) worktree
 				if (fs.existsSync(mergedReportFile)) {
-					const destMasked = (getEnvVar(identity.cwd, "DESTINATION_PHONE_NUMBER") || "").replace(/.(?=.{3})/g, "•"); // e.g. •••••••123
-					const line = `\n> _[evento] notifica WhatsApp fine task${destMasked ? ` a ${destMasked}` : ""} — ${notifyResult.ok ? "inviata" : `non inviata (${notifyResult.detail})`} alle ${nowIso()}_\n`;
+					const line = `\n> _[evento] notifica multi-canale fine task — ${notifyResult.ok ? "inviata" : `non inviata (${notifyResult.detail})`} alle ${nowIso()}_\n`;
 					fs.appendFileSync(mergedReportFile, line);
 				}
 			} catch {
@@ -4612,9 +4757,9 @@ export default function (pi: ExtensionAPI) {
 					type: "text" as const,
 					text: `worktree_finalize: merged ${branch} into the main checkout and removed the worktree.` +
 						(params.push === false ? " Push saltato (push:false)." : pushResult.ok ? " Push al remote riuscito." : ` Push NON riuscito: ${pushResult.detail}.`) +
-						(notifyResult.ok ? " WhatsApp notification sent." : ` (WhatsApp notification not sent: ${notifyResult.detail})`),
+						(notifyResult.ok ? " Notifications sent to configured channels." : ` (No notification channel sent the message: ${notifyResult.detail})`),
 				}],
-				details: { merged: true, conflict: false, worktree_path: wtPath, branch, whatsapp_notified: notifyResult.ok, pushed: pushResult.ok },
+				details: { merged: true, conflict: false, worktree_path: wtPath, branch, notifications: notifyResult.channels, notified: notifyResult.ok, pushed: pushResult.ok },
 			};
 		},
 		renderCall(args, theme) {
@@ -4709,8 +4854,8 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			logEvent("worktree_abandon", { slug, worktree_path: wtPath, branch, reason, branch_deleted: branchDeleted });
-			const notifyResult = await sendWhatsAppNotification(`ℹ️ Task "${slug}": worktree chiuso manualmente (${reason}) — non tramite il normale merge automatico.`);
-			logEvent("whatsapp_notify", { slug, ok: notifyResult.ok, detail: notifyResult.detail, reason: "worktree_abandon" });
+			const notifyResult = await sendNotifications(`ℹ️ Task "${slug}": worktree chiuso manualmente (${reason}) — non tramite il normale merge automatico.`);
+			logEvent("notification_dispatch", { slug, ok: notifyResult.ok, detail: notifyResult.detail, channels: notifyResult.channels, reason: "worktree_abandon" });
 
 			return {
 				content: [{

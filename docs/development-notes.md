@@ -6,6 +6,36 @@ l'equivalente diretto di `coms.ts`/`coms-net.ts` del repo
 `disler/pi-vs-claude-code`, ma su MQTT 5 e con il paradigma role/instance al
 posto della chat P2P piatta.
 
+## Revisione 51 — `agent_list` include il planner corrente
+
+**Incidente reale**: in `code-mem` il pannello `planner-01` era online e
+pubblicava heartbeat MQTT, ma il planner riceveva da `agent_list` soltanto i
+due peer (`docsA-01` e `coderB-01`). Poiché la mappa interna dei peer esclude
+intenzionalmente l’istanza locale per evitare auto-routing, il prompt concludeva
+erroneamente che non esistesse un planner online.
+
+**Diagnosi**: `yano fleet`, le card retained MQTT e il trace globale
+confermavano che `planner-01` era connesso allo stesso progetto. Non era una
+collisione di scope, un heartbeat scaduto o una struttura di cartelle vecchia;
+era un contratto incompleto del tool, che non esponeva la distinzione tra
+“istanza corrente” e “peer delegabile”.
+
+**Fix**:
+
+- `agent_list` restituisce ora l’istanza corrente come primo elemento con
+  `self: true`, ruolo, team, stato e carico correnti;
+- i peer continuano a provenire esclusivamente dalla mappa MQTT retained, e
+  il routing di `agent_send` resta peer-only: l’agente non può delegare a sé
+  stesso;
+- testo, renderer, prompt del planner e quick start dichiarano esplicitamente
+  questa semantica;
+- lo smoke test di presenza fallisceva prima della modifica e ora verifica che
+  un planner riavviato identifichi sé stesso oltre a ricostruire i peer.
+
+**Verifica**: syntax check e smoke test presenza superati (6 asserzioni). Dopo
+il riavvio dell’istanza già aperta, il risultato atteso è una riga
+`planner-01 ... [self — do not delegate to this instance]` seguita dai peer.
+
 ## Revisione 50 — refresh presenza da SQLite e diagnosi degli scope MQTT divergenti
 
 **Incidente reale**: nella prova `FocusBoard Trace Test` alcuni worker
@@ -163,8 +193,8 @@ ora è concreto).
 
 **Trigger reale**: subito dopo la Revisione 47, l'operatore ha condiviso il
 reasoning REALE del planner di "voice-agent" mentre rilanciava l'intero team
-dopo un crash del server tmux — ancora componendo `tmux new-session ...
-"pi -e $EXT --instance $1 --role $2"`, lo stesso identico pattern che questo
+dopo un crash del server Herdr — ancora componendo un lancio legacy con
+estensione esplicita, lo stesso identico pattern che questo
 progetto pensava di aver già chiuso. Contemporaneamente ha segnalato che,
 appena il planner lancia un agente (con la sintassi herdr che questo
 prompt suggeriva), quell'istanza risponde SUBITO con qualcosa come *"Il
@@ -181,7 +211,7 @@ dell'"ambiguo `pi`")**: questo prompt istruiva `herdr agent start <nome>
 assumendo (mai verificato contro un herdr reale né contro la sua
 documentazione ufficiale, onestamente segnalato come tale nel testo)
 che tutto dopo `--` venisse eseguito come comando di shell nel pannello,
-esattamente come fa `tmux new-session ... "<comando>"`. **Non è così**:
+esattamente come un comando di shell nel pannello. **Non è così**:
 verificato ora contro la documentazione ufficiale
 (herdr.dev/docs/cli-reference/), `--kind pi` dice a herdr di lanciare esso
 stesso l'eseguibile `pi`, e tutto ciò che segue `--` sono argomenti diretti
@@ -202,12 +232,11 @@ contro la doc ufficiale:
 2. `yano start --instance <nome> --role <ruolo> --print-only` per farsi
    stampare la riga composta, togliere a mano la prima parola `pi`, e
    passare SOLO il resto dopo il `--` di `herdr agent start ... -- <resto>`
-   — mai `yano start` per intero, perché per herdr (a differenza di tmux) non
+   — mai `yano start` per intero, perché Herdr non interpreta quel comando come
    è un comando di shell.
 
-Il prompt spiega ora esplicitamente perché tmux e herdr si comportano in
-modo diverso con lo stesso comando `yano start` (prima lasciava intendere
-fossero intercambiabili), per evitare che l'errore si ripresenti in una
+Il prompt spiega ora esplicitamente come Herdr interpreta i propri argomenti
+e come Yano compone il lancio, per evitare che l'errore si ripresenti in una
 forma diversa in futuro.
 
 **2) Herdr suonava per OGNI istanza, non solo per il planner**: l'unico
@@ -418,13 +447,13 @@ progetto (screenshot dell'operatore):
 ```
 $ cd /Users/alessiobacin/Development/testCode/voice-agent && \
 EXT="/Users/alessiobacin/.pi/agent/git/github.com/alessiobacin/yano-orchestrator/extensions/orchestrator.ts"; \
-for s in reviewer-02 a11y-tester-02; do tmux kill-session -t "$s" 2>/dev/null; done; \
+for s in reviewer-02 a11y-tester-02; do herdr tab close "$s" 2>/dev/null; done; \
 ...
-for spec in "reviewer-02 reviewer" "a11y-tester-02 a11y-tester"; do set -- $spec; tmux new-session -d -s "$1" -c "$PWD" "pi -e $EXT --instance $1 --role $2"; ...; done
+for spec in "reviewer-02 reviewer" "a11y-tester-02 a11y-tester"; do set -- $spec; herdr tab create --cwd "$PWD" --label "$1"; yano start --instance "$1" --role "$2"; done
 ```
 
-Il planner di QUESTO progetto reale sta ancora componendo **tmux** +
-`pi -e <path assoluto>` — esattamente il pattern pre-Revisione-44 che questo
+Il planner di QUESTO progetto reale stava ancora componendo un lancio legacy
+con `pi -e <path assoluto>` — esattamente il pattern pre-Revisione-44 che questo
 stesso repo ha corretto in `prompts/planner.md` settimane prima. La causa,
 una volta trovata, è ovvia con il senno di poi: `yano init` copia `prompts/`
 dentro un progetto scaffoldato **una volta sola**
@@ -437,7 +466,7 @@ la sua creazione. "voice-agent" era stato scaffoldato prima della Revisione
 regolarmente ad ogni consegna, ma la copia LOCALE di `prompts/planner.md`
 dentro quel progetto è rimasta ferma alla versione con cui era stata
 scritta — il planner continuava quindi a ragionare (correttamente, rispetto
-al SUO prompt) componendo il vecchio comando tmux. Gli agenti risultavano
+al SUO prompt) componendo il vecchio lancio. Gli agenti risultavano
 online su MQTT (la presence bar li mostra) perché il processo `pi` in sé
 si connette comunque al broker — semplicemente herdr non aveva mai creato
 un proprio pannello/tab per loro, dato che non erano mai stati lanciati
@@ -595,7 +624,7 @@ esattamente dalla Revisione 33 in poi, MAI corretto in questo punto specifico.
 Il planner, seguendo `prompts/planner.md` (sezione "Selezione dinamica del
 team", mai passando da `yano start`/`launch-planner.mjs` per gli altri ruoli),
 componeva quello stesso comando stale a mano, per ogni istanza coder/
-reviewer/specialista lanciata via herdr o tmux — riproducendo l'esatto
+reviewer/specialista lanciata via Herdr — riproducendo l'esatto
 traceback "Tool ... conflicts with ..." (o, peggio, un fallimento silenzioso
 del processo `pi` all'avvio) ogni singola volta.
 
@@ -617,7 +646,7 @@ del rifiuto). La logica di rilevamento `-e extensions/orchestrator.ts`
 (hasLocalExtension && looksLikePackageRepo, Revisione 33/38) è invariata e
 ora si applica identica a qualunque ruolo. `scripts/create-project.mjs`
 (messaggio stampato da `yano init`) e `prompts/planner.md` (sezione di lancio
-team, herdr E tmux) aggiornati per usare sempre `yano start --instance <nome>
+team con Herdr) aggiornati per usare sempre `yano start --instance <nome>
 --role <ruolo>` invece del vecchio `pi -e extensions/orchestrator.ts ...`.
 
 **Seconda richiesta dell'operatore — rilancio per session id** (`yano start
@@ -637,17 +666,10 @@ PRIMA di usarlo, esattamente come già fa per `herdr pane split`/i
 sotto-comandi tab di herdr — mai inventare la sintassi, mai bloccarsi se non
 la trova: rilanciare una sessione nuova va sempre bene come fallback.
 
-**Terza osservazione dell'operatore — "voglio un nuovo tab di herdr non
-tmux"**: la preferenza herdr-su-tmux (e tab-su-split) era già la regola
-scritta in `prompts/planner.md` prima di questa revisione — resa più
-esplicita qui ("SEMPRE herdr quando è disponibile, mai tmux se herdr c'è").
-Il tmux menzionato nel transcript del planner era quasi certamente
-terminologia informale per descrivere i pannelli herdr stessi (probabilmente
-implementati sopra tmux), non un fallback effettivamente scelto al posto di
-herdr — non c'è evidenza nel transcript che il planner abbia usato comandi
-tmux diretti invece di `herdr agent start`. La causa reale del fallimento
-era il comando `pi` composto, non lo strumento di terminal multiplexing
-scelto.
+**Terza osservazione dell'operatore — "voglio un nuovo tab di Herdr"**: la
+regola è esplicita in `prompts/planner.md`: usare sempre Herdr per creare tab
+e pannelli, quindi avviare Yano nella tab con `yano start`. La causa reale
+del fallimento era il comando `pi` composto, non il tab Herdr scelto.
 
 **Verificato**: nuovo `scripts/smoke-test-launch-any-role.mjs` (11
 asserzioni) — spawna il vero `scripts/launch-planner.mjs` come child process
@@ -781,7 +803,7 @@ STESSO topic comandi già usato da `agent_send`/`handleCommand` — l'istanza
 target, ricevendolo, esegue lo stesso `cleanShutdown()` di un
 `session_shutdown` pulito e poi esce (`process.exit`). Non rilancia nulla da
 solo: dopo, va verificato con `agent_list` e rilanciata manualmente (stesso
-meccanismo herdr/tmux della selezione iniziale del team — nessun modo
+meccanismo Herdr della selezione iniziale del team — nessun modo
 verificato per questa estensione di generare un nuovo pane/processo dall'interno,
 stesso limite onesto già documentato per herdr/paseo). Esiste anche una
 terminazione automatica opt-in (`PI_ORCH_WATCHDOG_AUTO_TERMINATE=true`,
@@ -2594,8 +2616,8 @@ harness sostituisce deterministicamente le decisioni che prenderebbe un
 agente reale (FakeInstance guida i tool esattamente come farebbe un
 planner/coder/reviewer/specialista, ma senza nessun LLM nel mezzo); MQTT
 con TLS (`mqtts://`) o autenticazione username/password non testati (il
-broker locale usato è senza auth); il lancio reale via herdr/tmux resta
-non testato (nessun multiplexer di terminale reale in questo sandbox);
+broker locale usato è senza auth); il lancio reale via Herdr resta
+non testato in questo sandbox;
 nessuno stress test con concorrenza oltre lo scenario di contesa
 deliberata dello scenario 5.
 
@@ -2739,7 +2761,7 @@ nemmeno con la Revisione 23) — aggiunti i nuovi passi/nodi
 `worktree_list_open`, il controllo di sovrapposizione worktree con
 conferma esplicita all'utente, il vincolo `docs-sync` in `plan_set`, il
 controllo preliminare + elenco file in conflitto + `worktree_abandon` in
-`worktree_finalize`, herdr/tmux al posto di herdr/paseo (Revisione 23,
+`worktree_finalize`, Herdr al posto di herdr/paseo (Revisione 23,
 mai risincronizzato prima d'ora), e le notifiche WhatsApp sui casi di
 blocco (con un'icona 📱 dedicata in legenda). Rigenerato con
 `mmdc`/layout elk, verificato con uno screenshot reale della pagina HTML
@@ -2750,7 +2772,7 @@ solo come file di lavoro fuori dallo zip consegnato; ora chiunque cloni
 il repo può rigenerare il diagramma senza dover chiedere di nuovo il
 sorgente.
 
-## Revisione 23: bug reale — paseo non lancia le istanze, sostituito con tmux
+## Revisione 23: bug reale — paseo non lancia le istanze, corretto con Herdr
 
 **Trovato dall'utente in un test reale**, non da me: ha chiesto a un
 planner reale (avviato con `scripts/launch-planner.mjs`) di lanciare un
@@ -2801,17 +2823,13 @@ persistente e un log completamente vuoto.
 
 **Fix**: `paseo` rimosso come opzione di lancio istanze in
 `prompts/planner.md` (punto 8) — se lo trova disponibile, il planner lo
-ignora esplicitamente per questo scopo, con la spiegazione del perché
-incorporata nel prompt (per evitare che un futuro planner ritenti). Al suo
-posto, **tmux** come fallback quando herdr non è disponibile:
-`tmux new-session -d -s <nome-istanza> -c <working-dir> "pi -e
-extensions/orchestrator.ts --instance <nome-istanza> --role <ruolo>"` —
-sintassi tmux standard, stabile da anni, niente da verificare come per
-herdr/paseo (a differenza di paseo, `tmux new-session` esegue letteralmente
-il comando che gli si passa). Aggiunta anche una nota esplicita e
+ignora esplicitamente per questo scopo. Il lancio passa sempre da Herdr:
+`herdr tab create --cwd <working-dir> --label <nome-istanza>` seguito da
+`yano start --instance <nome-istanza> --role <ruolo>` — nessuna estensione
+locale da indicare a mano. Aggiunta anche una nota esplicita e
 inequivocabile all'inizio del punto 8: non lanciare MAI un'istanza con
 `nohup`/`&`/output rediretto su file, per nessun motivo — serve sempre un
-vero pty (herdr, tmux, o un terminale aperto a mano).
+vero pannello Herdr.
 
 `extensions/orchestrator.ts`: `paseoDetectAndLog()` lasciata invariata nel
 comportamento (resta un no-op fuori da paseo, innocua) ma il commento
@@ -2821,13 +2839,13 @@ Nessuna modifica a `plan_set`/`plan_advance`/`agent_send`.
 
 **Verifica**: suite completa (12 smoke test + check-syntax +
 check-skill-isolation) riverificata verde — nessuno di questi test
-copriva/copre il meccanismo di lancio herdr/paseo/tmux (sono script Node
+copriva/copre il meccanismo di lancio Herdr/paseo (sono script Node
 puri, indipendenti da `pi`), quindi il fix qui è verificato solo a livello
 di lettura della documentazione ufficiale di paseo (ri-fetchata apposta
 dopo la segnalazione) e di coerenza logica col comportamento osservato
-dall'utente — non con un nuovo test end-to-end reale con tmux (l'utente non
+dall'utente — non con un nuovo test end-to-end reale con Herdr (l'utente non
 lo ha ancora provato). **Prossimo passo consigliato**: l'utente riprova il
-lancio del team con la sintassi tmux aggiornata e conferma che `agent_list`
+lancio del team con la sintassi Herdr aggiornata e conferma che `agent_list`
 mostri finalmente i peer attesi.
 
 ## Revisione 22: skill esterne vendorizzate (wayfinder/to-spec) solo per planner
@@ -4699,8 +4717,8 @@ cartella principale resta inalterata, finché planner non chiama
   `docker ps` — deve esserci `pi-orchestrator-mqtt-dev` con la porta
   `127.0.0.1:1883->1883/tcp`. Non serve riavviare `pi`: appena il broker
   risponde, il widget si aggancia da solo entro un paio di secondi.
-- Nessun peer visibile con `agent_list` → controlla che tutti e tre i
-  pannelli abbiano lo stesso `--project` — dalla Revisione 38 in poi non è
+- `agent_list` mostra solo la riga `self` ma nessun peer → controlla che tutti
+  i pannelli abbiano lo stesso `--project` — dalla Revisione 38 in poi non è
   più `default` per tutti, ma deriva dalla directory di lavoro (vedi
   Revisione 38 più sotto), quindi il caso tipico è aver lanciato uno dei tre
   pannelli da una cwd diversa dagli altri due, non un `--project` scordato.

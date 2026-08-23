@@ -38,6 +38,11 @@
 //   yano update            aggiorna alla versione più recente su GitHub (entrambe le copie)
 //   yano update --check    controlla solo se è disponibile un aggiornamento, non installa
 //
+// Dopo l'aggiornamento del pacchetto e del clone dell'estensione, il comando
+// sincronizza anche le estensioni registrate nell'installazione locale di Pi
+// con `pi update --extensions`. Questo evita che una sessione Pi appena aperta
+// proponga un aggiornamento separato.
+//
 // Limite onesto residuo: il percorso `~/.pi/agent/git/<host>/<owner>/<repo>`
 // è dedotto dalla struttura osservata in un singolo traceback reale (Windows,
 // `pi` v0.84.2) — non è documentato pubblicamente da `pi`, quindi potrebbe
@@ -89,6 +94,22 @@ function piExtensionGitDir(repoUrl) {
 function currentGitCommit(dir) {
 	const result = spawnSync("git", ["-C", dir, "rev-parse", "--short", "HEAD"], { encoding: "utf-8" });
 	return result.status === 0 ? result.stdout.trim() : null;
+}
+
+export function updatePiExtensions() {
+	if (!commandExists("pi")) {
+		console.warn("yano update: pi non trovato sul PATH — sincronizzazione delle estensioni saltata.");
+		return { ok: false, skipped: true };
+	}
+	try {
+		execFileSync("pi", ["update", "--extensions"], { stdio: "inherit", shell: process.platform === "win32" });
+		console.log("yano update: estensioni Pi sincronizzate.");
+		return { ok: true, skipped: false };
+	} catch (err) {
+		console.warn(`yano update: "pi update --extensions" non riuscito (${err instanceof Error ? err.message : String(err)}).`);
+		console.warn("Le copie Yano sono state aggiornate; ripeti manualmente `pi update --extensions` quando Pi sarà disponibile.");
+		return { ok: false, skipped: false };
+	}
 }
 
 // runUpdate({ packageRoot, argv }) — packageRoot è la directory del
@@ -212,6 +233,9 @@ export function runUpdate({ packageRoot, argv }) {
 				"`pi extension install <url>`.",
 		);
 	}
+
+	console.log("\nyano update: 3/3 — sincronizzo le estensioni registrate in Pi (pi update --extensions)...\n");
+	updatePiExtensions();
 
 	console.log(
 		"\nyano update: i prompt di ruolo di OGNI progetto (anche già scaffoldato prima di questo update) si leggono " +

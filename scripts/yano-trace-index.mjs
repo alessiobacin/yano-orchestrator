@@ -215,7 +215,7 @@ function documentFor(record) {
 
 const FAILURE_RULES = [
 	["no_live_target", (record) => record.type === "agent_send_no_live_target"],
-	["delegation_timeout", (record) => record.type === "whatsapp_notify" && record.reason === "agent_send_timeout"],
+	["delegation_timeout", (record) => (record.type === "notification_dispatch" || record.type === "whatsapp_notify") && record.reason === "agent_send_timeout"],
 	["watchdog_stall", (record) => typeof record.type === "string" && record.type.includes("stall")],
 	["orphaned_agent", (record) => typeof record.type === "string" && record.type.includes("orphan")],
 	["merge_conflict", (record) => record.type === "worktree_finalize" && record.conflict === true],

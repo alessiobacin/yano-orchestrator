@@ -3,7 +3,7 @@
 [![CI](https://github.com/alessiobacin/yano-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/alessiobacin/yano-orchestrator/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A multi-agent orchestration extension for [Pi](https://github.com/badlogic/pi-mono). It coordinates a **planner**, a **coder**, a **reviewer**, and an optional roster of specialist agents over MQTT 5, isolates every unit of work in its own git worktree, tracks execution through a persistent ticket/DAG layer, and can notify you over WhatsApp when something finishes or needs your attention.
+A multi-agent orchestration extension for [Pi](https://github.com/badlogic/pi-mono). It coordinates a **planner**, a **coder**, a **reviewer**, and an optional roster of specialist agents over MQTT 5, isolates every unit of work in its own git worktree, tracks execution through a persistent ticket/DAG layer, and can notify you through WhatsApp, Telegram, and email when something finishes or needs your attention.
 
 ## Overview
 
@@ -23,7 +23,7 @@ Everything communicates over a local MQTT broker, using role/instance identity a
 - **A mandatory closing checklist**: `worktree_finalize` refuses to merge until you declare the user actually confirmed the result, e2e tests ran (or don't apply), the version was bumped (or doesn't apply), *and* a docs-sync pass actually reconciled the project's own README/QUICK-START/architecture diagram with what shipped (or doesn't apply) — and now pushes to the remote automatically after a successful merge
 - **Frontend work has its own enforced review loop** — `frontend-developer` always hands off to `frontend-reviewer`, never to the backend `reviewer`; the frontend reviewer uses Playwright CLI/skill, chrome-devtools, and `code-review`, rejects back with specifics if needed, and informs the planner only after verification
 - **Phased execution plans** — the planner declares which roles work together and in what order, and the system enforces it
-- **WhatsApp notifications** (via Evolution API) when a task completes or needs your input, so you don't have to watch the terminal
+- **Multi-channel notifications** via Evolution API/WhatsApp, Telegram Bot API, and SendGrid email when a task completes or needs your input, so you don't have to watch the terminal
 - **A global `yano` CLI** (`yano init`, `yano start`, `yano doctor`, `yano update`, `yano copy-prompts`, `yano uninstall`, `yano end`, `yano pause`, `yano resume`, `yano recovery`) for scaffolding, launching, verifying the environment, checkpointing and restoring active work, and closing projects — `yano resume` restores agents exclusively in the visible Herdr workspace
 - **Shared trace-analysis skill** for planner, coder, reviewer and specialists — workers can inspect the filtered origin of a mismatch, while the planner records cross-project opinions and systemic interventions
 - **Local embeddings prerequisite** — `yano doctor` verifies Ollama, the `nomic-embed-text` model and a real `/api/embed` probe; `yano init` installs/pulls them when missing (no extra npm embedding library is required)
@@ -58,7 +58,7 @@ npm install -g .
 
 mkdir url-shortener; cd url-shortener
 yano init --name "URL Shortener"
-copy .env.example .env   # optional: WhatsApp notifications
+cp .env.example .env   # optional: WhatsApp, Telegram, and email notifications
 
 # MQTT broker — either works:
 docker compose -f mqtt/compose.yaml up -d   # with Docker Desktop
@@ -87,7 +87,7 @@ yano update --check   # just check whether an update is available, without insta
 yano uninstall        # remove the global installation (asks for confirmation; add --yes to skip it)
 ```
 
-`yano update` updates both places the extension can live: the global npm package (`npm install -g` against this repo's GitHub URL) and, if present, the separate clone `pi extension install` keeps under `~/.pi/agent/git/github.com/<owner>/<repo>` (a plain `git pull`). `yano uninstall` removes both the same way, asking a separate confirmation for the second one.
+`yano update` updates both places the extension can live: the global npm package (`npm install -g` against this repo's GitHub URL) and, if present, the separate clone `pi extension install` keeps under `~/.pi/agent/git/github.com/<owner>/<repo>` (a plain `git pull`). At the end it also runs `pi update --extensions`, so Pi's installed extension registry is synchronized before the next session. A failure in that final synchronization is reported clearly without hiding the successful Yano package update. `yano update --check` remains read-only and does not run any update command. `yano uninstall` removes both the same way, asking a separate confirmation for the second one.
 
 **Role prompts are always read live from whichever global install `pi` actually loaded — never from a per-project copy — so `yano update` alone is enough.** `yano init` no longer creates a `prompts/` folder in a scaffolded project at all; every instance simply reads `<installed-package>/prompts/<role>.md` at launch, so a `yano update` immediately takes effect for every existing project too, with no extra step.
 
@@ -155,7 +155,7 @@ mkdir url-shortener && cd url-shortener
 yano init --name "URL Shortener"
 yano trace enable --mode full
 yano trace status
-cp .env.example .env   # optional: WhatsApp notifications, fill in your Evolution API details
+cp .env.example .env   # optional: notifications; fill in only the channels you use
 docker compose -f mqtt/compose.yaml up -d   # local MQTT broker
 yano start --instance planner-01
 ```
@@ -181,7 +181,7 @@ pi --instance coder-01 --role coder
 
 ## Configuration
 
-WhatsApp notifications are optional and configured via `.env` (see `.env.example`). **All four variables below are required together** — if even one is missing, the extension silently skips every notification (logged as "non configurato — variabili mancanti nel .env: `<name>`"), a real bug found and fixed in a project using this package (Revisione 48, see `docs/development-notes.md`):
+Notifications are optional and configured via `.env` (see `.env.example`). Each channel is independent: incomplete credentials disable only that channel, while configured channels continue to receive the same event. Results are recorded in the trace as `notification_dispatch` with one status per channel.
 
 | Variable | Description |
 | --- | --- |
@@ -189,8 +189,13 @@ WhatsApp notifications are optional and configured via `.env` (see `.env.example
 | `EVOLUTION_API_KEY` | API key for your Evolution API instance |
 | `EVOLUTION_INSTANCE_NAME` | Your Evolution API instance name (note the `_NAME` suffix — this table itself had the wrong key name, `EVOLUTION_INSTANCE`, until Revisione 48) |
 | `DESTINATION_PHONE_NUMBER` | Phone number to notify (with country code, digits only, no `+`) |
+| `TELEGRAM_BOT_TOKEN` | Bot token from BotFather |
+| `TELEGRAM_DESTINATION_CHAT_ID` | Telegram chat or channel id |
+| `SENDGRID_API_KEY` | SendGrid API key with mail-send permission |
+| `SENDGRID_FROM_EMAIL` | Verified sender email in SendGrid |
+| `SENDGRID_TO_EMAIL` | Recipient email(s), comma-separated if needed |
 
-Without a `.env`, the extension runs normally — notifications are simply skipped.
+Without a `.env`, the extension runs normally — notifications are simply skipped. `notify_all` can be used for a manual fan-out; `notify_whatsapp` remains available for a WhatsApp-only message.
 
 ### MCP e prerequisiti frontend
 
@@ -220,7 +225,7 @@ skills-vendor/awesome-copilot/    vendored chrome-devtools skill, reviewer/front
                                    see VERSION.md
 mqtt/                             local Mosquitto broker config for development
 docs/                             architecture, trace reference, quick start, Mermaid diagrams and development notes
-.env.example                      WhatsApp notification configuration template
+.env.example                      WhatsApp, Telegram, and SendGrid notification template
 mcp.json.example                  chrome-devtools MCP server configuration template
 ```
 

@@ -164,8 +164,9 @@ async function main() {
 
 	// The retained presence cards are the ground truth for what each instance
 	// resolved as its teams. Read them directly from the broker's retained
-	// status topics (agent_list only surfaces PEERS, since each instance
-	// excludes itself, so it can't show both planners to one reader).
+	// status topics (agent_list includes the current instance as self=true and
+	// the other instances as peers; direct retained cards remain the ground
+	// truth for comparing every instance without reader-specific filtering).
 	const cardHolder = {};
 	// Attach the message handler BEFORE subscribing so no retained card can be
 	// delivered into a gap (some mqtt libs emit retained messages right after

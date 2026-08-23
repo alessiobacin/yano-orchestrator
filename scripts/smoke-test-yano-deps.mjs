@@ -29,10 +29,10 @@ async function main() {
 	console.log("Yano-deps smoke test — scripts/yano-deps.mjs (Ticket 10).\n");
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "yano-yano-deps-"));
 	fs.writeFileSync(path.join(dir, ".env"), "GITHUB_TOKEN=abc123\nEMPTY=\n");
-	const { runPoDeps } = await import(pathToFileURL(path.join(PROJECT_ROOT, "scripts", "yano-deps.mjs")).href);
+	const { runYanoDeps } = await import(pathToFileURL(path.join(PROJECT_ROOT, "scripts", "yano-deps.mjs")).href);
 
 	console.log("=== PART 1 — env vars present vs missing ===");
-	let r = await runPoDeps({ cwd: dir, argv: ["--env", "GITHUB_TOKEN,EMPTY,NOT_HERE"] });
+	let r = await runYanoDeps({ cwd: dir, argv: ["--env", "GITHUB_TOKEN,EMPTY,NOT_HERE"] });
 	const e1 = r.results.find((x) => x.name === "GITHUB_TOKEN");
 	const e2 = r.results.find((x) => x.name === "EMPTY");
 	const e3 = r.results.find((x) => x.name === "NOT_HERE");
@@ -41,19 +41,19 @@ async function main() {
 	ok(e3.present === false && e3.list === "missing" && typeof e3.hint === "string", "missing var is missing with an install hint");
 
 	console.log("\n=== PART 2 — CLI detection (real binary present, unknown missing) ===");
-	r = await runPoDeps({ cwd: dir, argv: ["--cli", "git,made_up_cmd_xyz"] });
+	r = await runYanoDeps({ cwd: dir, argv: ["--cli", "git,made_up_cmd_xyz"] });
 	const c1 = r.results.find((x) => x.name === "git");
 	const c2 = r.results.find((x) => x.name === "made_up_cmd_xyz");
 	ok(c1.present === true, "git (real binary) is present");
 	ok(c2.present === false && c2.list === "missing", "a made-up binary is missing");
 
 	console.log("\n=== PART 3 — auth best-effort never throws ===");
-	r = await runPoDeps({ cwd: dir, argv: ["--auth", "git"] });
+	r = await runYanoDeps({ cwd: dir, argv: ["--auth", "git"] });
 	const a1 = r.results.find((x) => x.name === "git");
 	ok(a1 !== undefined && ["ok", "missing"].includes(a1.list), "auth check returns a typed result without throwing");
 
 	console.log("\n=== PART 4 — machine-readable summary (planner-actionable) ===");
-	r = await runPoDeps({ cwd: dir, argv: ["--env", "NOT_HERE", "--cli", "made_up_cmd_xyz"] });
+	r = await runYanoDeps({ cwd: dir, argv: ["--env", "NOT_HERE", "--cli", "made_up_cmd_xyz"] });
 	ok(typeof r.ok === "boolean" && r.ok === false, "summary ok=false when something is missing");
 	ok(Array.isArray(r.missing) && r.missing.length === 2, "the missing array lists exactly the gaps — ready to feed decision_hold_create context");
 	ok(Array.isArray(r.results) && r.results.every((x) => ["env", "cli", "auth"].includes(x.kind)), "each result is typed (env|cli|auth) for the preflight checklist");

@@ -223,7 +223,7 @@ async function runDoctorNetwork(cwd, argv = []) {
 
 const SUBCOMMANDS = ["status", "logs", "fleet", "mcp", "skills"];
 
-export async function runPoStatus({ cwd, argv }) {
+export async function runYanoStatus({ cwd, argv }) {
 	applyDataDir(argv);
 	const sub = argv[0];
 	const subArgs = argv.slice(1);
@@ -239,5 +239,5 @@ export async function runPoStatus({ cwd, argv }) {
 
 const invokedDirectly = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (invokedDirectly) {
-	runPoStatus({ cwd: process.cwd(), argv: process.argv.slice(2) }).catch((e) => { console.error(e); process.exit(1); });
+	runYanoStatus({ cwd: process.cwd(), argv: process.argv.slice(2) }).catch((e) => { console.error(e); process.exit(1); });
 }

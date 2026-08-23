@@ -123,6 +123,8 @@ async function main() {
 		await coder.start();
 		restartedPlanner = new Instance("planner-01", "planner", cwd);
 		await restartedPlanner.start();
+		await waitUntil(async () => (await restartedPlanner.call("agent_list")).details.agents.some((agent) => agent.instance === "planner-01" && agent.self === true && agent.role === "planner"), "agent_list identifies the current planner as self");
+		ok(true, "agent_list includes the current planner explicitly instead of implying it is offline");
 		await waitUntil(async () => (await restartedPlanner.call("agent_list")).details.agents.some((agent) => agent.instance === "coder-01"), "restarted planner receives coder retained presence");
 		ok(true, "planner restart rebuilds its peer map from retained MQTT presence");
 

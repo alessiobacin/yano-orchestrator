@@ -53,6 +53,23 @@ roles:
     teams:
       - core
 
+  debugger:
+    activation: always
+    playbook: backend-change
+    label: "Yano Debugger"
+    brief: "Gestisci bug applicativi assegnati dal registro yano-debugger: raccogli il contesto trace, riproduci il problema, correggi nel worktree, verifica con test e porta la modifica fino a staging. Non promuovere mai in production senza validazione esplicita e deployment-id."
+    model:
+      provider: llmproxy
+      model: coding-model
+    skills:
+      - tdd-development
+      - yano-planner-trace-analysis
+    cli: [git, npm, npx, docker, docker-compose]
+    mcp: [github]
+    teams:
+      - debugger
+      - quality
+
   # ── Roster di agenti specialisti (nessun prompts/<role>.md dedicato: usano
   # prompts/specialist.md, un template generico che l'estensione riempie con
   # `label`/`brief` qui sotto — vedi loadRolePrompt() in orchestrator.ts e

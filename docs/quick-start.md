@@ -300,4 +300,6 @@ vuoi eliminarlo esplicitamente:
 yano trace clear --all --yes
 ```
 
-Per il riferimento completo consulta [`yano-trace.md`](./yano-trace.md).
+Per il riferimento completo consulta [`yano-trace.md`](./yano-trace.md). Per
+il flusso di bug applicativi usa [`yano-debugger.md`](./yano-debugger.md) e la
+[guida rapida del debugger](./quick_guides/12-yano-debugger.md).

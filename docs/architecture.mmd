@@ -83,6 +83,13 @@ flowchart TD
         TELEGRAM["Telegram Bot API\nYano .env or yano config"]
     end
 
+    subgraph YANO_DEBUGGER["Global debugger boundary"]
+        DEBUGGER["yano-debugger\nbug intake + lifecycle"]
+        DEBUG_DB["debugger.sqlite\nprojects / bugs / events"]
+        DEBUG_WS["Herdr workspace\nyano-debugger\none tab per project"]
+        ENVIRONMENTS["dev / staging / production\npaired port ranges"]
+    end
+
     PLANNER --> SQLITE
     CODER --> WORKTREES
     REVIEWER --> WORKTREES
@@ -109,6 +116,12 @@ flowchart TD
     SQLITE --> WATCHER
     WATCHER --> YANO_TICKETS
     WATCHER --> TELEGRAM
+    CLI --> DEBUGGER
+    DEBUGGER --> DEBUG_DB
+    DEBUGGER --> DEBUG_WS
+    DEBUGGER --> ENVIRONMENTS
+    DEBUG_DB --> TRACE
+    DEBUGGER --> PLANNER
     SQLITE --> DASHBOARD["local read-only dashboard\nGantt + status"]
     OBS --> DASHBOARD
 
@@ -140,6 +153,6 @@ flowchart TD
     classDef durable fill:#253b2b,stroke:#7ec488,color:#e5e7eb
     classDef risk fill:#3a1f1f,stroke:#e06c75,color:#e5e7eb
     class USER user
-    class CLI,INIT,OBS,PLANNER,GATES,FINALIZE,MERGE,RELOAD,BARRIER control
-    class SQLITE,WORKTREES,REPORTS,TRACE,TRACE_MEMORY,TRACE_LINKS,PROJECTIONS,TRACE_CONFIG,SNAPSHOT durable
+    class CLI,INIT,OBS,PLANNER,GATES,FINALIZE,MERGE,RELOAD,BARRIER,DEBUGGER control
+    class SQLITE,WORKTREES,REPORTS,TRACE,TRACE_MEMORY,TRACE_LINKS,PROJECTIONS,TRACE_CONFIG,SNAPSHOT,DEBUG_DB,DEBUG_WS,ENVIRONMENTS durable
     class WATCHDOG,ADAPTERS,WATCHER risk

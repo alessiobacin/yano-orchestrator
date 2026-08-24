@@ -127,6 +127,24 @@ direct MQTT command to each live planner instance; if no live planner exists,
 it sends the alert to Telegram. A project with no agents and no detected fault
 is considered idle and does not page the user.
 
+### Global `yano-debugger`
+
+`yano debugger` è il secondo agente esterno e vive fuori dal workspace del
+progetto, nel workspace Herdr globale `yano-debugger`, con una tab per ogni
+progetto registrato. Il registro `debugger/debugger.sqlite` contiene progetto,
+worker, bug, transizioni e audit; gli eventi vengono duplicati nel trace del
+progetto per consentire la diagnosi contestuale. La modalità `project` è
+separata da `yano-maintenance`, che può puntare solo al repository
+`yano-orchestrator`.
+
+Il lifecycle applicativo è `reported → triaged → reproducing → fixing →
+testing → staging → awaiting_validation → production`. L'ultima transizione è
+protetta da `--yes`, attore autorizzato e `--deployment-id`; questa versione
+non esegue un deploy Docker/cloud implicito, ma registra il deployment staging
+validato. Le porte vengono assegnate con la stessa base nei tre ambienti:
+backend `3000–3999`, `4000–4999`, `5000–5999`; frontend `6000–6999`,
+`7000–7999`, `8000–8999`.
+
 The optional semantic layer is stored at `<yano-install>/temp/semantic-index.sqlite`.
 `yano trace index` incrementally embeds observable trace records through local
 Ollama, and `yano trace search` retrieves a small ranked evidence set using

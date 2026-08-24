@@ -27,6 +27,7 @@ Everything communicates over a local MQTT broker, using role/instance identity a
 - **Phased execution plans** — the planner declares which roles work together and in what order, and the system enforces it
 - **Multi-channel notifications** via Evolution API/WhatsApp, Telegram Bot API, and SendGrid email when a task completes or needs your input, so you don't have to watch the terminal
 - **A global `yano` CLI** (`yano init`, `yano start`, `yano doctor`, `yano update`, `yano copy-prompts`, `yano uninstall`, `yano end`, `yano pause`, `yano resume`, `yano recovery`) for scaffolding, launching, verifying the environment, checkpointing and restoring active work, and closing projects — `yano resume` restores agents exclusively in the visible Herdr workspace
+- **External `yano-debugger` agent** — `yano debugger` keeps application bug reports and transitions in global SQLite, starts one Herdr debugger tab per project, preserves trace provenance and requires explicit staging validation before production
 - **Shared trace-analysis skill** for planner, coder, reviewer and specialists — workers can inspect the filtered origin of a mismatch, while the planner records cross-project opinions and systemic interventions
 - **Local embeddings prerequisite** — `yano doctor` verifies Ollama, the `nomic-embed-text` model and a real `/api/embed` probe; `yano init` installs/pulls them when missing (no extra npm embedding library is required)
 - **Semantic trace index** — `yano trace index` incrementally stores local Ollama vectors in SQLite and `yano trace search` retrieves only the most relevant observable evidence with project/run/round filters
@@ -155,6 +156,9 @@ yano trace opinion --text "<analisi planner>" --change prompt --confidence mediu
 yano trace export --run <id> --output ./trace-bundle.json
 yano trace import --input ./trace-bundle.json --reindex
 yano trace clear --all --yes   # elimina tutti i dati temporanei di Yano
+yano debugger init --base-port 3055  # registra il progetto e le porte dev/staging/prod
+yano debugger start             # avvia/riusa il worker nel workspace Herdr yano-debugger
+yano debugger status --json     # stato del worker e dei bug del progetto
 ```
 
 A run (the ticket/DAG layer's top-level container for one objective — see "Layer ticket/DAG persistente" in `docs/development-notes.md`, Revisione 26) normally closes itself once every one of its tickets is marked done. `yano end` is for when that doesn't happen — a session ended before every ticket was formally completed, the goal changed, or you're simply satisfied with where things landed and want to declare it done. It never touches tickets, worktrees, or any file outside this project's own `orchestrator.db` — closing a run just changes its own status and records the change in its event history, visible later via `run_status` from inside a planner session.

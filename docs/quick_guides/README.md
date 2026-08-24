@@ -17,6 +17,7 @@ pensate per chi usa Yano per la prima volta e lavora dalla root del progetto.
 10. [Watcher: ticket per falle di Yano](./10-watcher-falle-yano.md)
 11. [Configurazione globale](./11-configurazione-globale.md)
 12. [Yano Debugger](./12-yano-debugger.md)
+13. [Deployment agent](./13-deployment-agent.md)
 
 Per una spiegazione completa del primo task, consulta anche la
 [quick start estesa](../quick-start.md). Per il comportamento dettagliato del

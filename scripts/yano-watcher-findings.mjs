@@ -141,8 +141,10 @@ function parseFrontmatter(content) {
 
 function ticketBody(finding, sourceProject, now) {
 	const evidence = safeJson(finding.payload);
-	return `---
-type: yano-watcher-ticket
+return `---
+type: debugger
+kind: task
+created_by: yano-watcher
 status: open
 severity: ${finding.severity}
 category: ${finding.category}
@@ -161,7 +163,9 @@ evidence_record_id: ${finding.record_id || "unknown"}
 
 # ${finding.summary}
 
-Type: task
+Type: debugger
+Kind: task
+Created-by: yano-watcher
 Status: open
 Fingerprint: ${finding.fingerprint}
 

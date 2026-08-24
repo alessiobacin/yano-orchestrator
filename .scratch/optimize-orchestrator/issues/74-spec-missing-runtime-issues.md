@@ -1,6 +1,7 @@
 # 74 — Specifica delle issue runtime mancanti
 
-Type: task  
+Type: human
+Kind: task
 Status: resolved  
 Blocked by: 04, 08, 09, 14, 15, 16, 20, 21, 23, 25, 26
 

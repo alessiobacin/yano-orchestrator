@@ -96,6 +96,11 @@ const YANO_PLANNER_SKILL = "yano-planner-trace-analysis";
 // all'utente e sub-agent paralleli. Vedi skills-vendor/yano/yano-code-review/.
 const YANO_REVIEW_SKILL = "yano-code-review";
 const YANO_REVIEW_SKILL_ROLES = ["reviewer", "frontend-reviewer"];
+// Deployment workers receive a Yano-specific contract in addition to the
+// shared trace skill. It is scoped to deployment-agent so normal coders and
+// reviewers cannot accidentally treat a coding task as a release operation.
+const YANO_DEPLOYMENT_SKILL = "yano-deployment";
+const YANO_DEPLOYMENT_SKILL_ROLES = ["deployment-agent"];
 
 // Revisione 49 — skill vendorizzata destinata SOLO ai ruoli reviewer e
 // frontend-developer (vedi skills-vendor/awesome-copilot/VERSION.md).
@@ -133,6 +138,10 @@ function resolveYanoPlannerSkillPath(packageRoot) {
 
 function resolveYanoReviewSkillPath(packageRoot) {
 	return resolveVendoredSkillPaths(packageRoot, "yano", [YANO_REVIEW_SKILL])[0];
+}
+
+function resolveYanoDeploymentSkillPath(packageRoot) {
+	return resolveVendoredSkillPaths(packageRoot, "yano", [YANO_DEPLOYMENT_SKILL])[0];
 }
 
 function parseArgs(argv) {
@@ -312,8 +321,11 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 	const yanoReviewSkillFlags = YANO_REVIEW_SKILL_ROLES.includes(role)
 		? ["--skill", resolveYanoReviewSkillPath(packageRoot)]
 		: [];
+	const yanoDeploymentSkillFlags = YANO_DEPLOYMENT_SKILL_ROLES.includes(role)
+		? ["--skill", resolveYanoDeploymentSkillPath(packageRoot)]
+		: [];
 	const yanoTraceSkillFlags = ["--skill", resolveYanoPlannerSkillPath(packageRoot)];
-	const skillFlags = [...mattPocockSkillFlags, ...yanoTraceSkillFlags, ...chromeDevToolsSkillFlags, ...yanoReviewSkillFlags];
+	const skillFlags = [...mattPocockSkillFlags, ...yanoTraceSkillFlags, ...chromeDevToolsSkillFlags, ...yanoReviewSkillFlags, ...yanoDeploymentSkillFlags];
 	// -e esplicito SOLO in sviluppo del pacchetto stesso (looksLikePackageRepo)
 	// — mai per una copia locale residua in un progetto scaffoldato, anche se
 	// esiste sul disco (vedi Revisione 38 sopra): l'estensione installata

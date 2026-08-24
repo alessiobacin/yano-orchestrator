@@ -1,5 +1,8 @@
 # 81 — Finalize evidence collector completo
 
+Type: human
+Kind: task
+
 **What to build:** Il finalize raccoglie evidenze verificabili e separate per test, workspace, commit, merge e push, impedendo di dichiarare completato ciò che non è stato osservato.
 
 **Blocked by:** 15, 20

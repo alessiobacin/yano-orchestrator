@@ -1,0 +1,154 @@
+---
+schema_version: 1
+id: deployment-delivery
+label: Development, staging and production delivery
+description: Controlled application deployment flow owned by deployment-agent.
+  Development stays on source code, staging and production run Docker/Compose,
+  the six-port matrix remains paired across environments, and production is
+  gated by explicit approval plus an immutable artifact and rollback checkpoint.
+enforcement:
+  status: partial
+  note: Docker/Compose execution and provider access are environment-specific;
+    every command must be probed and every external effect must be evidenced.
+states:
+  - id: received
+    owner: planner
+    terminal: false
+  - id: preflight
+    owner: planner
+    terminal: false
+  - id: development_ready
+    owner: deployment-agent
+    terminal: false
+  - id: staging_packaged
+    owner: deployment-agent
+    terminal: false
+  - id: staging_validated
+    owner: deployment-agent_and_human
+    terminal: false
+  - id: production_approved
+    owner: planner_and_human
+    terminal: false
+  - id: production_deployed
+    owner: deployment-agent
+    terminal: false
+  - id: completed
+    owner: planner
+    terminal: true
+  - id: blocked
+    owner: planner_and_human
+    terminal: true
+  - id: rolled_back
+    owner: deployment-agent_and_planner
+    terminal: true
+transitions:
+  - id: scope
+    from: received
+    to: preflight
+    actor: planner
+    requires:
+      - objective_received
+      - deployment_scope_defined
+      - tickets_created_for_all_phases
+  - id: verify_development
+    from: preflight
+    to: development_ready
+    actor: deployment-agent
+    requires:
+      - source_tree_identified
+      - canonical_development_path_verified
+      - port_matrix_recorded
+      - development_tests_and_healthcheck_passed
+  - id: package_staging
+    from: development_ready
+    to: staging_packaged
+    actor: deployment-agent
+    requires:
+      - docker_and_compose_preflight_passed
+      - dockerfile_or_existing_image_strategy_reviewed
+      - compose_config_validated
+      - immutable_image_reference_recorded
+  - id: validate_staging
+    from: staging_packaged
+    to: staging_validated
+    actor: deployment-agent_and_human
+    requires:
+      - staging_healthcheck_passed
+      - staging_smoke_tests_passed
+      - staging_ports_verified
+      - staging_digest_verified
+  - id: approve_production
+    from: staging_validated
+    to: production_approved
+    actor: planner_and_human
+    requires:
+      - explicit_production_approval
+      - immutable_image_reference_recorded
+      - rollback_checkpoint_saved
+  - id: deploy_production
+    from: production_approved
+    to: production_deployed
+    actor: deployment-agent
+    requires:
+      - production_compose_validated
+      - production_ports_verified
+      - production_healthcheck_passed
+      - deployment_id_recorded
+  - id: accept
+    from: production_deployed
+    to: completed
+    actor: planner
+    requires:
+      - production_smoke_tests_passed
+      - deployment_report_updated
+      - docs_synced_or_skipped_with_reason
+  - id: block
+    from:
+      - preflight
+      - development_ready
+      - staging_packaged
+      - staging_validated
+      - production_approved
+      - production_deployed
+    to: blocked
+    actor: planner
+    requires:
+      - deployment_risk_or_missing_access
+      - deployment_report_updated
+  - id: rollback
+    from:
+      - staging_packaged
+      - staging_validated
+      - production_approved
+      - production_deployed
+    to: rolled_back
+    actor: deployment-agent
+    requires:
+      - rollback_checkpoint_saved
+      - rollback_verification_recorded
+failure_routes:
+  - condition: capability_missing
+    action: stop_and_report_actionable_preflight_error
+    terminal: false
+  - condition: port_collision
+    action: stop_and_replan_port_matrix_without_changing_environment
+    terminal: false
+  - condition: staging_healthcheck_failed
+    action: block_release_and_preserve_logs
+    terminal: false
+  - condition: production_healthcheck_failed
+    action: rollback_to_previous_immutable_artifact
+    terminal: true
+  - condition: secret_detected_in_repository_or_image
+    action: block_release_and_rotate_secret
+    terminal: true
+invariants:
+  - development_uses_source_at_canonical_projects_path
+  - staging_and_production_are_dockerized
+  - paired_backend_and_frontend_port_ranges_are_preserved
+  - no_production_deploy_without_explicit_approval
+  - staging_and_production_use_the_same_immutable_artifact
+  - secrets_never_enter_git_or_image_layers
+  - healthcheck_and_smoke_evidence_required
+  - previous_release_and_rollback_checkpoint_are_retained
+  - no_finalize_before_explicit_user_confirmation

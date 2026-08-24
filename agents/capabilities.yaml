@@ -56,3 +56,7 @@ capabilities:
     kind: cli
     command: semgrep
     probe: [--version]
+  curl:
+    kind: cli
+    command: curl
+    probe: [--version]

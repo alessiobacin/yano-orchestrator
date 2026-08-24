@@ -1,5 +1,8 @@
 # 78 — Failure degli effetti e dead-letter runtime
 
+Type: human
+Kind: task
+
 **What to build:** Un effetto esterno che supera il budget di retry porta il run a uno stato operativo bounded e conserva l'audit necessario al replan.
 
 **Blocked by:** 03, 24, 59, 75

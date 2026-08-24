@@ -1,5 +1,8 @@
 # 79 — Approval multi-principal ed escalation
 
+Type: human
+Kind: task
+
 **What to build:** Approval ed escalation sono durevoli, vincolate al contesto del run e riprendibili solo da principal autorizzati.
 
 **Blocked by:** 26, 29, 30, 75

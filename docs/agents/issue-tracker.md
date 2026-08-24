@@ -11,7 +11,7 @@ scelta (Revisione 22 in `docs/development-notes.md`).
 
 - One feature per directory: `.scratch/<feature-slug>/`
 - The spec is `.scratch/<feature-slug>/spec.md`
-- Implementation issues are one file per ticket at `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01` — never a single combined tickets file
+- Implementation issues are one file per ticket at `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01` — never a single combined tickets file. Nel repository Yano il percorso di manutenzione è sempre `.scratch/optimize-orchestrator/issues/`; `issues/` nella root non è un percorso valido.
 - Triage state: non applicabile in questo repo — la skill `triage` di mattpocock/skills non è vendorizzata qui (solo `wayfinder`/`to-spec`/`grilling`/`domain-modeling`/`setup-matt-pocock-skills`, vedi `skills-vendor/mattpocock/VERSION.md`), quindi non esiste un vocabolario di label di triage da applicare
 - Comments and conversation history append to the bottom of the file under a `## Comments` heading
 
@@ -28,7 +28,8 @@ Read the file at the referenced path. The user will normally pass the path or th
 Used by `/skill:wayfinder`. The **map** is a file with one **child** file per ticket.
 
 - **Map**: `.scratch/<effort>/map.md` — the Notes / Decisions-so-far / Fog body.
-- **Child ticket**: `.scratch/<effort>/issues/NN-<slug>.md`, numbered from `01`, with the question in the body. A `Type:` line records the ticket type (`research`/`prototype`/`grilling`/`task`); a `Status:` line records `claimed`/`resolved`.
+- **Child ticket**: `.scratch/<effort>/issues/NN-<slug>.md`, numbered from `01`, with the question in the body. `Type:` records the provenance (`human` or `debugger`), `Kind:` records the ticket category (`research`/`prototype`/`grilling`/`task`), and `Status:` records `claimed`/`resolved`.
+- I ticket creati dal watcher per una falla interna di Yano usano `Type: debugger`, `Kind: task`, `Created-by: yano-watcher`; gli issue pianificati o inseriti dall'utente usano `Type: human` e conservano la categoria in `Kind:`.
 - **Blocking**: a `Blocked by: NN, NN` line near the top. A ticket is unblocked when every file it lists is `resolved`.
 - **Frontier**: scan `.scratch/<effort>/issues/` for files that are open, unblocked, and unclaimed; first by number wins.
 - **Claim**: set `Status: claimed` and save before any work.

@@ -29,6 +29,8 @@ const MATT_POCOCK_SKILLS = ["wayfinder", "to-spec", "to-tickets", "grilling", "d
 const YANO_PLANNER_SKILL = "yano-planner-trace-analysis";
 const YANO_REVIEW_SKILL = "yano-code-review";
 const YANO_REVIEW_SKILL_ROLES = ["reviewer", "frontend-reviewer"];
+const YANO_DEPLOYMENT_SKILL = "yano-deployment";
+const YANO_DEPLOYMENT_SKILL_ROLES = ["deployment-agent"];
 const CHROME_DEVTOOLS_SKILL = "chrome-devtools";
 const CHROME_DEVTOOLS_SKILL_ROLES = ["frontend-reviewer", "frontend-developer"];
 
@@ -230,6 +232,25 @@ assert.ok(!printed.includes(yanoReviewSkillPath), "planner non deve ricevere l'a
 assert.ok(!printedCoder.includes(yanoReviewSkillPath), "coder non deve ricevere l'adapter Yano code-review");
 console.log("   OK");
 
+console.log("\n14. la skill Yano deployment è presente e riservata al deployment-agent...");
+const yanoDeploymentSkillPath = path.join(repoRoot, "skills-vendor", "yano", YANO_DEPLOYMENT_SKILL);
+assert.ok(existsSync(path.join(yanoDeploymentSkillPath, "SKILL.md")), "la skill Yano deployment deve contenere SKILL.md");
+assert.ok(existsSync(path.join(yanoDeploymentSkillPath, "evals", "evals.json")), "la skill Yano deployment deve contenere evals/evals.json");
+assert.ok(launcherSrc.includes(`"${YANO_DEPLOYMENT_SKILL}"`), "launch-planner.mjs deve referenziare la skill Yano deployment");
+const printedDeployment = execFileSync(
+	"node",
+	["scripts/launch-planner.mjs", "--instance", "deployment-check", "--role", "deployment-agent", "--print-only"],
+	{ cwd: repoRoot, encoding: "utf8" },
+);
+assert.ok(printedDeployment.includes(yanoDeploymentSkillPath), "deployment-agent deve ricevere la skill Yano deployment");
+assert.ok(!printed.includes(yanoDeploymentSkillPath), "planner non deve ricevere la skill Yano deployment");
+assert.ok(!printedCoder.includes(yanoDeploymentSkillPath), "coder non deve ricevere la skill Yano deployment");
+for (const [roleName, cfg] of Object.entries(roles)) {
+	const hasIt = (cfg.skills ?? []).includes(YANO_DEPLOYMENT_SKILL);
+	assert.equal(hasIt, YANO_DEPLOYMENT_SKILL_ROLES.includes(roleName), `skill deployment non correttamente isolata per '${roleName}'`);
+}
+console.log("   OK");
+
 console.log(
-	"\nOK: skill planner, skill Yano trace, adapter code-review e chrome-devtools risultano cablate ai soli ruoli previsti.",
+  "\nOK: skill planner, skill Yano trace, adapter code-review, deployment e chrome-devtools risultano cablate ai soli ruoli previsti.",
 );

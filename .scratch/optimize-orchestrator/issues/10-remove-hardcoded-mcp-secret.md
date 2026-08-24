@@ -1,4 +1,5 @@
-Type: task
+Type: human
+Kind: task
 Status: resolved
 
 ## Question

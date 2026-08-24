@@ -1,4 +1,5 @@
-Type: research
+Type: human
+Kind: research
 Status: resolved
 
 ## Question

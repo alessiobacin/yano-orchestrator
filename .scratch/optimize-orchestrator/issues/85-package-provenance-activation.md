@@ -1,5 +1,8 @@
 # 85 — Provenienza e pubblicazione atomica del pacchetto
 
+Type: human
+Kind: task
+
 **What to build:** Playbook, ruoli, skill, probe e adapter vengono attivati solo se appartengono allo stesso pacchetto controllato e immutabile.
 
 **Blocked by:** 18, 22, 35, 83, 84

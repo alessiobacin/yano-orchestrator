@@ -1,4 +1,5 @@
-Type: task
+Type: human
+Kind: task
 Status: resolved
 Blocked by: 20, 46, 65, 72
 

@@ -37,6 +37,9 @@ assert.equal(duplicate.path, first.path);
 const ticket = fs.readFileSync(first.path, "utf8");
 assert.match(ticket, /agent_send_no_live_target/);
 assert.match(ticket, /focusboard-trace-test/);
+assert.match(ticket, /^type: debugger$/m);
+assert.match(ticket, /^Type: debugger$/m);
+assert.match(ticket, /^Kind: task$/m);
 assert.doesNotMatch(ticket, /test-token/);
 
 const requests = [];

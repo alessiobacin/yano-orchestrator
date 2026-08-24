@@ -94,12 +94,13 @@ function roleFromInstance(instance) {
 	if (id.startsWith("tdd")) return "tdd-agent";
 	if (id.startsWith("docs")) return "docs-sync";
 	if (id.startsWith("schema")) return "schema-migrator";
+	if (id.startsWith("deployment")) return "deployment-agent";
 	if (id.startsWith("e2e")) return "e2e-simulator";
 	return "specialist";
 }
 
 function looksLikeAgentInstance(instance) {
-	return /^(planner|coder|reviewer|frontend[-_]developer|frontend[-_]reviewer|docs|tdd|e2e|schema|security|specialist|qa|docker|k8s|cicd|data|openapi|architecture|release|dependency|refactoring|observability|a11y|design|speed)[-_]/i.test(String(instance || ""));
+	return /^(planner|coder|reviewer|frontend[-_]developer|frontend[-_]reviewer|docs|tdd|e2e|schema|security|specialist|qa|docker|k8s|cicd|data|openapi|architecture|release|dependency|refactoring|observability|deployment|a11y|design|speed)[-_]/i.test(String(instance || ""));
 }
 
 function readRoster(cwd) {

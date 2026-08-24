@@ -1,5 +1,8 @@
 # 76 — Reconciliation completo Playbook–plan–DAG
 
+Type: human
+Kind: task
+
 **What to build:** Il runtime confronta il Playbook normativo con plan e DAG persistiti e rende consultabile un risultato deterministico di riallineamento.
 
 **Blocked by:** 25, 43

@@ -1,4 +1,5 @@
-Type: grilling
+Type: human
+Kind: grilling
 Status: resolved
 Blocked by: 19, 26
 

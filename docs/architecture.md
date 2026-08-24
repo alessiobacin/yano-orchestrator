@@ -145,6 +145,19 @@ validato. Le porte vengono assegnate con la stessa base nei tre ambienti:
 backend `3000–3999`, `4000–4999`, `5000–5999`; frontend `6000–6999`,
 `7000–7999`, `8000–8999`.
 
+### Deployment agent
+
+Il `deployment-agent` è un worker distinto dal debugger applicativo. Il suo
+Playbook `deployment-delivery` governa il percorso `development_ready →
+staging_packaged → staging_validated → production_approved →
+production_deployed`. Development resta codice sorgente nella checkout
+`~/projects/<project-name>`; staging e production sono Docker/Compose e usano
+lo stesso artefatto immutabile. La skill `yano-deployment` impone la matrice di
+porte appaiata, healthcheck, smoke test, digest, secrets fuori da Git e
+rollback checkpoint. Il passaggio in production richiede approvazione esplicita
+del planner/utente: build riuscita o test staging da soli non sono
+autorizzazione al rilascio.
+
 The optional semantic layer is stored at `<yano-install>/temp/semantic-index.sqlite`.
 `yano trace index` incrementally embeds observable trace records through local
 Ollama, and `yano trace search` retrieves a small ranked evidence set using

@@ -1,0 +1,23 @@
+{
+  "skill_name": "yano-deployment",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Il planner ti assegna il deploy di un'app con backend e frontend. Prepara development, staging e production rispettando le porte Yano e Dockerizza staging/prod.",
+      "expected_output": "Il piano usa una base B tra 3000 e 3999, conserva la stessa base nei sei mapping, lascia development sul codice sorgente, usa Docker/Compose per staging e production e richiede healthcheck, digest e approvazione prima della produzione.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Lo staging è verde ma il deploy production fallisce l'healthcheck. Cosa fai?",
+      "expected_output": "Blocca la promozione, conserva log/evidenze, ripristina l'immagine/configurazione precedente tramite rollback e informa il planner senza cancellare il rilascio precedente.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Il progetto non ha Docker installato e chiede un deploy Kubernetes urgente.",
+      "expected_output": "Esegue un preflight bounded, segnala la capability mancante e non inventa comandi Kubernetes/cloud; chiede al planner di coinvolgere lo specialista appropriato.",
+      "files": []
+    }
+  ]
+}

@@ -1,5 +1,8 @@
 # 80 — Recovery worker e budget di replan
 
+Type: human
+Kind: task
+
 **What to build:** Un worker offline può essere sostituito sul ticket esistente e il runtime applica budget bounded a retry e replan.
 
 **Blocked by:** 03, 14, 26, 75

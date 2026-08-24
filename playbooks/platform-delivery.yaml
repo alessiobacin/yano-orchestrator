@@ -4,11 +4,13 @@ id: platform-delivery
 label: Container, Kubernetes and CI delivery
 description: Platform flow separating image/container work, cluster
   manifests and CI/CD policy; each specialist consumes the previous
-  artifact instead of rewriting it.
+  artifact instead of rewriting it. This is a supporting platform playbook;
+  the end-to-end release authority is deployment-delivery/deployment-agent.
 enforcement:
   status: partial
   note: Cluster access and cloud cost evidence are environment-specific
-    and must be explicitly probed.
+    and must be explicitly probed. Do not treat this playbook as permission
+    to promote production without the deployment-delivery approval gate.
 states:
   - id: received
     owner: planner

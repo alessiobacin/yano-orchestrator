@@ -1,5 +1,8 @@
 # 82 — Retention, benchmark e migrazioni operative
 
+Type: human
+Kind: task
+
 **What to build:** Storage e release hanno policy versionate per retention, performance e migrazione, con diagnostica e rollback sicuro.
 
 **Blocked by:** 19, 23, 47, 75

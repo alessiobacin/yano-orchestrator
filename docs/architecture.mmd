@@ -90,6 +90,14 @@ flowchart TD
         ENVIRONMENTS["dev / staging / production\npaired port ranges"]
     end
 
+    subgraph DELIVERY_AGENT["Deployment boundary"]
+        DEPLOY_AGENT["deployment-agent\npreflight + release + rollback"]
+        DEPLOY_PLAYBOOK["deployment-delivery\napproval/evidence gates"]
+        DEV_SOURCE["~/projects/<project-name>\nsource development"]
+        DOCKER_ENVS["Docker/Compose\nstaging + production"]
+        RELEASE["immutable image digest\nhealthcheck + rollback"]
+    end
+
     PLANNER --> SQLITE
     CODER --> WORKTREES
     REVIEWER --> WORKTREES
@@ -122,6 +130,12 @@ flowchart TD
     DEBUGGER --> ENVIRONMENTS
     DEBUG_DB --> TRACE
     DEBUGGER --> PLANNER
+    PLANNER --> DEPLOY_AGENT
+    DEPLOY_AGENT --> DEPLOY_PLAYBOOK
+    DEPLOY_AGENT --> DEV_SOURCE
+    DEPLOY_AGENT --> DOCKER_ENVS
+    DOCKER_ENVS --> RELEASE
+    DEPLOY_PLAYBOOK --> RELEASE
     SQLITE --> DASHBOARD["local read-only dashboard\nGantt + status"]
     OBS --> DASHBOARD
 
@@ -153,6 +167,6 @@ flowchart TD
     classDef durable fill:#253b2b,stroke:#7ec488,color:#e5e7eb
     classDef risk fill:#3a1f1f,stroke:#e06c75,color:#e5e7eb
     class USER user
-    class CLI,INIT,OBS,PLANNER,GATES,FINALIZE,MERGE,RELOAD,BARRIER,DEBUGGER control
-    class SQLITE,WORKTREES,REPORTS,TRACE,TRACE_MEMORY,TRACE_LINKS,PROJECTIONS,TRACE_CONFIG,SNAPSHOT,DEBUG_DB,DEBUG_WS,ENVIRONMENTS durable
+    class CLI,INIT,OBS,PLANNER,GATES,FINALIZE,MERGE,RELOAD,BARRIER,DEBUGGER,DEPLOY_AGENT control
+    class SQLITE,WORKTREES,REPORTS,TRACE,TRACE_MEMORY,TRACE_LINKS,PROJECTIONS,TRACE_CONFIG,SNAPSHOT,DEBUG_DB,DEBUG_WS,ENVIRONMENTS,DEPLOY_PLAYBOOK,DEV_SOURCE,DOCKER_ENVS,RELEASE durable
     class WATCHDOG,ADAPTERS,WATCHER risk

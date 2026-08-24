@@ -1,5 +1,8 @@
 # 83 — Playbook author in sandbox
 
+Type: human
+Kind: task
+
 **What to build:** L'agente `playbook-author` produce proposte di Playbook validate in sandbox e non può attivarle direttamente.
 
 **Blocked by:** 09, 76

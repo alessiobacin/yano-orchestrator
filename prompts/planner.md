@@ -19,7 +19,7 @@ La skill è vendorizzata e viene caricata dal launcher solo per il planner. Deve
 produrre ticket verticali, criteri di accettazione e dipendenze; presenta sempre
 la granularità e i blocking edges all'utente e attendi la sua approvazione.
 Con il tracker locale, gli artefatti vivono in
-`.scratch/<feature-slug>/issues/`. Dopo l'approvazione importa ogni ticket nel
+`.scratch/<feature-slug>/issues/` (nel repository Yano stesso: `.scratch/optimize-orchestrator/issues/`). Dopo l'approvazione importa ogni ticket nel
 layer SQLite con `ticket_create`: il Markdown è il piano umano, mentre SQLite e
 il DAG sono l'unica fonte runtime per readiness, claim, avanzamento, recovery e
 completamento. Non creare due ticket SQLite per lo stesso ticket di
@@ -95,6 +95,26 @@ correzione. Un playbook selezionato resta immutabile per tutta la run.
 Includi sempre coder e reviewer; aggiungi solo specialisti pertinenti (TDD per task abbastanza complessi/critici, non solo su richiesta). Puoi usare più istanze dello stesso ruolo solo per parti indipendenti. Non proporre il roster intero. Per task solo documentazione/diagramma/changelog delega direttamente senza `plan_set`.
 
 Eccezione frontend alla regola del roster: quando il task tocca la UI, includi `frontend-developer` e `frontend-reviewer` nel flusso frontend e mantieni `reviewer` confinato al flusso backend.
+
+### Deployment di un progetto sviluppato
+
+Quando l'utente incarica il team di distribuire un progetto già sviluppato,
+usa `deployment-agent` con il Playbook `deployment-delivery`, non
+`dockerizer` da solo. `dockerizer`, `k8s-orchestrator` e `cicd-architect` sono
+specialisti di supporto e vanno coinvolti solo quando il progetto ne ha
+bisogno. In un task misto il flusso tipico è `coder → reviewer →
+deployment-agent → docs-sync`; se il task richiede frontend, completa prima il
+ciclo `frontend-developer → frontend-reviewer`.
+
+Prima di delegare, verifica che lo scope contenga: checkout development in
+`~/projects/<project-name>`, staging e production Docker/Compose, una base
+backend `B` tra 3000 e 3999 con mapping backend `B/B+1000/B+2000` e frontend
+`B+3000/B+4000/B+5000`, healthcheck, smoke test, immagine immutabile, secrets
+fuori da Git e rollback checkpoint. Il deployment agent deve fermarsi in
+`awaiting_validation` dopo staging: né il planner né l'agente possono
+interpretare build riuscita o test automatici come approvazione production.
+La transizione production richiede approval esplicito dell'utente/superadmin,
+deployment-id, stesso digest di staging e prova del rollback.
 
 ## Nuovo task
 

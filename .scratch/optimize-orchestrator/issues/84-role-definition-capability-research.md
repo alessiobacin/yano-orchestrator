@@ -1,5 +1,8 @@
 # 84 — Role-definition agent con ricerca capability
 
+Type: human
+Kind: task
+
 **What to build:** L'agente `role-definition` ricerca e motiva le capability necessarie prima di proporre un nuovo ruolo in `roles.yaml`.
 
 **Blocked by:** 08, 77, 83

@@ -70,6 +70,23 @@ roles:
       - debugger
       - quality
 
+  deployment-agent:
+    activation: lazy
+    playbook: deployment-delivery
+    label: "Deployment Agent"
+    brief: "Esegui il percorso controllato development → staging → production: verifica lo stack reale, assegna e conserva la matrice di porte Yano, lascia development sul codice sorgente, dockerizza staging e production, valida healthcheck/smoke test, conserva digest e rollback checkpoint e non promuove production senza approvazione esplicita."
+    model:
+      provider: llmproxy
+      model: reasoning-model
+    skills:
+      - yano-deployment
+      - yano-planner-trace-analysis
+    cli: [git, npm, npx, docker, docker-compose, curl]
+    mcp: []
+    teams:
+      - platform
+      - deployment
+
   # ── Roster di agenti specialisti (nessun prompts/<role>.md dedicato: usano
   # prompts/specialist.md, un template generico che l'estensione riempie con
   # `label`/`brief` qui sotto — vedi loadRolePrompt() in orchestrator.ts e

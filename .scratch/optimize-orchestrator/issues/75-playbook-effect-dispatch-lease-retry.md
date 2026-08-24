@@ -1,6 +1,7 @@
 # 75 — Dispatcher effetti Playbook: lease, fencing e retry bounded
 
-Type: task  
+Type: human
+Kind: task
 Status: resolved  
 Blocked by: 43, 59, 61, 62
 

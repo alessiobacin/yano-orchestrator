@@ -1,5 +1,8 @@
 # 77 — Capability cards durevoli e versionate
 
+Type: human
+Kind: task
+
 **What to build:** Il runtime conserva una capability card verificata per ruolo, istanza e run e la invalida quando cambia l'ambiente osservato.
 
 **Blocked by:** 08, 16, 21

@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import http from "node:http";
 import { pathToFileURL } from "node:url";
+import mqtt from "mqtt";
 import { appendRawTraceRecord } from "./yano-trace-storage.mjs";
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "yano-watcher-e2e-"));
@@ -12,7 +13,7 @@ const projectRoot = path.join(root, "focusboard-trace-test");
 const genericProjectRoot = path.join(root, "ordinary-project");
 const traceRoot = path.join(root, "temp");
 for (const dir of [yanoRepo, projectRoot, genericProjectRoot]) fs.mkdirSync(dir, { recursive: true });
-fs.writeFileSync(path.join(yanoRepo, ".env"), "TELEGRAM_BOT_TOKEN=e2e-token\nTELEGRAM_DESTINATION_CHAT_ID=5228139669\n");
+fs.writeFileSync(path.join(yanoRepo, ".env"), `YANO_ORCHESTRATOR_REPO=${yanoRepo}\nTELEGRAM_BOT_TOKEN=e2e-token\nTELEGRAM_DESTINATION_CHAT_ID=5228139669\n`);
 
 function seedDatabase(cwd) {
 	const { DatabaseSync } = process.getBuiltinModule("node:sqlite");
@@ -26,7 +27,7 @@ function seedDatabase(cwd) {
 seedDatabase(projectRoot);
 seedDatabase(genericProjectRoot);
 process.env.YANO_DATA_DIR = traceRoot;
-process.env.YANO_ORCHESTRATOR_REPO = yanoRepo;
+process.env.YANO_ORCHESTRATOR_REPO = path.join(root, "wrong-repository");
 process.env.PI_ORCH_BROKER_URL = "mqtt://127.0.0.1:1";
 
 const yanoFailure = {
@@ -61,7 +62,7 @@ process.env.YANO_TELEGRAM_API_URL = "http://127.0.0.1:" + address.port;
 try {
 	const { runWatch } = await import(pathToFileURL(path.join(process.cwd(), "scripts", "watch-stalls.mjs")).href);
 
-	await runWatch({ cwd: projectRoot, argv: ["--once", "--project", "focusboard-trace-test", "--yano-repo", yanoRepo] });
+	await runWatch({ cwd: projectRoot, argv: ["--once", "--project", "focusboard-trace-test"], packageRoot: yanoRepo });
 	const issueDir = path.join(yanoRepo, ".scratch", "optimize-orchestrator", "issues");
 	let tickets = fs.readdirSync(issueDir).filter((file) => file.endsWith(".md"));
 	assert.deepEqual(tickets, ["01-yano-watcher-no-live-target.md"]);
@@ -75,15 +76,37 @@ try {
 	assert.match(requests[0].body.text, /trace-escalation|no_live_target/);
 
 	// Same trace twice: one ticket and one notification only.
-	await runWatch({ cwd: projectRoot, argv: ["--once", "--project", "focusboard-trace-test", "--yano-repo", yanoRepo] });
+	await runWatch({ cwd: projectRoot, argv: ["--once", "--project", "focusboard-trace-test"], packageRoot: yanoRepo });
 	tickets = fs.readdirSync(issueDir).filter((file) => file.endsWith(".md"));
 	assert.deepEqual(tickets, ["01-yano-watcher-no-live-target.md"]);
 	assert.equal(requests.length, 1);
 
 	// Ordinary project failure: no Yano ticket and no Telegram escalation.
-	await runWatch({ cwd: genericProjectRoot, argv: ["--once", "--project", "ordinary-project", "--yano-repo", yanoRepo] });
+	await runWatch({ cwd: genericProjectRoot, argv: ["--once", "--project", "ordinary-project"], packageRoot: yanoRepo });
 	assert.equal(fs.readdirSync(issueDir).filter((file) => file.endsWith(".md")).length, 1);
 	assert.equal(requests.length, 1);
+
+	// With a live planner presence, a new Yano finding is routed to its command
+	// topic instead of paging Telegram.
+	const broker = "mqtt://127.0.0.1:1883";
+	const observer = mqtt.connect(broker, { reconnectPeriod: 0 });
+	const plannerCommands = [];
+	await new Promise((resolve, reject) => { observer.once("connect", resolve); observer.once("error", reject); });
+	await observer.subscribeAsync("pi/focusboard-trace-test/agents/planner-01/commands", { qos: 1 });
+	observer.on("message", (_topic, payload) => { try { plannerCommands.push(JSON.parse(payload.toString())); } catch { /* ignore */ } });
+	await observer.publishAsync("pi/focusboard-trace-test/agents/planner-01/status", JSON.stringify({
+		instance: "planner-01", role: "planner", project: "focusboard-trace-test", status: "idle", last_heartbeat: new Date().toISOString(),
+	}), { qos: 1, retain: true });
+	appendRawTraceRecord({ cwd: projectRoot, project: "focusboard-trace-test", record: {
+		type: "trace_preflight", ok: false, expected: "full", actual: "events", id: "source-yano-failure-2", ts: new Date().toISOString(),
+	} });
+	process.env.PI_ORCH_BROKER_URL = broker;
+	await runWatch({ cwd: projectRoot, argv: ["--once", "--project", "focusboard-trace-test"], packageRoot: yanoRepo });
+	await new Promise((resolve) => setTimeout(resolve, 150));
+	assert.ok(plannerCommands.some((command) => command.type === "command" && command.sender_instance === "yano-watcher" && /trace_preflight_mismatch/.test(command.prompt)));
+	assert.equal(requests.length, 1, "un planner live evita il Telegram duplicato");
+	await observer.publishAsync("pi/focusboard-trace-test/agents/planner-01/status", JSON.stringify({ instance: "planner-01", role: "planner", project: "focusboard-trace-test", status: "offline", last_heartbeat: new Date().toISOString() }), { qos: 1, retain: true });
+	observer.end(true);
 
 	console.log("smoke-test-yano-watcher-e2e: ok");
 } finally {

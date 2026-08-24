@@ -10,6 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { appendRawTraceRecord } from "./yano-trace-storage.mjs";
+import { resolveYanoConfig } from "./yano-config.mjs";
 
 const SECRET_KEY = /token|password|secret|authorization|api[-_]?key|private[-_]?key|cookie/i;
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -30,6 +31,7 @@ function safeJson(value, depth = 0) {
 
 export function loadEnvFile(rootDir) {
 	const result = {};
+	if (!rootDir) return result;
 	const file = path.join(rootDir, ".env");
 	try {
 		for (const raw of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
@@ -45,14 +47,15 @@ export function loadEnvFile(rootDir) {
 	return result;
 }
 
-export function resolveYanoRepository({ packageRoot = PACKAGE_ROOT, explicit = null } = {}) {
-	const configured = explicit || process.env.YANO_ORCHESTRATOR_REPO;
-	if (configured && fs.existsSync(path.resolve(configured))) return path.resolve(configured);
-	try {
-		const pkg = JSON.parse(fs.readFileSync(path.join(packageRoot, "package.json"), "utf8"));
-		if (pkg.name === "yano-orchestrator" && fs.existsSync(path.join(packageRoot, ".git"))) return path.resolve(packageRoot);
-	} catch { /* fall through */ }
-	return null;
+export function resolveYanoRepository({ packageRoot = PACKAGE_ROOT } = {}) {
+	// This setting is intentionally sourced only from the .env belonging to the
+	// Yano checkout/package in use. Do not fall back to the watched project's
+	// env, process.env, a CLI flag or the current working directory: that could
+	// send maintenance tickets to the wrong repository.
+	const configured = resolveYanoConfig({ packageRoot }).YANO_ORCHESTRATOR_REPO;
+	if (!configured) return null;
+	const candidate = path.resolve(packageRoot, configured);
+	return fs.existsSync(candidate) ? candidate : null;
 }
 
 function isYanoInternalRecord(record) {
@@ -236,11 +239,11 @@ export function createYanoWatcherTicket({ finding, yanoRepo, projectRoot, projec
 
 export async function sendTelegramWatcherNotification({ yanoRepo, message, env = process.env, apiBaseUrl = null }) {
 	const fileEnv = loadEnvFile(yanoRepo);
-	// The maintenance checkout is authoritative. Process env is only a
-	// fallback for installations that deliberately keep secrets out of .env.
-	const token = fileEnv.TELEGRAM_BOT_TOKEN || env.TELEGRAM_BOT_TOKEN;
-	const chatId = fileEnv.TELEGRAM_DESTINATION_CHAT_ID || env.TELEGRAM_DESTINATION_CHAT_ID;
-	if (!token || !chatId) return { ok: false, detail: "telegram_env_missing" };
+	// Runtime/global configuration wins. The maintenance checkout .env remains
+	// a development fallback for callers using this module directly.
+	const token = env.TELEGRAM_BOT_TOKEN || fileEnv.TELEGRAM_BOT_TOKEN;
+	const chatId = env.TELEGRAM_DESTINATION_CHAT_ID || fileEnv.TELEGRAM_DESTINATION_CHAT_ID;
+	if (!token || !chatId) return { ok: false, detail: "telegram_env_missing", missing: [!token && "TELEGRAM_BOT_TOKEN", !chatId && "TELEGRAM_DESTINATION_CHAT_ID"].filter(Boolean) };
 	if (String(env.YANO_WATCHER_NOTIFY_DRY_RUN || "") === "1") return { ok: true, detail: "dry-run", chat_id: chatId };
 	const base = (apiBaseUrl || env.YANO_TELEGRAM_API_URL || "https://api.telegram.org").replace(/\/$/, "");
 	try {
@@ -269,7 +272,7 @@ export async function processYanoWatcherFindings({ records, projectRoot, project
 	const results = [];
 	for (const finding of findings) {
 		const result = createYanoWatcherTicket({ finding, yanoRepo, projectRoot: sourceProject.root, project: sourceProject.name, ticketsDir });
-		let telegram = { ok: false, detail: "duplicate_ticket" };
+		let telegram = { ok: false, detail: notify ? "not_sent" : "planner_route" };
 		if (!result.skipped && result.created && notify) telegram = await sendTelegramWatcherNotification({ yanoRepo, message: notificationText(result, sourceProject), env });
 		try {
 			if (traceContext?.cwd) appendRawTraceRecord({ cwd: traceContext.cwd, project: sourceProject.name, record: {

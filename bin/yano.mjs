@@ -65,10 +65,16 @@ import { runGantt } from "../scripts/gantt-server.mjs";
 import { runWatch } from "../scripts/watch-stalls.mjs";
 import { runTrace } from "../scripts/yano-trace.mjs";
 import { runRecovery } from "../scripts/yano-recovery.mjs";
+import { applyGlobalConfig, runYanoConfig } from "../scripts/yano-config.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, "..");
 const cwd = process.cwd();
+
+// Load per-user global configuration before choosing defaults or spawning Pi.
+// A development checkout .env is supported, but the npm package never ships
+// user secrets and a global-only installation has no dependency on it.
+applyGlobalConfig({ packageRoot });
 
 // The CLI and the Pi extension may be loaded from different installations
 // (npm global package vs ~/.pi/agent/git/... clone). Make every child started
@@ -92,8 +98,9 @@ function printTopUsage() {
 			"  status|logs|fleet|mcp|skills  Viste read-only del progetto e della flotta",
 			"  deps [opzioni]   Verifica CLI, credenziali e autenticazione richieste dal task",
 			"  gantt [opzioni]  Avvia la dashboard web live dei run/ticket",
-			"  watch [opzioni]  Osserva stall e segnala falle Yano ( --once | --project-root | --yano-repo )",
+			"  watch [opzioni]  Osserva stall e segnala falle Yano ( --once | --project-root | --lookback-ms | --interval-ms )",
 			"  trace [opzioni]  Attiva/disattiva, cerca e cancella il tracing globale — `yano trace --help`",
+			"  config [opzioni] Gestisce la configurazione globale utente — `yano config --help`",
 			"  pause [opzioni]  Salva uno snapshot non distruttivo e mette in pausa i run",
 			"  resume [opzioni] Ripristina uno snapshot e riapre gli agenti mancanti",
 			"  recovery [opzioni] Ispeziona gli snapshot e lo stato di ripristino",
@@ -170,6 +177,10 @@ async function main() {
 	}
 	if (sub === "trace") {
 		await runTrace({ cwd, argv: rest });
+		return;
+	}
+	if (sub === "config") {
+		await runYanoConfig({ argv: rest });
 		return;
 	}
 	if (["pause", "resume", "recovery"].includes(sub)) {

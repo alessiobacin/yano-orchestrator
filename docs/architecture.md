@@ -111,15 +111,21 @@ When an eligible signal is found, the watcher:
 3. appends a `yano_watcher_finding` event to the watched project's trace,
    including the ticket path and the Telegram delivery result (never secrets);
 4. sends a concise Telegram alert using `TELEGRAM_BOT_TOKEN` and
-   `TELEGRAM_DESTINATION_CHAT_ID` from the Yano repository `.env`.
+   `TELEGRAM_DESTINATION_CHAT_ID` from the development `.env` or the global
+   user configuration managed by `yano config`.
 
-The source repository is resolved from `YANO_ORCHESTRATOR_REPO` when set, or
-from the checked-out `yano-orchestrator` package during development. A global
-installation should set the variable to the maintenance checkout, for example
-`export YANO_ORCHESTRATOR_REPO=/path/to/yano-orchestrator`. If it is not
-configured, the watcher still preserves the trace evidence but does not invent
-a ticket in an unknown location. The future `yano-debugger` can consume these
-files; until then they are deliberately ordinary Markdown tickets for an LLM.
+The source repository is resolved from `YANO_ORCHESTRATOR_REPO` in the
+development checkout `.env`, or from the global user configuration for a
+global-only installation. It is never read from the watched project or a CLI
+override. If a detected Yano defect needs it and it is missing, the command
+returns an actionable configuration error instead of silently losing the
+maintenance ticket. The future `yano-debugger` can consume these files; until
+then they are deliberately ordinary Markdown tickets for an LLM.
+
+Routing is presence-aware: with at least one live planner, the watcher sends a
+direct MQTT command to each live planner instance; if no live planner exists,
+it sends the alert to Telegram. A project with no agents and no detected fault
+is considered idle and does not page the user.
 
 The optional semantic layer is stored at `<yano-install>/temp/semantic-index.sqlite`.
 `yano trace index` incrementally embeds observable trace records through local

@@ -68,16 +68,33 @@ criteri di chiusura per l'LLM che dovrà correggere Yano. Le rilevazioni
 successive dello stesso problema non ricreano il file. Il watcher aggiunge
 anche un evento `yano_watcher_finding` nel trace del progetto.
 
-La notifica Telegram legge il token esclusivamente dal `.env` del repository
-Yano. Per un'installazione globale indicare il checkout di manutenzione:
+La configurazione usa il `.env` del checkout Yano quando si lavora dal
+repository di sviluppo, oppure la configurazione globale dell'utente quando
+Yano è installato soltanto via npm. Il file globale si gestisce senza copiare
+segreti nel pacchetto:
 
 ```bash
-export YANO_ORCHESTRATOR_REPO=/Users/alessiobacin/Development/testCode/yano-orchestrator
+yano config set YANO_ORCHESTRATOR_REPO /Users/alessiobacin/Development/testCode/yano-orchestrator
+yano config set TELEGRAM_DESTINATION_CHAT_ID 5228139669
+printf '%s' "$TELEGRAM_BOT_TOKEN" | yano config set TELEGRAM_BOT_TOKEN --stdin
+```
+
+`YANO_ORCHESTRATOR_REPO` non viene mai letto dal progetto osservato, né da un
+flag CLI. Se una scansione trova un difetto Yano e manca una variabile davvero
+necessaria, il comando termina indicando la variabile mancante e il comando
+`yano config set` esatto per valorizzarla.
+
+Poi si può eseguire:
+
+```bash
 yano watch --project-root /path/al/progetto --once
 ```
 
-Il `.env` deve contenere `TELEGRAM_BOT_TOKEN` e
-`TELEGRAM_DESTINATION_CHAT_ID=5228139669`. Il watcher non stampa mai il token.
+Il watcher non stampa mai il token.
+
+`--lookback-ms 3600000` significa “analizza i record degli ultimi 60 minuti”;
+non significa eseguire una scansione ogni 60 minuti. Per una scansione unica
+usa `--once`; per il polling continuo usa `--interval-ms 3600000`.
 Per esaminare gli eventi prodotti:
 
 ```bash

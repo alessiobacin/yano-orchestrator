@@ -22,6 +22,19 @@ npm install -g /percorso/yano-orchestrator
 yano doctor
 ```
 
+Le variabili per notifiche, watcher e trace globale non devono essere copiate
+nel pacchetto npm. Su un'installazione globale configurale con `yano config`:
+
+```bash
+yano config list --all
+yano config set YANO_ORCHESTRATOR_REPO /percorso/yano-orchestrator
+printf '%s' "$TELEGRAM_BOT_TOKEN" | yano config set TELEGRAM_BOT_TOKEN --stdin
+yano config set TELEGRAM_DESTINATION_CHAT_ID CHAT_ID
+```
+
+In sviluppo è ancora possibile usare il `.env` del checkout Yano. Il `.env`
+del progetto applicativo non viene usato per la configurazione globale.
+
 `yano doctor` verifica anche Ollama, il modello `nomic-embed-text` e una
 richiesta reale all'endpoint locale `/api/embed`. Se Ollama manca, segui il
 comando di installazione stampato dal doctor, poi ripeti `yano init`.

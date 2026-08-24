@@ -34,6 +34,7 @@ import * as net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
+import { globalConfigPath, loadConfigFile } from "./yano-config.mjs";
 
 const PLAYWRIGHT_CLI_PACKAGE = "@playwright/cli@latest";
 const PLAYWRIGHT_CLI_SKILL_REPO = "https://github.com/microsoft/playwright-cli";
@@ -496,6 +497,8 @@ export async function runDoctor({ cwd = process.cwd(), json = false, autoStartBr
 
 	const rows = [];
 	let ok = true;
+	const globalConfig = loadConfigFile(globalConfigPath());
+	rows.push(["Yano global config", true, `${globalConfigPath()}${Object.keys(globalConfig).length ? ` (${Object.keys(globalConfig).length} variabili)` : " (nessuna variabile configurata)"}`]);
 
 	const nodeOk = isSupportedNodeRuntime();
 	rows.push(["Node.js", nodeOk, nodeOk ? `${process.version} (minimo 22.5.0)` : `${process.version} — richiesto almeno Node 22.5.0`]);

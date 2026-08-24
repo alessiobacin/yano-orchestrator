@@ -134,7 +134,12 @@ yano deps --cli git,npm        # capability preflight
 yano gantt                     # local live dashboard at 127.0.0.1:8174
 yano watch --once              # one stalled-ticket scan
 # yano watch also escalates high-confidence Yano faults to .scratch/optimize-orchestrator/issues
-# and Telegram; set YANO_ORCHESTRATOR_REPO for a global installation.
+# and Telegram; global-only installs use `yano config`, development checkouts may use .env.
+yano config path                 # percorso della configurazione globale utente
+yano config list --all           # variabili configurabili, segreti oscurati
+yano config set YANO_ORCHESTRATOR_REPO /path/to/yano-orchestrator
+yano config set TELEGRAM_DESTINATION_CHAT_ID CHAT_ID
+# printf '%s' "$TELEGRAM_BOT_TOKEN" | yano config set TELEGRAM_BOT_TOKEN --stdin
 yano trace status              # modalità e percorso del trace globale
 yano trace enable --mode full  # trace completo dei dati osservabili
 yano trace events --follow     # segue gli eventi raw mentre gli agenti lavorano
@@ -231,7 +236,20 @@ pi --instance coder-01 --role coder
 
 ## Configuration
 
-Notifications are optional and configured via `.env` (see `.env.example`). Each channel is independent: incomplete credentials disable only that channel, while configured channels continue to receive the same event. Results are recorded in the trace as `notification_dispatch` with one status per channel.
+Notifications are optional and configured via `.env` in development or via the
+per-user global store managed by `yano config` (see `.env.example`). The global
+store is outside the npm package, is not overwritten by updates and is written
+with restrictive permissions. Each channel is independent: incomplete
+credentials disable only that channel, while configured channels continue to
+receive the same event. Results are recorded in the trace as
+`notification_dispatch` with one status per channel.
+
+When a command reaches a branch that genuinely requires missing configuration,
+Yano exits with the missing variable names and the exact `yano config set`
+commands to use. Secrets are never printed. `YANO_ORCHESTRATOR_REPO` is read
+from the development checkout `.env` when running the source checkout, or from
+the global configuration for a global-only installation; it is never taken
+from the watched project's `.env`.
 
 | Variable | Description |
 | --- | --- |
@@ -244,6 +262,11 @@ Notifications are optional and configured via `.env` (see `.env.example`). Each 
 | `SENDGRID_API_KEY` | SendGrid API key with mail-send permission |
 | `SENDGRID_FROM_EMAIL` | Verified sender email in SendGrid |
 | `SENDGRID_TO_EMAIL` | Recipient email(s), comma-separated if needed |
+| `YANO_ORCHESTRATOR_REPO` | Yano checkout for watcher maintenance tickets |
+| `YANO_DATA_DIR` | Optional global trace/index directory |
+| `YANO_OLLAMA_URL` | Optional Ollama endpoint; default `http://127.0.0.1:11434` |
+| `YANO_EMBEDDING_MODEL` | Optional embedding model; default `nomic-embed-text` |
+| `PI_ORCH_BROKER_URL` | Optional MQTT broker URL |
 
 Without a `.env`, the extension runs normally — notifications are simply skipped. `notify_all` can be used for a manual fan-out; `notify_whatsapp` remains available for a WhatsApp-only message.
 

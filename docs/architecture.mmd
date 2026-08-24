@@ -80,7 +80,7 @@ flowchart TD
     subgraph YANO_WATCHER["Global watcher boundary"]
         WATCHER["yano-watcher\nzero-token polling + classifier"]
         YANO_TICKETS["yano-orchestrator/.scratch/optimize-orchestrator/issues\nMarkdown maintenance tickets"]
-        TELEGRAM["Telegram Bot API\nconfigured by Yano .env"]
+        TELEGRAM["Telegram Bot API\nYano .env or yano config"]
     end
 
     PLANNER --> SQLITE

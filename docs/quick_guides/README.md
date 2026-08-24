@@ -14,6 +14,7 @@ pensate per chi usa Yano per la prima volta e lavora dalla root del progetto.
 7. [Mettere in pausa e riprendere un task](./07-pausa-e-ripresa.md)
 8. [Attivare e analizzare il trace](./08-trace-e-diagnosi.md)
 9. [Problemi comuni](./09-troubleshooting.md)
+10. [Watcher: ticket per falle di Yano](./10-watcher-falle-yano.md)
 
 Per una spiegazione completa del primo task, consulta anche la
 [quick start estesa](../quick-start.md). Per il comportamento dettagliato del

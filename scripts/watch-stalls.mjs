@@ -22,7 +22,9 @@
 // detached tripwire so stalls are still surfaced when no planner is open.
 //
 // Uso:
-//   yano watch [--project <slug>] [--stall-ms 900000] [--interval-ms 60000] [--once] [--away]
+//   yano watch [--project <slug>] [--project-root <dir>] [--yano-repo <dir>]
+//              [--lookback-ms 86400000] [--stall-ms 900000]
+//              [--interval-ms 60000] [--once] [--away]
 //   (in locale: node scripts/watch-stalls.mjs [stesse opzioni])
 //
 // Away-mode (Ticket 07): con `--away` il watcher assorbe il rumore di routine
@@ -40,15 +42,19 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import mqtt from "mqtt";
-import { tracePaths } from "./yano-trace-storage.mjs";
+import { readTraceRecords, tracePaths } from "./yano-trace-storage.mjs";
+import { processYanoWatcherFindings, resolveYanoRepository } from "./yano-watcher-findings.mjs";
 
 const yanoRequire = createRequire(import.meta.url);
 
 function parseArgs(argv) {
-	const o = { project: null, stallMs: 900000, intervalMs: 60000, once: false, away: false };
+	const o = { project: null, projectRoot: null, yanoRepo: null, lookbackMs: 86_400_000, stallMs: 900000, intervalMs: 60000, once: false, away: false };
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i];
 		if (a === "--project") o.project = argv[++i];
+		else if (a === "--project-root") o.projectRoot = argv[++i];
+		else if (a === "--yano-repo") o.yanoRepo = argv[++i];
+		else if (a === "--lookback-ms") o.lookbackMs = Number(argv[++i]);
 		else if (a === "--stall-ms") o.stallMs = Number(argv[++i]);
 		else if (a === "--interval-ms") o.intervalMs = Number(argv[++i]);
 		else if (a === "--once") o.once = true;
@@ -75,9 +81,10 @@ export async function runWatch({ cwd, argv }) {
 	// pass process.argv.slice(2) or `--once --project ...`); parseArgs iterates
 	// it directly, matching runEndProject's convention.
 	const opts = parseArgs(argv);
-	const project = opts.project || resolveProject(cwd);
+	const watchCwd = opts.projectRoot ? path.resolve(opts.projectRoot) : cwd;
+	const project = opts.project || resolveProject(watchCwd);
 
-	const dbPath = path.join(cwd, ".pi", "extensions", "yano-orchestrator", "orchestratorStorage", "orchestrator.db");
+	const dbPath = path.join(watchCwd, ".pi", "extensions", "yano-orchestrator", "orchestratorStorage", "orchestrator.db");
 	if (!existsSync(dbPath)) {
 		console.log(`yano watch: nessun orchestrator.db per questo progetto (${dbPath}) — niente da sorvegliare.`);
 		process.exit(0);
@@ -97,8 +104,13 @@ export async function runWatch({ cwd, argv }) {
 	let client = null;
 	try {
 		client = mqtt.connect(brokerUrl);
-		await new Promise((res, rej) => { client.once("connect", res); client.once("error", rej); });
+		await new Promise((res, rej) => {
+			const timeout = setTimeout(() => rej(new Error("timeout connessione broker")), 2_000);
+			client.once("connect", () => { clearTimeout(timeout); res(); });
+			client.once("error", (error) => { clearTimeout(timeout); rej(error); });
+		});
 	} catch (err) {
+		try { client?.end(true); } catch { /* best effort */ }
 		client = null;
 		console.warn(`yano watch: broker ${brokerUrl} non raggiungibile (${err instanceof Error ? err.message : String(err)}) — solo report locale.`);
 	}
@@ -113,7 +125,7 @@ export async function runWatch({ cwd, argv }) {
 		process.exit(1);
 	}
 
-	const logDir = tracePaths({ cwd, project }).eventsDir;
+	const logDir = tracePaths({ cwd: watchCwd, project }).eventsDir;
 
 	// Semantic liveness proxy (Ticket 05): an assignee whose JSONL log carries a
 	// recent tool_execution_start marker (logged by the extension at the START of
@@ -148,7 +160,7 @@ export async function runWatch({ cwd, argv }) {
 	for (const t of stalled) {
 		const elapsedMs = now - new Date(t.updated_at).getTime();
 		const active = t.assigned_instance ? semanticActive.has(t.assigned_instance) : false;
-		const event = { ts: new Date().toISOString(), type: "stall_watch", project, project_key: tracePaths({ cwd, project }).projectKey, ticket_id: t.id, run_id: t.run_id, assigned_instance: t.assigned_instance, elapsed_ms: elapsedMs, semantic_active: active };
+		const event = { ts: new Date().toISOString(), type: "stall_watch", project, project_key: tracePaths({ cwd: watchCwd, project }).projectKey, ticket_id: t.id, run_id: t.run_id, assigned_instance: t.assigned_instance, elapsed_ms: elapsedMs, semantic_active: active };
 		if (client) {
 			const topic = `pi/${project}/runs/${t.run_id}/events`;
 			try {
@@ -184,6 +196,25 @@ export async function runWatch({ cwd, argv }) {
 				body: JSON.stringify({ number: process.env.DESTINATION_PHONE_NUMBER, text: `⏱️ ${marker.length} ticket stagnanti (yano watch): ${marker.map((m) => m.ticket_id).join(", ")}` }),
 			});
 		} catch { /* best-effort */ }
+	}
+
+	// Escalation path for defects in Yano itself. The classifier is deliberately
+	// conservative: generic project failures stay in the project trace and do
+	// not create maintenance tickets in the Yano repository.
+	try {
+		const traceRecords = readTraceRecords({ cwd: watchCwd, project, since: new Date(Date.now() - Math.max(0, opts.lookbackMs)), limit: 100000 });
+		const escalation = await processYanoWatcherFindings({
+			records: traceRecords,
+			projectRoot: watchCwd,
+			project,
+			yanoRepo: resolveYanoRepository({ explicit: opts.yanoRepo }),
+			traceContext: { cwd: watchCwd, project_key: tracePaths({ cwd: watchCwd, project }).projectKey },
+		});
+		if (escalation.created || escalation.notified || escalation.findings.length) {
+			console.log(`yano watch: ${escalation.findings.length} segnal${escalation.findings.length === 1 ? "e" : "i"} Yano, ${escalation.created} ticket creat${escalation.created === 1 ? "o" : "i"}, ${escalation.notified} notific${escalation.notified === 1 ? "a" : "he"} Telegram.`);
+		}
+	} catch (error) {
+		console.warn(`yano watch: escalation Yano non riuscita — ${error instanceof Error ? error.message : String(error)}`);
 	}
 
 	try { db.close(); } catch { /* ignore */ }

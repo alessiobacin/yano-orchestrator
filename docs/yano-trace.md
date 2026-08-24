@@ -48,6 +48,46 @@ caricata da un clone Pi scrivano in due `temp/` diversi. Per ispezionare un run
 avviato da una vecchia versione si può indicare temporaneamente il suo store
 con `--data-dir`.
 
+## Escalation delle falle di Yano
+
+Quando `yano watch` osserva un progetto, oltre agli stall controlla i record
+recenti del trace per segnali ad alta confidenza che appartengono a Yano. Per
+esempio `agent_send_no_live_target`, un errore di un tool interno o una
+discordanza tra workspace e progetto. Gli errori generici dell'applicazione
+(come `npm test` fallito) non vengono classificati come difetti di Yano.
+
+Per ogni segnale nuovo viene creato un ticket Markdown deduplicato nel checkout
+del repository Yano:
+
+```text
+<yano-orchestrator>/.scratch/optimize-orchestrator/issues/<NN>-yano-watcher-<signal>.md
+```
+
+Il ticket contiene progetto, run, round, agente, record di evidenza, impatto e
+criteri di chiusura per l'LLM che dovrà correggere Yano. Le rilevazioni
+successive dello stesso problema non ricreano il file. Il watcher aggiunge
+anche un evento `yano_watcher_finding` nel trace del progetto.
+
+La notifica Telegram legge il token esclusivamente dal `.env` del repository
+Yano. Per un'installazione globale indicare il checkout di manutenzione:
+
+```bash
+export YANO_ORCHESTRATOR_REPO=/Users/alessiobacin/Development/testCode/yano-orchestrator
+yano watch --project-root /path/al/progetto --once
+```
+
+Il `.env` deve contenere `TELEGRAM_BOT_TOKEN` e
+`TELEGRAM_DESTINATION_CHAT_ID=5228139669`. Il watcher non stampa mai il token.
+Per esaminare gli eventi prodotti:
+
+```bash
+yano trace events --instance yano-watcher --type yano_watcher_finding --limit 50
+find /Users/alessiobacin/Development/testCode/yano-orchestrator/.scratch/optimize-orchestrator/issues -type f -maxdepth 1 -print
+```
+
+La consegna Telegram è best-effort: un errore di rete non blocca il watcher e
+resta nel campo `telegram.detail` dell'evento senza credenziali.
+
 ## Modalità di raccolta
 
 ```bash

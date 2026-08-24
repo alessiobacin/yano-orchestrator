@@ -92,6 +92,35 @@ terminal adapters when those adapters are active.
 The operational SQLite database remains project-local because it is the
 orchestrator's live state, not forensic trace data.
 
+### Global `yano-watcher` escalation
+
+The watcher has two separate responsibilities: it observes a project without
+using LLM tokens (stalled tickets and liveness signals), and it classifies only
+high-confidence failures of Yano itself. A failed `npm test`, `git` command or
+application tool is evidence about the watched project and is not escalated as
+a Yano defect. Signals such as `agent_send_no_live_target`, an internal Yano
+tool failure, a workspace-scope mismatch or an orphaned Yano lifecycle are
+eligible for escalation.
+
+When an eligible signal is found, the watcher:
+
+1. writes a Markdown maintenance ticket to
+   `.scratch/optimize-orchestrator/issues/` in the Yano source repository;
+2. deduplicates by a deterministic fingerprint, so a ten-minute polling loop
+   does not create an unbounded number of tickets;
+3. appends a `yano_watcher_finding` event to the watched project's trace,
+   including the ticket path and the Telegram delivery result (never secrets);
+4. sends a concise Telegram alert using `TELEGRAM_BOT_TOKEN` and
+   `TELEGRAM_DESTINATION_CHAT_ID` from the Yano repository `.env`.
+
+The source repository is resolved from `YANO_ORCHESTRATOR_REPO` when set, or
+from the checked-out `yano-orchestrator` package during development. A global
+installation should set the variable to the maintenance checkout, for example
+`export YANO_ORCHESTRATOR_REPO=/path/to/yano-orchestrator`. If it is not
+configured, the watcher still preserves the trace evidence but does not invent
+a ticket in an unknown location. The future `yano-debugger` can consume these
+files; until then they are deliberately ordinary Markdown tickets for an LLM.
+
 The optional semantic layer is stored at `<yano-install>/temp/semantic-index.sqlite`.
 `yano trace index` incrementally embeds observable trace records through local
 Ollama, and `yano trace search` retrieves a small ranked evidence set using
@@ -166,6 +195,9 @@ for an explicit `yano resume`.
 - MQTT presence uses retained status plus LWT; stale peers are removed locally. Each heartbeat reconciles the agent's `busy`/`idle` status and load from SQLite ticket ownership, so a planner completing a worker's ticket cannot leave a stale `busy` card behind. Presence publishes are serialized so an older transition cannot overwrite a newer one.
 - `yano fleet` applies the same live-heartbeat rule to retained cards and does not report offline or stale agents as live; it reports their ignored-card count as a diagnostic.
 - The planner watchdog detects stalled tickets, unfinalized runs and orphaned assignments.
+- The standalone `yano-watcher` can turn high-confidence Yano orchestration
+  faults into deduplicated maintenance tickets and Telegram alerts; it never
+  changes project ticket state or attempts an automatic fix.
 - A dead worker is surfaced with a durable event/checkpoint and can be replaced without letting the planner silently claim worker work.
 - External Playbook effects are claimed with leases, retried with bounded attempts and moved to a dead-letter outcome when delivery is exhausted.
 - Human approvals are durable decision holds with generation fencing and idempotent answers.

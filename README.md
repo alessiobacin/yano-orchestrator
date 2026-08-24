@@ -133,6 +133,8 @@ yano fleet                     # live MQTT presence of the agent pool
 yano deps --cli git,npm        # capability preflight
 yano gantt                     # local live dashboard at 127.0.0.1:8174
 yano watch --once              # one stalled-ticket scan
+# yano watch also escalates high-confidence Yano faults to .scratch/optimize-orchestrator/issues
+# and Telegram; set YANO_ORCHESTRATOR_REPO for a global installation.
 yano trace status              # modalità e percorso del trace globale
 yano trace enable --mode full  # trace completo dei dati osservabili
 yano trace events --follow     # segue gli eventi raw mentre gli agenti lavorano

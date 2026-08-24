@@ -1,0 +1,91 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import http from "node:http";
+import { pathToFileURL } from "node:url";
+import { appendRawTraceRecord } from "./yano-trace-storage.mjs";
+
+const root = fs.mkdtempSync(path.join(os.tmpdir(), "yano-watcher-e2e-"));
+const yanoRepo = path.join(root, "yano-orchestrator");
+const projectRoot = path.join(root, "focusboard-trace-test");
+const genericProjectRoot = path.join(root, "ordinary-project");
+const traceRoot = path.join(root, "temp");
+for (const dir of [yanoRepo, projectRoot, genericProjectRoot]) fs.mkdirSync(dir, { recursive: true });
+fs.writeFileSync(path.join(yanoRepo, ".env"), "TELEGRAM_BOT_TOKEN=e2e-token\nTELEGRAM_DESTINATION_CHAT_ID=5228139669\n");
+
+function seedDatabase(cwd) {
+	const { DatabaseSync } = process.getBuiltinModule("node:sqlite");
+	const dbDir = path.join(cwd, ".pi", "extensions", "yano-orchestrator", "orchestratorStorage");
+	fs.mkdirSync(dbDir, { recursive: true });
+	const db = new DatabaseSync(path.join(dbDir, "orchestrator.db"));
+	db.exec("CREATE TABLE tickets (id TEXT PRIMARY KEY, status TEXT, updated_at TEXT, assigned_instance TEXT, run_id TEXT, title TEXT)");
+	db.close();
+}
+
+seedDatabase(projectRoot);
+seedDatabase(genericProjectRoot);
+process.env.YANO_DATA_DIR = traceRoot;
+process.env.YANO_ORCHESTRATOR_REPO = yanoRepo;
+process.env.PI_ORCH_BROKER_URL = "mqtt://127.0.0.1:1";
+
+const yanoFailure = {
+	type: "agent_send_no_live_target",
+	project: "focusboard-trace-test",
+	project_key: "workspace-e2e",
+	run_id: "run-e2e",
+	instance: "planner-01",
+	task_slug: "trace-escalation",
+	id: "source-yano-failure-1",
+	ts: new Date().toISOString(),
+};
+appendRawTraceRecord({ cwd: projectRoot, project: "focusboard-trace-test", record: yanoFailure });
+appendRawTraceRecord({ cwd: genericProjectRoot, project: "ordinary-project", record: {
+	type: "tool_execution_end", tool: "npm test", ok: false, error: "application assertion failed", id: "project-failure-1", ts: new Date().toISOString(),
+} });
+
+const requests = [];
+const server = http.createServer((req, res) => {
+	let body = "";
+	req.on("data", (chunk) => { body += chunk; });
+	req.on("end", () => {
+		requests.push({ url: req.url, body: JSON.parse(body) });
+		res.writeHead(200, { "Content-Type": "application/json" });
+		res.end(JSON.stringify({ ok: true, result: { message_id: requests.length } }));
+	});
+});
+await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+const address = server.address();
+process.env.YANO_TELEGRAM_API_URL = "http://127.0.0.1:" + address.port;
+
+try {
+	const { runWatch } = await import(pathToFileURL(path.join(process.cwd(), "scripts", "watch-stalls.mjs")).href);
+
+	await runWatch({ cwd: projectRoot, argv: ["--once", "--project", "focusboard-trace-test", "--yano-repo", yanoRepo] });
+	const issueDir = path.join(yanoRepo, ".scratch", "optimize-orchestrator", "issues");
+	let tickets = fs.readdirSync(issueDir).filter((file) => file.endsWith(".md"));
+	assert.deepEqual(tickets, ["01-yano-watcher-no-live-target.md"]);
+	const ticket = fs.readFileSync(path.join(issueDir, tickets[0]), "utf8");
+	assert.match(ticket, /Status: open/);
+	assert.match(ticket, /focusboard-trace-test/);
+	assert.doesNotMatch(ticket, /e2e-token/);
+	assert.equal(requests.length, 1);
+	assert.equal(requests[0].url, "/bote2e-token/sendMessage");
+	assert.equal(requests[0].body.chat_id, "5228139669");
+	assert.match(requests[0].body.text, /trace-escalation|no_live_target/);
+
+	// Same trace twice: one ticket and one notification only.
+	await runWatch({ cwd: projectRoot, argv: ["--once", "--project", "focusboard-trace-test", "--yano-repo", yanoRepo] });
+	tickets = fs.readdirSync(issueDir).filter((file) => file.endsWith(".md"));
+	assert.deepEqual(tickets, ["01-yano-watcher-no-live-target.md"]);
+	assert.equal(requests.length, 1);
+
+	// Ordinary project failure: no Yano ticket and no Telegram escalation.
+	await runWatch({ cwd: genericProjectRoot, argv: ["--once", "--project", "ordinary-project", "--yano-repo", yanoRepo] });
+	assert.equal(fs.readdirSync(issueDir).filter((file) => file.endsWith(".md")).length, 1);
+	assert.equal(requests.length, 1);
+
+	console.log("smoke-test-yano-watcher-e2e: ok");
+} finally {
+	await new Promise((resolve) => server.close(resolve));
+}

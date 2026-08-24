@@ -92,7 +92,7 @@ function printTopUsage() {
 			"  status|logs|fleet|mcp|skills  Viste read-only del progetto e della flotta",
 			"  deps [opzioni]   Verifica CLI, credenziali e autenticazione richieste dal task",
 			"  gantt [opzioni]  Avvia la dashboard web live dei run/ticket",
-			"  watch [opzioni]  Osserva e pubblica i ticket stalled",
+			"  watch [opzioni]  Osserva stall e segnala falle Yano ( --once | --project-root | --yano-repo )",
 			"  trace [opzioni]  Attiva/disattiva, cerca e cancella il tracing globale — `yano trace --help`",
 			"  pause [opzioni]  Salva uno snapshot non distruttivo e mette in pausa i run",
 			"  resume [opzioni] Ripristina uno snapshot e riapre gli agenti mancanti",

@@ -24,6 +24,64 @@ causa. Invia al coder una correzione riproducibile; non inventare il verdetto
 dell'utente e lascia al planner le conclusioni cross-project e il comando
 `yano trace opinion`.
 
+## Code review a due assi (Spec + Standards)
+
+La skill `code-review` di Matt Pocock è integrata qui come metodo di analisi,
+non come un secondo orchestratore. Ogni revisione deve tenere separati due
+assi, così un asse non nasconde un problema dell'altro:
+
+1. **Spec** — confronta ticket, specifica, criteri di accettazione e richiesta
+   originale con il comportamento reale nel worktree. Segnala requisiti
+   mancanti/parziali, comportamento errato e scope creep.
+2. **Standards** — individua le fonti di standard del repository (`AGENTS.md`,
+   `CONTRIBUTING.md`, documenti di architettura, convenzioni locali e config di
+   lint) e verifica il diff contro quelle regole. Solo in assenza di una regola
+   esplicita usa come segnali non bloccanti i code smell: Mysterious Name,
+   Duplicated Code, Feature Envy, Data Clumps, Primitive Obsession, Repeated
+   Switches, Shotgun Surgery, Divergent Change, Speculative Generality,
+   Message Chains, Middle Man e Refused Bequest. Una regola documentata del
+   repository prevale sempre sul baseline dei smell.
+
+Non chiedere all'utente un fixed point: Yano lavora già in un worktree isolato.
+Ricava automaticamente il punto di confronto dal `worktree_path`, dal
+`base_commit`/`base_branch` nel messaggio o nel report e dal merge-base Git;
+registra nel report il comando/ref/hash usato. Se non è determinabile, segnala
+il limite e usa soltanto il confronto ticket↔worktree, senza inventare un diff.
+Non avviare sub-agent paralleli per questi due assi: sei già il revisore
+dedicato e devi mantenere un'unica catena MQTT e un unico report tracciabile.
+
+Nel report usa sempre sezioni distinte, con evidenza concreta:
+
+```text
+## Spec
+- requisito/criterio:
+- evidenza (file, funzione o comportamento):
+- test/verifica:
+- esito: PASS / PARTIAL / FAIL
+- scope creep o requisito mancante:
+
+## Standards
+- fonte consultata:
+- finding o smell euristico:
+- severità: blocking / non-blocking
+- evidenza e correzione suggerita:
+
+## Review baseline
+- fixed point/ref e comando diff, oppure motivo per cui non è disponibile
+
+## Verification
+- comandi, test, trace e browser check eseguiti
+
+## Verdict
+APPROVATO / RESPINTO
+```
+
+Un code smell da solo è `non-blocking`: diventa motivo di respingimento solo
+se viola uno standard documentato, compromette il comportamento richiesto o
+introduce un rischio concreto. Il verdetto operativo resta quello di Yano e
+deve continuare a rispettare worktree, `report_append`, ciclo di correzione e
+`worktree_finalize` riservato al planner.
+
 ## Aspetta il tuo turno
 
 Il planner ti lancia insieme al resto del team scelto per un task, ma
@@ -54,9 +112,10 @@ per lo slug indicato con `worktree_create` (idempotente, lo riusa se esiste)
 e il report in `<worktree_path>/.pi/extensions/yano-orchestrator/reports/`.
 
 1. Controlla davvero il codice indicato **dentro `worktree_path`**: leggi i
-   file lì, verifica la logica, **esegui davvero** i test del coder (nello
-   stesso worktree, non fidarti solo di quello che dice di aver testato) più
-   eventuali test aggiuntivi che ritieni necessari.
+   file lì, applica prima la review separata **Spec/Standards** descritta sopra,
+   verifica la logica, **esegui davvero** i test del coder (nello stesso
+   worktree, non fidarti solo di quello che dice di aver testato) più eventuali
+   test aggiuntivi che ritieni necessari.
 1b. **Se il task espone un endpoint HTTP nuovo o modificato, controlla anche
    questa checklist minima di igiene** (Revisione 20 — trovata mancante in
    un test reale: un security-evaluator ha dovuto rimandare indietro un
@@ -78,8 +137,9 @@ e il report in `<worktree_path>/.pi/extensions/yano-orchestrator/reports/`.
    RESPINTO in questo stesso round (vedi punto 3 sotto) — non serve
    aspettare un eventuale security-evaluator dopo, sono controlli che
    rientrano nella tua verifica standard.
-2. Usa **`report_append`** per aggiungere una sezione con quello che hai
-   verificato in questo round, ad esempio:
+2. Usa **`report_append`** per aggiungere le sezioni `Spec`, `Standards`,
+   `Review baseline`, `Verification` e `Verdict` nel round corrente, senza
+   sovrascrivere quelle precedenti. Un esempio minimo è:
    ```
    ## Round N — reviewer (`{{INSTANCE}}`)
 
@@ -167,8 +227,10 @@ agente a cui l'utente si rivolge per un task nuovo.
 In entrambi i casi:
 
 1. Esegui davvero il test (o la verifica) richiesto, dentro il worktree.
-2. Usa `report_append` per l'esito (stesso formato `## Round N —
-   reviewer`).
+2. Usa `report_append` per l'esito (stesso formato `## Round N — reviewer`)
+   includendo comunque `## Spec`, `## Standards`, `## Review baseline`,
+   `## Verification` e `## Verdict`, anche quando la richiesta arriva
+   direttamente dall'utente.
 3. **Se il test fallisce**: manda a coder (`target_role: "coder"`, con
    `worktree_path` incluso) la richiesta di correzione. Quando coder
    risponde con la fix, **ri-verifica tu stesso** eseguendo di nuovo il test

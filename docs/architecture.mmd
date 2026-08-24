@@ -11,12 +11,17 @@ flowchart TD
         ROLES["agents/roles.yaml\ncapabilities + playbook defaults"]
         AGENTS["agents/agents.yaml\ninstance overrides"]
         PROMPTS["prompts/\nrole instructions"]
+        TO_TICKETS["to-tickets\nvertical slices + blockers"]
+        REVIEW_SKILL["yano-code-review\nSpec + Standards adapter"]
         MCP[".mcp.json\nproject-wide MCP declarations"]
     end
 
     PLANNER --> ROLES
     PLANNER --> AGENTS
     PLANNER --> PROMPTS
+    PLANNER --> TO_TICKETS
+    REVIEWER --> REVIEW_SKILL
+    FRONTEND_REVIEWER --> REVIEW_SKILL
     PLANNER --> MCP
 
     subgraph BUS["MQTT 5 — pi/<project>/..."]
@@ -34,21 +39,25 @@ flowchart TD
     subgraph WORKERS["Worker instances"]
         CODER["coder"]
         REVIEWER["reviewer"]
-        FRONTEND["frontend-developer\nfrontend-reviewer"]
+        FRONTEND_DEV["frontend-developer"]
+        FRONTEND_REVIEWER["frontend-reviewer"]
         SPECIALISTS["specialists\nsecurity / docs / QA / platform / data"]
     end
 
     COMMANDS --> CODER
     COMMANDS --> REVIEWER
-    COMMANDS --> FRONTEND
+    COMMANDS --> FRONTEND_DEV
+    COMMANDS --> FRONTEND_REVIEWER
     COMMANDS --> SPECIALISTS
     CODER --> RESPONSES
     REVIEWER --> RESPONSES
-    FRONTEND --> RESPONSES
+    FRONTEND_DEV --> RESPONSES
+    FRONTEND_REVIEWER --> RESPONSES
     SPECIALISTS --> RESPONSES
     CODER --> PRESENCE
     REVIEWER --> PRESENCE
-    FRONTEND --> PRESENCE
+    FRONTEND_DEV --> PRESENCE
+    FRONTEND_REVIEWER --> PRESENCE
     SPECIALISTS --> PRESENCE
 
     subgraph STORAGE["Durable project workspace"]
@@ -70,7 +79,8 @@ flowchart TD
     PLANNER --> SQLITE
     CODER --> WORKTREES
     REVIEWER --> WORKTREES
-    FRONTEND --> WORKTREES
+    FRONTEND_DEV --> WORKTREES
+    FRONTEND_REVIEWER --> WORKTREES
     SPECIALISTS --> WORKTREES
     WORKTREES --> REPORTS
     WORKERS --> TRACE

@@ -2,7 +2,7 @@
 // Lancia una istanza `pi` per QUALUNQUE ruolo (Revisione 44 — prima solo
 // planner, vedi sotto), includendo automaticamente i flag --skill per le
 // skill vendorizzate di mattpocock/skills (skills-vendor/mattpocock/, vedi
-// VERSION.md lì dentro) — wayfinder, to-spec, grilling, domain-modeling,
+// VERSION.md lì dentro) — wayfinder, to-spec, to-tickets, grilling, domain-modeling,
 // setup-matt-pocock-skills — MA SOLO quando il ruolo risolto è "planner"
 // (default se --role non è passato affatto, per compatibilità con l'uso
 // storico di questo script/`yano start`).
@@ -77,18 +77,25 @@ import { fileURLToPath } from "node:url";
 import { ensureRolePrerequisites, isSupportedNodeRuntime } from "./doctor.mjs";
 import { TRACE_MODES, getTraceConfig, resolveTraceProject, setTraceMode, slugify } from "./yano-trace-storage.mjs";
 
-// Le 5 skill vendorizzate destinate al ruolo planner (Revisione 22) — vedi
+// Le 6 skill vendorizzate destinate al ruolo planner — vedi
 // skills-vendor/mattpocock/VERSION.md per la motivazione di ciascuna
-// (wayfinder/to-spec richieste dall'utente; grilling/domain-modeling
+// (wayfinder/to-spec/to-tickets richieste dal flusso di planning;
+// grilling/domain-modeling
 // dipendenze dirette e incondizionate di wayfinder; setup-matt-pocock-skills
 // perché entrambe la richiedono per configurare il tracker del repo).
-const MATT_POCOCK_SKILLS = ["wayfinder", "to-spec", "grilling", "domain-modeling", "setup-matt-pocock-skills"];
+const MATT_POCOCK_SKILLS = ["wayfinder", "to-spec", "to-tickets", "grilling", "domain-modeling", "setup-matt-pocock-skills"];
 
 // Skill Yano condivisa: contiene il contratto della CLI trace e il protocollo
 // per riportare evidenze tra coder, reviewer, specialisti e planner. Il planner
 // mantiene comunque la responsabilità delle overview cross-project e delle
 // decisioni di modifica sistemica.
 const YANO_PLANNER_SKILL = "yano-planner-trace-analysis";
+
+// Adapter Yano della skill /code-review di Matt Pocock: il reviewer riceve il
+// metodo Spec/Standards, ma non il workflow originale con fixed point chiesto
+// all'utente e sub-agent paralleli. Vedi skills-vendor/yano/yano-code-review/.
+const YANO_REVIEW_SKILL = "yano-code-review";
+const YANO_REVIEW_SKILL_ROLES = ["reviewer", "frontend-reviewer"];
 
 // Revisione 49 — skill vendorizzata destinata SOLO ai ruoli reviewer e
 // frontend-developer (vedi skills-vendor/awesome-copilot/VERSION.md).
@@ -122,6 +129,10 @@ function resolveChromeDevToolsSkillPath(packageRoot) {
 
 function resolveYanoPlannerSkillPath(packageRoot) {
 	return resolveVendoredSkillPaths(packageRoot, "yano", [YANO_PLANNER_SKILL])[0];
+}
+
+function resolveYanoReviewSkillPath(packageRoot) {
+	return resolveVendoredSkillPaths(packageRoot, "yano", [YANO_REVIEW_SKILL])[0];
 }
 
 function parseArgs(argv) {
@@ -298,8 +309,11 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 	const chromeDevToolsSkillFlags = CHROME_DEVTOOLS_SKILL_ROLES.includes(role)
 		? ["--skill", resolveChromeDevToolsSkillPath(packageRoot)]
 		: [];
+	const yanoReviewSkillFlags = YANO_REVIEW_SKILL_ROLES.includes(role)
+		? ["--skill", resolveYanoReviewSkillPath(packageRoot)]
+		: [];
 	const yanoTraceSkillFlags = ["--skill", resolveYanoPlannerSkillPath(packageRoot)];
-	const skillFlags = [...mattPocockSkillFlags, ...yanoTraceSkillFlags, ...chromeDevToolsSkillFlags];
+	const skillFlags = [...mattPocockSkillFlags, ...yanoTraceSkillFlags, ...chromeDevToolsSkillFlags, ...yanoReviewSkillFlags];
 	// -e esplicito SOLO in sviluppo del pacchetto stesso (looksLikePackageRepo)
 	// — mai per una copia locale residua in un progetto scaffoldato, anche se
 	// esiste sul disco (vedi Revisione 38 sopra): l'estensione installata

@@ -5,7 +5,7 @@
 //     the flow, and the honest fallback when no web tool is available;
 //   - prompts/planner.md references research-guide.md (research step wired in);
 //   - prompts/planner.md documents the to-spec -> to-tickets -> ticket-layer
-//     closure ('to-tickets' is not a vendored skill, it is the ticket files);
+//     closure (vendored skill produces Markdown, SQLite/DAG remains runtime);
 //   - check-skill-isolation still passes (the vendored mattpocock skills are
 //     ONLY for planner — our additions must not leak them elsewhere).
 //
@@ -38,7 +38,7 @@ async function main() {
 	const planner = path.join(PROJECT_ROOT, "prompts", "planner.md");
 	const p = fs.readFileSync(planner, "utf-8");
 	ok(/research-guide\.md/.test(p), "planner.md references the research guide (Ticket 09 wired)");
-	ok(/to-tickets/.test(p) && /NON è una skill vendored/.test(p), "planner.md documents the to-spec->to-tickets closure (Ticket 08): to-tickets = ticket files, not a vendored skill");
+	ok(/to-tickets/.test(p) && /skill è vendorizzata/.test(p) && /SQLite/.test(p), "planner.md documents the to-spec->to-tickets closure: vendored skill, user approval and SQLite runtime import");
 	ok(/ticket_create/.test(p), "planner.md links the to-tickets output to the persistent ticket layer");
 
 	console.log("\n=== skill isolation must still hold (mattpocock skills ONLY for planner) ===");

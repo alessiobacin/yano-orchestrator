@@ -72,11 +72,12 @@ function main() {
 	ok(!coderOut.includes(path.join(PACKAGE_ROOT, "skills-vendor", "mattpocock")), "coder: receives no planner-only mattpocock skills");
 	ok(!coderOut.includes("-e extensions/orchestrator.ts"), "coder: no stale -e flag (modern scaffold, relies on global install)");
 
-	console.log("\n=== TEST 2 — --role reviewer: backend reviewer gets no frontend browser skill ===");
-	const reviewerOut = run(dir, ["--instance", "reviewer-01", "--role", "reviewer", "--print-only"]);
-	ok(reviewerOut.includes("--role reviewer"), "reviewer: composed command carries --role reviewer");
-	ok(!reviewerOut.includes("chrome-devtools"), "reviewer: does not receive chrome-devtools");
-	for (const name of ["wayfinder", "to-spec", "grilling", "domain-modeling", "setup-matt-pocock-skills"]) {
+console.log("\n=== TEST 2 — --role reviewer: backend reviewer gets no frontend browser skill ===");
+const reviewerOut = run(dir, ["--instance", "reviewer-01", "--role", "reviewer", "--print-only"]);
+ok(reviewerOut.includes("--role reviewer"), "reviewer: composed command carries --role reviewer");
+ok(!reviewerOut.includes("chrome-devtools"), "reviewer: does not receive chrome-devtools");
+ok(reviewerOut.includes(path.join(PACKAGE_ROOT, "skills-vendor", "yano", "yano-code-review")), "reviewer: receives the Yano two-axis code-review adapter");
+	for (const name of ["wayfinder", "to-spec", "to-tickets", "grilling", "domain-modeling", "setup-matt-pocock-skills"]) {
 		ok(
 			!reviewerOut.includes(path.join(PACKAGE_ROOT, "skills-vendor", "mattpocock", name)),
 			`reviewer: does NOT receive the mattpocock skill '${name}' (stays planner-only)`,
@@ -92,8 +93,9 @@ function main() {
 	);
 	console.log("\n=== TEST 2c — --role frontend-reviewer: gets chrome-devtools ===");
 	const frontendReviewerOut = run(dir, ["--instance", "frontend-reviewer-01", "--role", "frontend-reviewer", "--print-only"]);
-	ok(frontendReviewerOut.includes("--role frontend-reviewer"), "frontend-reviewer: composed command carries role");
-	ok(frontendReviewerOut.includes("chrome-devtools"), "frontend-reviewer: receives chrome-devtools");
+ok(frontendReviewerOut.includes("--role frontend-reviewer"), "frontend-reviewer: composed command carries role");
+ok(frontendReviewerOut.includes("chrome-devtools"), "frontend-reviewer: receives chrome-devtools");
+ok(frontendReviewerOut.includes(path.join(PACKAGE_ROOT, "skills-vendor", "yano", "yano-code-review")), "frontend-reviewer: receives the Yano two-axis code-review adapter");
 
 	console.log("\n=== TEST 3 — --role omitted still defaults to planner WITH the skill flags (backward compatible) ===");
 	const defaultOut = run(dir, ["--instance", "planner-01", "--print-only"]);

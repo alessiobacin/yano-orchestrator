@@ -22,6 +22,8 @@ Everything communicates over a local MQTT broker, using role/instance identity a
 - **The planner is structurally barred from claiming ticket work itself** (`ticket_claim` refuses the planner role outright) — planning and delegating is the job, never quietly doing the work when an instance is missing
 - **A mandatory closing checklist**: `worktree_finalize` refuses to merge until you declare the user actually confirmed the result, e2e tests ran (or don't apply), the version was bumped (or doesn't apply), *and* a docs-sync pass actually reconciled the project's own README/QUICK-START/architecture diagram with what shipped (or doesn't apply) — and now pushes to the remote automatically after a successful merge
 - **Frontend work has its own enforced review loop** — `frontend-developer` always hands off to `frontend-reviewer`, never to the backend `reviewer`; the frontend reviewer uses Playwright CLI/skill, chrome-devtools, and `code-review`, rejects back with specifics if needed, and informs the planner only after verification
+- **Code review is two-axis** — backend and frontend reviewers separate specification compliance from repository standards/maintainability; Fowler smell checks are labelled heuristics, while Yano keeps the existing worktree, trace, MQTT and planner-finalization workflow
+- **Planning uses vertical tickets** — after the spec, the planner invokes the vendored `to-tickets` skill, validates granularity and blocking edges with you, then imports each approved ticket once into the SQLite/DAG runtime
 - **Phased execution plans** — the planner declares which roles work together and in what order, and the system enforces it
 - **Multi-channel notifications** via Evolution API/WhatsApp, Telegram Bot API, and SendGrid email when a task completes or needs your input, so you don't have to watch the terminal
 - **A global `yano` CLI** (`yano init`, `yano start`, `yano doctor`, `yano update`, `yano copy-prompts`, `yano uninstall`, `yano end`, `yano pause`, `yano resume`, `yano recovery`) for scaffolding, launching, verifying the environment, checkpointing and restoring active work, and closing projects — `yano resume` restores agents exclusively in the visible Herdr workspace
@@ -248,9 +250,9 @@ agents/roles.yaml                 per-role defaults and the specialist roster
 agents/agents.yaml                 example instance configuration
 bin/yano.mjs                        the `yano` CLI (init/start/doctor/update/uninstall)
 scripts/                          CLI internals, dev tooling, and CI checks
-skills-vendor/mattpocock/         vendored planner-only skills (wayfinder, to-spec, and their own
+skills-vendor/mattpocock/         vendored planner-only skills (wayfinder, to-spec, to-tickets, and their own
                                    dependencies) — see VERSION.md
-skills-vendor/yano/               bundled shared skill for trace CLI usage and post-round diagnosis
+skills-vendor/yano/               bundled trace-analysis skill plus the reviewer code-review adapter
 skills-vendor/awesome-copilot/    vendored chrome-devtools skill, reviewer/frontend-developer only —
                                    see VERSION.md
 mqtt/                             local Mosquitto broker config for development

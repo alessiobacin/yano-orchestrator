@@ -29,11 +29,15 @@ Every instance has an `instance`, `role`, `project` and `team` identity. MQTT to
 
 1. `yano init` validates Node, Pi-facing prerequisites, MCP configuration and broker availability before writing a scaffold. In-place initialization of an existing project is non-destructive: it preserves application files and merges only missing Yano infrastructure; if root `agents/` belongs to the application, the Yano roster uses `.pi/agents/`. With `--herdr`, the CLI first creates or reuses and explicitly focuses a Herdr workspace rooted at the current directory, runs the scaffold command in its root pane, then starts `planner-01` in that same terminal; when invoked outside Herdr it opens/attaches the Herdr client, while an invocation already inside Herdr avoids nesting another client. Older projects whose roster is still under `.pi/agents/` remain launchable; the launcher selects that directory explicitly instead of assuming the modern root `agents/` layout.
 2. `yano start` launches any configured role. The trace-analysis skill is attached to every worker; planner-only vendor skills remain restricted to the planner, and browser skills remain restricted to frontend roles.
-3. The planner creates or reuses a Git worktree, initializes the persistent workspace and declares a phase plan.
-4. `agent_send` routes work by instance or role. Presence is advisory but immediately warns when no live target is available. Structured phase gates can refuse sends to locked phases.
-5. Coder, reviewer and specialists append evidence to the task report. File claims prevent simultaneous edits to the same shared file.
-6. Ticket/DAG and Playbook state are persisted in SQLite. Generation fencing, idempotency keys and the effect outbox make retries resumable.
-7. The planner advances phases and runs the mandatory closing evidence checklist before `worktree_finalize` merges the reviewed branch.
+3. After `to-spec`, the planner invokes the vendored `to-tickets` skill for
+   development and mixed tasks. It proposes vertical slices, acceptance
+   criteria and blocking edges, waits for the user's granularity approval and
+   writes the local Markdown planning artefacts under `.scratch/<feature>/issues/`.
+4. The planner creates or reuses a Git worktree, initializes the persistent workspace and declares a phase plan. Each approved `to-tickets` item is imported once into SQLite/DAG; Markdown remains a human-readable plan, never a second scheduler.
+5. `agent_send` routes work by instance or role. Presence is advisory but immediately warns when no live target is available. Structured phase gates can refuse sends to locked phases.
+6. Coder, reviewer and specialists append evidence to the task report. File claims prevent simultaneous edits to the same shared file. The reviewer applies the vendored `/code-review` method through Yano's adapter: every review records separate `Spec` and `Standards` findings, the automatic worktree fixed point when available, verification evidence and a verdict. It does not spawn nested agents, ask the user for a ref, commit or finalize.
+7. Ticket/DAG and Playbook state are persisted in SQLite. Generation fencing, idempotency keys and the effect outbox make retries resumable.
+8. The planner advances phases and runs the mandatory closing evidence checklist before `worktree_finalize` merges the reviewed branch.
 
 ## Persistence model
 
@@ -117,6 +121,28 @@ Tickets may declare `required_playbook`. When present, `ticket_create` checks it
 against the immutable run binding and `ticket_claim` checks both the binding and
 the claiming role's playbook mapping. This keeps mixed-role runs possible while
 making explicitly playbook-scoped work fail closed on a wrong worker.
+
+### `to-tickets` and SQLite/DAG boundary
+
+`to-tickets` is the planning-time translator between an approved spec and
+Yano's runtime ticket layer. It produces one local Markdown file per vertical
+slice, including acceptance criteria and blockers, and asks the user to confirm
+granularity. The planner then creates one corresponding SQLite ticket and
+preserves the dependency edges in `depends_on`. The Markdown files are useful
+for review, recovery and audit, but claims, readiness, watchdog, phase gates
+and completion read only from SQLite/DAG.
+
+### Review skill boundaries
+
+`skills-vendor/mattpocock/code-review/` preserves the upstream Matt Pocock
+reference. Runtime reviewer sessions receive
+`skills-vendor/yano/yano-code-review/`, which ports the useful two-axis model
+without importing the upstream assumptions that conflict with Yano (manual
+fixed-point input, parallel nested reviewers, short standalone reports and
+external issue-tracker publication). `reviewer` and `frontend-reviewer` keep
+their existing role-specific prompts and routing; the adapter is an additional
+checklist, not a replacement for browser evidence, trace analysis, HTTP
+hygiene or the coder correction loop.
 
 ## Failure and recovery
 

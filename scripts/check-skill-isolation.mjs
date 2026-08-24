@@ -1,5 +1,5 @@
 // Verifica che le skill vendorizzate in skills-vendor/mattpocock/ (wayfinder,
-// to-spec, grilling, domain-modeling, setup-matt-pocock-skills — Revisione
+// to-spec, to-tickets, grilling, domain-modeling, setup-matt-pocock-skills — Revisione
 // 22, vedi docs/development-notes.md) siano cablate SOLO per il ruolo planner, mai
 // per coder/reviewer/specialisti. Controlli statici (file di config, testo
 // dei prompt, comportamento di scripts/launch-planner.mjs) — non lancia un
@@ -10,6 +10,9 @@
 // Revisione 49 — stessi identici controlli (7-11 sotto), seconda skill
 // vendorizzata: skills-vendor/awesome-copilot/chrome-devtools/, cablata SOLO
 // per i ruoli reviewer e frontend-developer (vedi VERSION.md lì dentro).
+// Revisione 50 — l'adapter Yano della skill /code-review è cablato SOLO per
+// reviewer e frontend-reviewer; la snapshot originale Matt resta un
+// riferimento vendorizzato e non viene iniettata come workflow autonomo.
 //
 // Usage: node scripts/check-skill-isolation.mjs
 
@@ -22,8 +25,10 @@ import YAML from "yaml";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
-const MATT_POCOCK_SKILLS = ["wayfinder", "to-spec", "grilling", "domain-modeling", "setup-matt-pocock-skills"];
+const MATT_POCOCK_SKILLS = ["wayfinder", "to-spec", "to-tickets", "grilling", "domain-modeling", "setup-matt-pocock-skills"];
 const YANO_PLANNER_SKILL = "yano-planner-trace-analysis";
+const YANO_REVIEW_SKILL = "yano-code-review";
+const YANO_REVIEW_SKILL_ROLES = ["reviewer", "frontend-reviewer"];
 const CHROME_DEVTOOLS_SKILL = "chrome-devtools";
 const CHROME_DEVTOOLS_SKILL_ROLES = ["frontend-reviewer", "frontend-developer"];
 
@@ -55,7 +60,7 @@ for (const [roleName, cfg] of Object.entries(roles)) {
 }
 console.log("   OK");
 
-console.log("3. scripts/launch-planner.mjs esiste, referenzia tutte e 5 le skill mattpocock (attaccate solo quando il ruolo risolto è planner)...");
+console.log("3. scripts/launch-planner.mjs esiste, referenzia tutte e 6 le skill mattpocock (attaccate solo quando il ruolo risolto è planner)...");
 const launcherSrc = read("scripts/launch-planner.mjs");
 assert.match(launcherSrc, /MATT_POCOCK_SKILLS/, "launch-planner.mjs deve referenziare la lista delle skill mattpocock");
 for (const name of MATT_POCOCK_SKILLS) {
@@ -63,7 +68,7 @@ for (const name of MATT_POCOCK_SKILLS) {
 }
 console.log("   OK");
 
-console.log("4. launch-planner.mjs --print-only produce un comando con --role planner e i 5 --skill (skill mattpocock reali)...");
+console.log("4. launch-planner.mjs --print-only produce un comando con --role planner e i 6 --skill (skill mattpocock reali)...");
 const printed = execFileSync("node", ["scripts/launch-planner.mjs", "--instance", "planner-check", "--print-only"], {
 	cwd: repoRoot,
 	encoding: "utf8",
@@ -108,6 +113,7 @@ const allowedFiles = new Set(
 		"README.md",
 		"docs/development-notes.md",
 		"AGENTS.md",
+		"docs/architecture.md",
 		"docs/agents/issue-tracker.md",
 		"docs/agents/domain.md",
 		"prompts/planner.md",
@@ -202,6 +208,28 @@ for (const [roleName, cfg] of Object.entries(roles)) {
 }
 console.log("   OK");
 
+console.log("\n13. l'adapter Yano della skill code-review è presente e riservato a reviewer/frontend-reviewer...");
+const yanoReviewSkillPath = path.join(repoRoot, "skills-vendor", "yano", YANO_REVIEW_SKILL);
+assert.ok(existsSync(path.join(yanoReviewSkillPath, "SKILL.md")), "l'adapter Yano code-review deve contenere SKILL.md");
+assert.ok(launcherSrc.includes(`\"${YANO_REVIEW_SKILL}\"`), "launch-planner.mjs deve referenziare l'adapter Yano code-review");
+for (const [roleName, cfg] of Object.entries(roles)) {
+	const hasIt = (cfg.skills ?? []).includes(YANO_REVIEW_SKILL);
+	if (YANO_REVIEW_SKILL_ROLES.includes(roleName)) {
+		assert.equal(hasIt, true, `il ruolo '${roleName}' deve dichiarare '${YANO_REVIEW_SKILL}'`);
+	} else {
+		assert.equal(hasIt, false, `il ruolo '${roleName}' NON deve dichiarare '${YANO_REVIEW_SKILL}'`);
+	}
+}
+const printedReviewer = execFileSync(
+	"node",
+	["scripts/launch-planner.mjs", "--instance", "reviewer-check", "--role", "reviewer", "--print-only"],
+	{ cwd: repoRoot, encoding: "utf8" },
+);
+assert.ok(printedReviewer.includes(yanoReviewSkillPath), "reviewer deve ricevere l'adapter Yano code-review");
+assert.ok(!printed.includes(yanoReviewSkillPath), "planner non deve ricevere l'adapter Yano code-review");
+assert.ok(!printedCoder.includes(yanoReviewSkillPath), "coder non deve ricevere l'adapter Yano code-review");
+console.log("   OK");
+
 console.log(
-	"\nOK: skill planner, skill Yano trace e chrome-devtools risultano cablate ai soli ruoli previsti.",
+	"\nOK: skill planner, skill Yano trace, adapter code-review e chrome-devtools risultano cablate ai soli ruoli previsti.",
 );

@@ -3,8 +3,8 @@ schema_version: 1
 id: backend-change
 label: Backend change with TDD and review
 description: "Deterministic flow for backend implementation: contract,
-  tests, isolated change, reviewer approval, regression evidence and
-  documentation."
+  two-axis Spec/Standards review, tests, isolated change, reviewer approval,
+  regression evidence and documentation."
 enforcement:
   status: partial
   note: Runtime gates plan phases, tickets, evidence and finalization;
@@ -52,6 +52,9 @@ transitions:
       - tests_run
       - report_updated
       - coder_sent_to_reviewer_when_code_changed
+      - spec_reviewed
+      - standards_reviewed
+      - review_findings_classified
   - id: accept
     from: review
     to: completed
@@ -77,5 +80,7 @@ invariants:
   - isolated_worktree
   - tests_before_implementation_when_tdd_selected
   - reviewer_required_for_code
+  - spec_and_standards_are_reported_separately
+  - code_smells_are_heuristics_not_automatic_blockers
   - docs_sync_last
   - no_finalize_before_explicit_user_confirmation

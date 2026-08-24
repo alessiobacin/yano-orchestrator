@@ -4,8 +4,10 @@ Questa cartella contiene una copia **vendorizzata** (non un mirror che si
 aggiorna da solo) di alcune skill del repo pubblico di Matt Pocock. Vive
 FUORI da `.pi/skills/`, `~/.pi/agent/skills/` e `.agents/skills/`
 deliberatamente, per non attivare la discovery automatica di Pi su tutti i
-ruoli — vengono caricate esplicitamente solo per il ruolo `planner` (vedi
-`extensions/orchestrator.ts` e Revisione 22 in `docs/development-notes.md`).
+ruoli. Le skill di pianificazione vengono caricate esplicitamente solo per il
+ruolo `planner`; la snapshot di `code-review` è conservata come riferimento e
+il reviewer usa l'adapter Yano dedicato in
+`skills-vendor/yano/yano-code-review/` (vedi `scripts/launch-planner.mjs`).
 
 - **Repo sorgente**: https://github.com/mattpocock/skills
 - **Commit pinnato**: `9c9f36ccd3995266cd675468af71639c8dde1ec5`
@@ -17,16 +19,26 @@ ruoli — vengono caricate esplicitamente solo per il ruolo `planner` (vedi
 
 ## Skill vendorizzate e perché
 
-Richieste esplicitamente dall'utente (2):
+Richieste esplicitamente dall'utente:
 
 - **`wayfinder`** (da `skills/engineering/wayfinder/` nel repo sorgente) —
   scompone un task grande/ambiguo in una mappa di "ticket" di decisione,
   risolti uno alla volta finché la via non è chiara.
 - **`to-spec`** (da `skills/engineering/to-spec/`) — collassa la
   conversazione/mappa di decisioni in un'unica spec pubblicata sul tracker.
+- **`to-tickets`** (da `skills/engineering/to-tickets/`) — trasforma la spec
+  approvata in tracer-bullet vertical slices con criteri di accettazione e
+  blocking edges. In Yano il suo output Markdown viene importato una sola
+  volta nel layer SQLite/DAG, che resta la fonte runtime.
+- **`code-review`** (da `skills/engineering/code-review/`) — snapshot del
+  metodo a due assi Spec/Standards e del baseline di code smell. Non viene
+  iniettata integralmente nel reviewer perché il suo workflow originale usa
+  fixed point richiesto all'utente e sub-agent paralleli; Yano ne usa i
+  contenuti tramite l'adapter runtime `yano-code-review`.
 
-Vendorizzate perché sono **dipendenze dirette e non aggirabili** delle due
-sopra (letto il `SKILL.md` di ognuna prima di escluderle, come richiesto):
+Vendorizzate perché sono **dipendenze dirette e non aggirabili** di wayfinder,
+to-spec e del flusso di planning (letto il `SKILL.md` di ognuna prima di
+escluderle o integrarle, come richiesto):
 
 - **`grilling`** (da `skills/productivity/grilling/`) — la primitiva di
   interrogazione a round che `wayfinder` invoca via Skill tool in OGNI
@@ -54,8 +66,9 @@ sopra (letto il `SKILL.md` di ognuna prima di escluderle, come richiesto):
 
 ## Esplicitamente fuori scope (richiesta dell'utente)
 
-- **`to-tickets`** e **`implement`** (entrambi in `skills/engineering/`) —
-  esclusi su richiesta esplicita dell'utente. Non toccati, non vendorizzati.
+- **`implement`** (`skills/engineering/`) — esclusa su richiesta esplicita
+  dell'utente. Non toccata e non vendorizzata; le sue pratiche utili sono già
+  riflesse nei prompt coder/reviewer e nei playbook.
 
 ## Dipendenza NON vendorizzata, nota e documentata (limite noto)
 
@@ -103,7 +116,7 @@ consapevolmente:
 
 1. `git clone --depth 1 https://github.com/mattpocock/skills.git` in una
    directory scratch, annotare il nuovo commit hash.
-2. Diff manuale tra il commit pinnato qui sopra e il nuovo HEAD per le 5
+2. Diff manuale tra il commit pinnato qui sopra e il nuovo HEAD per le 6
    directory elencate in questo file — leggere ogni `SKILL.md` prima di
    sovrascrivere, non fare un copy-paste alla cieca (stesse cautele del
    vendoring iniziale: nessuno script da eseguire alla cieca, verificare se

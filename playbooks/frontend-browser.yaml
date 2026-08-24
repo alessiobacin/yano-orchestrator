@@ -3,8 +3,8 @@ schema_version: 1
 id: frontend-browser
 label: Frontend implementation and browser review
 description: Frontend flow using frontend-developer and
-  frontend-reviewer with Playwright CLI and Chrome DevTools evidence;
-  backend reviewer is not substituted.
+  frontend-reviewer with two-axis Spec/Standards review, Playwright CLI and
+  Chrome DevTools evidence; backend reviewer is not substituted.
 enforcement:
   status: partial
   note: Browser commands are recorded as evidence by the planner;
@@ -53,6 +53,9 @@ transitions:
       - frontend_tests_run
       - screenshot_or_trace_recorded
       - frontend_sent_to_frontend_reviewer
+      - spec_reviewed
+      - frontend_standards_reviewed
+      - review_findings_classified
   - id: accept
     from: browser_review
     to: completed
@@ -77,6 +80,8 @@ failure_routes:
     terminal: false
 invariants:
   - frontend_reviewer_is_separate_from_backend_reviewer
+  - spec_and_standards_are_reported_separately
+  - code_smells_are_heuristics_not_automatic_blockers
   - snapshot_first
   - no_fixed_waits_when_web_assertion_exists
   - no_finalize_before_explicit_user_confirmation

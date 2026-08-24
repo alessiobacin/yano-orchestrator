@@ -12,7 +12,18 @@ Se il task è grande o ambiguo, usa `/skill:wayfinder <descrizione>` e poi `/ski
 
 Per i task che richiedono ricerca, segui anche `prompts/research-guide.md`: verifica prima se esiste una capability web/browser, usa fonti attendibili quando disponibili e, se non puoi verificare, dichiara il limite senza inventare strumenti, progetti o risultati.
 
-La chiusura `to-spec` → `to-tickets` usa i file ticket locali in `.scratch/<feature-slug>/issues/`: `to-tickets` NON è una skill vendored; dopo la spec crea i ticket persistenti con `ticket_create` quando il run è stato inizializzato.
+La chiusura `to-spec` → `to-tickets` è obbligatoria per ogni task di sviluppo o
+modifica mista che richieda almeno un ticket: dopo aver ottenuto la spec,
+invoca esplicitamente `/skill:to-tickets` prima di proporre il piano runtime.
+La skill è vendorizzata e viene caricata dal launcher solo per il planner. Deve
+produrre ticket verticali, criteri di accettazione e dipendenze; presenta sempre
+la granularità e i blocking edges all'utente e attendi la sua approvazione.
+Con il tracker locale, gli artefatti vivono in
+`.scratch/<feature-slug>/issues/`. Dopo l'approvazione importa ogni ticket nel
+layer SQLite con `ticket_create`: il Markdown è il piano umano, mentre SQLite e
+il DAG sono l'unica fonte runtime per readiness, claim, avanzamento, recovery e
+completamento. Non creare due ticket SQLite per lo stesso ticket di
+`to-tickets` e non schedulare direttamente i file Markdown.
 
 ## Feedback dell'utente e apprendimento tra progetti
 
@@ -34,7 +45,14 @@ Presenta nello stesso messaggio ruoli/istanze con motivo e fasi con ordine/motiv
 
 ## Layer ticket/DAG persistente
 
-Per ogni task che usa `plan_set`, subito dopo il piano chiama sempre `orchestrator_init`, `run_create({objective,domain})`, `spec_create({run_id,title,content})`, un `ticket_create` per ogni ruolo di ogni fase e `tickets_ready({run_id})`; conserva gli id restituiti e usa lo stesso slug del worktree nel report e nel piano.
+Per ogni task che usa `plan_set`, dopo l'approvazione del breakdown di
+`to-tickets`, chiama sempre `orchestrator_init`, `run_create({objective,domain})`,
+`spec_create({run_id,title,content})`, importa i ticket approvati con
+`ticket_create` preservando `depends_on`, criteri, fase e capacità richiesta,
+poi chiama `tickets_ready({run_id})`; conserva gli id restituiti e usa lo
+stesso slug del worktree nel report, nei file `.scratch` e nel piano. Il ciclo
+reviewer resta interno al ticket del coder: non creare un ticket separato per
+il reviewer solo perché la skill ha prodotto una review.
 
 In `orchestrator_init`, se `details.config.project` è ancora `default`, usa prima il nome specifico di `package.json` (mai `@otomatik/yano-orchestrator`); se manca/non è utile e il nome non è ovvio dal task, chiedilo all'utente; se proviene da `pi-orchestrator-init`, è già persistito e non va richiesto di nuovo. `run_create` usa lo stesso slug di worktree e piano. `spec_create.description` è la scomposizione inviata al team. Ogni ticket usa `required_capabilities: ["<ruolo-nudo-minuscolo>"]`, mai skill custom, e `depends_on` con tutti gli id dei ticket della fase immediatamente precedente; fase 1 usa `[]`, ruoli paralleli hanno ticket distinti con le stesse dipendenze. Dopo `plan_set` annota `run_id`/`spec_id` nel report.
 
@@ -82,8 +100,9 @@ Eccezione frontend alla regola del roster: quando il task tocca la UI, includi `
 
 1. Non implementare: prepara una descrizione autosufficiente.
 2. Seleziona e proponi team/fasi; attendi conferma.
-3. Chiama `worktree_list_open`, riusa il worktree se l'utente conferma che è lo stesso task; altrimenti scegli uno slug breve kebab-case e chiama `worktree_create`. Da quel momento file, test e report stanno nel worktree.
-4. Crea nel worktree `.pi/extensions/yano-orchestrator/reports/<slug>.md` con:
+3. Dopo la spec invoca `/skill:to-tickets`, mostra ticket verticali, blocchi e criteri di accettazione e attendi la conferma dell'utente sulla granularità.
+4. Chiama `worktree_list_open`, riusa il worktree se l'utente conferma che è lo stesso task; altrimenti scegli uno slug breve kebab-case e chiama `worktree_create`. Da quel momento file, test e report stanno nel worktree.
+5. Crea nel worktree `.pi/extensions/yano-orchestrator/reports/<slug>.md` con:
 
    ```md
    # Report: <titolo task>
@@ -95,8 +114,8 @@ Eccezione frontend alla regola del roster: quando il task tocca la UI, includi `
    ```
 
    È il registro condiviso: aggiornalo con `report_append`, mai leggendo/modificando/riscrivendo manualmente il file in presenza di agenti paralleli.
-5. Chiama `plan_set(slug, phases)` con il piano confermato; correggi solo errori di forma rifiutati dal tool senza rifare la proposta. Poi registra il layer ticket/DAG come sopra: `run_create` richiede `objective`, `spec_create` richiede `content`, e annota `run_id`/`spec_id`.
-6. Invia con `agent_send` solo ai ruoli della fase 1, con `target_role` o `target_instance`, `worktree_path`, report path e `ticket_id`; non contattare fasi bloccate. Se fase 1 contiene uno specialista indipendente in parallelo, delega anche la sua parte specifica. Non usare `agent_await` in blocco: informa subito l'utente di assegnazione, team, piano e percorsi e termina il turno.
+6. Chiama `plan_set(slug, phases)` con il piano confermato; correggi solo errori di forma rifiutati dal tool senza rifare la proposta. Poi registra il layer ticket/DAG come sopra: `run_create` richiede `objective`, `spec_create` richiede `content`, importa i ticket `to-tickets` senza duplicarli e annota `run_id`/`spec_id`.
+7. Invia con `agent_send` solo ai ruoli della fase 1, con `target_role` o `target_instance`, `worktree_path`, report path e `ticket_id`; non contattare fasi bloccate. Se fase 1 contiene uno specialista indipendente in parallelo, delega anche la sua parte specifica. Non usare `agent_await` in blocco: informa subito l'utente di assegnazione, team, piano e percorsi e termina il turno.
 
 ## Fine fase e risveglio
 

@@ -129,8 +129,19 @@ leggera si può usare `yano start --trace-mode events` (oppure `standard`/`off`)
 
 Il launcher carica automaticamente la skill condivisa di analisi trace anche
 per coder, reviewer e specialisti quando sono avviati con `yano start`.
+
+Il reviewer applica inoltre la skill `yano-code-review`: ogni revisione separa
+la conformità alla `Spec` dalla conformità agli `Standards` del repository,
+registra il fixed point automatico quando disponibile e classifica i finding
+come `blocking` o `non-blocking`. I code smell da soli non respingono un task;
+restano vincolanti i test, le verifiche browser/API, il trace e il verdetto
+operativo già previsto dal ciclo Yano.
 Nel terminale del planner descrivi l'obiettivo; dopo la tua conferma creerà i
 worktree e delegherà il lavoro.
+
+Per ogni task di sviluppo il planner passa dalla skill `/to-tickets` dopo la
+spec: propone slice verticali, criteri di accettazione e dipendenze, chiede se
+la granularità è corretta e solo dopo importa i ticket approvati in SQLite/DAG.
 
 ## 5. Controlla il lavoro
 

@@ -1,5 +1,43 @@
 # Development notes
 
+## Revisione 50 — reviewer con code review a due assi
+
+La skill `/code-review` di Matt Pocock è stata valutata e integrata senza
+duplicare l'orchestrazione di Yano. La snapshot originale è conservata in
+`skills-vendor/mattpocock/code-review/` per rendere esplicito il riferimento e
+facilitare futuri aggiornamenti; le sessioni runtime ricevono invece
+`skills-vendor/yano/yano-code-review/`.
+
+L'adapter viene caricato soltanto per `reviewer` e `frontend-reviewer` tramite
+`scripts/launch-planner.mjs`. Impone due sezioni indipendenti nel report:
+
+- `Spec`: requisito, criterio di accettazione, evidenza, comportamento
+  mancante/errato e scope creep;
+- `Standards`: fonti del repository, qualità/manutenibilità e code smell
+  euristici.
+
+Il reviewer ricava il fixed point dal worktree, dal report o dal merge-base
+quando è disponibile; non chiede un ref all'utente, non crea sub-agent
+annidati e non fa commit/finalize. I smell di Fowler sono sempre
+`non-blocking` salvo una violazione documentata o un rischio concreto. Il
+workflow già esistente resta invariato: test reali, trace, browser evidence,
+`report_append`, correzione sullo stesso worktree e approvazione al planner.
+
+## Revisione 51 — `to-tickets` entra nel planning runtime
+
+Il flusso del planner ora usa esplicitamente `/skill:to-tickets` dopo
+`to-spec`, per ogni task di sviluppo o modifica mista. La skill è vendorizzata
+in `skills-vendor/mattpocock/to-tickets/` e caricata solo dal launcher per il
+ruolo `planner`.
+
+Il planner presenta all'utente le slice verticali, i criteri di accettazione e
+i blocking edges e attende la conferma della granularità. Dopo l'approvazione
+scrive gli artefatti locali `.scratch/<feature>/issues/` e importa ogni ticket
+una sola volta nel layer SQLite tramite `ticket_create`, preservando
+`depends_on`, fase e capacità richiesta. SQLite/DAG resta l'unica fonte per
+readiness, claim, watchdog, recovery e completamento: i file Markdown sono
+documentazione del piano e materiale di audit, non un secondo scheduler.
+
 Questo pacchetto è il livello di **trasporto + identità + presenza + pub/sub +
 comportamento di ruolo** descritto in `docs/architecture.md`, §22-24 e §37 —
 l'equivalente diretto di `coms.ts`/`coms-net.ts` del repo
@@ -2977,8 +3015,10 @@ comando `pi -e extensions/orchestrator.ts ... --role planner --skill <path>
 qualcuno passa un `--role` diverso da `planner`. Supporta `--print-only` per
 vedere il comando composto senza lanciarlo. README Quickstart e
 `prompts/planner.md` aggiornati: planner-01 va SEMPRE avviato con questo
-script, mai con `pi` a mano; per gli altri ruoli resta `pi` diretto, senza i
-flag `--skill` di mattpocock (che non li riguardano).
+script, mai con `pi` composto a mano. Oggi tutti i ruoli vanno avviati con
+`yano start --instance <nome> --role <ruolo>`: i flag mattpocock restano
+planner-only, mentre reviewer e frontend-reviewer ricevono i rispettivi
+adapter Yano/browser tramite lo stesso launcher.
 
 **Setup del tracker**: eseguito il processo di `setup-matt-pocock-skills`
 (esplorazione del repo, nessun `AGENTS.md`/`CLAUDE.md`/`CONTEXT.md`/remote

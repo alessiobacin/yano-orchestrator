@@ -550,7 +550,7 @@ export async function runCreateProject({ packageRoot, cwd, argv, preflightTools 
 	console.log("  yano start --instance planner-01   # planner SEMPRE così, mai `pi` a mano — vedi sotto");
 	console.log("");
 	console.log("IMPORTANTE — planner va lanciato SOLO con `yano start`, mai con `pi --instance planner-01 --role planner` a mano:");
-	console.log("`yano start` è l'unico modo in cui le skill vendorizzate di mattpocock (Wayfinder/To-Spec, più grilling/domain-modeling");
+	console.log("`yano start` è l'unico modo in cui le skill vendorizzate di mattpocock (Wayfinder/To-Spec/To-Tickets, più grilling/domain-modeling");
 	console.log("che invocano) vengono cablate nella sessione, dall'installazione globale del pacchetto (non dal progetto scaffoldato —");
 	console.log("questo scaffold non le include). Lanciato a mano, il planner parte comunque ma senza quelle skill: usa in automatico un");
 	console.log("metodo di scoping equivalente ma più semplice, integrato nel suo prompt (vedi Revisione 38 in docs/development-notes.md).");

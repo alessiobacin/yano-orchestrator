@@ -57,6 +57,7 @@ import { existsSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { runControlledReload } from "./yano-recovery.mjs";
 
 function commandExists(cmd) {
 	const result = spawnSync(cmd, ["--version"], { stdio: "ignore", shell: process.platform === "win32" });
@@ -116,7 +117,7 @@ export function updatePiExtensions() {
 // pacchetto npm installato globalmente da cui `yano` sta girando in questo
 // momento (usata sia per leggere la versione corrente sia per il campo
 // "repository.url" da cui reinstallare/aggiornare entrambe le copie).
-export function runUpdate({ packageRoot, argv }) {
+async function performUpdate({ packageRoot, argv }) {
 	const checkOnly = argv.includes("--check");
 
 	const pkgJsonPath = path.join(packageRoot, "package.json");
@@ -179,7 +180,7 @@ export function runUpdate({ packageRoot, argv }) {
 				}
 			}
 		}
-		return;
+		return { checkOnly: true, currentVersion, remoteVersion };
 	}
 
 	console.log("\nyano update: 1/2 — reinstallo il pacchetto npm globale da GitHub (npm install -g ...)...\n");
@@ -244,11 +245,34 @@ export function runUpdate({ packageRoot, argv }) {
 			"caso solo i file che hai personalizzato lì restano tuoi: qualunque altro ruolo/file continua comunque " +
 			"a leggere questa versione appena aggiornata.",
 	);
+	return {
+		checkOnly: false,
+		currentVersion,
+		newVersion: readVersion(pkgJsonPath) || currentVersion,
+		extensionGitDir: gitDir,
+		extensionCommit: hasGitClone ? currentGitCommit(gitDir) : null,
+	};
+}
+
+export async function runUpdate({ packageRoot, cwd = process.cwd(), argv }) {
+	if (argv.includes("--reload")) {
+		if (argv.includes("--check")) throw new Error("yano update: --check e --reload non sono combinabili.");
+		return runControlledReload({
+			cwd,
+			packageRoot,
+			argv,
+			update: () => performUpdate({
+				packageRoot,
+				argv: argv.filter((arg) => !["--reload", "--dry-run", "--force", "--timeout"].includes(arg)),
+			}),
+		});
+	}
+	return performUpdate({ packageRoot, argv });
 }
 
 // Uso diretto: `node scripts/update.mjs ...` (dev, dal repo del pacchetto).
 const invokedDirectly = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (invokedDirectly) {
 	const __dirname = path.dirname(fileURLToPath(import.meta.url));
-	runUpdate({ packageRoot: path.resolve(__dirname, ".."), argv: process.argv.slice(2) });
+	await runUpdate({ packageRoot: path.resolve(__dirname, ".."), cwd: process.cwd(), argv: process.argv.slice(2) });
 }

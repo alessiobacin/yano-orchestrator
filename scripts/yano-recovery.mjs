@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import mqtt from "mqtt";
 import { parse as parseYaml } from "yaml";
-import { appendTraceRecord, projectKey, readTraceRecords, resolveTraceProject, traceRoot } from "./yano-trace-storage.mjs";
+import { appendRawTraceRecord, appendTraceRecord, projectKey, readTraceRecords, resolveTraceProject, traceRoot } from "./yano-trace-storage.mjs";
 import { projectConfig, projectDbPath, resolveYanoWorkspaceDir, slugifyProject } from "./yano-project.mjs";
 
 const BROKER_URL = process.env.PI_ORCH_BROKER_URL || "mqtt://127.0.0.1:1883";
@@ -19,6 +19,11 @@ function value(argv, flag) {
 }
 
 function has(argv, flag) { return argv.includes(flag); }
+
+function commandExists(command) {
+	const result = spawnSync(command, ["--version"], { stdio: "ignore", shell: process.platform === "win32" });
+	return !result.error || result.error.code !== "ENOENT";
+}
 
 function usage() {
 	console.log([
@@ -70,6 +75,17 @@ function safeJson(value) {
 	try { return JSON.parse(JSON.stringify(value)); } catch { return String(value); }
 }
 
+function traceReloadEvent({ cwd, project, stage, payload = {} }) {
+	try {
+		appendRawTraceRecord({ cwd, project, record: {
+			type: `reload_${stage}`,
+			instance: "yano-cli",
+			role: "operator",
+			...safeJson(payload),
+		} });
+	} catch { /* trace is best effort; recovery state remains authoritative */ }
+}
+
 function roleFromInstance(instance) {
 	const id = String(instance || "").toLowerCase();
 	if (id.startsWith("planner")) return "planner";
@@ -80,6 +96,10 @@ function roleFromInstance(instance) {
 	if (id.startsWith("schema")) return "schema-migrator";
 	if (id.startsWith("e2e")) return "e2e-simulator";
 	return "specialist";
+}
+
+function looksLikeAgentInstance(instance) {
+	return /^(planner|coder|reviewer|frontend[-_]developer|frontend[-_]reviewer|docs|tdd|e2e|schema|security|specialist|qa|docker|k8s|cicd|data|openapi|architecture|release|dependency|refactoring|observability|a11y|design|speed)[-_]/i.test(String(instance || ""));
 }
 
 function readRoster(cwd) {
@@ -164,7 +184,7 @@ function gitSnapshot(cwd) {
 	};
 }
 
-function snapshotInputs({ cwd, workspaceDir, dbPath, project, run, assignments, presence, traceRecords }) {
+function snapshotInputs({ cwd, workspaceDir, dbPath, project, run, assignments, presence, traceRecords, herdrSnapshot = null, reload = null }) {
 	const directory = snapshotDir(project, run.id);
 	fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
 	const files = {
@@ -174,7 +194,7 @@ function snapshotInputs({ cwd, workspaceDir, dbPath, project, run, assignments, 
 		project_config: copyIfExists(path.join(workspaceDir, "config", "project.json"), path.join(directory, "project.json")),
 	};
 	const manifest = {
-		schema_version: 1,
+		schema_version: 2,
 		created_at: new Date().toISOString(),
 		project,
 		project_cwd: cwd,
@@ -182,10 +202,12 @@ function snapshotInputs({ cwd, workspaceDir, dbPath, project, run, assignments, 
 		run: safeJson(run),
 		assignments: safeJson(assignments),
 		presence: safeJson(presence),
+		herdr: safeJson(herdrSnapshot),
+		reload: safeJson(reload),
 		git: gitSnapshot(cwd),
 		trace_records: traceRecords,
 		files,
-		resume_contract: "Restore only missing instances, keep SQLite run/ticket state and worktrees intact, then wake the planner.",
+		resume_contract: "Restore only missing instances, keep SQLite run/ticket state and worktrees intact, then wake the planner. A reload resumes semantically from the last observable checkpoint, never from hidden model tokens.",
 	};
 	fs.writeFileSync(path.join(directory, "snapshot.json"), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
 	return { directory, manifest };
@@ -204,7 +226,7 @@ function ensureRecoveryTable(db) {
 	)`);
 }
 
-async function pauseRun({ cwd, project, dbPath, workspaceDir, run, broker, yes }) {
+async function pauseRun({ cwd, project, dbPath, workspaceDir, run, broker, yes, herdrSnapshot = null, reload = null, terminateAgents = true }) {
 	const db = getDb(dbPath);
 	ensureRecoveryTable(db);
 	const assignments = collectAssignments(db, [run.id]);
@@ -216,7 +238,7 @@ async function pauseRun({ cwd, project, dbPath, workspaceDir, run, broker, yes }
 		console.warn(`yano pause: broker non raggiungibile (${error instanceof Error ? error.message : String(error)}); snapshot locale comunque salvato.`);
 	}
 	const traceRecords = readTraceRecords({ cwd, project, limit: 100000 });
-	const { directory, manifest } = snapshotInputs({ cwd, workspaceDir, dbPath, project, run, assignments, presence, traceRecords });
+	const { directory, manifest } = snapshotInputs({ cwd, workspaceDir, dbPath, project, run, assignments, presence, traceRecords, herdrSnapshot, reload });
 	const pauseId = `${run.id}-${Date.now()}`;
 	const metadata = { directory, assignments, presence, requested_stop: yes };
 	db.prepare("INSERT OR REPLACE INTO yano_recovery_pauses (id, run_id, project, snapshot_dir, created_at, status, metadata_json) VALUES (?, ?, ?, ?, ?, 'paused', ?)").run(pauseId, run.id, project, directory, new Date().toISOString(), JSON.stringify(metadata));
@@ -227,7 +249,7 @@ async function pauseRun({ cwd, project, dbPath, workspaceDir, run, broker, yes }
 	if (dbColumns(db, "checkpoints").includes("run_id")) {
 		db.prepare("INSERT INTO checkpoints (run_id, label, payload, created_at) VALUES (?, 'yano_pause', ?, ?)").run(run.id, JSON.stringify(pausePayload), new Date().toISOString());
 	}
-	if (client && yes) {
+	if (client && yes && terminateAgents) {
 		for (const card of presence.filter((item) => item.status !== "offline")) {
 			await client.publishAsync(`pi/${project}/agents/${card.instance}/commands`, JSON.stringify({
 				type: "terminate",
@@ -242,7 +264,7 @@ async function pauseRun({ cwd, project, dbPath, workspaceDir, run, broker, yes }
 	db.close();
 	console.log(`yano pause: run ${run.id} salvato in ${directory}`);
 	console.log(`   agent osservati: ${presence.filter((item) => item.status !== "offline").map((item) => item.instance).join(", ") || "nessuno"}`);
-	console.log(`   ${yes ? "terminate graceful inviati" : "nessun processo fermato: aggiungi --yes"}; stato SQLite preservato.`);
+	console.log(`   ${yes && terminateAgents ? "terminate graceful inviati" : "nessun processo fermato"}; stato SQLite preservato.`);
 	return { pauseId, directory, manifest };
 }
 
@@ -265,6 +287,11 @@ function requiredAgents({ cwd, db, runIds, snapshots }) {
 	for (const snapshot of snapshots) for (const card of (snapshot?.data?.presence || []).filter((item) => item.status !== "offline")) {
 		if (card.instance && card.role) result.set(card.instance, { instance: card.instance, role: card.role, source: "pause-presence" });
 	}
+	for (const snapshot of snapshots) for (const tab of (snapshot?.data?.herdr?.tabs || [])) {
+		if (tab.label && looksLikeAgentInstance(tab.label)) {
+			result.set(tab.label, { instance: tab.label, role: roleFromInstance(tab.label), source: result.get(tab.label)?.source || "herdr-snapshot" });
+		}
+	}
 	for (const assignment of collectAssignments(db, runIds)) {
 		result.set(assignment.instance, { ...assignment, source: "running-ticket" });
 	}
@@ -282,6 +309,33 @@ function herdrJson(args) {
 		const resultBody = parsed?.result || parsed;
 		return resultBody?.snapshot || resultBody;
 	} catch { return null; }
+}
+
+function herdrInventory(snapshot) {
+	if (!snapshot) return null;
+	return {
+		workspaces: (snapshot.workspaces || []).map((item) => ({
+			workspace_id: item.workspace_id,
+			label: item.label,
+			root_pane_id: item.root_pane_id || item.root_pane?.pane_id || null,
+		})),
+		tabs: (snapshot.tabs || []).map((item) => ({
+			tab_id: item.tab_id,
+			workspace_id: item.workspace_id,
+			label: item.label,
+		})),
+		panes: (snapshot.panes || []).map((item) => ({
+			pane_id: item.pane_id,
+			tab_id: item.tab_id,
+			workspace_id: item.workspace_id,
+			cwd: item.cwd || null,
+		})),
+	};
+}
+
+function herdrHasProjectWorkspace(snapshot, cwd, project) {
+	if (!snapshot) return false;
+	return (snapshot.workspaces || []).some((workspace) => workspace.label === project || (snapshot.panes || []).some((pane) => pane.workspace_id === workspace.workspace_id && path.resolve(pane.cwd || "") === path.resolve(cwd)));
 }
 
 function herdrLaunch({ cwd, project, instance, args }) {
@@ -357,7 +411,209 @@ async function resumeRuns({ cwd, project, dbPath, runs, argv }) {
 		console.log(`   ${item.launched ? "✓" : "→"} ${item.instance} (${item.role}) — ${detail}`);
 	}
 	if (!yes) console.log("   modalità dry-run operativa: aggiungi --yes per salvare lo stato e avviare il team in Herdr.");
-	return { runs, launched, snapshots };
+	return { runs, launched, snapshots, agents };
+}
+
+async function waitForPresenceCondition({ project, broker, instances, timeoutMs, predicate }) {
+	const deadline = Date.now() + timeoutMs;
+	let last = [];
+	while (Date.now() < deadline) {
+		let client = null;
+		try {
+			const discovered = await discoverPresence(project, broker);
+			client = discovered.client;
+			last = discovered.cards;
+			const selected = discovered.cards.filter((card) => instances.has(card.instance));
+			if (predicate(selected, instances)) return { ok: true, cards: selected };
+		} catch {
+			// Keep polling until the bounded deadline; the caller gets the last
+			// observed cards and a deterministic diagnostic on timeout.
+		} finally {
+			if (client) { try { await client.endAsync(); } catch { /* best effort */ } }
+		}
+		await new Promise((resolve) => setTimeout(resolve, 250));
+	}
+	return { ok: false, cards: last.filter((card) => instances.has(card.instance)) };
+}
+
+async function prepareReload({ project, broker, cards, timeoutMs, force }) {
+	const live = cards.filter((card) => card.status !== "offline");
+	const instances = new Set(live.map((card) => card.instance));
+	if (!instances.size || force) return { prepared: force ? [] : [...instances], forced: force, cards: live };
+	let client = null;
+	try {
+		const discovered = await discoverPresence(project, broker);
+		client = discovered.client;
+		for (const card of discovered.cards.filter((item) => instances.has(item.instance) && item.status !== "offline")) {
+			await client.publishAsync(`pi/${project}/agents/${card.instance}/commands`, JSON.stringify({
+				type: "reload_prepare",
+				requested_by_instance: "yano-cli",
+				requested_by_role: "operator",
+				reason: "yano update --reload: raggiungere un safe point prima dell\'aggiornamento",
+				timestamp: new Date().toISOString(),
+			}), { qos: 1 });
+		}
+	} finally {
+		if (client) { try { await client.endAsync(); } catch { /* best effort */ } }
+	}
+	const ready = await waitForPresenceCondition({
+		project,
+		broker,
+		instances,
+		timeoutMs,
+		predicate: (selected, expected) => [...expected].every((instance) => selected.some((card) => card.instance === instance && card.reload_requested === true && card.reload_ready === true)),
+	});
+	if (!ready.ok) {
+		const pending = ready.cards.filter((card) => !card.reload_ready).map((card) => card.instance);
+		let cancelClient = null;
+		try {
+			const discovered = await discoverPresence(project, broker);
+			cancelClient = discovered.client;
+			for (const card of discovered.cards.filter((item) => instances.has(item.instance) && item.status !== "offline")) {
+				await cancelClient.publishAsync(`pi/${project}/agents/${card.instance}/commands`, JSON.stringify({
+					type: "reload_cancel",
+					requested_by_instance: "yano-cli",
+					requested_by_role: "operator",
+					reason: "safe point non raggiunto: barriera reload annullata senza fermare gli agenti",
+					timestamp: new Date().toISOString(),
+				}), { qos: 1 });
+			}
+		} catch { /* best effort: the original timeout remains the actionable error */ }
+		finally { if (cancelClient) { try { await cancelClient.endAsync(); } catch { /* best effort */ } } }
+		throw new Error(`safe point non raggiunto entro ${timeoutMs} ms dagli agenti: ${pending.join(", ") || [...instances].join(", ")}. Usa --force solo se accetti di interrompere il lavoro corrente.`);
+	}
+	return { prepared: [...instances], forced: false, cards: ready.cards };
+}
+
+async function waitForOffline({ project, broker, instances, timeoutMs }) {
+	if (!instances.size) return { ok: true, cards: [] };
+	return waitForPresenceCondition({
+		project,
+		broker,
+		instances,
+		timeoutMs,
+		predicate: (selected) => selected.every((card) => card.status === "offline"),
+	});
+}
+
+function writeReloadUpdate(snapshotResults, updateResult, state) {
+	for (const result of snapshotResults) {
+		try {
+			fs.writeFileSync(path.join(result.directory, "reload-update.json"), `${JSON.stringify({
+				updated_at: new Date().toISOString(),
+				state,
+				update: safeJson(updateResult),
+			}, null, 2)}\n`, { mode: 0o600 });
+		} catch { /* snapshot is already durable; reporting is best effort */ }
+	}
+}
+
+/**
+ * Controlled update orchestration. The update callback is deliberately
+ * injected so this module owns the pause/snapshot/restart transaction without
+ * importing the updater back (which would create a circular dependency).
+ */
+export async function runControlledReload({ cwd, packageRoot, argv, update }) {
+	const project = projectScope(cwd, argv);
+	traceReloadEvent({ cwd, project, stage: "preflight", payload: { dry_run: has(argv, "--dry-run"), force: has(argv, "--force") } });
+	const dbPath = projectDbPath(cwd, project);
+	const dryRun = has(argv, "--dry-run");
+	const yes = has(argv, "--yes");
+	const force = has(argv, "--force");
+	const timeoutMs = Math.max(5_000, Number(value(argv, "--timeout") || 120) * 1000);
+	if (has(argv, "--all-projects")) throw new Error("yano update --reload è limitato al progetto corrente; usa un progetto per volta per evitare reload globali accidentali.");
+	if (!fs.existsSync(dbPath)) {
+		console.log(`yano update --reload: database Yano non trovato per ${project}; nessun agente/run da ricaricare${dryRun ? ", anteprima senza aggiornamento" : ", eseguo l'update normale"}.`);
+		if (dryRun) return { dryRun: true, runs: [], presence: [], reason: "database-missing" };
+		return update();
+	}
+	const db = getDb(dbPath, true);
+	const runs = db.prepare("SELECT * FROM runs WHERE status = 'active' ORDER BY created_at ASC").all();
+	db.close();
+	if (!runs.length) {
+		console.log(`yano update --reload: nessun run attivo nel progetto ${project}${dryRun ? ", anteprima senza aggiornamento" : ", eseguo l'update normale"}.`);
+		if (dryRun) return { dryRun: true, runs: [], presence: [], reason: "no-active-run" };
+		return update();
+	}
+	const herdrSnapshot = herdrJson(["api", "snapshot"]);
+	if (!herdrSnapshot && !dryRun) throw new Error("Herdr non raggiungibile: reload annullato prima di fermare gli agenti.");
+	if (!dryRun && !commandExists("herdr")) throw new Error("Herdr non trovato sul PATH: reload annullato.");
+	if (!dryRun && !herdrHasProjectWorkspace(herdrSnapshot, cwd, project)) throw new Error(`workspace Herdr del progetto "${project}" non trovato: reload annullato prima di fermare gli agenti.`);
+	let discoveryClient = null;
+	let presence = [];
+	try {
+		const discovered = await discoverPresence(project, value(argv, "--broker") || BROKER_URL);
+		discoveryClient = discovered.client;
+		presence = discovered.cards.filter((card) => card.status !== "offline");
+	} catch (error) {
+		if (!dryRun) throw new Error(`broker MQTT non raggiungibile: reload annullato (${error instanceof Error ? error.message : String(error)})`);
+	} finally {
+		if (discoveryClient) { try { await discoveryClient.endAsync(); } catch { /* best effort */ } }
+	}
+	console.log(`yano update --reload: progetto ${project}, run attivi ${runs.map((run) => run.id).join(", ")}.`);
+	console.log(`   agenti live rilevati: ${presence.map((card) => `${card.instance}(${card.status})`).join(", ") || "nessuno"}`);
+	console.log(`   piano: safe point → snapshot → update → restart Herdr → verifica versione.`);
+	if (dryRun || !yes) {
+		console.log("   nessuna modifica eseguita: aggiungi --yes per confermare (oppure --dry-run per questa anteprima). ");
+		return { dryRun: true, runs, presence, herdr: herdrInventory(herdrSnapshot) };
+	}
+	const broker = value(argv, "--broker") || BROKER_URL;
+	const startedAt = new Date().toISOString();
+	const prepared = await prepareReload({ project, broker, cards: presence, timeoutMs, force });
+	traceReloadEvent({ cwd, project, stage: "barrier", payload: { agents: prepared.prepared, forced: prepared.forced, timeout_ms: timeoutMs } });
+	const workspaceDir = resolveYanoWorkspaceDir(cwd, project);
+	const snapshotResults = [];
+	try {
+		for (const run of runs) {
+			const result = await pauseRun({
+				cwd, project, dbPath, workspaceDir, run, broker, yes: true,
+				herdrSnapshot: herdrInventory(herdrSnapshot),
+				reload: { requested_at: startedAt, forced: prepared.forced, safe_point_agents: prepared.prepared },
+				terminateAgents: snapshotResults.length === 0,
+			});
+			snapshotResults.push(result);
+		}
+		traceReloadEvent({ cwd, project, stage: "checkpoint", payload: { snapshots: snapshotResults.map((result) => result.directory) } });
+		const offline = await waitForOffline({ project, broker, instances: new Set(presence.map((card) => card.instance)), timeoutMs });
+		if (!offline.ok) throw new Error(`alcuni agenti non hanno confermato offline dopo terminate: ${offline.cards.filter((card) => card.status !== "offline").map((card) => card.instance).join(", ")}`);
+	} catch (error) {
+		writeReloadUpdate(snapshotResults, null, "paused_with_error");
+		throw error;
+	}
+	let updateResult;
+	try {
+		updateResult = await update();
+		traceReloadEvent({ cwd, project, stage: "updated", payload: { update: updateResult } });
+		writeReloadUpdate(snapshotResults, updateResult, "updated_pending_resume");
+	} catch (error) {
+		writeReloadUpdate(snapshotResults, { error: error instanceof Error ? error.message : String(error) }, "update_failed_agents_left_paused");
+		console.error(`yano update --reload: aggiornamento fallito; gli agenti restano in pausa e lo snapshot è disponibile in ${snapshotResults[0]?.directory || "temp/recovery"}.`);
+		throw error;
+	}
+	const resumeArgv = [...argv.filter((arg) => !["--dry-run", "--force", "--reload"].includes(arg)), "--yes"];
+	const resumed = await resumeRuns({ cwd, project, dbPath, runs, argv: resumeArgv });
+	traceReloadEvent({ cwd, project, stage: "resumed", payload: { agents: resumed.launched } });
+	const expectedVersion = updateResult?.newVersion || updateResult?.currentVersion || null;
+	if (expectedVersion) {
+		const deadline = Date.now() + timeoutMs;
+		const expectedInstances = new Set(resumed.agents.map((agent) => agent.instance));
+		let verified = [];
+		while (Date.now() < deadline) {
+			const records = readTraceRecords({ cwd, project, since: new Date(startedAt), limit: 100000 });
+			verified = records.filter((record) => record.type === "trace_preflight" && record.version_match === true && record.yano_runtime_version === expectedVersion && expectedInstances.has(record.instance));
+			if ([...expectedInstances].every((instance) => verified.some((record) => record.instance === instance))) break;
+			await new Promise((resolve) => setTimeout(resolve, 300));
+		}
+		const missing = [...expectedInstances].filter((instance) => !verified.some((record) => record.instance === instance));
+		if (missing.length) {
+			writeReloadUpdate(snapshotResults, { ...updateResult, missing_version_handshake: missing }, "resume_version_unverified");
+			throw new Error(`reload completato senza handshake della nuova versione per: ${missing.join(", ")}`);
+		}
+	}
+	writeReloadUpdate(snapshotResults, updateResult, "completed");
+	traceReloadEvent({ cwd, project, stage: "completed", payload: { version: expectedVersion, agents: resumed.launched.map((item) => item.instance) } });
+	console.log(`yano update --reload: completato; ${resumed.launched.length} agenti rilanciati e versione verificata (${expectedVersion || "non disponibile"}).`);
+	return { ...updateResult, resumed, snapshots: snapshotResults };
 }
 
 async function recoveryStatus({ cwd, project, argv }) {

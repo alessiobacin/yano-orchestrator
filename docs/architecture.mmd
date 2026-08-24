@@ -4,6 +4,7 @@ flowchart TD
     CLI --> INIT["init / doctor / start"]
     INIT --> HERDR_INIT["init --herdr\nHerdr workspace + root pane"]
     CLI --> OBS["status / fleet / deps / gantt / watch / trace"]
+    CLI --> RELOAD["update --reload\ncontrolled restart"]
     INIT --> PLANNER["pi planner\nrole + instance identity"]
     HERDR_INIT --> PLANNER
 
@@ -107,9 +108,15 @@ flowchart TD
         FINALIZE["finalize evidence\ncommit / tests / docs / version"]
         MERGE["worktree_finalize\nreviewed merge + push"]
         ADAPTERS["effect adapters\nWhatsApp / MQTT / external APIs"]
+        BARRIER["reload barrier\nsafe point + version handshake"]
+        SNAPSHOT["recovery snapshot\nSQLite/Git/trace/Herdr inventory"]
     end
 
     SQLITE --> WATCHDOG
+    RELOAD --> BARRIER
+    BARRIER --> SNAPSHOT
+    SNAPSHOT --> RELOAD
+    RELOAD --> FINALIZE
     SQLITE --> GATES
     GATES --> COMMANDS
     WATCHDOG --> PLANNER
@@ -123,6 +130,6 @@ flowchart TD
     classDef durable fill:#253b2b,stroke:#7ec488,color:#e5e7eb
     classDef risk fill:#3a1f1f,stroke:#e06c75,color:#e5e7eb
     class USER user
-    class CLI,INIT,OBS,PLANNER,GATES,FINALIZE,MERGE control
-    class SQLITE,WORKTREES,REPORTS,TRACE,TRACE_MEMORY,TRACE_LINKS,PROJECTIONS,TRACE_CONFIG durable
+    class CLI,INIT,OBS,PLANNER,GATES,FINALIZE,MERGE,RELOAD,BARRIER control
+    class SQLITE,WORKTREES,REPORTS,TRACE,TRACE_MEMORY,TRACE_LINKS,PROJECTIONS,TRACE_CONFIG,SNAPSHOT durable
     class WATCHDOG,ADAPTERS risk

@@ -59,6 +59,46 @@ Per collegarsi a una sessione:
 
 Usa direttamente l'interfaccia Herdr per focalizzare la tab dell'istanza.
 
+## Aggiornamento con reload controllato
+
+`yano update` aggiorna il pacchetto globale, la copia dell'estensione Pi e
+sincronizza `pi update --extensions`, ma un processo Pi già attivo continua a
+usare il codice caricato in memoria. Per applicare il nuovo codice alle
+istanze del progetto corrente usare:
+
+```bash
+yano update --reload --dry-run
+yano update --reload --yes
+```
+
+Il reload non è un hot-reload. Verifica Herdr, broker, database e run attivi,
+chiede agli agenti di raggiungere un safe point, salva snapshot con presenza
+MQTT, ticket, Git, trace, workspace/tab/pane Herdr e versione Yano, invia
+`terminate` graceful, aggiorna entrambe le copie di Yano, riusa le tab Herdr e
+riapre gli agenti mancanti tramite `resume`. Il planner viene avviato con
+`--continue` e riconcilia ticket, worktree e assegnazioni.
+
+```bash
+yano update --reload --yes --timeout 180
+yano update --reload --yes --force
+```
+
+`--timeout` è espresso in secondi e vale per safe point e verifica finale.
+`--force` salta l'attesa del safe point e va usato solo accettando la possibile
+interruzione dell'operazione corrente. Il reload è limitato al progetto
+corrente e non chiude né duplica le tab Herdr.
+
+Gli snapshot e l'esito del reload sono in:
+
+```text
+<installazione-yano>/temp/recovery/<progetto>/<run>/<timestamp>/
+```
+
+La ripresa è semantica: eventi, output dei tool, report, ticket, checkpoint e
+worktree sono ripristinabili; i token interni di una generazione LLM già
+interrotta non lo sono. In caso di errore nell'aggiornamento gli agenti restano
+in pausa e il comando indica lo snapshot da usare con `yano resume`.
+
 ## Stato e limiti
 
 ```bash

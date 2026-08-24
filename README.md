@@ -86,10 +86,21 @@ The ticket/DAG layer uses Node's built-in `node:sqlite` API, so Node 22.5 or new
 ```bash
 yano update           # reinstall the global package from the latest GitHub main
 yano update --check   # just check whether an update is available, without installing
+yano update --reload --dry-run # preview a controlled reload of this project's Herdr team
+yano update --reload --yes     # pause, update, restart and verify live instances
 yano uninstall        # remove the global installation (asks for confirmation; add --yes to skip it)
 ```
 
 `yano update` updates both places the extension can live: the global npm package (`npm install -g` against this repo's GitHub URL) and, if present, the separate clone `pi extension install` keeps under `~/.pi/agent/git/github.com/<owner>/<repo>` (a plain `git pull`). At the end it also runs `pi update --extensions`, so Pi's installed extension registry is synchronized before the next session. A failure in that final synchronization is reported clearly without hiding the successful Yano package update. `yano update --check` remains read-only and does not run any update command. `yano uninstall` removes both the same way, asking a separate confirmation for the second one.
+
+`yano update --reload --yes` is the controlled restart path for a live project:
+it waits for agent safe points, saves recovery and Herdr inventory snapshots,
+updates Yano and the Pi extension, reuses Herdr tabs, resumes missing agents
+and verifies the new runtime through the trace. It is not a JavaScript
+hot-reload and it only affects the current project. Use `--timeout <seconds>`
+to extend the safe-point/version wait or `--force` to explicitly allow an
+interrupted operation. If the update fails, agents remain paused and can be
+resumed from the saved snapshot.
 
 **Role prompts are always read live from whichever global install `pi` actually loaded — never from a per-project copy — so `yano update` alone is enough.** `yano init` no longer creates a `prompts/` folder in a scaffolded project at all; every instance simply reads `<installed-package>/prompts/<role>.md` at launch, so a `yano update` immediately takes effect for every existing project too, with no extra step.
 
@@ -149,6 +160,11 @@ If you run `pi` against a local LLM proxy instead of a cloud provider directly, 
 
 Per il percorso completo, inclusa l'inizializzazione dei log con `yano trace`,
 vedi [`docs/quick-start.md`](docs/quick-start.md).
+
+Per le procedure brevi, scegli una singola operazione nella raccolta
+[`docs/quick_guides/`](docs/quick_guides/README.md): installazione, init di
+una repository esistente, avvio con Herdr, update normale o reload, recovery,
+trace e troubleshooting.
 
 Scaffold a new project and start the planner:
 
@@ -256,7 +272,7 @@ skills-vendor/yano/               bundled trace-analysis skill plus the reviewer
 skills-vendor/awesome-copilot/    vendored chrome-devtools skill, reviewer/frontend-developer only —
                                    see VERSION.md
 mqtt/                             local Mosquitto broker config for development
-docs/                             architecture, trace reference, quick start, Mermaid diagrams and development notes
+docs/                             architecture, trace reference, quick start, quick guides, Mermaid diagrams and development notes
 .env.example                      WhatsApp, Telegram, and SendGrid notification template
 mcp.json.example                  chrome-devtools MCP server configuration template
 ```

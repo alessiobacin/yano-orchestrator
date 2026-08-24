@@ -146,6 +146,23 @@ hygiene or the coder correction loop.
 
 ## Failure and recovery
 
+### Controlled Yano reload
+
+An already-running Pi process has the extension module, tool registry, MQTT
+listeners and runtime state in memory. Replacing files on disk therefore does
+not hot-reload that process. `yano update --reload` uses a controlled state
+machine instead: preflight → reload barrier/safe point → durable snapshot →
+graceful Herdr termination → global/package-extension update → Herdr reuse and
+`--continue` resume → trace version handshake. The snapshot includes the
+project database/WAL/SHM, ticket assignments, Git/worktrees, observable trace,
+MQTT presence, and a redacted workspace/tab/pane inventory.
+
+The restart is semantic rather than token-level: observable tool calls,
+reports, checkpoints and tickets can be reconciled, while hidden model tokens
+from an interrupted generation cannot be restored. The default scope is one
+project; a failed update leaves the agents paused and the snapshot available
+for an explicit `yano resume`.
+
 - MQTT presence uses retained status plus LWT; stale peers are removed locally. Each heartbeat reconciles the agent's `busy`/`idle` status and load from SQLite ticket ownership, so a planner completing a worker's ticket cannot leave a stale `busy` card behind. Presence publishes are serialized so an older transition cannot overwrite a newer one.
 - `yano fleet` applies the same live-heartbeat rule to retained cards and does not report offline or stale agents as live; it reports their ignored-card count as a diagnostic.
 - The planner watchdog detects stalled tickets, unfinalized runs and orphaned assignments.

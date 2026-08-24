@@ -15,7 +15,7 @@
 //                        operativo per ciò che manca (Revisione 33) — delega
 //                        a scripts/doctor.mjs (runDoctor()). Girato anche in
 //                        automatico in coda a `yano init`.
-//   yano update [--check]  aggiorna l'installazione globale all'ultima
+//   yano update [--check|--reload]  aggiorna l'installazione globale all'ultima
 //                        versione del repo GitHub (Revisione 34) — delega a
 //                        scripts/update.mjs (runUpdate()).
 //   yano uninstall [--yes] rimuove l'installazione globale (Revisione 34) —
@@ -85,7 +85,7 @@ function printTopUsage() {
 			'  init [opzioni]   Scaffolda yano-orchestrator nella directory corrente (default) — `yano init --help`',
 			"  start [opzioni]  Lancia planner-01 con le skill vendorizzate mattpocock — `yano start --help`",
 			"  doctor [--json]  Verifica prerequisiti; --json restituisce un risultato machine-readable",
-			"  update [--check] Aggiorna l'installazione globale all'ultima versione della repo GitHub",
+			"  update [--check|--reload] Aggiorna Yano; --reload pausa/salva/riavvia le istanze Herdr del progetto corrente",
 			"  uninstall [--yes] Rimuove l'installazione globale",
 			'  end [opzioni]    Chiude i run "active" del progetto nella directory corrente — `yano end --help`',
 			"  copy-prompts     Copia prompts/ dal pacchetto installato nel progetto corrente, per personalizzarli",
@@ -137,7 +137,7 @@ async function main() {
 		process.exit(ok ? 0 : 1);
 	}
 	if (sub === "update") {
-		await runUpdate({ packageRoot, argv: rest });
+		await runUpdate({ packageRoot, cwd, argv: rest });
 		return;
 	}
 	if (sub === "uninstall") {

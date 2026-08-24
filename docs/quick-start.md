@@ -3,6 +3,10 @@
 Questa guida prepara un progetto nuovo, attiva il trace e porta il primo task
 fino al feedback dell'utente.
 
+Se cerchi solo i comandi per una singola operazione, usa la raccolta di
+[quick guides](./quick_guides/README.md). Questa pagina resta il percorso
+completo e ragionato dal primo avvio fino alla diagnosi del risultato.
+
 ## Prerequisiti
 
 - Node.js 22.5 o superiore;

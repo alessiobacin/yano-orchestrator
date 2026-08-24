@@ -34,6 +34,8 @@ yano trace import --project <nome> --input ./trace-bundle.json --reindex
 yano pause --project <nome> --run <id> --yes
 yano resume --project <nome> --run <id> --yes
 yano recovery status --project <nome>
+yano update --reload --dry-run
+yano update --reload --yes [--timeout <secondi>] [--force]
 ```
 
 Expected behavior:
@@ -93,6 +95,16 @@ Expected behavior:
 - `recovery status` lists available checkpoints. If a project was created with
   an older workspace layout, the command resolves its existing project
   database instead of creating a second one.
+- `yano update --reload` is the controlled restart path for applying a new
+  Yano/Pi extension version to a live project. It is scoped to the current
+  project, requires `--yes` to execute, and never performs a JavaScript
+  hot-reload inside an existing Pi process. It checks Herdr/MQTT/SQLite,
+  requests a safe point, snapshots durable state plus Herdr inventory, updates
+  both Yano installation copies, reuses Herdr tabs, resumes missing agents and
+  verifies the new runtime through `trace_preflight`. `--force` skips waiting
+  for safe points and must be treated as an explicit interruption. If update
+  fails, agents remain paused and the recovery snapshot is the source for a
+  later `yano resume`.
 
 Do not use `yano trace clear` during diagnosis. Destructive cleanup is an
 operator action and requires explicit `--yes`; preserve evidence until the
@@ -118,6 +130,17 @@ snapshot is missing, reconstruct the minimal recovery set from active ticket
 assignments and the roster, and state that the original presence snapshot was
 not available. Never call `yano end` as a substitute for pause: `end` closes a
 run and is intentionally irreversible at the orchestration layer.
+
+When applying an installation update during an active task, prefer:
+
+```text
+yano update --reload --dry-run
+yano update --reload --yes --timeout 180
+```
+
+The continuation is checkpoint-based and semantic. It can recover observable
+messages, tool results, reports, tickets and worktrees, but not hidden tokens
+from an LLM generation that was interrupted.
 
 For explicit operator cleanup, the supported forms are:
 

@@ -209,6 +209,26 @@ type TerminateEnvelope = {
 	timestamp: string;
 };
 
+// Controlled reload handshake used by `yano update --reload`. It is a
+// quiescence request, not a hot-reload: the running extension stops accepting
+// new delegated work and publishes readiness before the supervisor sends the
+// normal graceful terminate.
+type ReloadPrepareEnvelope = {
+	type: "reload_prepare";
+	requested_by_instance: string;
+	requested_by_role: string;
+	reason: string;
+	timestamp: string;
+};
+
+type ReloadCancelEnvelope = {
+	type: "reload_cancel";
+	requested_by_instance: string;
+	requested_by_role: string;
+	reason: string;
+	timestamp: string;
+};
+
 type PresenceStatus = "idle" | "busy" | "offline";
 
 interface PresenceCard {
@@ -226,6 +246,9 @@ interface PresenceCard {
 	color: string;
 	started_at: string;
 	last_heartbeat: string;
+	reload_requested?: boolean;
+	reload_ready?: boolean;
+	yano_runtime_version?: string | null;
 }
 
 interface ActivityEvent {
@@ -2579,6 +2602,15 @@ export default function (pi: ExtensionAPI) {
 	}
 	let currentCtx: ExtensionContext | null = null;
 	let currentInbound: InboundContext | null = null;
+	let reloadRequested = false;
+	function reloadReady(): boolean {
+		// Hidden model generation is not recoverable. Readiness means all
+		// observable delegated work and persisted ticket ownership are quiescent;
+		// the trace/checkpoint is the semantic continuation contract.
+		refreshActiveTicketIdsFromStorage();
+		const unresolvedReplies = [...pendingReplies.values()].some((entry) => !entry.result || entry.awaiting === true);
+		return reloadRequested && !currentInbound && !unresolvedReplies && inboundQueue.size === 0 && activeTicketIds.size === 0;
+	}
 	let mqttConnected = false;
 	let everConnected = false; // distinguishes "connecting…" (first attempt) from "reconnecting…" (dropped after being up) in the widget
 
@@ -2708,6 +2740,9 @@ export default function (pi: ExtensionAPI) {
 					color: identity.color,
 					started_at: heartbeat,
 					last_heartbeat: heartbeat,
+					reload_requested: reloadRequested,
+					reload_ready: reloadReady(),
+					yano_runtime_version: YANO_RUNTIME_PACKAGE_VERSION,
 				};
 				try {
 					await client.publishAsync(T.agentStatus(identity.instance), JSON.stringify(card), { qos: 1, retain: true });
@@ -2721,6 +2756,10 @@ export default function (pi: ExtensionAPI) {
 	function handleCommand(env: CommandEnvelope) {
 		if (typeof env.hops !== "number" || env.hops >= MAX_HOPS) {
 			pushActivity({ channel: "self", from: env.sender_instance, summary: `dropped: hop limit exceeded`, timestamp: nowIso() });
+			return;
+		}
+		if (reloadRequested) {
+			logEvent("reload_work_rejected", { assignment_id: env.assignment_id, sender_instance: env.sender_instance, reason: "reload barrier active" });
 			return;
 		}
 		if (!rememberAssignment(env.assignment_id)) return; // duplicate QoS1 delivery
@@ -2765,6 +2804,29 @@ export default function (pi: ExtensionAPI) {
 		void publishPresence("busy");
 	}
 
+	function handleReloadPrepare(env: ReloadPrepareEnvelope): void {
+		if (!identity) return;
+		reloadRequested = true;
+		logEvent("reload_prepare_received", {
+			requested_by_instance: env.requested_by_instance,
+			requested_by_role: env.requested_by_role,
+			reload_ready: reloadReady(),
+			reason: env.reason,
+		});
+		void publishPresence(computeSelfStatus());
+	}
+
+	function handleReloadCancel(env: ReloadCancelEnvelope): void {
+		if (!identity) return;
+		reloadRequested = false;
+		logEvent("reload_prepare_cancelled", {
+			requested_by_instance: env.requested_by_instance,
+			requested_by_role: env.requested_by_role,
+			reason: env.reason,
+		});
+		void publishPresence(computeSelfStatus());
+	}
+
 	function handleResponse(env: ResponseEnvelope) {
 		const entry = pendingReplies.get(env.assignment_id);
 		if (!entry) {
@@ -2777,6 +2839,7 @@ export default function (pi: ExtensionAPI) {
 		if (entry.timer) clearTimeout(entry.timer);
 		entry.resolve(entry.result);
 		scheduleEviction(env.assignment_id);
+		if (reloadRequested) void publishPresence(computeSelfStatus());
 
 		// Revisione 30: a real incident showed this reply landing while the
 		// sender's own turn had long since ended (agent_send was fire-and-forget,
@@ -3080,8 +3143,10 @@ export default function (pi: ExtensionAPI) {
 			if (!identity || !T) return;
 			if (topicStr === T.agentCommands(identity.instance)) {
 				try {
-					const env = JSON.parse(payload.toString("utf-8")) as CommandEnvelope | TerminateEnvelope;
+					const env = JSON.parse(payload.toString("utf-8")) as CommandEnvelope | TerminateEnvelope | ReloadPrepareEnvelope | ReloadCancelEnvelope;
 					if (env.type === "command") handleCommand(env);
+					else if (env.type === "reload_prepare") handleReloadPrepare(env);
+					else if (env.type === "reload_cancel") handleReloadCancel(env);
 					else if (env.type === "terminate") handleTerminate(env);
 				} catch { /* ignore malformed */ }
 				return;

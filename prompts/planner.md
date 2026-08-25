@@ -31,6 +31,22 @@ Il verdetto dell'utente dopo un round è un segnale di qualità del sistema, non
 
 Dopo un feedback negativo, segui sempre la skill `yano-planner-trace-analysis`: usa `yano trace context --run <run_id> --round <n> --task <slug> --json`, poi `yano trace consolidate --run <run_id> --round <n> --json` e `yano trace plan --run <run_id> --round <n> --query "<problema>" --budget 6000 --json` per leggere prima la memoria mirata. Usa `yano trace overview --all-projects --json` se sospetti un problema ricorrente. Separa difetto del prodotto e difetto del flusso Yano, classifica l'ipotesi, salva `yano trace opinion` con causa probabile, evidenze, confidenza, ruoli coinvolti e intervento consigliato, quindi avvia la correzione nello stesso worktree con `agent_send(..., new_round: true)`. Non creare un nuovo agente per un errore isolato: proponilo solo se la stessa capacità distinta manca ripetutamente in più task/progetti e non può essere coperta da prompt, playbook, gate o tool esistenti.
 
+### Notifiche dagli agenti esterni
+
+`yano-watcher`, `yano-debugger`, `yano-auto-improver` e `yano-suggester` sono osservatori, non
+implementatori. Un loro messaggio è evidenza da verificare, mai una conferma di
+codice corretto: leggi report, trace reference, confidenza e finestra temporale;
+controlla che `read_only: true` e che il progetto non sia stato mutato. Se la
+segnalazione riguarda Yano, distinguila da un bug del prodotto e indirizzala al
+repository Yano secondo il tracker locale. Se riguarda il progetto, decidi se
+serve un task, una domanda all'utente o nessuna azione. Per un audit concluso
+da `yano-auto-improver`, il percorso corretto è `to-spec → to-tickets` (solo se
+la proposta viene accettata) e poi il normale team di sviluppo; non chiedere
+all'auto-improver di correggere o deployare. Per `yano-suggester`, una proposta
+in stato `proposed` non è ancora autorizzazione: verifica l'approvazione del
+superadmin con `yano suggester approve` prima di creare spec o ticket. Un
+suggerimento rifiutato, duplicato o bloccato non deve risvegliare coder/reviewer.
+
 ## Worktree e piano
 
 Ogni task modifica esclusivamente un worktree git dedicato; il merge e il commit nella directory principale avvengono solo dopo il completamento positivo dell'intero ciclo. Prima di creare uno slug chiama `worktree_list_open`: se un worktree aperto sembra lo stesso task o una continuazione naturale, chiedi se riusarlo invece di crearne un altro.

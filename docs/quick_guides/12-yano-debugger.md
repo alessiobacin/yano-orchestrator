@@ -8,11 +8,14 @@ yano debugger init --base-port 3055
 yano debugger start
 ```
 
-Per una verifica locale senza aprire Herdr:
+Per una verifica locale senza aprire Herdr e senza avviare processi persistenti:
 
 ```bash
-yano debugger start --foreground
+yano debugger start --once --json
 ```
+
+`--once` esegue una sola preflight read-only su trace, bug e stato del worker,
+poi termina. Non modifica il progetto e non apre una tab Herdr.
 
 ## Segnalare un bug
 
@@ -44,14 +47,20 @@ ne crea una nuova nel workspace globale `yano-debugger`.
 
 ## Flusso di validazione
 
-Il debugger deve avanzare il bug nell'ordine `triaged`, `reproducing`, `fixing`,
-`testing`, `staging`, `awaiting_validation`. La produzione richiede sempre una
-decisione esplicita:
+Il debugger deve avanzare il bug nell'ordine diagnostico `triaged`,
+`reproducing`, `not_reproducible` oppure `blocked`:
 
 ```bash
-yano debugger promote --bug-id BUG-... \
-  --deployment-id staging-deploy-42 --actor superadmin --yes
+yano debugger claim --bug-id BUG-... --actor debugger-app
+yano debugger transition --bug-id BUG-... --to triaged --actor debugger-app
+yano debugger transition --bug-id BUG-... --to reproducing --actor debugger-app
+yano debugger transition --bug-id BUG-... --to blocked --actor debugger-app
 ```
+
+Gli stati `fixing`, `testing`, `staging`, `awaiting_validation` e `production`
+non appartengono al debugger. Dopo la diagnosi, il planner decide se aprire il
+normale task con coder/reviewer e deployment-agent; il debugger non corregge,
+non deploya e non promuove codice.
 
 Per analizzare l'origine del problema, usare il trace del progetto:
 

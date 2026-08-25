@@ -38,6 +38,8 @@
 //   yano watch              watcher dei ticket stalled
 //   yano trace              attiva, consulta, indicizza e cancella il tracing globale
 //   yano debugger           registra e gestisce bug applicativi con un worker Herdr esterno
+//   yano auto-improve       esegue audit periodici read-only e inoltra report al planner
+//   yano suggester          raccoglie proposte utenti read-only e le inoltra dopo approvazione
 //
 // Installazione: `npm install -g <repo>` (o `npm link` in locale, per lo
 // sviluppo di questo pacchetto stesso) espone `yano` sul PATH — campo "bin" di
@@ -66,6 +68,8 @@ import { runGantt } from "../scripts/gantt-server.mjs";
 import { runWatch } from "../scripts/watch-stalls.mjs";
 import { runTrace } from "../scripts/yano-trace.mjs";
 import { runYanoDebugger } from "../scripts/yano-debugger.mjs";
+import { runYanoAutoImprove } from "../scripts/yano-auto-improver.mjs";
+import { runYanoSuggester } from "../scripts/yano-suggester.mjs";
 import { runRecovery } from "../scripts/yano-recovery.mjs";
 import { applyGlobalConfig, runYanoConfig } from "../scripts/yano-config.mjs";
 
@@ -103,6 +107,8 @@ function printTopUsage() {
 			"  watch [opzioni]  Osserva stall e segnala falle Yano ( --once | --project-root | --lookback-ms | --interval-ms )",
 			"  trace [opzioni]  Attiva/disattiva, cerca e cancella il tracing globale — `yano trace --help`",
 			"  debugger [opzioni] Gestisce bug applicativi e worker esterni — `yano debugger --help`",
+			"  auto-improve [opzioni] Audit periodici read-only e report al planner — `yano auto-improve --help`",
+			"  suggester [opzioni]  Suggerimenti utenti read-only e gate superadmin — `yano suggester --help`",
 			"  config [opzioni] Gestisce la configurazione globale utente — `yano config --help`",
 			"  pause [opzioni]  Salva uno snapshot non distruttivo e mette in pausa i run",
 			"  resume [opzioni] Ripristina uno snapshot e riapre gli agenti mancanti",
@@ -184,6 +190,14 @@ async function main() {
 	}
 	if (sub === "debugger") {
 		await runYanoDebugger({ argv: rest });
+		return;
+	}
+	if (sub === "auto-improve") {
+		await runYanoAutoImprove({ argv: rest });
+		return;
+	}
+	if (sub === "suggester") {
+		await runYanoSuggester({ argv: rest });
 		return;
 	}
 	if (sub === "config") {

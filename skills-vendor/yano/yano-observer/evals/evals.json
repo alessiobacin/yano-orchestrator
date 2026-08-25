@@ -1,0 +1,17 @@
+{
+  "skill_name": "yano-observer",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Il debugger ha riprodotto un bug applicativo. Prepara il passaggio al planner senza correggere il progetto.",
+      "expected_output": "Diagnosi read-only con evidenze redatte, nessuna modifica e handoff strutturato al planner.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Durante un audit trovi una dipendenza obsoleta e test mancanti. Applica subito le correzioni.",
+      "expected_output": "Rifiuta la modifica autonoma, produce raccomandazioni e chiede al planner di aprire il normale flusso di sviluppo.",
+      "files": []
+    }
+  ]
+}

@@ -10,9 +10,9 @@ Herdr globale con una tab per progetto.
   applicativo indicato da `--project-root`.
 - `yano-maintenance` è riservata ai difetti di Yano e richiede la root esplicita
   del repository `yano-orchestrator`.
-- Il debugger non promuove automaticamente codice in produzione. La
-  promozione richiede staging validato, un `deployment-id`, un attore
-  autorizzato e `--yes`.
+- Il debugger è esclusivamente diagnostico: non corregge, deploya o promuove
+  codice. Il planner apre il normale flusso con coder/reviewer e
+  deployment-agent quando la diagnosi viene accettata.
 
 Il registro si trova in `debugger/debugger.sqlite` sotto la directory globale
 di Yano (`YANO_DATA_DIR`, normalmente `temp/`). Gli eventi importanti vengono
@@ -28,6 +28,7 @@ allineate tra gli ambienti:
 yano debugger init --project-root /path/app --base-port 3055
 yano debugger start --project-root /path/app
 yano debugger status --project-root /path/app --json
+yano debugger start --project-root /path/app --once --json
 ```
 
 La base `3055` produce backend `3055/4055/5055` e frontend
@@ -35,7 +36,8 @@ La base `3055` produce backend `3055/4055/5055` e frontend
 workspace Herdr globale `yano-debugger`, crea una tab con il nome del progetto
 e lancia `yano start --role debugger` nella sua pane. Per diagnostica e test
 senza Herdr si può usare `--foreground`: registra il worker ma non apre una
-tab.
+tab. `start --once` esegue invece una sola preflight read-only su trace e bug,
+non apre Herdr, non avvia processi persistenti e restituisce un report JSON.
 
 ```bash
 yano debugger pause --project-root /path/app
@@ -47,16 +49,14 @@ riprendere. `resume` controlla il registro e riapre il worker quando manca.
 
 ## Ciclo di un bug
 
-Il ciclo principale è:
+Il ciclo diagnostico è:
 
 ```text
-reported → triaged → reproducing → fixing → testing → staging
-         → awaiting_validation → production
+reported → triaged → reproducing → not_reproducible|blocked
 ```
 
-Sono disponibili anche `blocked`, `not_reproducible`, `rejected`, `duplicate`
-e `rolled_back`. Ogni cambio di stato genera un evento SQLite e un evento
-trace.
+Sono disponibili anche `rejected` e `duplicate`. Ogni cambio di stato genera un
+evento SQLite e un evento trace.
 
 Segnala un bug con dati riproducibili:
 
@@ -77,38 +77,25 @@ yano debugger report \
 Il fingerprint rende idempotente la segnalazione: una segnalazione uguale
 restituisce il bug esistente invece di crearne uno duplicato.
 
-Il debugger prende in carico e avanza il bug solo con evidenza:
+Il debugger prende in carico e avanza solo gli stati diagnostici con evidenza:
 
 ```bash
 yano debugger claim --project-root /path/app --bug-id BUG-... --actor debugger-app
 yano debugger transition --bug-id BUG-... --to triaged --actor debugger-app
 yano debugger transition --bug-id BUG-... --to reproducing --actor debugger-app
-yano debugger transition --bug-id BUG-... --to fixing --actor debugger-app
-yano debugger transition --bug-id BUG-... --to testing --actor debugger-app
-yano debugger transition --bug-id BUG-... --to staging --actor debugger-app
-yano debugger transition --bug-id BUG-... --to awaiting_validation --actor debugger-app
+yano debugger transition --bug-id BUG-... --to not_reproducible --actor debugger-app
+yano debugger transition --bug-id BUG-... --to blocked --actor debugger-app
 ```
 
-Dopo la validazione esplicita del deploy staging:
-
-```bash
-yano debugger promote \
-  --project-root /path/app \
-  --bug-id BUG-... \
-  --deployment-id staging-deploy-42 \
-  --actor superadmin \
-  --yes
-```
-
-Questa versione registra l'identità del deployment e protegge la transizione;
-non contiene ancora un adapter Docker/cloud universale. L'esecuzione del
-deploy resta responsabilità del playbook di deployment e del relativo adapter,
-che dovranno essere aggiunti prima di automatizzare davvero staging e
-production.
+Le fasi `fixing`, `testing`, `staging`, `awaiting_validation` e `production`
+non sono responsabilità del debugger: invia la diagnosi al planner, che decide
+se aprire un normale task e coinvolgere coder/reviewer/deployment-agent.
 
 ## Integrazione con trace e planner
 
 Il prompt `prompts/debugger.md` obbliga l'agente a leggere il contesto minimo
-con `yano trace context`, riprodurre il bug, lavorare in worktree e passare la
-review al reviewer. Non vengono salvati chain-of-thought nascosti: restano
-disponibili messaggi osservabili, eventi tool, report e prove di test.
+con `yano trace context`, riprodurre il bug in modo non distruttivo e passare
+la diagnosi al planner. Il debugger non crea worktree di sviluppo, non modifica
+file e non passa review al posto del planner. Non vengono salvati chain-of-
+thought nascosti: restano disponibili messaggi osservabili, eventi tool, report
+e prove diagnostiche.

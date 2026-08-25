@@ -137,13 +137,60 @@ progetto per consentire la diagnosi contestuale. La modalità `project` è
 separata da `yano-maintenance`, che può puntare solo al repository
 `yano-orchestrator`.
 
-Il lifecycle applicativo è `reported → triaged → reproducing → fixing →
-testing → staging → awaiting_validation → production`. L'ultima transizione è
-protetta da `--yes`, attore autorizzato e `--deployment-id`; questa versione
-non esegue un deploy Docker/cloud implicito, ma registra il deployment staging
-validato. Le porte vengono assegnate con la stessa base nei tre ambienti:
+Il debugger esterno è esclusivamente diagnostico: il suo lifecycle è
+`reported → triaged → reproducing → not_reproducible|blocked`. Legge trace,
+log, stato Git e superfici applicative osservabili, ma non modifica codice,
+test, configurazioni, worktree o deployment. Un report del debugger viene
+consegnato al planner, che decide se aprire un normale task di sviluppo e
+delegarlo a coder/reviewer/deployment-agent. Le vecchie transizioni
+`fixing/testing/staging/production` non appartengono più al debugger.
+
+Le porte vengono assegnate con la stessa base nei tre ambienti:
 backend `3000–3999`, `4000–4999`, `5000–5999`; frontend `6000–6999`,
 `7000–7999`, `8000–8999`.
+Per una verifica bounded e read-only è disponibile
+`yano debugger start --project-root <dir> --once`; non apre Herdr e non avvia
+processi persistenti.
+
+### Global `yano-auto-improver`
+
+`yano auto-improve` registra un progetto nel database globale
+`temp/auto-improver/auto-improver.sqlite`, crea audit periodici (per default
+ogni `5d`) e avvia, tramite Herdr, una tab per progetto nel workspace globale
+`yano-auto-improver`. Ogni audit raccoglie un evidence pack limitato con
+manifest, Git, trace/semantic retrieval, test/lint/build disponibili, bug e
+feedback; i report vivono soltanto nella directory globale `temp/`.
+
+L'auto-improver è read-only come tutti gli agenti esterni: non modifica il
+progetto osservato, non crea worktree, non fa commit, non installa dipendenze,
+non apre ticket operativi e non esegue deploy. Al termine invia report e
+raccomandazioni al planner via MQTT e, se configurati, all'utente via Telegram,
+WhatsApp e SendGrid. Il planner classifica ogni proposta e decide se chiedere
+conferma o avviare il normale flusso `to-spec → to-tickets → coder/reviewer`.
+Comandi principali: `init`, `start`, `run`, `status`, `reports`, `pause`,
+`resume`, `stop` e `complete`; `--dry-run` permette di verificare la
+composizione del worker senza aprire Herdr. `yano auto-improve run|start
+--once` esegue un solo audit e non avvia lo scheduler detached.
+
+### Global `yano-suggester`
+
+`yano suggester` è un osservatore globale read-only. Registra i suggerimenti in
+`temp/suggester/suggester.sqlite`, conserva evidence pack e report sotto
+`temp/suggester/` e usa il workspace Herdr `yano-suggester`, con una tab per
+progetto. La v1 offre intake CLI, redazione di segreti, fingerprint esatto,
+analisi bounded e lifecycle `received → analyzing → awaiting_approval →
+accepted|rejected`.
+
+Una proposta resta in attesa del superadmin: `approve` è il solo passaggio che
+può notificare il planner via MQTT e canali configurati. Il planner decide se
+chiedere chiarimenti o avviare `to-spec → to-tickets`; il suggester non modifica
+codice, test, dati, configurazioni, ticket operativi o deployment. FAB/HTTP,
+auth, rate limiting e deduplicazione semantica sono roadmap, non capacità v1.
+
+La distinzione tra v1 e sviluppi successivi di tutti gli agenti esterni è
+registrata in [`docs/agents/external-agents-roadmap.md`](agents/external-agents-roadmap.md).
+`yano suggester start|submit --once` consente un test bounded; `--dry-run`
+evita l'apertura del worker Herdr.
 
 ### Deployment agent
 

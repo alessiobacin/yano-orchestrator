@@ -18,6 +18,8 @@ pensate per chi usa Yano per la prima volta e lavora dalla root del progetto.
 11. [Configurazione globale](./11-configurazione-globale.md)
 12. [Yano Debugger](./12-yano-debugger.md)
 13. [Deployment agent](./13-deployment-agent.md)
+14. [Auto-improve periodico](./14-auto-improve.md)
+15. [Yano suggester](./15-yano-suggester.md)
 
 Per una spiegazione completa del primo task, consulta anche la
 [quick start estesa](../quick-start.md). Per il comportamento dettagliato del

@@ -79,15 +79,34 @@ flowchart TD
 
     subgraph YANO_WATCHER["Global watcher boundary"]
         WATCHER["yano-watcher\nzero-token polling + classifier"]
+        WATCHER_ONCE["--once\nsingle bounded scan"]
         YANO_TICKETS["yano-orchestrator/.scratch/optimize-orchestrator/issues\nMarkdown maintenance tickets"]
         TELEGRAM["Telegram Bot API\nYano .env or yano config"]
     end
 
     subgraph YANO_DEBUGGER["Global debugger boundary"]
         DEBUGGER["yano-debugger\nbug intake + lifecycle"]
+        DEBUG_ONCE["start --once\nread-only preflight"]
         DEBUG_DB["debugger.sqlite\nprojects / bugs / events"]
         DEBUG_WS["Herdr workspace\nyano-debugger\none tab per project"]
         ENVIRONMENTS["dev / staging / production\npaired port ranges"]
+    end
+
+    subgraph YANO_AUTO_IMPROVER["Global auto-improver boundary"]
+        AUTO_IMPROVER["yano-auto-improver\nperiodic read-only audit"]
+        AUTO_ONCE["run|start --once\none audit, no scheduler"]
+        AUTO_DB["auto-improver.sqlite\nprojects / audits / recommendations"]
+        AUTO_WS["Herdr workspace\nyano-auto-improver\none tab per project"]
+        AUTO_REPORTS["temp/auto-improver\nevidence + reports"]
+    end
+
+    subgraph YANO_SUGGESTER["Global suggester boundary"]
+        SUGGESTER["yano-suggester\nread-only intake + proposal"]
+        SUGGESTER_ONCE["start|submit --once\nbounded test"]
+        SUGGESTER_DB["suggester.sqlite\nprojects / suggestions / approvals"]
+        SUGGESTER_WS["Herdr workspace\nyano-suggester\none tab per project"]
+        SUGGESTER_REPORTS["temp/suggester\nevidence + reports"]
+        SUGGESTER_GATE["superadmin approval gate"]
     end
 
     subgraph DELIVERY_AGENT["Deployment boundary"]
@@ -124,12 +143,34 @@ flowchart TD
     SQLITE --> WATCHER
     WATCHER --> YANO_TICKETS
     WATCHER --> TELEGRAM
+    CLI --> WATCHER_ONCE
+    WATCHER_ONCE --> WATCHER
     CLI --> DEBUGGER
+    CLI --> DEBUG_ONCE
+    DEBUG_ONCE --> DEBUGGER
     DEBUGGER --> DEBUG_DB
     DEBUGGER --> DEBUG_WS
     DEBUGGER --> ENVIRONMENTS
     DEBUG_DB --> TRACE
     DEBUGGER --> PLANNER
+    CLI --> AUTO_IMPROVER
+    CLI --> AUTO_ONCE
+    AUTO_ONCE --> AUTO_IMPROVER
+    AUTO_IMPROVER --> AUTO_DB
+    AUTO_IMPROVER --> AUTO_WS
+    AUTO_IMPROVER --> AUTO_REPORTS
+    AUTO_IMPROVER --> TRACE
+    AUTO_DB --> PLANNER
+    AUTO_REPORTS --> PLANNER
+    CLI --> SUGGESTER
+    CLI --> SUGGESTER_ONCE
+    SUGGESTER_ONCE --> SUGGESTER
+    SUGGESTER --> SUGGESTER_DB
+    SUGGESTER --> SUGGESTER_WS
+    SUGGESTER --> SUGGESTER_REPORTS
+    SUGGESTER_DB --> SUGGESTER_GATE
+    SUGGESTER_REPORTS --> SUGGESTER_GATE
+    SUGGESTER_GATE --> PLANNER
     PLANNER --> DEPLOY_AGENT
     DEPLOY_AGENT --> DEPLOY_PLAYBOOK
     DEPLOY_AGENT --> DEV_SOURCE
@@ -168,5 +209,5 @@ flowchart TD
     classDef risk fill:#3a1f1f,stroke:#e06c75,color:#e5e7eb
     class USER user
     class CLI,INIT,OBS,PLANNER,GATES,FINALIZE,MERGE,RELOAD,BARRIER,DEBUGGER,DEPLOY_AGENT control
-    class SQLITE,WORKTREES,REPORTS,TRACE,TRACE_MEMORY,TRACE_LINKS,PROJECTIONS,TRACE_CONFIG,SNAPSHOT,DEBUG_DB,DEBUG_WS,ENVIRONMENTS,DEPLOY_PLAYBOOK,DEV_SOURCE,DOCKER_ENVS,RELEASE durable
+    class SQLITE,WORKTREES,REPORTS,TRACE,TRACE_MEMORY,TRACE_LINKS,PROJECTIONS,TRACE_CONFIG,SNAPSHOT,DEBUG_DB,DEBUG_WS,ENVIRONMENTS,AUTO_DB,AUTO_WS,AUTO_REPORTS,SUGGESTER_DB,SUGGESTER_WS,SUGGESTER_REPORTS,SUGGESTER_GATE,DEPLOY_PLAYBOOK,DEV_SOURCE,DOCKER_ENVS,RELEASE durable
     class WATCHDOG,ADAPTERS,WATCHER risk

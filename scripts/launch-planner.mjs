@@ -101,6 +101,12 @@ const YANO_REVIEW_SKILL_ROLES = ["reviewer", "frontend-reviewer"];
 // reviewers cannot accidentally treat a coding task as a release operation.
 const YANO_DEPLOYMENT_SKILL = "yano-deployment";
 const YANO_DEPLOYMENT_SKILL_ROLES = ["deployment-agent"];
+const YANO_OBSERVER_SKILL = "yano-observer";
+const YANO_OBSERVER_SKILL_ROLES = ["debugger", "auto-improver", "suggester"];
+const YANO_AUTO_IMPROVEMENT_SKILL = "yano-auto-improvement";
+const YANO_AUTO_IMPROVEMENT_SKILL_ROLES = ["auto-improver"];
+const YANO_SUGGESTER_SKILL = "yano-suggester";
+const YANO_SUGGESTER_SKILL_ROLES = ["suggester"];
 
 // Revisione 49 — skill vendorizzata destinata SOLO ai ruoli reviewer e
 // frontend-developer (vedi skills-vendor/awesome-copilot/VERSION.md).
@@ -142,6 +148,18 @@ function resolveYanoReviewSkillPath(packageRoot) {
 
 function resolveYanoDeploymentSkillPath(packageRoot) {
 	return resolveVendoredSkillPaths(packageRoot, "yano", [YANO_DEPLOYMENT_SKILL])[0];
+}
+
+function resolveYanoObserverSkillPath(packageRoot) {
+	return resolveVendoredSkillPaths(packageRoot, "yano", [YANO_OBSERVER_SKILL])[0];
+}
+
+function resolveYanoAutoImprovementSkillPath(packageRoot) {
+	return resolveVendoredSkillPaths(packageRoot, "yano", [YANO_AUTO_IMPROVEMENT_SKILL])[0];
+}
+
+function resolveYanoSuggesterSkillPath(packageRoot) {
+	return resolveVendoredSkillPaths(packageRoot, "yano", [YANO_SUGGESTER_SKILL])[0];
 }
 
 function parseArgs(argv) {
@@ -324,8 +342,17 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 	const yanoDeploymentSkillFlags = YANO_DEPLOYMENT_SKILL_ROLES.includes(role)
 		? ["--skill", resolveYanoDeploymentSkillPath(packageRoot)]
 		: [];
+	const yanoObserverSkillFlags = YANO_OBSERVER_SKILL_ROLES.includes(role)
+		? ["--skill", resolveYanoObserverSkillPath(packageRoot)]
+		: [];
+	const yanoAutoImprovementSkillFlags = YANO_AUTO_IMPROVEMENT_SKILL_ROLES.includes(role)
+		? ["--skill", resolveYanoAutoImprovementSkillPath(packageRoot)]
+		: [];
+	const yanoSuggesterSkillFlags = YANO_SUGGESTER_SKILL_ROLES.includes(role)
+		? ["--skill", resolveYanoSuggesterSkillPath(packageRoot)]
+		: [];
 	const yanoTraceSkillFlags = ["--skill", resolveYanoPlannerSkillPath(packageRoot)];
-	const skillFlags = [...mattPocockSkillFlags, ...yanoTraceSkillFlags, ...chromeDevToolsSkillFlags, ...yanoReviewSkillFlags, ...yanoDeploymentSkillFlags];
+	const skillFlags = [...mattPocockSkillFlags, ...yanoTraceSkillFlags, ...chromeDevToolsSkillFlags, ...yanoReviewSkillFlags, ...yanoDeploymentSkillFlags, ...yanoObserverSkillFlags, ...yanoAutoImprovementSkillFlags, ...yanoSuggesterSkillFlags];
 	// -e esplicito SOLO in sviluppo del pacchetto stesso (looksLikePackageRepo)
 	// — mai per una copia locale residua in un progetto scaffoldato, anche se
 	// esiste sul disco (vedi Revisione 38 sopra): l'estensione installata

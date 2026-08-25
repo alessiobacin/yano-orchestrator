@@ -1,0 +1,487 @@
+#!/usr/bin/env node
+
+// Scheduled, read-only project audits. The LLM worker runs in Herdr; this
+// module owns only durable scheduling, bounded evidence collection, report
+// storage and planner/notification handoff. It never writes to the project.
+
+import crypto from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { spawn, spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
+import mqtt from "mqtt";
+import { appendRawTraceRecord, buildTraceOverview, projectKey, readTraceRecords, resolveTraceProject, traceRoot } from "./yano-trace-storage.mjs";
+import { planTraceRetrieval } from "./yano-trace-index.mjs";
+import { resolveYanoConfig } from "./yano-config.mjs";
+
+const require = createRequire(import.meta.url);
+const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const SCRIPT_PATH = fileURLToPath(import.meta.url);
+const WORKSPACE_LABEL = "yano-auto-improver";
+const MAX_OUTPUT = 12000;
+const MAX_TRACE_RECORDS = 120;
+const DEFAULT_INTERVAL_MS = 5 * 24 * 60 * 60 * 1000;
+const VALID_NOTIFY = new Set(["auto", "none", "telegram", "whatsapp", "email"]);
+
+function now() { return new Date().toISOString(); }
+function value(argv, flag) { const index = argv.indexOf(flag); return index >= 0 ? argv[index + 1] : null; }
+function has(argv, flag) { return argv.includes(flag); }
+function json(valueToParse, fallback) { try { return JSON.parse(valueToParse); } catch { return fallback; } }
+
+function requireSqlite() {
+	try { return process.getBuiltinModule?.("node:sqlite") || require("node:sqlite"); }
+	catch (error) { throw new Error(`yano auto-improve: node:sqlite non disponibile (${error instanceof Error ? error.message : String(error)}); serve Node >=22.5`); }
+}
+
+function parseDuration(raw) {
+	if (raw === null || raw === undefined || raw === "") return DEFAULT_INTERVAL_MS;
+	if (/^\d+$/.test(String(raw))) return Math.max(60_000, Number(raw));
+	const match = String(raw).trim().match(/^([0-9]+(?:\.[0-9]+)?)(m|h|d|w)$/i);
+	if (!match) throw new Error(`yano auto-improve: intervallo non valido "${raw}"; usa 30m, 12h, 5d o 2w`);
+	const factor = { m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000 }[match[2].toLowerCase()];
+	return Math.max(60_000, Math.round(Number(match[1]) * factor));
+}
+
+function validateNotify(raw) {
+	const mode = raw || "auto";
+	if (mode.split(",").some((item) => !VALID_NOTIFY.has(item.trim()))) throw new Error(`yano auto-improve: --notify deve essere auto, none, telegram, whatsapp, email o una lista separata da virgole`);
+	return mode;
+}
+
+function dbPath() { return path.join(traceRoot(), "auto-improver", "auto-improver.sqlite"); }
+function dataRoot() { return path.join(traceRoot(), "auto-improver"); }
+function projectDataRoot(projectKeyValue) { return path.join(dataRoot(), "projects", projectKeyValue); }
+
+function openDatabase() {
+	fs.mkdirSync(path.dirname(dbPath()), { recursive: true, mode: 0o700 });
+	const { DatabaseSync } = requireSqlite();
+	const db = new DatabaseSync(dbPath());
+	db.exec(`
+		PRAGMA journal_mode = WAL;
+		CREATE TABLE IF NOT EXISTS auto_projects (
+			project_key TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			root TEXT NOT NULL UNIQUE,
+			interval_ms INTEGER NOT NULL,
+			notify TEXT NOT NULL DEFAULT 'auto',
+			workspace_id TEXT,
+			worker_tab_id TEXT,
+			worker_pane_id TEXT,
+			worker_instance TEXT,
+			worker_status TEXT NOT NULL DEFAULT 'stopped',
+			last_started_at TEXT,
+			last_completed_at TEXT,
+			next_run_at TEXT,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);
+		CREATE TABLE IF NOT EXISTS auto_audits (
+			audit_id TEXT PRIMARY KEY,
+			project_key TEXT NOT NULL REFERENCES auto_projects(project_key),
+			status TEXT NOT NULL,
+			started_at TEXT NOT NULL,
+			completed_at TEXT,
+			evidence_path TEXT NOT NULL,
+			report_path TEXT,
+			summary TEXT,
+			created_at TEXT NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS auto_audits_project_idx ON auto_audits(project_key, started_at DESC);
+		CREATE TABLE IF NOT EXISTS auto_recommendations (
+			recommendation_id TEXT PRIMARY KEY,
+			audit_id TEXT NOT NULL REFERENCES auto_audits(audit_id),
+			category TEXT NOT NULL,
+			title TEXT NOT NULL,
+			priority TEXT NOT NULL,
+			confidence TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'proposed',
+			evidence_json TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		);
+		CREATE TABLE IF NOT EXISTS auto_events (
+			event_id TEXT PRIMARY KEY,
+			project_key TEXT NOT NULL,
+			audit_id TEXT,
+			type TEXT NOT NULL,
+			payload_json TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		);
+	`);
+	return db;
+}
+
+function projectInfo(projectRoot, explicitProject = null) {
+	const root = path.resolve(projectRoot || process.cwd());
+	if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) throw new Error(`yano auto-improve: project root non valida: ${root}`);
+	const name = String(explicitProject || resolveTraceProject(root)).trim();
+	if (!name) throw new Error("yano auto-improve: nome progetto vuoto");
+	return { root, name, key: projectKey(root, name) };
+}
+
+function ensureProject(db, info, { intervalMs, notify } = {}) {
+	const timestamp = now();
+	const existing = db.prepare("SELECT * FROM auto_projects WHERE project_key = ? OR root = ?").get(info.key, info.root);
+	if (existing) {
+		if (existing.project_key !== info.key) throw new Error(`yano auto-improve: root già registrata con project key ${existing.project_key}`);
+		db.prepare("UPDATE auto_projects SET name = ?, interval_ms = COALESCE(?, interval_ms), notify = COALESCE(?, notify), updated_at = ? WHERE project_key = ?")
+			.run(info.name, intervalMs || null, notify || null, timestamp, info.key);
+		return db.prepare("SELECT * FROM auto_projects WHERE project_key = ?").get(info.key);
+	}
+	db.prepare("INSERT INTO auto_projects(project_key,name,root,interval_ms,notify,created_at,updated_at) VALUES(?,?,?,?,?,?,?)")
+		.run(info.key, info.name, info.root, intervalMs || DEFAULT_INTERVAL_MS, notify || "auto", timestamp, timestamp);
+	return db.prepare("SELECT * FROM auto_projects WHERE project_key = ?").get(info.key);
+}
+
+function getProject(db, info) { return db.prepare("SELECT * FROM auto_projects WHERE project_key = ? OR root = ?").get(info.key, info.root); }
+function safeJson(value, depth = 0) {
+	if (depth > 4) return "[truncated]";
+	if (value === null || value === undefined) return value;
+	if (typeof value === "string") return value.length > 1800 ? `${value.slice(0, 1800)}…` : value;
+	if (typeof value !== "object") return value;
+	if (Array.isArray(value)) return value.slice(0, 30).map((item) => safeJson(item, depth + 1));
+	const secret = /token|password|secret|authorization|api[-_]?key|cookie|private[-_]?key|credential/i;
+	return Object.fromEntries(Object.entries(value).slice(0, 80).map(([key, item]) => [key, secret.test(key) ? "[redacted]" : safeJson(item, depth + 1)]));
+}
+
+function command(command, args, cwd, timeout = 10_000) {
+	const result = spawnSync(command, args, { cwd, encoding: "utf8", timeout, maxBuffer: MAX_OUTPUT });
+	return {
+		command: [command, ...args].join(" "),
+		exit_code: result.status,
+		timed_out: result.error?.code === "ETIMEDOUT",
+		stdout: String(result.stdout || "").slice(0, MAX_OUTPUT),
+		stderr: String(result.stderr || result.error?.message || "").slice(0, MAX_OUTPUT),
+	};
+}
+
+function readProjectManifest(root) {
+	const candidates = ["package.json", "pyproject.toml", "Cargo.toml", "go.mod", "pom.xml", "composer.json"];
+	return candidates.filter((file) => fs.existsSync(path.join(root, file))).map((file) => {
+		const full = path.join(root, file);
+		let text = "";
+		try { text = fs.readFileSync(full, "utf8").slice(0, 20_000); } catch { text = "[unreadable]"; }
+		if (file === "package.json") {
+			const parsed = json(text, {});
+			return { file, name: parsed.name || null, scripts: safeJson(parsed.scripts || {}), dependencies: Object.keys(parsed.dependencies || {}).slice(0, 100), devDependencies: Object.keys(parsed.devDependencies || {}).slice(0, 100) };
+		}
+		return { file, preview: text.replace(/(token|password|secret|key)\s*[:=].*/ig, "$1=[redacted]").slice(0, 5000) };
+	});
+}
+
+function collectEvidence(info, row, auditId) {
+	const since = row.last_completed_at ? new Date(row.last_completed_at) : null;
+	const trace = readTraceRecords({ cwd: info.root, project: info.name, since, limit: MAX_TRACE_RECORDS });
+	const overview = buildTraceOverview({ cwd: info.root, project: info.name, since, limit: MAX_TRACE_RECORDS });
+	const failures = trace.filter((record) => record.ok === false || /fail|error|reject|stall|timeout|blocked/i.test(String(record.type || ""))).slice(-40).map(safeJson);
+	const feedback = trace.filter((record) => record.record_type === "feedback" || record.type === "feedback").slice(-20).map(safeJson);
+	const packageManifest = readProjectManifest(info.root);
+	const git = {
+		branch: command("git", ["branch", "--show-current"], info.root),
+		status: command("git", ["status", "--short"], info.root),
+		recent_commits: command("git", ["log", "-n", "12", "--date=iso", "--format=%h %ad %s"], info.root),
+	};
+	const scripts = packageManifest.find((item) => item.file === "package.json")?.scripts || {};
+	const retrieval = planTraceRetrieval({ cwd: info.root, project: info.name, query: "regressioni errori feedback performance feature mancante test documentazione", limit: 12, budget: 6000 });
+	const evidence = {
+		read_only: true,
+		audit_id: auditId,
+		project: info,
+		window: { since: since?.toISOString() || null, until: now() },
+		collected_at: now(),
+		manifest: packageManifest,
+		git: safeJson(git),
+		trace: { count: trace.length, records: trace.slice(-60).map(safeJson), failures, feedback, overview: safeJson(overview) },
+		semantic_retrieval: safeJson(retrieval),
+		available_checks: { npm_scripts: Object.keys(scripts), has_tests: Boolean(scripts.test || scripts["test:e2e"] || scripts.e2e), has_lint: Boolean(scripts.lint), has_build: Boolean(scripts.build) },
+		budgets: { max_trace_records: MAX_TRACE_RECORDS, max_command_output: MAX_OUTPUT, commands_are_observational: true },
+	};
+	const dir = projectDataRoot(info.key);
+	fs.mkdirSync(path.join(dir, "evidence"), { recursive: true, mode: 0o700 });
+	const evidencePath = path.join(dir, "evidence", `${auditId}.json`);
+	fs.writeFileSync(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`, { mode: 0o600 });
+	return { evidence, evidencePath };
+}
+
+function initialRecommendations(evidence) {
+	const result = [];
+	const checks = evidence.available_checks;
+	if (!checks.has_tests) result.push({ category: "quality", title: "Aggiungere una suite di test riproducibile", priority: "high", confidence: "high", evidence: ["package.json: nessuno script test rilevato"] });
+	if (!checks.has_lint) result.push({ category: "quality", title: "Aggiungere linting automatizzato", priority: "medium", confidence: "medium", evidence: ["package.json: nessuno script lint rilevato"] });
+	if (!checks.has_build && evidence.manifest.some((item) => item.file === "package.json")) result.push({ category: "delivery", title: "Definire una build verificabile", priority: "medium", confidence: "medium", evidence: ["package.json: nessuno script build rilevato"] });
+	if (evidence.trace.failures.length) result.push({ category: "reliability", title: "Analizzare i failure signal ricorrenti del trace", priority: "high", confidence: "medium", evidence: evidence.trace.failures.slice(0, 5).map((item) => item.type || "trace failure") });
+	if (evidence.trace.feedback.some((item) => /rejected|partial|negative/i.test(String(item.status || "")))) result.push({ category: "product", title: "Rivedere i round respinti dall'utente", priority: "high", confidence: "medium", evidence: ["feedback con esito rejected/partial"] });
+	return result;
+}
+
+function writeReportSkeleton(info, auditId, evidence, recommendations) {
+	const dir = projectDataRoot(info.key);
+	fs.mkdirSync(path.join(dir, "reports"), { recursive: true, mode: 0o700 });
+	const reportPath = path.join(dir, "reports", `${auditId}.md`);
+	const lines = [
+		`# Auto-improve audit ${auditId}`,
+		"",
+		"> Audit preliminare read-only. Il report finale deve essere completato dall'agente e consegnato al planner.",
+		"",
+		`- Progetto: ${info.name}`,
+		`- Root: ${info.root}`,
+		`- Audit: ${auditId}`,
+		`- Evidence: ${path.join(dir, "evidence", `${auditId}.json`)}`,
+		"- Modifiche al progetto: nessuna",
+		"",
+		"## Raccomandazioni preliminari",
+		"",
+		...(recommendations.length ? recommendations.map((item, index) => `${index + 1}. **[${item.priority}] ${item.title}** — ${item.category}; confidenza ${item.confidence}. Evidenza: ${item.evidence.join("; ")}`) : ["Nessuna raccomandazione deterministica preliminare; completare l'analisi LLM."]),
+		"",
+		"## Evidenze da analizzare",
+		"",
+		`- Trace osservati nella finestra: ${evidence.trace.count}`,
+		`- Failure signal candidati: ${evidence.trace.failures.length}`,
+		`- Feedback osservati: ${evidence.trace.feedback.length}`,
+		`- Script test/lint/build: ${[evidence.available_checks.has_tests && "test", evidence.available_checks.has_lint && "lint", evidence.available_checks.has_build && "build"].filter(Boolean).join(", ") || "nessuno rilevato"}`,
+		"",
+		"## Handoff planner",
+		"",
+		"L'agente deve completare questo report, indicare confidenza e decisione umana richiesta, poi inviare il risultato al planner. Nessuna modifica è autorizzata.",
+		"",
+	];
+	fs.writeFileSync(reportPath, `${lines.join("\n")}\n`, { mode: 0o600 });
+	return reportPath;
+}
+
+function shellQuote(valueToQuote) {
+	return process.platform === "win32" ? `"${String(valueToQuote).replaceAll('"', '\\"')}"` : `'${String(valueToQuote).replaceAll("'", `\\'"'"'`)}'`;
+}
+
+function herdrSnapshot() {
+	const result = spawnSync("herdr", ["api", "snapshot"], { encoding: "utf8" });
+	if (result.status !== 0) return null;
+	try { const parsed = JSON.parse(result.stdout); return parsed?.result?.snapshot || parsed?.result || parsed; } catch { return null; }
+}
+
+function ensureWorkspace(snapshot, dryRun) {
+	const existing = snapshot?.workspaces?.find((item) => item.label === WORKSPACE_LABEL);
+	if (existing) return existing;
+	if (dryRun) return { workspace_id: null, label: WORKSPACE_LABEL };
+	const result = spawnSync("herdr", ["workspace", "create", "--cwd", path.join(dataRoot(), "agent-workspaces"), "--label", WORKSPACE_LABEL, "--focus"], { encoding: "utf8" });
+	if (result.status !== 0) throw new Error(`yano auto-improve: impossibile creare workspace Herdr${result.stderr ? `: ${result.stderr.trim()}` : ""}`);
+	let workspace = null;
+	try { const parsed = JSON.parse(result.stdout); workspace = parsed?.result?.workspace || parsed?.workspace; } catch { /* refresh below */ }
+	workspace ||= herdrSnapshot()?.workspaces?.find((item) => item.label === WORKSPACE_LABEL);
+	if (!workspace?.workspace_id) throw new Error("yano auto-improve: workspace Herdr creato ma senza workspace_id");
+	return workspace;
+}
+
+function launchWorker(info, row, auditId, evidencePath, reportPath, dryRun = false) {
+	const workspaceRoot = path.join(dataRoot(), "agent-workspaces");
+	fs.mkdirSync(workspaceRoot, { recursive: true, mode: 0o700 });
+	const instance = row.worker_instance || `auto-improver-${info.name}`;
+	const prompt = `Esegui l'audit auto-improve ${auditId} in modo esclusivamente read-only. Leggi evidence pack ${evidencePath} e completa il report ${reportPath}. Non modificare mai ${info.root}. Dopo aver scritto il report finale usa: yano auto-improve complete --project-root ${shellQuote(info.root)} --audit-id ${shellQuote(auditId)} --report-file ${shellQuote(reportPath)} --summary-file <file-json-nella-temp>. Invia il risultato al planner.`;
+	const commandLine = `yano start --instance ${shellQuote(instance)} --role auto-improver --project ${shellQuote(info.name)} --continue ${shellQuote(prompt)}`;
+	if (dryRun) return { workspace_id: row.workspace_id, tab_id: row.worker_tab_id, pane_id: row.worker_pane_id, instance, command: commandLine, dry_run: true };
+	const snapshot = herdrSnapshot();
+	if (!snapshot) throw new Error("yano auto-improve: Herdr non raggiungibile; avvia Herdr e riprova");
+	const workspace = ensureWorkspace(snapshot, false);
+	let refreshed = herdrSnapshot() || snapshot;
+	let tab = refreshed.tabs?.find((item) => item.workspace_id === workspace.workspace_id && item.label === info.name);
+	let pane = tab && refreshed.panes?.find((item) => item.tab_id === tab.tab_id);
+	if (!tab) {
+		const created = spawnSync("herdr", ["tab", "create", "--workspace", workspace.workspace_id, "--cwd", info.root, "--label", info.name, "--no-focus"], { encoding: "utf8" });
+		if (created.status !== 0) throw new Error(`yano auto-improve: Herdr non ha creato la tab ${info.name}${created.stderr ? `: ${created.stderr.trim()}` : ""}`);
+		refreshed = herdrSnapshot() || refreshed;
+		tab = refreshed.tabs?.find((item) => item.workspace_id === workspace.workspace_id && item.label === info.name);
+		pane = tab && refreshed.panes?.find((item) => item.tab_id === tab.tab_id);
+	}
+	if (!tab || !pane) throw new Error(`yano auto-improve: tab/pane non trovati per ${info.name}`);
+	const launched = spawnSync("herdr", ["pane", "run", pane.pane_id, `exec ${commandLine}`], { cwd: info.root, encoding: "utf8" });
+	if (launched.status !== 0) throw new Error(`yano auto-improve: avvio agente fallito${launched.stderr ? `: ${launched.stderr.trim()}` : ""}`);
+	return { workspace_id: workspace.workspace_id, tab_id: tab.tab_id, pane_id: pane.pane_id, instance, command: commandLine, dry_run: false };
+}
+
+function createAudit(db, info, row) {
+	const auditId = `AUDIT-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+	const { evidence, evidencePath } = collectEvidence(info, row, auditId);
+	const recommendations = initialRecommendations(evidence);
+	const reportPath = writeReportSkeleton(info, auditId, evidence, recommendations);
+	const timestamp = now();
+	db.prepare("INSERT INTO auto_audits(audit_id,project_key,status,started_at,evidence_path,report_path,summary,created_at) VALUES(?,?,?,?,?,?,?,?)")
+		.run(auditId, info.key, "awaiting_agent", timestamp, evidencePath, reportPath, "Audit preliminare read-only creato; in attesa del report dell'agente.", timestamp);
+	for (const recommendation of recommendations) db.prepare("INSERT INTO auto_recommendations(recommendation_id,audit_id,category,title,priority,confidence,evidence_json,created_at) VALUES(?,?,?,?,?,?,?,?)")
+		.run(`REC-${crypto.randomUUID()}`, auditId, recommendation.category, recommendation.title, recommendation.priority, recommendation.confidence, JSON.stringify(recommendation.evidence), timestamp);
+	db.prepare("UPDATE auto_projects SET last_started_at = ?, next_run_at = ?, updated_at = ? WHERE project_key = ?")
+		.run(timestamp, new Date(Date.now() + row.interval_ms).toISOString(), timestamp, info.key);
+	db.prepare("INSERT INTO auto_events(event_id,project_key,audit_id,type,payload_json,created_at) VALUES(?,?,?,?,?,?)")
+		.run(`auto-event-${crypto.randomUUID()}`, info.key, auditId, "audit_started", JSON.stringify({ read_only: true, evidence_path: evidencePath, report_path: reportPath }), timestamp);
+	return { auditId, evidence, evidencePath, reportPath, recommendations };
+}
+
+async function notifyTelegram(message, config) {
+	if (!config.TELEGRAM_BOT_TOKEN || !config.TELEGRAM_DESTINATION_CHAT_ID) return { ok: false, detail: "telegram_not_configured" };
+	const base = (config.YANO_TELEGRAM_API_URL || "https://api.telegram.org").replace(/\/$/, "");
+	try {
+		const response = await fetch(`${base}/bot${encodeURIComponent(config.TELEGRAM_BOT_TOKEN)}/sendMessage`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: config.TELEGRAM_DESTINATION_CHAT_ID, text: message, disable_web_page_preview: true }) });
+		const payload = await response.json().catch(() => null);
+		return { ok: response.ok && payload?.ok !== false, detail: response.ok ? "sent" : `http_${response.status}` };
+	} catch (error) { return { ok: false, detail: `network_${error instanceof Error ? error.message : String(error)}` }; }
+}
+
+async function notifyWhatsApp(message, config) {
+	const required = ["EVOLUTION_API_URL", "EVOLUTION_API_KEY", "EVOLUTION_INSTANCE_NAME", "DESTINATION_PHONE_NUMBER"];
+	if (required.some((key) => !config[key])) return { ok: false, detail: "whatsapp_not_configured" };
+	try {
+		const response = await fetch(`${String(config.EVOLUTION_API_URL).replace(/\/$/, "")}/message/sendText/${encodeURIComponent(config.EVOLUTION_INSTANCE_NAME)}`, { method: "POST", headers: { "Content-Type": "application/json", apikey: config.EVOLUTION_API_KEY }, body: JSON.stringify({ number: config.DESTINATION_PHONE_NUMBER, text: message }) });
+		return { ok: response.ok, detail: response.ok ? "sent" : `http_${response.status}` };
+	} catch (error) { return { ok: false, detail: `network_${error instanceof Error ? error.message : String(error)}` }; }
+}
+
+async function notifyEmail(message, config) {
+	const required = ["SENDGRID_API_KEY", "SENDGRID_FROM_EMAIL", "SENDGRID_TO_EMAIL"];
+	if (required.some((key) => !config[key])) return { ok: false, detail: "email_not_configured" };
+	try {
+		const personalizations = String(config.SENDGRID_TO_EMAIL).split(",").map((email) => ({ to: [{ email: email.trim() }] }));
+		const response = await fetch("https://api.sendgrid.com/v3/mail/send", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.SENDGRID_API_KEY}` }, body: JSON.stringify({ personalizations, from: { email: config.SENDGRID_FROM_EMAIL }, subject: config.SENDGRID_SUBJECT || "Yano auto-improve report", content: [{ type: "text/plain", value: message }] }) });
+		return { ok: response.ok, detail: response.ok ? "sent" : `http_${response.status}` };
+	} catch (error) { return { ok: false, detail: `network_${error instanceof Error ? error.message : String(error)}` }; }
+}
+
+async function notifyChannels(message, mode) {
+	const config = resolveYanoConfig({ packageRoot: PACKAGE_ROOT });
+	const selected = mode === "auto" ? ["telegram", "whatsapp", "email"] : mode === "none" ? [] : mode.split(",").map((item) => item.trim());
+	const results = {};
+	if (selected.includes("telegram")) results.telegram = await notifyTelegram(message, config);
+	if (selected.includes("whatsapp")) results.whatsapp = await notifyWhatsApp(message, config);
+	if (selected.includes("email")) results.email = await notifyEmail(message, config);
+	return results;
+}
+
+async function notifyPlanner(info, audit, summary) {
+	const broker = process.env.PI_ORCH_BROKER_URL || "mqtt://127.0.0.1:1883";
+	const client = mqtt.connect(broker, { reconnectPeriod: 0, connectTimeout: 1500 });
+	const live = new Map();
+	try {
+		await new Promise((resolve, reject) => { const timer = setTimeout(() => reject(new Error("planner discovery timeout")), 1800); client.once("connect", () => { clearTimeout(timer); resolve(); }); client.once("error", (error) => { clearTimeout(timer); reject(error); }); });
+		await client.subscribeAsync(`pi/${info.name}/agents/+/status`, { qos: 1 });
+		client.on("message", (topic, payload) => { const card = json(payload.toString(), null); if (card?.role === "planner" && card.instance && card.project === info.name && card.status !== "offline") live.set(card.instance, card); });
+		await new Promise((resolve) => setTimeout(resolve, 150));
+		const message = { type: "command", assignment_id: `auto-improve-${audit.audit_id}`, sender_instance: "yano-auto-improver", sender_role: "auto-improver", project: info.name, correlation_id: audit.audit_id, display: true, triggerTurn: true, followUp: true, prompt: `[yano-auto-improver] Audit completato per ${info.name}. Leggi il report ${audit.report_path}. Summary: ${summary}. Decidi se procedere direttamente o chiedere una decisione all'utente; l'auto-improver non ha modificato il progetto.` };
+		for (const planner of live.values()) await client.publishAsync(`pi/${info.name}/agents/${planner.instance}/commands`, JSON.stringify(message), { qos: 1 });
+		return { delivered: live.size, planners: [...live.keys()] };
+	} catch (error) { return { delivered: 0, planners: [], detail: error instanceof Error ? error.message : String(error) }; }
+	finally { client.end(true); }
+}
+
+function assertTempPath(file) {
+	const resolved = path.resolve(file);
+	const root = path.resolve(dataRoot()) + path.sep;
+	if (!resolved.startsWith(root)) throw new Error("yano auto-improve: report e summary devono restare nella directory globale temp/auto-improver");
+	return resolved;
+}
+
+async function completeAudit(db, opts) {
+	const audit = db.prepare("SELECT a.*, p.name, p.root, p.notify FROM auto_audits a JOIN auto_projects p ON p.project_key = a.project_key WHERE a.audit_id = ?").get(opts.auditId);
+	if (!audit) throw new Error(`yano auto-improve: audit non trovato: ${opts.auditId}`);
+	const reportPath = assertTempPath(opts.reportFile || audit.report_path);
+	if (!fs.existsSync(reportPath)) throw new Error(`yano auto-improve: report non trovato: ${reportPath}`);
+	let summary = opts.summary || "Report auto-improve completato; consultare il report completo.";
+	if (opts.summaryFile && fs.existsSync(assertTempPath(opts.summaryFile))) {
+		const summaryText = fs.readFileSync(assertTempPath(opts.summaryFile), "utf8").slice(0, 4000);
+		const parsed = json(summaryText, null);
+		summary = typeof parsed?.summary === "string" ? parsed.summary : summaryText;
+	}
+	const timestamp = now();
+	db.prepare("UPDATE auto_audits SET status = ?, completed_at = ?, report_path = ?, summary = ? WHERE audit_id = ?").run("completed", timestamp, reportPath, summary, audit.audit_id);
+	db.prepare("UPDATE auto_projects SET worker_status = ?, last_completed_at = ?, updated_at = ? WHERE project_key = ?").run("idle", timestamp, timestamp, audit.project_key);
+	db.prepare("INSERT INTO auto_events(event_id,project_key,audit_id,type,payload_json,created_at) VALUES(?,?,?,?,?,?)").run(`auto-event-${crypto.randomUUID()}`, audit.project_key, audit.audit_id, "audit_completed", JSON.stringify({ report_path: reportPath, summary: summary.slice(0, 1000), read_only: true }), timestamp);
+	const info = { root: audit.root, name: audit.name, key: audit.project_key };
+	try { appendRawTraceRecord({ cwd: info.root, project: info.name, record: { type: "auto_improve_completed", record_type: "event", source: "yano-auto-improver", instance: "yano-auto-improver", audit_id: audit.audit_id, report_path: reportPath, read_only: true } }); } catch { /* best effort */ }
+	const planner = await notifyPlanner(info, { audit_id: audit.audit_id, report_path: reportPath }, summary.slice(0, 1200));
+	const notifications = await notifyChannels(`✅ Yano auto-improve completato\nProgetto: ${info.name}\nAudit: ${audit.audit_id}\n${summary.slice(0, 1200)}\nReport: ${reportPath}\nPlanner notificati: ${planner.delivered}`, audit.notify);
+	return { audit_id: audit.audit_id, status: "completed", report_path: reportPath, planner, notifications };
+}
+
+function parseOptions(argv) {
+	const notifyRaw = value(argv, "--notify");
+	const intervalRaw = value(argv, "--interval") || value(argv, "--interval-ms");
+	return { sub: argv[0], projectRoot: value(argv, "--project-root") || process.cwd(), project: value(argv, "--project"), intervalMs: intervalRaw === null ? null : parseDuration(intervalRaw), notify: notifyRaw === null ? null : validateNotify(notifyRaw), auditId: value(argv, "--audit-id"), reportFile: value(argv, "--report-file"), summaryFile: value(argv, "--summary-file"), summary: value(argv, "--summary"), json: has(argv, "--json"), dryRun: has(argv, "--dry-run"), once: has(argv, "--once"), force: has(argv, "--force"), noDaemon: has(argv, "--no-daemon") };
+}
+
+function print(valueToPrint, machine) { console.log(machine ? JSON.stringify(valueToPrint, null, 2) : JSON.stringify(valueToPrint, null, 2)); }
+function usage() {
+	return [
+		"Uso: yano auto-improve <init|start|run|status|reports|pause|resume|stop|complete> [opzioni]",
+		"",
+		"  init --project-root <dir> --interval 5d --notify auto   registra il progetto",
+		"  start --project-root <dir> [--dry-run]                 crea/riusa tab Herdr e scheduler",
+		"  start --project-root <dir> --once                     avvia un solo audit senza scheduler persistente",
+		"  run --project-root <dir> [--once]                     prepara un audit immediato; --once non avvia scheduler",
+		"  status --project-root <dir> [--json]                  mostra scheduler/audit",
+		"  reports --project-root <dir>                           elenca report globali",
+		"  pause|resume|stop --project-root <dir>                 cambia stato senza toccare il progetto",
+		"  complete --audit-id <id> --report-file <temp-file>     chiude audit e notifica planner",
+		"",
+		"Nessun sottocomando modifica il progetto osservato. I dati vivono in temp/auto-improver/.",
+	].join("\n");
+}
+
+function startDaemon() {
+	const pidPath = path.join(dataRoot(), "scheduler.pid");
+	fs.mkdirSync(dataRoot(), { recursive: true, mode: 0o700 });
+	if (fs.existsSync(pidPath)) {
+		const pid = Number(fs.readFileSync(pidPath, "utf8"));
+		try { process.kill(pid, 0); return { running: true, pid, reused: true }; } catch { /* stale pid */ }
+	}
+	const child = spawn(process.execPath, [SCRIPT_PATH, "daemon"], { detached: true, stdio: "ignore", env: process.env });
+	child.unref();
+	fs.writeFileSync(pidPath, `${child.pid}\n`, { mode: 0o600 });
+	return { running: true, pid: child.pid, reused: false };
+}
+
+async function runAudit(db, info, row, { dryRun = false, force = false } = {}) {
+	if (!force && ["awaiting_agent", "running"].includes(row.worker_status)) return { skipped: true, reason: "audit_already_running", project: row };
+	const audit = createAudit(db, info, row);
+	const launched = launchWorker(info, row, audit.auditId, audit.evidencePath, audit.reportPath, dryRun);
+	db.prepare("UPDATE auto_projects SET workspace_id = COALESCE(?, workspace_id), worker_tab_id = COALESCE(?, worker_tab_id), worker_pane_id = COALESCE(?, worker_pane_id), worker_instance = ?, worker_status = ?, updated_at = ? WHERE project_key = ?")
+		.run(launched.workspace_id, launched.tab_id, launched.pane_id, launched.instance, dryRun ? "planned" : "running", now(), info.key);
+	return { ...audit, launched, project: info, read_only: true };
+}
+
+async function daemonLoop() {
+	const db = openDatabase();
+	process.on("SIGTERM", () => { try { db.close(); } finally { process.exit(0); } });
+	while (true) {
+		const due = db.prepare("SELECT * FROM auto_projects WHERE worker_status NOT IN ('paused','stopped','running','awaiting_agent') AND next_run_at IS NOT NULL AND next_run_at <= ?").all(now());
+		for (const row of due) {
+			try { await runAudit(db, { root: row.root, name: row.name, key: row.project_key }, row); } catch (error) { db.prepare("UPDATE auto_projects SET worker_status = ?, updated_at = ? WHERE project_key = ?").run("blocked", now(), row.project_key); console.error(`yano auto-improve scheduler: ${error.message}`); }
+		}
+		await new Promise((resolve) => setTimeout(resolve, 30_000));
+	}
+}
+
+export async function runYanoAutoImprove({ argv = [] } = {}) {
+	const opts = parseOptions(argv);
+	if (!opts.sub || opts.sub === "--help" || opts.sub === "-h") { console.log(usage()); return; }
+	if (opts.sub === "daemon") { await daemonLoop(); return; }
+	const db = openDatabase();
+	try {
+		if (opts.sub === "complete") return await completeAudit(db, opts).then((result) => { print(result, opts.json); return result; });
+		const info = projectInfo(opts.projectRoot, opts.project);
+		if (opts.sub === "init") { const row = ensureProject(db, info, { intervalMs: opts.intervalMs, notify: opts.notify }); const result = { project: row, db_path: dbPath(), data_root: projectDataRoot(info.key), read_only: true }; print(result, opts.json); return result; }
+		const row = ensureProject(db, info, { intervalMs: opts.intervalMs, notify: opts.notify });
+		if (opts.sub === "status") { const audits = db.prepare("SELECT * FROM auto_audits WHERE project_key = ? ORDER BY started_at DESC LIMIT 20").all(row.project_key); const result = { project: row, audits, db_path: dbPath(), data_root: projectDataRoot(info.key), read_only: true }; print(result, opts.json); return result; }
+		if (opts.sub === "reports") { const reports = db.prepare("SELECT audit_id,status,started_at,completed_at,report_path,summary FROM auto_audits WHERE project_key = ? ORDER BY started_at DESC").all(row.project_key); print(reports, opts.json); return reports; }
+		if (opts.sub === "pause" || opts.sub === "stop") { db.prepare("UPDATE auto_projects SET worker_status = ?, updated_at = ? WHERE project_key = ?").run(opts.sub === "pause" ? "paused" : "stopped", now(), row.project_key); const result = { project: info.name, worker_status: opts.sub === "pause" ? "paused" : "stopped", note: "stato logico; nessuna tab Herdr o file del progetto viene cancellato" }; print(result, opts.json); return result; }
+		if (opts.sub === "resume") { db.prepare("UPDATE auto_projects SET worker_status = ?, next_run_at = ?, updated_at = ? WHERE project_key = ?").run("scheduled", now(), now(), row.project_key); const result = await runAudit(db, info, { ...row, worker_status: "scheduled", next_run_at: now() }, { dryRun: opts.dryRun, force: true }); print(result, opts.json); return result; }
+		if (opts.sub === "run" || opts.sub === "start") {
+			const result = await runAudit(db, info, { ...row, worker_status: opts.force ? "scheduled" : row.worker_status }, { dryRun: opts.dryRun, force: opts.force || opts.sub === "start" });
+			const scheduler = opts.once || opts.dryRun || opts.noDaemon ? { running: false, skipped: true, once: opts.once } : startDaemon();
+			const output = { ...result, once: opts.once, scheduler };
+			print(output, opts.json);
+			return output;
+		}
+		throw new Error(`yano auto-improve: comando sconosciuto "${opts.sub}".\n${usage()}`);
+	} finally { try { db.close(); } catch { /* ignore */ } }
+}
+
+const invokedDirectly = process.argv[1] && path.resolve(process.argv[1]) === SCRIPT_PATH;
+if (invokedDirectly) runYanoAutoImprove({ argv: process.argv.slice(2) }).catch((error) => { console.error(`yano auto-improve: ${error.message}`); process.exit(1); });

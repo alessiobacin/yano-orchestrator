@@ -27,7 +27,9 @@ Everything communicates over a local MQTT broker, using role/instance identity a
 - **Phased execution plans** — the planner declares which roles work together and in what order, and the system enforces it
 - **Multi-channel notifications** via Evolution API/WhatsApp, Telegram Bot API, and SendGrid email when a task completes or needs your input, so you don't have to watch the terminal
 - **A global `yano` CLI** (`yano init`, `yano start`, `yano doctor`, `yano update`, `yano copy-prompts`, `yano uninstall`, `yano end`, `yano pause`, `yano resume`, `yano recovery`) for scaffolding, launching, verifying the environment, checkpointing and restoring active work, and closing projects — `yano resume` restores agents exclusively in the visible Herdr workspace
-- **External `yano-debugger` agent** — `yano debugger` keeps application bug reports and transitions in global SQLite, starts one Herdr debugger tab per project, preserves trace provenance and requires explicit staging validation before production
+- **External `yano-debugger` agent** — `yano debugger` keeps application bug reports and diagnostic transitions in global SQLite, starts one Herdr debugger tab per project, preserves trace provenance and hands accepted diagnoses to the planner
+- **Read-only external observers** — debugger diagnostica senza modificare, mentre `yano auto-improve` esegue audit periodici (default 5 giorni) in un workspace Herdr globale e consegna evidenze/raccomandazioni al planner
+- **User suggestion observer** — `yano suggester` raccoglie proposte in un workspace Herdr globale, le deduplica e notifica il planner solo dopo approvazione del superadmin
 - **Controlled deployment agent** — `deployment-agent` uses the `deployment-delivery` Playbook and `yano-deployment` skill to keep development source-based, dockerize staging/production, preserve paired ports and require rollback evidence plus explicit production approval
 - **Shared trace-analysis skill** for planner, coder, reviewer and specialists — workers can inspect the filtered origin of a mismatch, while the planner records cross-project opinions and systemic interventions
 - **Local embeddings prerequisite** — `yano doctor` verifies Ollama, the `nomic-embed-text` model and a real `/api/embed` probe; `yano init` installs/pulls them when missing (no extra npm embedding library is required)
@@ -159,7 +161,20 @@ yano trace import --input ./trace-bundle.json --reindex
 yano trace clear --all --yes   # elimina tutti i dati temporanei di Yano
 yano debugger init --base-port 3055  # registra il progetto e le porte dev/staging/prod
 yano debugger start             # avvia/riusa il worker nel workspace Herdr yano-debugger
+yano debugger start --once --json # preflight read-only senza Herdr
 yano debugger status --json     # stato del worker e dei bug del progetto
+yano auto-improve init --project-root /path/progetto --interval 5d --notify auto
+yano auto-improve start --project-root /path/progetto
+yano auto-improve start --project-root /path/progetto --once --dry-run --json
+yano auto-improve status --project-root /path/progetto --json
+yano auto-improve pause --project-root /path/progetto
+yano auto-improve resume --project-root /path/progetto
+yano auto-improve stop --project-root /path/progetto
+yano suggester init --project-root /path/progetto --notify auto
+yano suggester start --project-root /path/progetto --once --dry-run
+yano suggester submit --project-root /path/progetto --title "..." --description "..."
+yano suggester status --project-root /path/progetto --json
+yano suggester approve --suggestion-id SUG-... --actor superadmin --yes
 ```
 
 A run (the ticket/DAG layer's top-level container for one objective — see "Layer ticket/DAG persistente" in `docs/development-notes.md`, Revisione 26) normally closes itself once every one of its tickets is marked done. `yano end` is for when that doesn't happen — a session ended before every ticket was formally completed, the goal changed, or you're simply satisfied with where things landed and want to declare it done. It never touches tickets, worktrees, or any file outside this project's own `orchestrator.db` — closing a run just changes its own status and records the change in its event history, visible later via `run_status` from inside a planner session.

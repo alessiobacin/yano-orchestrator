@@ -25,6 +25,10 @@ try {
 	assert.equal(initialized.ports.frontend.development, 6055);
 	assert.equal(initialized.ports.frontend.staging, 7055);
 	assert.equal(initialized.ports.frontend.production, 8055);
+	const once = await call("start", "--once", "--json");
+	assert.equal(once.once, true);
+	assert.equal(once.worker_started, false);
+	assert.equal(once.read_only, true);
 
 	const started = await call("start", "--foreground", "--json");
 	assert.equal(started.worker_status, "running");
@@ -45,14 +49,12 @@ try {
 	assert.equal(duplicate.bug.bug_id, bugId);
 
 	await call("claim", "--bug-id", bugId, "--actor", "debugger-focusboard", "--json");
-	for (const state of ["triaged", "reproducing", "fixing", "testing", "staging", "awaiting_validation"]) {
+	for (const state of ["triaged", "reproducing", "not_reproducible"]) {
 		const transitioned = await call("transition", "--bug-id", bugId, "--to", state, "--actor", "debugger-focusboard", "--json");
 		assert.equal(transitioned.status, state);
 	}
-	await assert.rejects(() => call("transition", "--bug-id", bugId, "--to", "production", "--actor", "operator"), /promozione richiede/);
-	const promoted = await call("promote", "--bug-id", bugId, "--deployment-id", "staging-deploy-42", "--actor", "superadmin", "--yes", "--json");
-	assert.equal(promoted.status, "production");
-	assert.equal(promoted.deployment_id, "staging-deploy-42");
+	await assert.rejects(() => call("transition", "--bug-id", bugId, "--to", "fixing", "--actor", "debugger-focusboard"), /stato non valido|stato non diagnostico/);
+	await assert.rejects(() => call("promote", "--bug-id", bugId, "--deployment-id", "staging-deploy-42", "--actor", "superadmin", "--yes"), /read-only/);
 
 	const paused = await call("pause", "--json");
 	assert.equal(paused.worker_status, "paused");
@@ -61,10 +63,10 @@ try {
 	assert.equal(resumed.supervisor, "foreground");
 
 	const status = await call("status", "--bug-id", bugId, "--json");
-	assert.equal(status.status, "production");
+	assert.equal(status.status, "not_reproducible");
 	const trace = readTraceRecords({ cwd: projectRoot, project: "focusboard" });
 	assert.ok(trace.some((record) => record.type === "debug_report_received"));
-	assert.ok(trace.some((record) => record.type === "debug_state_changed" && record.status === "production"));
+	assert.ok(trace.some((record) => record.type === "debug_state_changed" && record.status === "not_reproducible"));
 	assert.ok(trace.some((record) => record.type === "debugger_pause"));
 	console.log("smoke-test-yano-debugger: ok");
 } finally {

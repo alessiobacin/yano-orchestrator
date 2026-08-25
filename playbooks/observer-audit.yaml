@@ -1,0 +1,75 @@
+schema_version: 1
+id: observer-audit
+label: Read-only observer audit
+description: >-
+  Contratto per agenti esterni che osservano un progetto e consegnano evidenze
+  al planner senza modificare codice, test, configurazioni o deployment.
+states:
+  - id: received
+    owner: observer
+    terminal: false
+  - id: collecting
+    owner: observer
+    terminal: false
+  - id: analyzing
+    owner: observer
+    terminal: false
+  - id: awaiting_planner
+    owner: planner
+    terminal: false
+  - id: completed
+    owner: planner
+    terminal: true
+  - id: blocked
+    owner: planner_and_human
+    terminal: true
+transitions:
+  - id: collect
+    from: received
+    to: collecting
+    actor: observer
+    requires:
+      - audit_requested
+  - id: analyze
+    from: collecting
+    to: analyzing
+    actor: observer
+    requires:
+      - evidence_pack_ready
+  - id: handoff
+    from: analyzing
+    to: awaiting_planner
+    actor: observer
+    requires:
+      - report_complete
+      - evidence_references_present
+  - id: accept
+    from: awaiting_planner
+    to: completed
+    actor: planner
+    requires:
+      - planner_acknowledged
+  - id: block
+    from: [collecting, analyzing, awaiting_planner]
+    to: blocked
+    actor: planner
+    requires:
+      - blocker_recorded
+invariants:
+  - id: read_only_project
+    description: The observer never mutates the reference project.
+  - id: planner_owns_action
+    description: Only the planner may turn findings into development tickets or changes.
+  - id: evidence_required
+    description: Every recommendation has redacted evidence and confidence.
+  - id: no_external_deploy
+    description: The observer cannot deploy or promote any artifact.
+  - id: bounded_audit
+    description: Collection uses bounded file, command, trace and token budgets.
+failure_routes:
+  - condition: project_unavailable
+    action: record_blocker_and_notify_planner_and_human
+    terminal: true
+  - condition: evidence_redaction_failure
+    action: stop_handoff_and_notify_planner_and_human
+    terminal: true

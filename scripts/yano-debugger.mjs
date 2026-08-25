@@ -14,26 +14,20 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { appendRawTraceRecord, projectKey, resolveTraceProject, traceRoot } from "./yano-trace-storage.mjs";
+import { appendRawTraceRecord, projectKey, readTraceRecords, resolveTraceProject, traceRoot } from "./yano-trace-storage.mjs";
 
 const require = createRequire(import.meta.url);
 const VALID_SEVERITIES = new Set(["low", "medium", "high", "critical"]);
 const VALID_SOURCES = new Set(["user", "system", "cli", "watcher"]);
-const STATES = ["reported", "triaged", "reproducing", "fixing", "testing", "staging", "awaiting_validation", "production", "blocked", "not_reproducible", "rejected", "duplicate", "rolled_back"];
+const STATES = ["reported", "triaged", "reproducing", "not_reproducible", "blocked", "rejected", "duplicate"];
 const TRANSITIONS = {
 	reported: ["triaged", "duplicate", "rejected"],
 	triaged: ["reproducing", "blocked", "rejected"],
-	reproducing: ["fixing", "not_reproducible", "blocked"],
-	fixing: ["testing", "blocked"],
-	testing: ["staging", "blocked"],
-	staging: ["awaiting_validation", "blocked"],
-	awaiting_validation: ["production", "rejected", "blocked"],
-	production: ["rolled_back"],
+	reproducing: ["triaged", "not_reproducible", "blocked"],
 	blocked: ["triaged", "rejected"],
 	not_reproducible: ["reproducing", "rejected"],
 	rejected: ["triaged"],
 	duplicate: ["triaged"],
-	rolled_back: ["triaged"],
 };
 
 function value(argv, flag) {
@@ -193,24 +187,24 @@ function portsFor(basePort) {
 
 function parseCommand(argv) {
 	const sub = argv[0];
-	return { sub, projectRoot: value(argv, "--project-root") || process.cwd(), project: value(argv, "--project"), bugId: value(argv, "--bug-id") || value(argv, "--id"), mode: value(argv, "--mode") || "project", actor: value(argv, "--actor") || "operator", intervalMs: Math.max(1000, Number(value(argv, "--interval-ms") || 60000)), basePort: validateBasePort(value(argv, "--base-port")), json: has(argv, "--json"), dryRun: has(argv, "--dry-run"), foreground: has(argv, "--foreground"), yes: has(argv, "--yes"), to: value(argv, "--to"), note: value(argv, "--note") || "", deploymentId: value(argv, "--deployment-id"), title: value(argv, "--title"), description: value(argv, "--description"), severity: value(argv, "--severity") || "medium", source: value(argv, "--source") || "cli", reporter: value(argv, "--reporter"), expected: value(argv, "--expected"), actual: value(argv, "--actual"), steps: value(argv, "--steps"), environment: value(argv, "--environment") };
+	return { sub, projectRoot: value(argv, "--project-root") || process.cwd(), project: value(argv, "--project"), bugId: value(argv, "--bug-id") || value(argv, "--id"), mode: value(argv, "--mode") || "project", actor: value(argv, "--actor") || "operator", intervalMs: Math.max(1000, Number(value(argv, "--interval-ms") || 60000)), basePort: validateBasePort(value(argv, "--base-port")), json: has(argv, "--json"), dryRun: has(argv, "--dry-run"), once: has(argv, "--once"), foreground: has(argv, "--foreground"), yes: has(argv, "--yes"), to: value(argv, "--to"), note: value(argv, "--note") || "", deploymentId: value(argv, "--deployment-id"), title: value(argv, "--title"), description: value(argv, "--description"), severity: value(argv, "--severity") || "medium", source: value(argv, "--source") || "cli", reporter: value(argv, "--reporter"), expected: value(argv, "--expected"), actual: value(argv, "--actual"), steps: value(argv, "--steps"), environment: value(argv, "--environment") };
 }
 
 function usage() {
 	return [
-		"Uso: yano debugger <init|start|status|report|claim|transition|promote|pause|resume> [opzioni]",
+		"Uso: yano debugger <init|start|status|report|claim|transition|pause|resume> [opzioni]",
 		"",
 		"  init --project-root <dir>                         registra un progetto",
 		"  start --project-root <dir> [--dry-run]            apre/riusa la tab Herdr del debugger",
+		"  start --project-root <dir> --once                 esegue una sola preflight read-only senza avviare Herdr",
 		"  status --project-root <dir> [--bug-id <id>]       mostra progetti o bug",
 		"  report --project-root <dir> --title ...           registra un bug applicativo",
 		"  claim --project-root <dir> --bug-id <id>          assegna il bug al debugger",
 		"  transition --project-root <dir> --bug-id <id> --to <stato>",
-		"  promote --project-root <dir> --bug-id <id> --deployment-id <id> --yes",
 		"  pause|resume --project-root <dir>                sospende/riattiva il worker logico",
 		"",
-		"Stati: reported, triaged, reproducing, fixing, testing, staging, awaiting_validation, production, blocked, not_reproducible, rejected, duplicate, rolled_back",
-		"La promozione in production richiede --yes, --actor e --deployment-id; Yano non esegue deploy impliciti.",
+		"Stati diagnostici: reported, triaged, reproducing, not_reproducible, blocked, rejected, duplicate",
+		"Il debugger non corregge, deploya o promuove: il planner apre il normale flusso di sviluppo/deployment.",
 	].join("\n");
 }
 
@@ -233,6 +227,23 @@ function print(valueToPrint, machine) {
 	if (machine) console.log(JSON.stringify(valueToPrint, null, 2));
 	else if (Array.isArray(valueToPrint)) for (const item of valueToPrint) console.log(`${item.bug_id || item.project_key} — ${item.status || item.worker_status || "registered"} — ${item.title || item.name || item.root}`);
 	else console.log(JSON.stringify(valueToPrint, null, 2));
+}
+
+function debuggerOnce(db, info, project) {
+	const trace = readTraceRecords({ cwd: info.root, project: info.name, limit: 100 });
+	const bugs = db.prepare("SELECT status, COUNT(*) AS count FROM debugger_bugs WHERE project_key = ? GROUP BY status ORDER BY status").all(project.project_key);
+	return {
+		once: true,
+		read_only: true,
+		project: info.name,
+		project_root: info.root,
+		worker_started: false,
+		worker_status: project.worker_status,
+		ports: portsFor(project.backend_base_port),
+		trace_records: trace.length,
+		bugs_by_status: bugs,
+		message: "Preflight debugger completata: nessuna tab Herdr, nessun processo persistente e nessuna modifica al progetto.",
+	};
 }
 
 function herdrSnapshot() {
@@ -320,7 +331,7 @@ function transitionBug(db, opts) {
 	const bug = getBugOrThrow(db, opts.bugId);
 	if (!STATES.includes(opts.to)) throw new Error(`yano debugger transition: stato non valido "${opts.to}"`);
 	if (!(TRANSITIONS[bug.status] || []).includes(opts.to)) throw new Error(`yano debugger transition: ${bug.status} → ${opts.to} non consentito; transizioni possibili: ${(TRANSITIONS[bug.status] || []).join(", ") || "nessuna"}`);
-	if (opts.to === "production" && (!opts.yes || !opts.actor || opts.actor === "operator")) throw new Error("yano debugger: la promozione richiede --yes e --actor <superadmin/utente-autorizzato>; usa `yano debugger promote` con --deployment-id");
+	if (["fixing", "testing", "staging", "awaiting_validation", "production", "rolled_back"].includes(opts.to)) throw new Error("yano debugger: stato non diagnostico; il planner deve aprire il flusso coder/reviewer/deployment-agent");
 	const timestamp = now();
 	db.prepare("UPDATE debugger_bugs SET status = ?, deployment_id = COALESCE(?, deployment_id), updated_at = ? WHERE bug_id = ?").run(opts.to, opts.deploymentId || null, timestamp, bug.bug_id);
 	const updated = bugWithProject(db, db.prepare("SELECT * FROM debugger_bugs WHERE bug_id = ?").get(bug.bug_id));
@@ -393,9 +404,7 @@ export async function runYanoDebugger({ argv = [] } = {}) {
 				return updated;
 			}
 			if (opts.sub === "promote") {
-				if (!opts.yes) throw new Error("yano debugger promote: aggiungi --yes per confermare la promozione");
-			if (!opts.deploymentId) throw new Error("yano debugger promote: --deployment-id è obbligatorio e deve identificare il deploy staging validato");
-			opts.to = "production";
+				throw new Error("yano debugger promote: il debugger è read-only; il planner deve usare deployment-agent per staging/production");
 			}
 			const updated = transitionBug(db, opts);
 			print(updated, opts.json);
@@ -433,6 +442,11 @@ export async function runYanoDebugger({ argv = [] } = {}) {
 			const registered = getProject(db, info);
 			const basePort = opts.basePort || registered?.backend_base_port || await allocateBasePort(db, null);
 			const project = ensureProject(db, info, { intervalMs: opts.intervalMs, backendBasePort: basePort, frontendBasePort: basePort + 3000 });
+			if (opts.once) {
+				const result = debuggerOnce(db, info, project);
+				print(result, opts.json);
+				return result;
+			}
 			if (project.worker_status === "running" && !opts.dryRun && !has(argv, "--force")) {
 				const result = { project: info.name, worker_status: "running", already_running: true, workspace_id: project.workspace_id, tab_id: project.worker_tab_id, instance: project.worker_instance };
 				print(result, opts.json);

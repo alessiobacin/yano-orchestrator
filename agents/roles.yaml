@@ -55,19 +55,55 @@ roles:
 
   debugger:
     activation: always
-    playbook: backend-change
+    playbook: observer-audit
     label: "Yano Debugger"
-    brief: "Gestisci bug applicativi assegnati dal registro yano-debugger: raccogli il contesto trace, riproduci il problema, correggi nel worktree, verifica con test e porta la modifica fino a staging. Non promuovere mai in production senza validazione esplicita e deployment-id."
+    brief: "Gestisci bug applicativi in modo esclusivamente diagnostico: raccogli il contesto trace, riproduci senza modificare il progetto, redigi evidenze e inoltra la diagnosi al planner. Non correggere codice, test o configurazioni e non fare deploy."
     model:
       provider: llmproxy
       model: coding-model
     skills:
-      - tdd-development
+      - yano-observer
       - yano-planner-trace-analysis
-    cli: [git, npm, npx, docker, docker-compose]
-    mcp: [github]
+    cli: [git, npm, npx, curl]
+    mcp: []
     teams:
       - debugger
+      - quality
+
+  auto-improver:
+    activation: lazy
+    playbook: observer-audit
+    label: "Yano Auto-Improver"
+    brief: "Esegui audit periodici read-only del progetto: correlando codice, test, documentazione, trace, bug e feedback produci raccomandazioni prioritizzate e inviale al planner. Non modificare mai il progetto, non creare ticket operativi autonomamente e non eseguire deploy."
+    model:
+      provider: llmproxy
+      model: reasoning-model
+    skills:
+      - yano-observer
+      - yano-auto-improvement
+      - yano-planner-trace-analysis
+    cli: [git, npm, npx, curl]
+    mcp: []
+    teams:
+      - improvement
+      - quality
+
+  suggester:
+    activation: lazy
+    playbook: suggestion-proposal
+    label: "Yano Suggester"
+    brief: "Raccogli e analizza suggerimenti utenti in modo esclusivamente read-only: deduplica, valuta valore/rischio/complessità, redigi una proposta e attendi l'approvazione del superadmin prima di notificare il planner. Non modificare il progetto, non creare ticket operativi e non fare deploy."
+    model:
+      provider: llmproxy
+      model: reasoning-model
+    skills:
+      - yano-observer
+      - yano-suggester
+      - yano-planner-trace-analysis
+    cli: [git, npm, npx, curl]
+    mcp: []
+    teams:
+      - suggestions
       - quality
 
   deployment-agent:

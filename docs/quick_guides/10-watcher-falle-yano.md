@@ -26,7 +26,10 @@ e non accetta un override `--yano-repo`. Se una rilevazione richiede Telegram
 o il repository di manutenzione e la variabile manca, il comando fallisce
 indicando la variabile e il comando `yano config set` da eseguire.
 
-## Avvio di una scansione
+## Avvio di una scansione zero-token
+
+`yano watch` è il comando bounded/read-only che esegue la scansione senza
+aprire una sessione LLM. È utile per cron, smoke test e diagnosi manuali:
 
 Da un progetto inizializzato con Yano:
 
@@ -55,6 +58,41 @@ Questo analizza gli ultimi 3.600.000 ms e termina. Per controllare ogni ora:
 yano watch --project-root /path/progetto --interval-ms 3600000
 ```
 
+`--lookback-ms` indica la finestra temporale analizzata; `--interval-ms`
+indica l'intervallo tra le scansioni. Con `--once` viene eseguita una sola
+scansione e il processo termina.
+
+## Watcher LLM per un playbook ephemeral
+
+Quando l'Architect prepara un nuovo playbook, il watcher non deve essere
+avviato come una semplice shell nella tab Herdr. Il comando corretto è:
+
+```bash
+yano architect provision --proposal-id <PROP-ID> --install
+```
+
+Questo riusa/crea il workspace globale `yano-watcher`, crea una tab chiamata
+`watcher-<project-name>` e avvia un vero agente Pi con:
+
+```text
+herdr agent start <nome-normalizzato> --kind pi --pane <pane-id> -- <argomenti-pi> ... --role watcher
+```
+
+`--kind pi` seleziona già l'eseguibile: non aggiungere un secondo `pi` dopo
+`--`, altrimenti Herdr proverebbe a lanciare `pi pi ...`.
+
+La tab da sola non è una prova di attività: verificare sempre l'agente reale:
+
+```bash
+herdr agent list
+yano fleet --project-root /path/progetto --json
+```
+
+Il suo prompt invoca poi `yano watch --once` per il controllo bounded. Se
+Architect non riesce ad avviare l'agente, `provision` ora ritorna `blocked` e
+registra `external_agent_launch_failed`, invece di lasciare una tab vuota e
+segnalare erroneamente il playbook come pronto.
+
 Se viene rilevato un problema e c'è un planner live, il watcher invia un
 comando MQTT direttamente alla sua tab. Se non c'è alcun planner live, invia
 Telegram all'utente. La semplice assenza di agenti, senza un problema rilevato,
@@ -65,9 +103,9 @@ non genera notifiche.
 I ticket sono nel repository Yano e sono pensati per essere presi da un LLM:
 
 ```bash
-YANO_REPO_DIR=/Users/alessiobacin/Development/testCode/yano-orchestrator
-find "$YANO_REPO_DIR/.scratch/optimize-orchestrator/issues" -maxdepth 1 -type f -print
-sed -n '1,220p' "$YANO_REPO_DIR"/.scratch/optimize-orchestrator/issues/*.md
+YANO_ORCHESTRATOR_REPO=/Users/alessiobacin/Development/testCode/yano-orchestrator
+find "$YANO_ORCHESTRATOR_REPO/.scratch/optimize-orchestrator/issues" -maxdepth 1 -type f -print
+sed -n '1,220p' "$YANO_ORCHESTRATOR_REPO"/.scratch/optimize-orchestrator/issues/*.md
 ```
 
 Il trace del progetto conserva il collegamento:

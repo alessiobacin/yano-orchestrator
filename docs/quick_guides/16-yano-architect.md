@@ -31,6 +31,10 @@ Quando tutte le capability sono `ready`, prepara i due workspace Herdr:
 yano architect provision --proposal-id <PROP-ID> --install
 ```
 
+Le tab create nei workspace globali hanno nomi stabili per progetto:
+`architect-<project-name>` nel workspace `yano-architect` e
+`watcher-<project-name>` nel workspace `yano-watcher`.
+
 Il watcher `yano-watcher` controlla il round. Dopo il suo esito, il planner
 chiede il feedback all'utente:
 
@@ -52,4 +56,3 @@ yano playbook list
 yano agent list
 yano agent show <role-id>
 ```
-

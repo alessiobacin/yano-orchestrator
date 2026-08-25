@@ -25,6 +25,10 @@ eventuale decisione del superadmin/utente, usa il flusso normale
 - handoff MQTT al planner vivo, Telegram se non esiste un planner vivo;
 - risoluzione di `YANO_ORCHESTRATOR_REPO` dalla configurazione Yano autorizzata.
 - comando di test singolo `yano watch --once`.
+- ruolo `watcher` con skill observer e trace analysis;
+- workspace globale `yano-watcher` con una tab per progetto, avviata come agente
+  Pi reale tramite `herdr agent start` (non come semplice comando in un pane);
+- nome Herdr normalizzato entro 32 caratteri e nome MQTT distinto per progetto.
 
 ### Da sviluppare dopo
 

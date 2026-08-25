@@ -5,6 +5,7 @@ flowchart TD
     INIT --> HERDR_INIT["init --herdr\nHerdr workspace + root pane"]
     CLI --> OBS["status / fleet / deps / gantt / watch / trace"]
     CLI --> RELOAD["update --reload\ncontrolled restart"]
+    CLI --> GLOBAL_CONFIG["Global config.env\nmanaged by `yano config`\ncredentials + runtime defaults"]
     INIT --> PLANNER["pi planner\nrole + instance identity"]
     HERDR_INIT --> PLANNER
 
@@ -78,17 +79,22 @@ flowchart TD
     end
 
     subgraph YANO_WATCHER["Global watcher boundary"]
-        WATCHER["yano-watcher\nzero-token polling + classifier"]
-        WATCHER_ONCE["--once\nsingle bounded scan"]
+        WATCHER["yano-watcher\nrole watcher\nread-only validation agent\ntab: watcher-<project-name>"]
+        WATCHER_ONCE["yano watch --once\nzero-token bounded scan"]
         YANO_TICKETS["yano-orchestrator/.scratch/optimize-orchestrator/issues\nMarkdown maintenance tickets"]
-        TELEGRAM["Telegram Bot API\nYano .env or yano config"]
+    end
+
+    subgraph NOTIFICATIONS["Configured notification channels"]
+        TELEGRAM["Telegram Bot API"]
+        WHATSAPP["WhatsApp API"]
+        SENDGRID["SendGrid email"]
     end
 
     subgraph YANO_DEBUGGER["Global debugger boundary"]
         DEBUGGER["yano-debugger\nbug intake + lifecycle"]
         DEBUG_ONCE["start --once\nread-only preflight"]
         DEBUG_DB["debugger.sqlite\nprojects / bugs / events"]
-        DEBUG_WS["Herdr workspace\nyano-debugger\none tab per project"]
+        DEBUG_WS["Herdr workspace\nyano-debugger\ntab: debugger-<project-name>"]
         ENVIRONMENTS["dev / staging / production\npaired port ranges"]
     end
 
@@ -96,7 +102,7 @@ flowchart TD
         AUTO_IMPROVER["yano-auto-improver\nperiodic read-only audit"]
         AUTO_ONCE["run|start --once\none audit, no scheduler"]
         AUTO_DB["auto-improver.sqlite\nprojects / audits / recommendations"]
-        AUTO_WS["Herdr workspace\nyano-auto-improver\none tab per project"]
+        AUTO_WS["Herdr workspace\nyano-auto-improver\ntab: auto-improver-<project-name>"]
         AUTO_REPORTS["temp/auto-improver\nevidence + reports"]
     end
 
@@ -104,7 +110,7 @@ flowchart TD
         SUGGESTER["yano-suggester\nread-only intake + proposal"]
         SUGGESTER_ONCE["start|submit --once\nbounded test"]
         SUGGESTER_DB["suggester.sqlite\nprojects / suggestions / approvals"]
-        SUGGESTER_WS["Herdr workspace\nyano-suggester\none tab per project"]
+        SUGGESTER_WS["Herdr workspace\nyano-suggester\ntab: suggester-<project-name>"]
         SUGGESTER_REPORTS["temp/suggester\nevidence + reports"]
         SUGGESTER_GATE["superadmin approval gate"]
     end
@@ -113,7 +119,7 @@ flowchart TD
         ARCHITECT["yano-architect\nplaybook + role factory"]
         ARCHITECT_ONCE["--once\ncapability gate only"]
         ARCHITECT_DB["architect.sqlite\nproposals / capabilities / feedback"]
-        ARCHITECT_WS["Herdr workspace\nyano-architect"]
+        ARCHITECT_WS["Herdr workspace\nyano-architect\ntab: architect-<project-name>"]
         ARCHITECT_EPHEMERAL["temp/architect/proposals\nephemeral artifacts"]
         ARCHITECT_GATE["skill / CLI / MCP\nreadiness gate"]
         ARCHITECT_CATALOG["temp/catalog\nimmutable promoted versions"]
@@ -153,8 +159,15 @@ flowchart TD
     SQLITE --> WATCHER
     WATCHER --> YANO_TICKETS
     WATCHER --> TELEGRAM
+    WATCHER --> WHATSAPP
+    WATCHER --> SENDGRID
+    GLOBAL_CONFIG --> TRACE_CONFIG
+    GLOBAL_CONFIG --> TELEGRAM
+    GLOBAL_CONFIG --> WHATSAPP
+    GLOBAL_CONFIG --> SENDGRID
     CLI --> WATCHER_ONCE
     WATCHER_ONCE --> WATCHER
+    WATCHER --> WATCHER_ONCE
     CLI --> DEBUGGER
     CLI --> DEBUG_ONCE
     DEBUG_ONCE --> DEBUGGER
@@ -170,6 +183,9 @@ flowchart TD
     AUTO_IMPROVER --> AUTO_WS
     AUTO_IMPROVER --> AUTO_REPORTS
     AUTO_IMPROVER --> TRACE
+    AUTO_IMPROVER --> TELEGRAM
+    AUTO_IMPROVER --> WHATSAPP
+    AUTO_IMPROVER --> SENDGRID
     AUTO_DB --> PLANNER
     AUTO_REPORTS --> PLANNER
     CLI --> SUGGESTER
@@ -178,6 +194,9 @@ flowchart TD
     SUGGESTER --> SUGGESTER_DB
     SUGGESTER --> SUGGESTER_WS
     SUGGESTER --> SUGGESTER_REPORTS
+    SUGGESTER --> TELEGRAM
+    SUGGESTER --> WHATSAPP
+    SUGGESTER --> SENDGRID
     SUGGESTER_DB --> SUGGESTER_GATE
     SUGGESTER_REPORTS --> SUGGESTER_GATE
     SUGGESTER_GATE --> PLANNER
@@ -225,6 +244,8 @@ flowchart TD
     FINALIZE --> MERGE
     SQLITE --> ADAPTERS
     ADAPTERS --> EVENTS
+    ADAPTERS --> WHATSAPP
+    ADAPTERS --> SENDGRID
 
     classDef user fill:#1f2937,stroke:#9ca3af,color:#e5e7eb
     classDef control fill:#19324d,stroke:#61afef,color:#e5e7eb

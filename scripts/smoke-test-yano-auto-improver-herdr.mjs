@@ -84,7 +84,7 @@ try {
 
 	const state = JSON.parse(fs.readFileSync(herdrState, "utf8"));
 	assert.deepEqual(state.workspaces, [{ workspace_id: "w-auto", label: "yano-auto-improver" }]);
-	assert.equal(state.tabs[0].label, "focusboard");
+	assert.equal(state.tabs[0].label, "auto-improver-focusboard");
 	assert.equal(state.tabs[0].cwd, projectRoot);
 	assert.equal(state.panes[0].pane_id, "p-focusboard");
 	const paneRun = state.calls.find((args) => args[0] === "pane" && args[1] === "run");

@@ -13,7 +13,7 @@ Everything communicates over a local MQTT broker, using role/instance identity a
 
 ## Features
 
-- **Role-based multi-agent coordination** over MQTT 5 — planner, coder, reviewer, and 23 optional specialist roles (TDD, mutation testing, security review, Kubernetes, CI/CD, accessibility, documentation sync, architecture diagrams, and more)
+- **Role-based multi-agent coordination** over MQTT 5 — planner, coder, reviewer, and 28 optional specialist roles (TDD, mutation testing, security review, Kubernetes, CI/CD, accessibility, documentation sync, architecture diagrams, read-only observers, and more)
 - **Git worktree isolation** — every task runs in its own worktree; your main branch is only ever touched by a clean, reviewed merge
 - **A persistent ticket/DAG layer** (SQLite-backed) that tracks runs, specs, and tickets across restarts
 - **A watchdog** that detects stalled tickets, runs that finished all their tickets but were never merged/notified, *and* tickets whose assigned instance has confirmably vanished (offline presence, not just slow) — the last case is auto-failed and escalated within a couple of minutes, not 15-30

@@ -9,7 +9,8 @@ proposta approvata in un task di sviluppo.
 
 - registro globale SQLite in `temp/suggester/suggester.sqlite`;
 - dati, evidence pack e report in `temp/suggester/`;
-- workspace Herdr globale `yano-suggester`, una tab per progetto;
+- workspace Herdr globale `yano-suggester`, una tab per progetto chiamata
+  `suggester-<project-name>`;
 - intake CLI con testo redatto e fingerprint esatto per deduplicare;
 - analisi worker con skill `yano-observer` e `yano-suggester`;
 - lifecycle `received → analyzing → awaiting_approval → accepted|rejected`;

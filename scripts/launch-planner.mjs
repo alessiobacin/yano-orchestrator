@@ -103,7 +103,7 @@ const YANO_REVIEW_SKILL_ROLES = ["reviewer", "frontend-reviewer"];
 const YANO_DEPLOYMENT_SKILL = "yano-deployment";
 const YANO_DEPLOYMENT_SKILL_ROLES = ["deployment-agent"];
 const YANO_OBSERVER_SKILL = "yano-observer";
-const YANO_OBSERVER_SKILL_ROLES = ["debugger", "auto-improver", "suggester"];
+const YANO_OBSERVER_SKILL_ROLES = ["watcher", "debugger", "auto-improver", "suggester"];
 const YANO_AUTO_IMPROVEMENT_SKILL = "yano-auto-improvement";
 const YANO_AUTO_IMPROVEMENT_SKILL_ROLES = ["auto-improver"];
 const YANO_SUGGESTER_SKILL = "yano-suggester";
@@ -220,12 +220,17 @@ function generatedRoleConfigDir({ cwd, role, roleManifest, sourceDir: preferredS
 function parseArgs(argv) {
 	const passthrough = [];
 	let printOnly = false;
+	let json = false;
 	let role; // undefined finché non trovato — risolto a "planner" più sotto se mai passato
 	let traceMode;
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i];
 		if (a === "--print-only") {
 			printOnly = true;
+			continue;
+		}
+		if (a === "--json") {
+			json = true;
 			continue;
 		}
 		if (a === "--role") {
@@ -247,7 +252,7 @@ function parseArgs(argv) {
 		}
 		passthrough.push(a);
 	}
-	return { passthrough, printOnly, role: role ?? "planner", traceMode };
+	return { passthrough, printOnly, json, role: role ?? "planner", traceMode };
 }
 
 // runLaunchPlanner({ packageRoot, cwd, argv }) — packageRoot risolve le
@@ -276,7 +281,7 @@ function parseArgs(argv) {
 // `yano init` scrive sempre: agents/roles.yaml oppure
 // .pi/extensions/yano-orchestrator/config/project.json.
 export function runLaunchPlanner({ packageRoot, cwd, argv }) {
-	const { passthrough, printOnly, role, traceMode } = parseArgs(argv);
+	const { passthrough, printOnly, json, role, traceMode } = parseArgs(argv);
 	if (!isSupportedNodeRuntime()) {
 		console.error(`launch-planner: Node.js ${process.version} non supportato — serve Node 22.5.0 o superiore.`);
 		return;
@@ -440,7 +445,8 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 	const piArgs = [...extensionFlags, ...passthrough, ...projectScopeFlags, ...legacyConfigDirFlags, ...generatedConfigFlags, "--role", role, ...skillFlags];
 
 	const printable = ["pi", ...piArgs].map((a) => (a.includes(" ") ? `"${a}"` : a)).join(" ");
-	console.log(`launch-planner: comando composto (cwd ${cwd}, trace ${traceConfig.mode}, progetto ${traceProject}):\n  ${printable}\n`);
+	if (json) console.log(JSON.stringify({ command: "pi", args: piArgs, cwd, trace_mode: traceConfig.mode, project: traceProject }));
+	else console.log(`launch-planner: comando composto (cwd ${cwd}, trace ${traceConfig.mode}, progetto ${traceProject}):\n  ${printable}\n`);
 
 	if (printOnly) {
 		process.exit(0);

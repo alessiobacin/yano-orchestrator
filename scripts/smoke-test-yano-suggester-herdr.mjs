@@ -52,7 +52,7 @@ try {
 	assert.match(submitted.dispatched.launched.command, /--role suggester/);
 	const state = JSON.parse(fs.readFileSync(herdrState, "utf8"));
 	assert.deepEqual(state.workspaces, [{ workspace_id: "w-suggest", label: "yano-suggester" }]);
-	assert.equal(state.tabs[0].label, "focusboard");
+	assert.equal(state.tabs[0].label, "suggester-focusboard");
 	const paneRun = state.calls.find((args) => args[0] === "pane" && args[1] === "run");
 	assert.ok(paneRun);
 	assert.match(paneRun[3], /yano start/);

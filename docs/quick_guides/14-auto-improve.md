@@ -34,6 +34,9 @@ il worker, rimuovi `--dry-run`:
 yano auto-improve run --project-root /Users/me/projects/my-app --once
 ```
 
+Il worker usa il workspace globale `yano-auto-improver` e la tab
+`auto-improver-<project-name>`.
+
 Per sospendere, riattivare o fermare la pianificazione:
 
 ```sh

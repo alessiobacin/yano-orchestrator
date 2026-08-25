@@ -43,7 +43,8 @@ yano debugger resume
 ```
 
 `pause` non chiude la tab Herdr. `resume` riusa la tab se è ancora presente o
-ne crea una nuova nel workspace globale `yano-debugger`.
+ne crea una nuova nel workspace globale `yano-debugger`; la tab segue il nome
+`debugger-<project-name>`.
 
 ## Flusso di validazione
 

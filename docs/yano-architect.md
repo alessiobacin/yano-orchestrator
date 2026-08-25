@@ -46,7 +46,7 @@ yano architect capability \
   --status ready \
   --evidence "initialize/tools-list riusciti nel progetto focusboard"
 
-# Preparare il watcher e il worker architect nei workspace Herdr globali
+# Preparare l'agente watcher e il worker architect nei workspace Herdr globali
 yano architect provision --proposal-id <PROP-ID> --install
 
 # Consultare lo stato completo
@@ -68,8 +68,13 @@ yano architect revise --proposal-id <PROP-ID> \
 
 `--once` esegue il controllo bounded e non apre workspace o tab. `--dry-run`
 compone le azioni Herdr senza eseguirle. `--install` non esegue comandi
-arbitrari provenienti dal task: avvia l'architect in Herdr, che può usare solo
-sorgenti/autorizzazioni documentate e deve poi ripetere `verify`.
+arbitrari provenienti dal task: crea/riusa i workspace globali
+`yano-architect` e `yano-watcher` e avvia entrambi come agenti Pi reali tramite
+`herdr agent start`. Il watcher usa il ruolo `watcher`, esegue una scansione
+`yano watch --once` e riferisce l'esito al planner; non è sufficiente creare il
+solo pannello Herdr. Le tab sono nominate `architect-<project-name>` e
+`watcher-<project-name>`; se viene incontrata una tab legacy con il solo nome
+del progetto, viene rinominata e riusata invece di crearne una duplicata.
 
 ## Catalogo globale
 
@@ -95,4 +100,3 @@ skill dichiarate dal manifest; non copia il catalogo nel repository applicativo.
 - nessun playbook generated ha effetti di produzione impliciti;
 - manifest, checksum, evidenze e feedback restano nel database globale per
   audit e rollback logico della versione catalogata.
-

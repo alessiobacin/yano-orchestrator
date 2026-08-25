@@ -3,6 +3,9 @@
 Il suggester raccoglie suggerimenti senza toccare il progetto. Il planner
 riceve una proposta solo dopo l'approvazione del superadmin.
 
+Il worker usa il workspace globale `yano-suggester` e la tab
+`suggester-<project-name>`.
+
 ```bash
 cd /path/progetto
 yano suggester init --project-root . --notify auto

@@ -131,7 +131,7 @@ is considered idle and does not page the user.
 
 `yano debugger` è il secondo agente esterno e vive fuori dal workspace del
 progetto, nel workspace Herdr globale `yano-debugger`, con una tab per ogni
-progetto registrato. Il registro `debugger/debugger.sqlite` contiene progetto,
+progetto registrato, nominata `debugger-<project-name>`. Il registro `debugger/debugger.sqlite` contiene progetto,
 worker, bug, transizioni e audit; gli eventi vengono duplicati nel trace del
 progetto per consentire la diagnosi contestuale. La modalità `project` è
 separata da `yano-maintenance`, che può puntare solo al repository
@@ -156,7 +156,7 @@ processi persistenti.
 
 `yano auto-improve` registra un progetto nel database globale
 `temp/auto-improver/auto-improver.sqlite`, crea audit periodici (per default
-ogni `5d`) e avvia, tramite Herdr, una tab per progetto nel workspace globale
+ogni `5d`) e avvia, tramite Herdr, una tab `auto-improver-<project-name>` per progetto nel workspace globale
 `yano-auto-improver`. Ogni audit raccoglie un evidence pack limitato con
 manifest, Git, trace/semantic retrieval, test/lint/build disponibili, bug e
 feedback; i report vivono soltanto nella directory globale `temp/`.
@@ -176,8 +176,8 @@ composizione del worker senza aprire Herdr. `yano auto-improve run|start
 
 `yano suggester` è un osservatore globale read-only. Registra i suggerimenti in
 `temp/suggester/suggester.sqlite`, conserva evidence pack e report sotto
-`temp/suggester/` e usa il workspace Herdr `yano-suggester`, con una tab per
-progetto. La v1 offre intake CLI, redazione di segreti, fingerprint esatto,
+`temp/suggester/` e usa il workspace Herdr `yano-suggester`, con una tab
+`suggester-<project-name>` per progetto. La v1 offre intake CLI, redazione di segreti, fingerprint esatto,
 analisi bounded e lifecycle `received → analyzing → awaiting_approval →
 accepted|rejected`.
 
@@ -208,9 +208,12 @@ presente in `.mcp.json` resta `pending` fino a un handshake reale registrato
 con `yano architect capability`. `--once` esegue soltanto il gate e non apre
 Herdr.
 
-Quando la readiness è completa, l'architect avvia anche una tab di
-`yano-watcher` per osservare il nuovo round. Il watcher può segnalare il round
-sano ma non può promuovere. Il planner intervista l'utente, chiede una
+Quando la readiness è completa, l'architect avvia una tab
+`architect-<project-name>` nel workspace `yano-architect` e una tab
+`watcher-<project-name>` nel workspace `yano-watcher`, oltre ai rispettivi
+agenti Pi con ruolo `architect` e `watcher` per osservare il nuovo round:
+creare soltanto la tab non costituisce un agente attivo. Il watcher può
+segnalare il round sano ma non può promuovere. Il planner intervista l'utente, chiede una
 revisione oppure usa `promote --yes` solo con capability pronte, almeno una
 validation riuscita e feedback positivo. Il catalogo espone
 `yano playbook list|show|check` e `yano agent list|show`; il launcher unisce un

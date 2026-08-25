@@ -24,6 +24,10 @@ capabilities:
     kind: cli
     command: herdr
     probe: [--version]
+  yano:
+    kind: cli
+    command: yano
+    probe: [--version]
   gh:
     kind: cli
     command: gh

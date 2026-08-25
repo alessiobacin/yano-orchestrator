@@ -29,6 +29,12 @@ function now() { return new Date().toISOString(); }
 function value(argv, flag) { const index = argv.indexOf(flag); return index >= 0 ? argv[index + 1] : null; }
 function has(argv, flag) { return argv.includes(flag); }
 function json(valueToParse, fallback) { try { return JSON.parse(valueToParse); } catch { return fallback; } }
+function slug(valueToSlug) {
+	return String(valueToSlug || "project").toLowerCase().normalize("NFKD")
+		.replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-")
+		.replace(/^-+|-+$/g, "").slice(0, 48) || "project";
+}
+function projectTabLabel(projectName) { return `auto-improver-${slug(projectName)}`.slice(0, 60); }
 
 function requireSqlite() {
 	try { return process.getBuiltinModule?.("node:sqlite") || require("node:sqlite"); }
@@ -260,6 +266,12 @@ function herdrSnapshot() {
 	try { const parsed = JSON.parse(result.stdout); return parsed?.result?.snapshot || parsed?.result || parsed; } catch { return null; }
 }
 
+function renameHerdrTab(tabId, label) {
+	if (!tabId || !label) return;
+	const result = spawnSync("herdr", ["tab", "rename", tabId, label], { encoding: "utf8" });
+	if (result.status !== 0) throw new Error(`yano auto-improve: impossibile rinominare la tab ${tabId} in ${label}${result.stderr ? `: ${result.stderr.trim()}` : ""}`);
+}
+
 function ensureWorkspace(snapshot, dryRun) {
 	const existing = snapshot?.workspaces?.find((item) => item.label === WORKSPACE_LABEL);
 	if (existing) return existing;
@@ -283,17 +295,24 @@ function launchWorker(info, row, auditId, evidencePath, reportPath, dryRun = fal
 	const snapshot = herdrSnapshot();
 	if (!snapshot) throw new Error("yano auto-improve: Herdr non raggiungibile; avvia Herdr e riprova");
 	const workspace = ensureWorkspace(snapshot, false);
+	const tabLabel = projectTabLabel(info.name);
 	let refreshed = herdrSnapshot() || snapshot;
-	let tab = refreshed.tabs?.find((item) => item.workspace_id === workspace.workspace_id && item.label === info.name);
+	let tab = refreshed.tabs?.find((item) => item.workspace_id === workspace.workspace_id && (item.label === tabLabel || item.tab_id === row.worker_tab_id || item.label === info.name));
 	let pane = tab && refreshed.panes?.find((item) => item.tab_id === tab.tab_id);
-	if (!tab) {
-		const created = spawnSync("herdr", ["tab", "create", "--workspace", workspace.workspace_id, "--cwd", info.root, "--label", info.name, "--no-focus"], { encoding: "utf8" });
-		if (created.status !== 0) throw new Error(`yano auto-improve: Herdr non ha creato la tab ${info.name}${created.stderr ? `: ${created.stderr.trim()}` : ""}`);
+	if (tab && tab.label !== tabLabel) {
+		renameHerdrTab(tab.tab_id, tabLabel);
 		refreshed = herdrSnapshot() || refreshed;
-		tab = refreshed.tabs?.find((item) => item.workspace_id === workspace.workspace_id && item.label === info.name);
+		tab = refreshed.tabs?.find((item) => item.tab_id === tab.tab_id);
 		pane = tab && refreshed.panes?.find((item) => item.tab_id === tab.tab_id);
 	}
-	if (!tab || !pane) throw new Error(`yano auto-improve: tab/pane non trovati per ${info.name}`);
+	if (!tab) {
+		const created = spawnSync("herdr", ["tab", "create", "--workspace", workspace.workspace_id, "--cwd", info.root, "--label", tabLabel, "--no-focus"], { encoding: "utf8" });
+		if (created.status !== 0) throw new Error(`yano auto-improve: Herdr non ha creato la tab ${tabLabel}${created.stderr ? `: ${created.stderr.trim()}` : ""}`);
+		refreshed = herdrSnapshot() || refreshed;
+		tab = refreshed.tabs?.find((item) => item.workspace_id === workspace.workspace_id && item.label === tabLabel);
+		pane = tab && refreshed.panes?.find((item) => item.tab_id === tab.tab_id);
+	}
+	if (!tab || !pane) throw new Error(`yano auto-improve: tab/pane non trovati per ${tabLabel}`);
 	const launched = spawnSync("herdr", ["pane", "run", pane.pane_id, `exec ${commandLine}`], { cwd: info.root, encoding: "utf8" });
 	if (launched.status !== 0) throw new Error(`yano auto-improve: avvio agente fallito${launched.stderr ? `: ${launched.stderr.trim()}` : ""}`);
 	return { workspace_id: workspace.workspace_id, tab_id: tab.tab_id, pane_id: pane.pane_id, instance, command: commandLine, dry_run: false };

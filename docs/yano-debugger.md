@@ -33,8 +33,9 @@ yano debugger start --project-root /path/app --once --json
 
 La base `3055` produce backend `3055/4055/5055` e frontend
 `6055/7055/8055` per development/staging/production. `start` crea o riusa il
-workspace Herdr globale `yano-debugger`, crea una tab con il nome del progetto
-e lancia `yano start --role debugger` nella sua pane. Per diagnostica e test
+workspace Herdr globale `yano-debugger`, crea una tab chiamata
+`debugger-<project-name>` e lancia `yano start --role debugger` nella sua pane.
+Per diagnostica e test
 senza Herdr si può usare `--foreground`: registra il worker ma non apre una
 tab. `start --once` esegue invece una sola preflight read-only su trace e bug,
 non apre Herdr, non avvia processi persistenti e restituisce un report JSON.

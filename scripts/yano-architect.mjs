@@ -300,11 +300,100 @@ function ensureWorkspace(label, cwd, dryRun = false) {
 	return { workspace, created: true };
 }
 
-function launchTab({ label, cwd, workspaceId, command, dryRun }) {
-	if (dryRun) return { workspace_id: workspaceId, tab_id: null, pane_id: null, label, command, dry_run: true };
+function herdrAgentName(instance) {
+	const normalized = slug(instance);
+	if (normalized.length <= 32) return normalized;
+	const suffix = crypto.createHash("sha256").update(normalized).digest("hex").slice(0, 6);
+	return `${normalized.slice(0, 25)}-${suffix}`.slice(0, 32);
+}
+
+function printableCommand(args) {
+	return args.map((arg) => /\s|['"]/.test(String(arg)) ? safeShell(arg) : String(arg)).join(" ");
+}
+
+function splitPiStartup(piArgs) {
+	const index = piArgs.indexOf("--continue");
+	if (index < 0) return { startupArgs: piArgs, initialPrompt: null };
+	return { startupArgs: [...piArgs.slice(0, index), ...piArgs.slice(index + 2)], initialPrompt: piArgs[index + 1] || null };
+}
+
+function composePiArgs({ cwd, instance, role, project, prompt }) {
+	const launcher = path.join(PACKAGE_ROOT, "scripts", "launch-planner.mjs");
+	const result = spawnSync(process.execPath, [launcher, "--instance", instance, "--role", role, "--project", project, "--continue", prompt, "--print-only", "--json"], {
+		cwd,
+		encoding: "utf8",
+		env: { ...process.env, YANO_DATA_DIR: process.env.YANO_DATA_DIR || traceRoot() },
+		maxBuffer: 2_000_000,
+	});
+	if (result.status !== 0) throw new Error(`yano architect: composizione del comando Pi fallita per ${role}${result.stderr ? `: ${result.stderr.trim()}` : ""}`);
+	const line = String(result.stdout || "").trim().split("\n").reverse().find((candidate) => candidate.trim().startsWith("{"));
+	let parsed;
+	try { parsed = JSON.parse(line || ""); } catch { parsed = null; }
+	if (!parsed?.args || !Array.isArray(parsed.args)) throw new Error(`yano architect: launch-planner non ha restituito argomenti Pi validi per ${role}`);
+	return parsed.args;
+}
+
+function activeHerdrAgent(snapshot, instance, agentName) {
+	return (snapshot?.agents || []).find((item) => {
+		if (["done", "unknown", "offline"].includes(item.agent_status)) return false;
+		return [item.name, item.terminal_title_stripped, item.terminal_title]
+			.some((candidate) => candidate === instance || candidate === agentName);
+	});
+}
+
+function activeHerdrAgentOnPane(snapshot, paneId) {
+	return (snapshot?.agents || []).find((item) => item.pane_id === paneId && !["done", "unknown", "offline"].includes(item.agent_status));
+}
+
+function ensureHerdrTabLabel(tabId, label) {
+	if (!tabId || !label) return;
+	const snapshot = herdrSnapshot();
+	const tab = snapshot?.tabs?.find((item) => item.tab_id === tabId);
+	if (!tab || tab.label === label) return;
+	const renamed = spawnSync("herdr", ["tab", "rename", tabId, label], { encoding: "utf8" });
+	if (renamed.status !== 0) throw new Error(`yano architect: impossibile rinominare la tab Herdr ${tabId} in ${label}${renamed.stderr ? `: ${renamed.stderr.trim()}` : ""}`);
+}
+
+function launchAgentTab({ label, cwd, workspaceId, instance, role, project, prompt, dryRun }) {
+	const piArgs = composePiArgs({ cwd, instance, role, project, prompt });
+	const { startupArgs, initialPrompt } = splitPiStartup(piArgs);
+	const command = printableCommand(["pi", ...piArgs]);
+	const agentName = herdrAgentName(instance);
+	if (dryRun) return { workspace_id: workspaceId, tab_id: null, pane_id: null, label, command, instance, agent_kind: "pi", herdr_agent_name: agentName, dry_run: true };
 	const refreshed = herdrSnapshot();
+	const alreadyRunning = activeHerdrAgent(refreshed, instance, agentName);
+	if (alreadyRunning) {
+		ensureHerdrTabLabel(alreadyRunning.tab_id, label);
+		return {
+			workspace_id: alreadyRunning.workspace_id || workspaceId,
+			tab_id: alreadyRunning.tab_id || null,
+			pane_id: alreadyRunning.pane_id || null,
+			label,
+			command,
+			instance,
+			agent_kind: alreadyRunning.agent || "pi",
+			herdr_agent_name: alreadyRunning.name || alreadyRunning.terminal_title_stripped || agentName,
+			agent_status: alreadyRunning.agent_status,
+			already_running: true,
+			dry_run: false,
+		};
+	}
 	let tab = refreshed?.tabs?.find((item) => item.workspace_id === workspaceId && item.label === label);
 	let pane = tab && refreshed?.panes?.find((item) => item.tab_id === tab.tab_id);
+	if (pane?.cwd && !fs.existsSync(pane.cwd)) {
+		tab = null;
+		pane = null;
+	}
+	// Workspace creation can leave a default shell tab behind. Reuse that blank
+	// pane before creating another tab; a visible Herdr panel is not disposable
+	// state and should become the requested real Pi agent when it is available.
+	if (!tab) {
+		pane = refreshed?.panes?.find((candidate) => {
+			const ownerTab = refreshed?.tabs?.find((item) => item.tab_id === candidate.tab_id && item.workspace_id === workspaceId);
+			return ownerTab && (!candidate.cwd || fs.existsSync(candidate.cwd)) && !activeHerdrAgentOnPane(refreshed, candidate.pane_id);
+		});
+		tab = pane && refreshed?.tabs?.find((item) => item.tab_id === pane.tab_id && item.workspace_id === workspaceId);
+	}
 	if (!tab) {
 		const created = spawnSync("herdr", ["tab", "create", "--workspace", workspaceId, "--cwd", cwd, "--label", label, "--no-focus"], { encoding: "utf8" });
 		if (created.status !== 0) throw new Error(`yano architect: tab Herdr ${label} non creata${created.stderr ? `: ${created.stderr.trim()}` : ""}`);
@@ -313,9 +402,21 @@ function launchTab({ label, cwd, workspaceId, command, dryRun }) {
 		pane = tab && next?.panes?.find((item) => item.tab_id === tab.tab_id);
 	}
 	if (!tab || !pane) throw new Error(`yano architect: tab/pane non trovati per ${label}`);
-	const run = spawnSync("herdr", ["pane", "run", pane.pane_id, `exec ${command}`], { cwd, encoding: "utf8" });
-	if (run.status !== 0) throw new Error(`yano architect: avvio tab ${label} fallito${run.stderr ? `: ${run.stderr.trim()}` : ""}`);
-	return { workspace_id: workspaceId, tab_id: tab.tab_id, pane_id: pane.pane_id, label, command, dry_run: false };
+	ensureHerdrTabLabel(tab.tab_id, label);
+	const occupied = herdrSnapshot()?.agents?.find((item) => item.pane_id === pane.pane_id && !["done", "unknown", "offline"].includes(item.agent_status));
+	if (occupied) throw new Error(`yano architect: pane ${pane.pane_id} già occupato dall'agente ${occupied.name || occupied.terminal_title_stripped || "sconosciuto"}`);
+	// `--kind pi` selects the executable. Herdr appends the arguments after
+	// `--`; passing `pi` there would launch the invalid command `pi pi ...`.
+	// Keep the initial prompt out of the shell command as well: Herdr must type
+	// a bounded startup command, then submit the potentially long prompt through
+	// its agent protocol once Pi has been detected as ready.
+	const started = spawnSync("herdr", ["agent", "start", agentName, "--kind", "pi", "--pane", pane.pane_id, "--timeout", "120000", "--", ...startupArgs], { cwd, encoding: "utf8", maxBuffer: 2_000_000 });
+	if (started.status !== 0) throw new Error(`yano architect: agente Herdr ${agentName} non avviato${started.stderr ? `: ${started.stderr.trim()}` : (started.stdout ? `: ${started.stdout.trim()}` : "")}`);
+	if (initialPrompt) {
+		const prompted = spawnSync("herdr", ["agent", "prompt", agentName, initialPrompt, "--timeout", "120000"], { cwd, encoding: "utf8", maxBuffer: 2_000_000 });
+		if (prompted.status !== 0) throw new Error(`yano architect: prompt iniziale non consegnato all'agente Herdr ${agentName}${prompted.stderr ? `: ${prompted.stderr.trim()}` : (prompted.stdout ? `: ${prompted.stdout.trim()}` : "")}`);
+	}
+	return { workspace_id: workspaceId, tab_id: tab.tab_id, pane_id: pane.pane_id, label, command, instance, agent_kind: "pi", herdr_agent_name: agentName, started: true, dry_run: false };
 }
 
 function launchArchitect(db, proposal, { dryRun = false } = {}) {
@@ -323,10 +424,9 @@ function launchArchitect(db, proposal, { dryRun = false } = {}) {
 	fs.mkdirSync(workspaceRoot, { recursive: true, mode: 0o700 });
 	const instance = proposal.architect_instance || `architect-${slug(proposal.proposal_id)}`;
 	const prompt = `Gestisci la proposta ${proposal.proposal_id} in modo controllato. Leggi ${proposal.manifest_path} e ${proposal.playbook_path}. Verifica/installare solo le capability dichiarate e autorizzate. Non modificare mai il progetto ${proposal.project_root}. Usa yano architect verify --proposal-id ${proposal.proposal_id} dopo il provisioning. Il playbook può diventare operativo solo con readiness completa.`;
-	const command = `yano start --instance ${safeShell(instance)} --role architect --project ${safeShell(proposal.project_name)} --continue ${safeShell(prompt)}`;
 	const workspace = ensureWorkspace(ARCHITECT_WORKSPACE, workspaceRoot, dryRun);
-	const label = `${slug(proposal.project_name)}-${slug(proposal.proposal_id)}`.slice(0, 60);
-	const launched = launchTab({ label, cwd: workspaceRoot, workspaceId: workspace.workspace.workspace_id, command, dryRun });
+	const label = `architect-${slug(proposal.project_name)}`.slice(0, 60);
+	const launched = launchAgentTab({ label, cwd: proposal.project_root, workspaceId: workspace.workspace.workspace_id, instance, role: "architect", project: proposal.project_name, prompt, dryRun });
 	const timestamp = now();
 	db.prepare("UPDATE architect_proposals SET workspace_id=?,tab_id=?,pane_id=?,architect_instance=?,updated_at=? WHERE proposal_id=?").run(launched.workspace_id, launched.tab_id, launched.pane_id, instance, timestamp, proposal.proposal_id);
 	return { ...launched, instance, workspace_label: ARCHITECT_WORKSPACE };
@@ -338,10 +438,11 @@ function launchValidationWatcher(db, proposal, { dryRun = false } = {}) {
 	const runId = proposal.validation_run_id || `validation-${proposal.proposal_id}`;
 	const manifest = parseJson(fs.readFileSync(proposal.manifest_path, "utf8"), {});
 	const playbookChecksum = fs.existsSync(proposal.playbook_path) ? crypto.createHash("sha256").update(fs.readFileSync(proposal.playbook_path)).digest("hex") : "";
-	const command = `yano watch --project-root ${safeShell(proposal.project_root)} --project ${safeShell(proposal.project_name)} --validation-run ${safeShell(runId)} --playbook-proposal ${safeShell(proposal.proposal_id)} --playbook-id ${safeShell(manifest.playbook_id || proposal.playbook_id)} --playbook-checksum ${safeShell(playbookChecksum)} --interval-ms 60000`;
+	const instance = `yano-watcher-${slug(proposal.project_name)}`;
+	const prompt = `Valida il round del playbook ${proposal.proposal_id} per il progetto ${proposal.project_root} in modo esclusivamente read-only. Usa yano watch --once --project-root ${safeShell(proposal.project_root)} --project ${safeShell(proposal.project_name)} --validation-run ${safeShell(runId)} --playbook-proposal ${safeShell(proposal.proposal_id)} --playbook-id ${safeShell(manifest.playbook_id || proposal.playbook_id)} --playbook-checksum ${safeShell(playbookChecksum)}; poi leggi il trace e comunica al planner un esito healthy, finding o blocked con evidenze. Non modificare mai il progetto e non promuovere il playbook. Non usare mai find /, scansioni dell'intero filesystem o comandi senza timeout: limita ogni lettura alla root del progetto e ai percorsi Yano esplicitamente indicati.`;
 	const workspace = ensureWorkspace(WATCHER_WORKSPACE, workspaceRoot, dryRun);
-	const label = `${slug(proposal.project_name)}-${slug(proposal.proposal_id)}`.slice(0, 60);
-	const launched = launchTab({ label, cwd: proposal.project_root, workspaceId: workspace.workspace.workspace_id, command, dryRun });
+	const label = `watcher-${slug(proposal.project_name)}`.slice(0, 60);
+	const launched = launchAgentTab({ label, cwd: proposal.project_root, workspaceId: workspace.workspace.workspace_id, instance, role: "watcher", project: proposal.project_name, prompt, dryRun });
 	db.prepare("UPDATE architect_proposals SET watcher_workspace_id=?,watcher_tab_id=?,watcher_pane_id=?,validation_run_id=?,updated_at=? WHERE proposal_id=?").run(launched.workspace_id, launched.tab_id, launched.pane_id, runId, now(), proposal.proposal_id);
 	return { ...launched, run_id: runId, workspace_label: WATCHER_WORKSPACE };
 }
@@ -385,11 +486,30 @@ function provision(db, proposal, { dryRun = false, once = false, install = false
 	recordEvent(db, proposal.proposal_id, "capability_readiness_checked", { ready, install_requested: install, checks });
 	const result = { proposal_id: proposal.proposal_id, status, ready, install_requested: install, checks, operational: ready, no_project_mutation: true };
 	if (ready && !once) {
-		result.watcher = launchValidationWatcher(db, { ...proposal, status }, { dryRun });
-		result.architect = launchArchitect(db, { ...proposal, status }, { dryRun });
-		db.prepare("UPDATE architect_proposals SET status=?,updated_at=? WHERE proposal_id=?").run("ready_ephemeral", now(), proposal.proposal_id);
+		try {
+			result.watcher = launchValidationWatcher(db, { ...proposal, status }, { dryRun });
+			result.architect = launchArchitect(db, { ...proposal, status }, { dryRun });
+			db.prepare("UPDATE architect_proposals SET status=?,updated_at=? WHERE proposal_id=?").run("ready_ephemeral", now(), proposal.proposal_id);
+		} catch (error) {
+			const detail = error instanceof Error ? error.message : String(error);
+			result.status = "blocked";
+			result.ready = false;
+			result.operational = false;
+			result.launch_error = detail;
+			db.prepare("UPDATE architect_proposals SET status=?,updated_at=? WHERE proposal_id=?").run("blocked", now(), proposal.proposal_id);
+			recordEvent(db, proposal.proposal_id, "external_agent_launch_failed", { error: detail, watcher: result.watcher || null, architect: result.architect || null });
+		}
 	} else if (!ready && install && !once) {
-		result.architect = launchArchitect(db, { ...proposal, status }, { dryRun });
+		try {
+			result.architect = launchArchitect(db, { ...proposal, status }, { dryRun });
+		} catch (error) {
+			const detail = error instanceof Error ? error.message : String(error);
+			result.status = "blocked";
+			result.operational = false;
+			result.launch_error = detail;
+			db.prepare("UPDATE architect_proposals SET status=?,updated_at=? WHERE proposal_id=?").run("blocked", now(), proposal.proposal_id);
+			recordEvent(db, proposal.proposal_id, "external_agent_launch_failed", { error: detail, architect: result.architect || null });
+		}
 	}
 	return result;
 }

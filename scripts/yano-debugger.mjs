@@ -37,6 +37,14 @@ function value(argv, flag) {
 
 function has(argv, flag) { return argv.includes(flag); }
 
+function slug(valueToSlug) {
+	return String(valueToSlug || "project").toLowerCase().normalize("NFKD")
+		.replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-")
+		.replace(/^-+|-+$/g, "").slice(0, 48) || "project";
+}
+
+function projectTabLabel(projectName) { return `debugger-${slug(projectName)}`.slice(0, 60); }
+
 function requireSqlite() {
 	try { return process.getBuiltinModule?.("node:sqlite") || require("node:sqlite"); }
 	catch (error) { throw new Error(`yano debugger: node:sqlite non disponibile (${error instanceof Error ? error.message : String(error)}); serve Node >=22.5`); }
@@ -252,6 +260,12 @@ function herdrSnapshot() {
 	try { const parsed = JSON.parse(result.stdout); return parsed?.result?.snapshot || parsed?.result || parsed; } catch { return null; }
 }
 
+function renameHerdrTab(tabId, label) {
+	if (!tabId || !label) return;
+	const result = spawnSync("herdr", ["tab", "rename", tabId, label], { encoding: "utf8" });
+	if (result.status !== 0) throw new Error(`yano debugger: impossibile rinominare la tab ${tabId} in ${label}${result.stderr ? `: ${result.stderr.trim()}` : ""}`);
+}
+
 function shellQuote(valueToQuote) {
 	return process.platform === "win32" ? `"${String(valueToQuote).replaceAll('"', '\\"')}"` : `'${String(valueToQuote).replaceAll("'", `\'"'"\'`)}'`;
 }
@@ -286,17 +300,24 @@ function launchHerdrWorker({ project, root, db, row, intervalMs, dryRun }) {
 	if (!snapshot) throw new Error("yano debugger: Herdr non raggiungibile; avvia Herdr e riprova");
 	const workspaceResult = findOrCreateDebuggerWorkspace(snapshot, workspaceRoot);
 	const { workspace } = workspaceResult;
+	const tabLabel = projectTabLabel(project.name);
 	let refreshed = herdrSnapshot() || snapshot;
-	let tab = refreshed.tabs?.find((item) => item.workspace_id === workspace.workspace_id && item.label === project.name);
+	let tab = refreshed.tabs?.find((item) => item.workspace_id === workspace.workspace_id && (item.label === tabLabel || item.tab_id === row.worker_tab_id || item.label === project.name));
 	let pane = tab && refreshed.panes?.find((item) => item.tab_id === tab.tab_id);
-	if (!tab) {
-		const created = spawnSync("herdr", ["tab", "create", "--workspace", workspace.workspace_id, "--cwd", root, "--label", project.name, "--no-focus"], { encoding: "utf8" });
-		if (created.status !== 0) throw new Error(`yano debugger: Herdr non ha creato la tab ${project.name}${created.stderr ? `: ${created.stderr.trim()}` : ""}`);
+	if (tab && tab.label !== tabLabel) {
+		renameHerdrTab(tab.tab_id, tabLabel);
 		refreshed = herdrSnapshot() || refreshed;
-		tab = refreshed.tabs?.find((item) => item.workspace_id === workspace.workspace_id && item.label === project.name);
+		tab = refreshed.tabs?.find((item) => item.tab_id === tab.tab_id);
 		pane = tab && refreshed.panes?.find((item) => item.tab_id === tab.tab_id);
 	}
-	if (!tab || !pane) throw new Error(`yano debugger: workspace Herdr pronto ma tab/pane non trovati per ${project.name}`);
+	if (!tab) {
+		const created = spawnSync("herdr", ["tab", "create", "--workspace", workspace.workspace_id, "--cwd", root, "--label", tabLabel, "--no-focus"], { encoding: "utf8" });
+		if (created.status !== 0) throw new Error(`yano debugger: Herdr non ha creato la tab ${tabLabel}${created.stderr ? `: ${created.stderr.trim()}` : ""}`);
+		refreshed = herdrSnapshot() || refreshed;
+		tab = refreshed.tabs?.find((item) => item.workspace_id === workspace.workspace_id && item.label === tabLabel);
+		pane = tab && refreshed.panes?.find((item) => item.tab_id === tab.tab_id);
+	}
+	if (!tab || !pane) throw new Error(`yano debugger: workspace Herdr pronto ma tab/pane non trovati per ${tabLabel}`);
 	const launched = spawnSync("herdr", ["pane", "run", pane.pane_id, `exec ${command}`], { cwd: root, encoding: "utf8" });
 	if (launched.status !== 0) throw new Error(`yano debugger: avvio dell'agente fallito${launched.stderr ? `: ${launched.stderr.trim()}` : ""}`);
 	const timestamp = now();

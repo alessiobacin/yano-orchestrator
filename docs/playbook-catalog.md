@@ -20,6 +20,7 @@ workflow instead of launching every specialist.
 | `documentation-release` | docs-sync, architecture-diagrammer, release-notes-writer | source-to-doc diff, examples/diagram/changelog verification |
 | `performance-observability` | observability-agent, speed-benchmarker | before/after measurements with units, environment and sample context |
 | `architect-provisioning` | architect | proposal scope, capability readiness, watcher validation, user feedback and explicit promotion evidence |
+| `knowledge-authoring` | market-researcher, seo-strategist, website-content-strategist, business-docs-author, business-docs-reviewer | catalog-first intent match, parameterized project context, research evidence, structured deliverables and review; variants `single-author`, `research-and-author`, `full-team` |
 
 The `architect` role is global rather than project-scoped. It stages generated
 playbooks and roles under `temp/architect/proposals/`, validates every declared
@@ -33,6 +34,16 @@ Every playbook requires: declared scope, verified starting state, reproducible
 evidence, automated checks, classified errors, a recoverable change, and a
 report artifact. Missing prerequisites stop the phase; they are never silently
 substituted.
+
+## Catalog-first rule
+
+Architect must run `yano architect assess` before proposing a new playbook. An
+exact match is reused without copying artifacts into the project. A missing
+match becomes a global, project-agnostic proposal. The user interview is
+mandatory for a new proposal and records whether the first operational variant
+is single-agent, multi-agent or selected by the Planner. The Architect owns
+the generic team contract; the Planner owns the task-specific variant,
+parallelism and instance count.
 
 For development and mixed tasks, the planner's `to-spec` → `to-tickets` output
 is the required human planning boundary. The approved Markdown tickets are

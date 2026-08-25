@@ -9,6 +9,30 @@ L'architect non modifica mai il progetto osservato. Scrive soltanto sotto la
 directory dati globale di Yano (`temp/`, o `YANO_DATA_DIR`) e nel catalogo
 globale dopo una promozione esplicita.
 
+## Catalog-first e lifecycle
+
+Architect non crea automaticamente un playbook per ogni richiesta. Prima
+confronta l'intento con il catalogo globale:
+
+```text
+assess → catalog match?
+       ├─ sì → riuso del playbook + scelta Planner della variante
+       └─ no → propose globale → intervista utente → capability gate
+                                      → watcher validation → feedback
+                                      → revise oppure promote
+```
+
+Un playbook creato per un progetto non è un playbook del progetto: il primo
+progetto fornisce soltanto il caso d'uso iniziale. Il nome, gli intenti, i
+parametri e i ruoli devono restare riutilizzabili in altri repository.
+
+Per le competenze ampie Architect definisce un team con varianti, non un
+agente monolitico. `single-author`, `research-and-author` e `full-team` sono
+esempi: Architect dichiara ruoli, capability, output, dipendenze e gruppi
+paralleli; il Planner sceglie la variante e il numero di istanze in base al
+task reale. Non si avviano tutti gli agenti solo perché sono presenti nel
+playbook.
+
 ## Lifecycle
 
 ```text
@@ -30,11 +54,19 @@ yano architect assess \
   --project-root /path/progetto \
   --task "crea un'importazione CSV con validazione e test"
 
-# Creare il playbook e il ruolo in staging ephemeral
+# Creare una nuova competenza globale quando il catalogo non basta
 yano architect propose \
   --project-root /path/progetto \
-  --task "crea un'importazione CSV con validazione e test" \
+  --task "crea un playbook per una competenza specialistica" \
+  --new-playbook \
   --json
+
+# Rispondere all'intervista diretta dell'Architect
+yano architect answer --proposal-id <PROP-ID> --status approved \
+  --text "Globale, team multi-agente, priorità balanced" --json
+
+# Selezionare la variante concreta da usare nel task
+yano architect team --proposal-id <PROP-ID> --variant full-team --json
 
 # Verificare il gate senza aprire Herdr (utile per test e CI)
 yano architect provision --proposal-id <PROP-ID> --once --json

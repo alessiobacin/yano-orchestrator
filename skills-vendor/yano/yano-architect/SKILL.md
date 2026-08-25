@@ -21,6 +21,29 @@ lavoro è una proposta di playbook/ruolo, non il codice del progetto osservato.
   completato la validazione;
 - una revisione crea una nuova versione, non sovrascrive un run già bindato.
 
+## Catalogo-first e team
+
+Prima di creare qualcosa, valuta sempre il catalogo con
+`yano architect assess --task ... --json`. Se trovi un playbook esatto,
+riusalo: non generare una copia specifica del progetto. Se non trovi una
+copertura sufficiente, la proposta deve essere globale, parametrica e
+riutilizzabile in altri progetti.
+
+Una nuova competenza passa da `yano architect propose --new-playbook` e da una
+breve intervista diretta all'utente. L'intervista deve chiedere almeno:
+
+- ambito globale e riutilizzabile;
+- agente singolo, team multi-agente o decisione lasciata al planner;
+- compromesso velocità/costo contro profondità/qualità.
+
+Finché l'utente non approva con `yano architect answer`, la proposta resta
+`awaiting_user_input` e nessun agente può partire. Dopo l'approvazione, il
+planner usa `yano architect team --variant ...` per scegliere una variante.
+L'Architect definisce ruoli, responsabilità, output, write-scope, capability,
+dipendenze e gruppi paralleli; il planner decide il roster concreto e il
+numero di istanze. Un playbook multi-agente non deve trasformarsi
+automaticamente in cinque agenti se il task è piccolo.
+
 ## Capability provisioning
 
 Verifica ogni skill con `SKILL.md`, ogni CLI con `which`/`--version` e ogni MCP

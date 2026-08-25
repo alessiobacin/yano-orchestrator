@@ -1,0 +1,158 @@
+schema_version: 1
+id: knowledge-authoring
+label: Generic knowledge and business documentation authoring
+description: Global reusable workflow for research, SEO, website/content strategy and structured business documentation. The Planner selects a team variant for each task.
+catalog:
+  scope: global
+  reusable: true
+  intents:
+    - business documentation
+    - market research
+    - SEO strategy
+    - website content strategy
+    - knowledge authoring
+  exclusions:
+    - application source-code implementation
+    - deployment execution
+  parameters:
+    - project_name
+    - project_root
+    - domain
+    - audience
+    - language
+    - deliverables
+team:
+  strategy: planner-selectable
+  default_variant: full-team
+  roles:
+    - id: market-researcher
+      purpose: Research market, audience, competitors and evidence without writing final deliverables.
+      outputs: [market-research-report, source-register]
+      write_scope: [temp/knowledge/market-research]
+      capabilities: [research, documentation-lookup]
+    - id: seo-strategist
+      purpose: Define search intent, keyword opportunities, information architecture and SEO recommendations.
+      outputs: [seo-strategy, keyword-map]
+      write_scope: [temp/knowledge/seo]
+      capabilities: [research, documentation-lookup, copywriting]
+    - id: website-content-strategist
+      purpose: Translate research into website positioning, messaging, page structure and content briefs.
+      outputs: [website-content-blueprint]
+      write_scope: [temp/knowledge/website]
+      capabilities: [copywriting, documentation-writer]
+    - id: business-docs-author
+      purpose: Synthesize approved research and strategy into the requested structured Markdown documents.
+      outputs: [business-document-set]
+      write_scope: [docs]
+      capabilities: [documentation-writer, documentation-lookup, copywriting]
+    - id: business-docs-reviewer
+      purpose: Check factual traceability, consistency, duplication, template compliance and completeness.
+      outputs: [documentation-review]
+      write_scope: [temp/knowledge/review]
+      capabilities: [documentation-writer, documentation-lookup]
+  variants:
+    - id: single-author
+      roles: [business-docs-author]
+      parallel_groups: [[business-docs-author]]
+      reason: One small, well-scoped document with known inputs.
+    - id: research-and-author
+      roles: [market-researcher, seo-strategist, business-docs-author]
+      parallel_groups: [[market-researcher, seo-strategist], [business-docs-author]]
+      reason: Medium task requiring independent market and SEO research before synthesis.
+    - id: full-team
+      roles: [market-researcher, seo-strategist, website-content-strategist, business-docs-author, business-docs-reviewer]
+      parallel_groups: [[market-researcher, seo-strategist], [website-content-strategist], [business-docs-author], [business-docs-reviewer]]
+      reason: Strategic multi-document task with independent research, synthesis and review.
+enforcement:
+  status: partial
+  note: The Planner chooses one declared variant; agents write only within their declared scope and the final author owns docs/.
+states:
+  - id: received
+    owner: planner
+    terminal: false
+  - id: preflight
+    owner: planner
+    terminal: false
+  - id: research
+    owner: market-researcher_and_seo-strategist
+    terminal: false
+  - id: strategy
+    owner: website-content-strategist
+    terminal: false
+  - id: authoring
+    owner: business-docs-author
+    terminal: false
+  - id: review
+    owner: business-docs-reviewer
+    terminal: false
+  - id: awaiting_user_feedback
+    owner: planner_and_human
+    terminal: false
+  - id: completed
+    owner: planner
+    terminal: true
+  - id: blocked
+    owner: planner_and_human
+    terminal: true
+transitions:
+  - id: scope
+    from: received
+    to: preflight
+    actor: planner
+    requires: [objective_received, variant_selected, source_of_truth_checked]
+  - id: start_research
+    from: preflight
+    to: research
+    actor: planner
+    requires: [capability_readiness_verified, phase_unlocked]
+  - id: start_strategy
+    from: research
+    to: strategy
+    actor: planner
+    requires: [research_reports_ready]
+  - id: start_authoring
+    from: [research, strategy]
+    to: authoring
+    actor: planner
+    requires: [inputs_registered, phase_unlocked]
+  - id: submit_review
+    from: authoring
+    to: review
+    actor: business-docs-author
+    requires: [documents_written, sources_registered, template_checked]
+  - id: request_feedback
+    from: review
+    to: awaiting_user_feedback
+    actor: planner
+    requires: [review_approved, watcher_round_healthy]
+  - id: complete
+    from: awaiting_user_feedback
+    to: completed
+    actor: planner
+    requires: [positive_user_feedback]
+  - id: block
+    from: [research, strategy, authoring, review]
+    to: blocked
+    actor: planner_and_human
+    requires: [finding_recorded]
+failure_routes:
+  - condition: capability_missing
+    action: keep_ephemeral_and_block
+    terminal: false
+  - condition: watcher_finding
+    action: keep_ephemeral_and_request_revision
+    terminal: false
+  - condition: research_conflict
+    action: return_to_planner_for_scope_decision
+    terminal: false
+  - condition: negative_user_feedback
+    action: return_to_architect_for_revision
+    terminal: false
+invariants:
+  - catalog_scope_is_global_and_project_agnostic
+  - planner_selects_one_declared_team_variant
+  - independent_research_roles_may_run_in_parallel
+  - only_business_docs_author_writes_final_docs
+  - each_agent_writes_only_inside_declared_scope
+  - final_documents_are_traceable_to_sources
+  - no_promotion_without_validation_and_user_feedback

@@ -3,6 +3,41 @@
 Usa questa procedura quando il planner capisce che il catalogo non contiene un
 playbook adeguato o serve un ruolo specialistico nuovo.
 
+## 1. Controllare il catalogo prima di creare
+
+```bash
+cd /path/progetto
+yano architect assess --project-root "$PWD" \
+  --task "documenti strategici di vendita, ricerca, SEO e sito" --json
+```
+
+Se il risultato contiene `catalog.action: reuse`, il Planner usa il playbook
+indicato e sceglie una variante adatta. Per `knowledge-authoring` le varianti
+sono `single-author`, `research-and-author` e `full-team`.
+
+## 2. Creare una nuova competenza riutilizzabile
+
+```bash
+yano architect propose --project-root "$PWD" \
+  --task "Crea un playbook per una competenza specialistica" \
+  --new-playbook --json
+```
+
+La proposta resta `awaiting_user_input`. L'Architect deve intervistare l'utente
+su ambito globale, agente singolo/team multi-agente e priorità velocità/
+profondità:
+
+```bash
+yano architect answer --proposal-id <PROP-ID> --status approved \
+  --text "Globale e riutilizzabile; team multi-agente; priorità balanced" --json
+yano architect team --proposal-id <PROP-ID> --variant full-team --json
+yano architect provision --proposal-id <PROP-ID> --once --json
+```
+
+Solo dopo readiness completa il Planner avvia i ruoli della variante con lo
+stesso `--proposal-id`. Gli artefatti restano globali sotto `temp/architect/`
+e non vengono copiati nel progetto osservato.
+
 ```bash
 cd /path/progetto
 yano architect assess --project-root "$PWD" --task "<obiettivo>" --json

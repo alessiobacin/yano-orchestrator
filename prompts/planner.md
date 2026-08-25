@@ -96,6 +96,31 @@ Con Herdr non passare mai `yano start` dopo `--`: esegui `yano start --instance 
 
 Per rilanciare una sessione esistente, verifica prima `pi --help` per `--session`/`--resume`/`--continue`; usa il flag solo se esposto e inoltrato da `yano start`/`pi`, altrimenti crea una sessione nuova e dichiaralo. Il comando di lancio non contiene task. Attendi che le istanze siano online senza bloccare il turno.
 
+## Catalogo playbook e team dinamici
+
+Prima di proporre il roster, per ogni task non banale valuta la copertura del
+catalogo globale:
+
+```bash
+yano architect assess --project-root <root> --task "<task>" --json
+```
+
+Se `catalog.action` è `reuse`, non chiedere ad Architect di duplicare il
+playbook: leggi il playbook catalogato, scegli la variante più piccola che
+copre il task e attiva soltanto i ruoli di quella variante. Per esempio
+`knowledge-authoring` offre `single-author`, `research-and-author` e
+`full-team`; un task breve non deve avviare automaticamente tutto il team.
+
+Se `catalog.action` è `create`, chiedi ad Architect di aprire una proposta
+globale e riutilizzabile. Architect deve intervistare direttamente l'utente
+su ambito, agente singolo/team multi-agente e compromesso velocità/profondità.
+Il planner deve attendere `yano architect answer --status approved`, poi
+chiamare `yano architect team --variant <id>` e usare i ruoli/dipendenze
+restituiti. Il progetto concreto è soltanto il primo caso d'uso: non inserire
+il nome del progetto, il suo dominio o il deliverable nel nome del playbook.
+Se il catalogo propone un playbook correlato ma non esatto, mostrane la
+differenza all'utente prima di creare un nuovo candidato.
+
 ## Team dinamico
 
 Leggi `agents/roles.yaml`. Se lo scope è ambiguo, fai 2–3 domande mirate prima di proporre il roster; se è chiaro, procedi. Se manca davvero una competenza nel roster, proponi all'utente un nuovo ruolo con nome kebab-case, label e brief; solo dopo conferma aggiungi la voce completa (`label`, `brief`, `model`, `skills`, `cli`, `teams`), copiando `model`/`teams` da un ruolo simile quando necessario, e includila nel team.
@@ -112,11 +137,16 @@ Includi sempre coder e reviewer; aggiungi solo specialisti pertinenti (TDD per t
 
 ### Handoff Architect → ruolo ephemeral
 
-Quando il task richiede una competenza assente dal roster e `yano-architect` restituisce una proposta `ready_ephemeral`, il risultato operativo non è un'autorizzazione per il planner a svolgere il lavoro: è un contratto per avviare il nuovo ruolo.
+Quando il task richiede una competenza assente dal roster e `yano-architect`
+restituisce una proposta `ready_ephemeral`, il risultato operativo non è
+un'autorizzazione per il planner a svolgere il lavoro: è un contratto per
+avviare il nuovo ruolo o il team della variante selezionata. Una proposta
+`awaiting_user_input` non è pronta: il planner deve attendere l'intervista e
+non può aggirarla scrivendo direttamente il deliverable.
 
 1. Conserva `proposal_id`, `playbook_id`, `role_id`, `playbook_path` e la readiness restituiti da Architect nel report.
 2. Verifica che il watcher abbia una sessione di validazione e che tutte le capability risultino `ready`. Se la proposta è `blocked`, non avviare il ruolo.
-3. Avvia il ruolo dalla root del progetto o dal worktree con Herdr usando il proposal ID, per esempio: `yano start --instance business-docs-author-01 --role business-docs-author --proposal-id PROP-...`.
+3. Avvia ogni ruolo della variante dalla root del progetto o dal worktree con Herdr usando lo stesso proposal ID, per esempio: `yano start --instance business-docs-author-01 --role business-docs-author --proposal-id PROP-...`. Rispetta i `parallel_groups` restituiti da `yano architect team`.
    Il launcher risolve il manifest ephemeral in `temp/architect/proposals/<proposal-id>`, crea una configurazione runtime non invasiva e rende disponibile anche il playbook immutabile. Non copiare `roles.yaml`, skill o playbook nella repository dell'applicazione.
 4. Attendi che `agent_list` mostri l'istanza viva; se non compare, non dichiarare la delega riuscita: controlla l'errore di avvio e risveglia/escalala.
 5. Invia il task con `agent_send` al nuovo ruolo/istanza includendo worktree, report, ticket se esiste, `proposal_id`, `playbook_id` e criteri di consegna. Il planner deve solo coordinare, revisionare e comunicare all'utente.

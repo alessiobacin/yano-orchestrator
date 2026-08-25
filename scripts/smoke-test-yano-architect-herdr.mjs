@@ -65,14 +65,24 @@ try {
 	assert.equal(assessment.candidate_playbook, "backend-change");
 	assert.ok(assessment.capabilities.skills.includes("tdd-development"));
 	const docsAssessment = runCli(["architect", "assess", "--task", "Scrivi documenti strategici di vendita, SEO e sito web", "--project-root", projectRoot, "--json"]);
-	assert.equal(docsAssessment.candidate_playbook, "documentation-release");
-	assert.equal(docsAssessment.candidate_reason, "documentation/business-authoring intent");
+	assert.equal(docsAssessment.candidate_playbook, "knowledge-authoring");
+	assert.equal(docsAssessment.catalog.action, "reuse");
+	assert.equal(docsAssessment.requires_user_interview, false);
+	assert.deepEqual(docsAssessment.team.variants.map((variant) => variant.id), ["single-author", "research-and-author", "full-team"]);
+	const docsReuse = runCli(["architect", "propose", "--task", "Scrivi documenti strategici di vendita, SEO e sito web", "--project-root", projectRoot, "--json"]);
+	assert.equal(docsReuse.reused, true);
+	assert.equal(docsReuse.decision, "reuse");
 
-	const created = runCli(["architect", "propose", "--task", "Implementa una funzione backend", "--project-root", projectRoot, "--json"]);
+	const created = runCli(["architect", "propose", "--task", "Implementa una funzione backend", "--new-playbook", "--project-root", projectRoot, "--json"]);
 	const proposalId = created.proposal.proposal_id;
-	assert.equal(created.proposal.status, "draft");
+	assert.equal(created.proposal.status, "awaiting_user_input");
+	assert.equal(created.interview.status, "open");
 	assert.ok(fs.existsSync(created.paths.playbook));
 	assert.ok(fs.existsSync(created.paths.manifest));
+	const blockedByInterview = runCli(["architect", "provision", "--proposal-id", proposalId, "--once", "--json"]);
+	assert.equal(blockedByInterview.reason, "awaiting_user_input");
+	const answered = runCli(["architect", "answer", "--proposal-id", proposalId, "--status", "approved", "--text", "Playbook globale, singolo agente per questa prima variante, priorità balanced", "--json"]);
+	assert.equal(answered.next_state, "draft");
 
 	const gated = runCli(["architect", "provision", "--proposal-id", proposalId, "--once", "--json"]);
 	assert.equal(gated.ready, false, JSON.stringify(gated));
@@ -129,7 +139,8 @@ try {
 	assert.match(launcher.stdout, /runtime-config/);
 	assert.match(launcher.stdout, /tdd-development/);
 
-	const blockedCreated = runCli(["architect", "propose", "--task", "Ridisegna l'interfaccia nel browser", "--project-root", blockedProjectRoot, "--json"]);
+	const blockedCreated = runCli(["architect", "propose", "--task", "Ridisegna l'interfaccia nel browser", "--new-playbook", "--project-root", blockedProjectRoot, "--json"]);
+	runCli(["architect", "answer", "--proposal-id", blockedCreated.proposal.proposal_id, "--status", "approved", "--text", "Playbook globale, team deciso dal Planner, priorità balanced", "--json"]);
 	const blocked = runCli(["architect", "provision", "--proposal-id", blockedCreated.proposal.proposal_id, "--once", "--json"]);
 	assert.equal(blocked.operational, false);
 	assert.ok(blocked.checks.some((check) => ["missing", "pending"].includes(check.status)));

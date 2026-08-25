@@ -157,6 +157,61 @@ roles:
       - architecture
       - platform
 
+  market-researcher:
+    activation: lazy
+    playbook: knowledge-authoring
+    label: "Market Researcher"
+    brief: "Ricerca mercato, audience, competitor e fonti per un playbook globale di knowledge authoring. Produce solo report intermedi e non modifica i documenti finali."
+    model: { provider: llmproxy, model: reasoning-model }
+    skills: [research, documentation-lookup, yano-planner-trace-analysis]
+    cli: [git, npx]
+    mcp: []
+    teams: [knowledge, research]
+
+  seo-strategist:
+    activation: lazy
+    playbook: knowledge-authoring
+    label: "SEO Strategist"
+    brief: "Definisci search intent, keyword, opportunità SEO e information architecture. Scrivi solo gli artefatti SEO intermedi assegnati."
+    model: { provider: llmproxy, model: reasoning-model }
+    skills: [research, documentation-lookup, copywriting, yano-planner-trace-analysis]
+    cli: [git, npx]
+    mcp: []
+    teams: [knowledge, research]
+
+  website-content-strategist:
+    activation: lazy
+    playbook: knowledge-authoring
+    label: "Website Content Strategist"
+    brief: "Trasforma ricerca e SEO in posizionamento, messaging, struttura del sito e content brief senza scrivere il deliverable finale."
+    model: { provider: llmproxy, model: reasoning-model }
+    skills: [copywriting, documentation-writer, yano-planner-trace-analysis]
+    cli: [git, npx]
+    mcp: []
+    teams: [knowledge, strategy]
+
+  business-docs-author:
+    activation: lazy
+    playbook: knowledge-authoring
+    label: "Business Docs Author"
+    brief: "Sintetizza gli input approvati in documenti Markdown business completi e strutturati. È l'unico ruolo autorizzato a scrivere i documenti finali in docs/."
+    model: { provider: llmproxy, model: reasoning-model }
+    skills: [documentation-writer, documentation-lookup, copywriting, yano-planner-trace-analysis]
+    cli: [git, npx]
+    mcp: []
+    teams: [knowledge, authoring]
+
+  business-docs-reviewer:
+    activation: lazy
+    playbook: knowledge-authoring
+    label: "Business Docs Reviewer"
+    brief: "Revisiona tracciabilità delle fonti, coerenza, duplicazioni, completezza e rispetto del template senza modificare direttamente i deliverable finali."
+    model: { provider: llmproxy, model: reasoning-model }
+    skills: [documentation-writer, documentation-lookup, yano-planner-trace-analysis]
+    cli: [git, npx]
+    mcp: []
+    teams: [knowledge, quality]
+
   # ── Roster di agenti specialisti (nessun prompts/<role>.md dedicato: usano
   # prompts/specialist.md, un template generico che l'estensione riempie con
   # `label`/`brief` qui sotto — vedi loadRolePrompt() in orchestrator.ts e

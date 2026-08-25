@@ -200,13 +200,24 @@ scrive il database `temp/architect/architect.sqlite`, le proposte ephemeral in
 `temp/architect/proposals/` e, solo dopo promozione, le versioni immutabili in
 `temp/catalog/`.
 
-Il lifecycle è `assess → propose → capability gate → watcher validation →
-feedback planner/utente → revise|promote`. L'architect non modifica mai
-codice, test, configurazioni, worktree o deployment del progetto. Prima di
-avviare un playbook controlla tutte le skill, CLI e MCP dichiarate; un MCP solo
-presente in `.mcp.json` resta `pending` fino a un handshake reale registrato
-con `yano architect capability`. `--once` esegue soltanto il gate e non apre
-Herdr.
+Il lifecycle è catalog-first: `assess → reuse` se esiste un match esatto,
+oppure `assess → propose globale → intervista utente → team variant →
+capability gate → watcher validation → feedback planner/utente → revise|promote`.
+L'architect non modifica mai codice, test, configurazioni, worktree o
+deployment del progetto. Prima di avviare un playbook controlla tutte le skill,
+CLI e MCP dichiarate; un MCP solo presente in `.mcp.json` resta `pending` fino
+a un handshake reale registrato con `yano architect capability`. `--once`
+esegue soltanto il gate e non apre Herdr.
+
+Una proposta nuova è globale e parametrica: il progetto che ha originato la
+richiesta è soltanto il primo caso d'uso. L'intervista chiede all'utente se
+preferisce un agente singolo, un team multi-agente o una scelta lasciata al
+planner, oltre alla priorità velocità/profondità. Architect definisce il
+contratto generico del team (ruoli, output, capability e gruppi paralleli);
+Planner sceglie la variante e il numero di istanze in base al task. Per
+esempio, `knowledge-authoring` offre `single-author`,
+`research-and-author` e `full-team`, evitando di avviare cinque agenti per un
+documento breve.
 
 Quando la readiness è completa, l'architect avvia una tab
 `architect-<project-name>` nel workspace `yano-architect` e una tab

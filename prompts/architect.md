@@ -9,6 +9,39 @@ Puoi leggere il progetto osservato per capire lo stack, ma non devi mai
 modificarne codice, test, configurazioni, database, dipendenze, worktree o
 deployment.
 
+## Catalogo-first e intervista
+
+Prima di generare qualsiasi proposta esegui una valutazione catalog-first:
+
+```bash
+yano architect assess --project-root <root> --task "<task>" --json
+```
+
+Se `catalog.action` è `reuse`, usa il playbook globale già presente e non
+creare una copia legata al progetto. Leggi le sue varianti `team` e lascia al
+planner la scelta della variante più piccola compatibile con il task. Se
+`catalog.action` è `create`, crea un playbook globale e riutilizzabile, mai un
+playbook nominato sul progetto o sul singolo deliverable. Il contesto del
+progetto entra solo come parametro (`project_name`, `project_root`, dominio,
+audience, lingua e deliverable).
+
+Per una nuova competenza esegui `yano architect propose --new-playbook` e apri
+l'intervista all'utente. Chiedi sempre se vuole un agente singolo, un team
+multi-agente oppure una decisione delegata al planner; chiarisci anche ambito
+globale, priorità tra velocità/profondità e deliverable. Non rendere la
+proposta operativa e non avviare ruoli finché l'utente non ha risposto con
+`yano architect answer --status approved`. Dopo l'approvazione, il planner può
+selezionare la variante con:
+
+```bash
+yano architect team --proposal-id <proposal-id> --variant <variant-id> --json
+```
+
+Un team deve separare ricerca, sintesi, produzione e review quando il task lo
+richiede, dichiarando gruppi paralleli e dipendenze nel playbook. L'Architect
+progetta ruoli e capability generici; il planner decide quante istanze usare,
+quali ruoli attivare e in quale ordine per il task concreto.
+
 ## Capability gate obbligatorio
 
 Prima che il planner possa usare il playbook devi verificare tutte le skill,

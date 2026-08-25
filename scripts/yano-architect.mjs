@@ -21,7 +21,7 @@ const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const ARCHITECT_WORKSPACE = "yano-architect";
 const WATCHER_WORKSPACE = "yano-watcher";
-const VALID_STATUSES = new Set(["draft", "provisioning", "ready_ephemeral", "validation_failed", "promotion_candidate", "persistent", "revision_required", "blocked"]);
+const VALID_STATUSES = new Set(["draft", "awaiting_user_input", "provisioning", "ready_ephemeral", "validation_failed", "promotion_candidate", "persistent", "revision_required", "blocked"]);
 
 function now() { return new Date().toISOString(); }
 function value(argv, flag) { const i = argv.indexOf(flag); return i >= 0 ? argv[i + 1] : null; }
@@ -108,6 +108,17 @@ function openDatabase() {
 			payload_json TEXT NOT NULL,
 			created_at TEXT NOT NULL
 		);
+		CREATE TABLE IF NOT EXISTS architect_interviews (
+			interview_id TEXT PRIMARY KEY,
+			proposal_id TEXT NOT NULL REFERENCES architect_proposals(proposal_id),
+			status TEXT NOT NULL,
+			questions_json TEXT NOT NULL,
+			answers_json TEXT,
+			actor TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			answered_at TEXT
+		);
+		CREATE INDEX IF NOT EXISTS architect_interviews_proposal_idx ON architect_interviews(proposal_id, created_at DESC);
 	`);
 	try { db.exec("ALTER TABLE architect_proposals RENAME COLUMN ephermal_dir TO ephemeral_dir"); } catch { /* fresh schema or already migrated */ }
 	return db;
@@ -126,17 +137,89 @@ function roleConfig() {
 	catch { return {}; }
 }
 
+function knowledgeTeam() {
+	return {
+		strategy: "planner-selectable",
+		default_variant: "full-team",
+		roles: [
+			{ id: "market-researcher", purpose: "Research market, audience, competitors and evidence without writing final deliverables.", outputs: ["market-research-report", "source-register"], write_scope: ["temp/knowledge/market-research"], capabilities: ["research", "documentation-lookup"] },
+			{ id: "seo-strategist", purpose: "Define search intent, keyword opportunities, information architecture and SEO recommendations.", outputs: ["seo-strategy", "keyword-map"], write_scope: ["temp/knowledge/seo"], capabilities: ["research", "documentation-lookup", "copywriting"] },
+			{ id: "website-content-strategist", purpose: "Translate research into website positioning, messaging, page structure and content briefs.", outputs: ["website-content-blueprint"], write_scope: ["temp/knowledge/website"], capabilities: ["copywriting", "documentation-writer"] },
+			{ id: "business-docs-author", purpose: "Synthesize approved research and strategy into the requested structured Markdown documents.", outputs: ["business-document-set"], write_scope: ["docs"], capabilities: ["documentation-writer", "documentation-lookup", "copywriting"] },
+			{ id: "business-docs-reviewer", purpose: "Check factual traceability, consistency, duplication, template compliance and completeness.", outputs: ["documentation-review"], write_scope: ["temp/knowledge/review"], capabilities: ["documentation-writer", "documentation-lookup"] },
+		],
+		variants: [
+			{ id: "single-author", roles: ["business-docs-author"], parallel_groups: [["business-docs-author"]], reason: "One small, well-scoped document with known inputs." },
+			{ id: "research-and-author", roles: ["market-researcher", "seo-strategist", "business-docs-author"], parallel_groups: [["market-researcher", "seo-strategist"], ["business-docs-author"]], reason: "Medium task requiring independent market and SEO research before synthesis." },
+			{ id: "full-team", roles: ["market-researcher", "seo-strategist", "website-content-strategist", "business-docs-author", "business-docs-reviewer"], parallel_groups: [["market-researcher", "seo-strategist"], ["website-content-strategist"], ["business-docs-author"], ["business-docs-reviewer"]], reason: "Strategic multi-document task with independent research, synthesis and review." },
+		],
+	};
+}
+
+function customTeam() {
+	return {
+		strategy: "planner-selectable",
+		default_variant: "full-team",
+		roles: [
+			{ id: "specialist-researcher", purpose: "Collect and structure domain evidence for the new reusable capability.", outputs: ["research-report"], write_scope: ["temp/knowledge/research"], capabilities: [] },
+			{ id: "specialist-author", purpose: "Produce the reusable domain deliverables from approved evidence.", outputs: ["domain-deliverables"], write_scope: ["docs"], capabilities: [] },
+			{ id: "specialist-reviewer", purpose: "Review completeness, consistency and reusability of the generated deliverables.", outputs: ["review-report"], write_scope: ["temp/knowledge/review"], capabilities: [] },
+		],
+		variants: [
+			{ id: "single-author", roles: ["specialist-author"], parallel_groups: [["specialist-author"]], reason: "Small new capability with known inputs." },
+			{ id: "full-team", roles: ["specialist-researcher", "specialist-author", "specialist-reviewer"], parallel_groups: [["specialist-researcher"], ["specialist-author"], ["specialist-reviewer"]], reason: "New reusable capability requiring research, authoring and review." },
+		],
+	};
+}
+
+function catalogPlaybooks() {
+	const files = [];
+	const builtinRoot = path.join(PACKAGE_ROOT, "playbooks");
+	if (fs.existsSync(builtinRoot)) for (const file of fs.readdirSync(builtinRoot).filter((entry) => entry.endsWith(".yaml"))) files.push({ source: "builtin", path: path.join(builtinRoot, file) });
+	const persistentRoot = path.join(catalogRoot(), "playbooks");
+	if (fs.existsSync(persistentRoot)) {
+		for (const id of fs.readdirSync(persistentRoot)) {
+			const currentPath = path.join(persistentRoot, id, "current.json");
+			const pointer = fs.existsSync(currentPath) ? parseJson(fs.readFileSync(currentPath, "utf8"), {}) : {};
+			const filePath = pointer.path || path.join(persistentRoot, id, `v${pointer.version || "0.1.0"}`, "playbook.yaml");
+			if (fs.existsSync(filePath)) files.push({ source: "persistent", path: filePath });
+		}
+	}
+	const result = [];
+	for (const entry of files) {
+		try {
+			const playbook = loadPlaybook(entry.path);
+			if (!result.some((item) => item.id === playbook.id)) result.push({ id: playbook.id, label: playbook.label, source: entry.source, path: entry.path, document: playbook });
+		} catch { /* invalid catalog entries are ignored by the read-only discovery pass */ }
+	}
+	return result.sort((a, b) => a.id.localeCompare(b.id));
+}
+
+function catalogDecision(candidate) {
+	const entries = catalogPlaybooks();
+	const exact = entries.find((entry) => entry.id === candidate.playbook) || null;
+	const related = (candidate.catalog_alternatives || []).map((id) => entries.find((entry) => entry.id === id)).filter(Boolean);
+	return {
+		action: exact ? "reuse" : "create",
+		exact_match: exact ? { id: exact.id, label: exact.label, source: exact.source, path: exact.path } : null,
+		related_matches: related.map((entry) => ({ id: entry.id, label: entry.label, source: entry.source, path: entry.path })),
+		catalog_size: entries.length,
+	};
+}
+
 function candidateForTask(task) {
 	const text = String(task).toLowerCase();
 	if (/deploy|release|staging|production|docker|rollout/.test(text)) return { playbook: "deployment-delivery", roles: ["deployment-agent"], reason: "deployment intent" };
-	if (/document|documenti|documentale|authoring|knowledge|strategic|strategia|strategico|vendita|sales|seo|marketing|acquisizione clienti|contenuti|copywriting|business docs/.test(text)) return { playbook: "documentation-release", roles: ["docs-sync"], reason: "documentation/business-authoring intent" };
+	if (/nuovo playbook|crea(?:re)? un playbook|nuova competenza|agente specializzato/.test(text)) return { playbook: "custom-specialization", roles: ["specialist-researcher", "specialist-author", "specialist-reviewer"], primaryRole: "specialist-author", team: customTeam(), capabilities: { skills: [], cli: ["git"], mcp: [] }, reason: "new reusable specialization requested", requires_user_interview: true };
+	if (/market research|ricerca di mercato|documenti strategici|documenti business|business documentation|knowledge authoring|authoring|seo|marketing strategy|strategia di marketing|acquisizione clienti|sales strategy/.test(text)) return { playbook: "knowledge-authoring", roles: knowledgeTeam().roles.map((role) => role.id), primaryRole: "business-docs-author", team: knowledgeTeam(), catalog_alternatives: ["documentation-release"], reason: "generic knowledge/business-authoring intent", requires_user_interview: true };
+	if (/document|documenti|documentale|changelog|readme|release notes|architecture documentation/.test(text)) return { playbook: "documentation-release", roles: ["docs-sync"], primaryRole: "docs-sync", reason: "documentation/release intent" };
 	if (/frontend|front-end|ui|ux|browser|responsive|redesign|design system|dashboard|sito|applicazione/.test(text)) return { playbook: "frontend-browser", roles: ["frontend-developer", "frontend-reviewer"], reason: "frontend/browser intent" };
 	if (/test|qa|tdd|regression|fuzz|mutation/.test(text)) return { playbook: "qa-hardening", roles: ["tdd-agent", "reviewer"], reason: "quality/testing intent" };
 	if (/refactor|refactoring|architettura|modular|cleanup|manutenibil/.test(text)) return { playbook: "backend-change", roles: ["refactoring-specialist", "reviewer"], reason: "refactoring/backend intent" };
 	return { playbook: "backend-change", roles: ["coder", "reviewer"], reason: "general implementation fallback" };
 }
 
-function aggregateCapabilities(roles, configs) {
+function aggregateCapabilities(roles, configs, declared = {}) {
 	const result = { skills: new Set(["yano-planner-trace-analysis"]), cli: new Set(["git"]), mcp: new Set() };
 	for (const role of roles) {
 		const cfg = configs[role];
@@ -145,20 +228,24 @@ function aggregateCapabilities(roles, configs) {
 		for (const cli of cfg.cli || []) result.cli.add(cli);
 		for (const mcp of cfg.mcp || []) result.mcp.add(mcp);
 	}
+	for (const skill of declared.skills || []) result.skills.add(skill);
+	for (const cli of declared.cli || []) result.cli.add(cli);
+	for (const mcp of declared.mcp || []) result.mcp.add(mcp);
 	return Object.fromEntries(Object.entries(result).map(([key, set]) => [key, [...set].sort()]));
 }
 
-function generatedPlaybook({ playbookId, task, candidate, roles }) {
+function generatedPlaybook({ playbookId, task, candidate, roles, catalog }) {
 	return {
 		schema_version: 1,
 		id: playbookId,
-		label: `Generated task flow: ${candidate.playbook}`,
-		description: `Ephemeral task-specific contract generated for: ${task}`,
+		label: candidate.team ? `Reusable specialization: ${candidate.playbook}` : `Generated task flow: ${candidate.playbook}`,
+		description: candidate.team ? `Global reusable playbook for ${candidate.reason}. The project "${task}" is only the originating use case.` : `Ephemeral task-specific contract generated for: ${task}`,
+		...(candidate.team ? { catalog: { scope: "global", reusable: true, intents: [candidate.reason], parameters: ["project_name", "project_root", "domain", "audience", "language", "deliverables"] }, team: candidate.team } : {}),
 		enforcement: { status: "partial", note: `Derived from ${candidate.playbook}; only the approved task scope is active.` },
 		states: [
 			{ id: "received", owner: "planner", terminal: false },
 			{ id: "provisioning", owner: "architect", terminal: false },
-			{ id: "implementing", owner: roles[0] || "coder", terminal: false },
+			{ id: "implementing", owner: candidate.primaryRole || roles[0] || "coder", terminal: false },
 			{ id: "review", owner: roles[1] || "reviewer", terminal: false },
 			{ id: "awaiting_user_feedback", owner: "planner_and_human", terminal: false },
 			{ id: "completed", owner: "planner", terminal: true },
@@ -167,7 +254,7 @@ function generatedPlaybook({ playbookId, task, candidate, roles }) {
 		transitions: [
 			{ id: "provision", from: "received", to: "provisioning", actor: "architect", requires: ["proposal_created", "capability_readiness_verified"] },
 			{ id: "start_implementation", from: "provisioning", to: "implementing", actor: "planner", requires: ["capability_readiness_verified", "phase_one_unlocked"] },
-			{ id: "submit_review", from: "implementing", to: "review", actor: roles[0] || "coder", requires: ["tests_run", "report_updated"] },
+			{ id: "submit_review", from: "implementing", to: "review", actor: candidate.primaryRole || roles[0] || "coder", requires: ["tests_run", "report_updated"] },
 			{ id: "request_feedback", from: "review", to: "awaiting_user_feedback", actor: "planner", requires: ["reviewer_approved", "watcher_round_healthy"] },
 			{ id: "complete", from: "awaiting_user_feedback", to: "completed", actor: "planner", requires: ["positive_user_feedback"] },
 			{ id: "revise", from: ["review", "awaiting_user_feedback"], to: "blocked", actor: "planner", requires: ["revision_requested"] },
@@ -178,6 +265,7 @@ function generatedPlaybook({ playbookId, task, candidate, roles }) {
 			{ condition: "negative_user_feedback", action: "return_to_architect", terminal: false },
 		],
 		invariants: [
+			...(candidate.team ? ["catalog_scope_is_global_and_project_agnostic", "planner_selects_one_declared_team_variant", "project_context_is_parameterized_not_embedded"] : []),
 			"generated_playbook_is_ephemeral_until_explicit_promotion",
 			"all_required_capabilities_are_verified_before_operation",
 			"watcher_observes_validation_without_modifying_the_project",
@@ -192,10 +280,10 @@ function proposalPaths(proposalId) {
 	return { dir, playbook: path.join(dir, "playbook.yaml"), manifest: path.join(dir, "manifest.json"), readiness: path.join(dir, "readiness.json") };
 }
 
-function writeProposalFiles(proposal, capabilities, candidate) {
+function writeProposalFiles(proposal, capabilities, candidate, catalog) {
 	const paths = proposalPaths(proposal.proposal_id);
 	fs.mkdirSync(paths.dir, { recursive: true, mode: 0o700 });
-	const document = generatedPlaybook({ playbookId: proposal.playbook_id, task: proposal.task, candidate, roles: proposal.roles });
+	const document = generatedPlaybook({ playbookId: proposal.playbook_id, task: proposal.task, candidate, roles: proposal.roles, catalog });
 	fs.writeFileSync(paths.playbook, YAML.stringify(document), { mode: 0o600 });
 	loadPlaybook(paths.playbook);
 	const manifest = {
@@ -209,6 +297,9 @@ function writeProposalFiles(proposal, capabilities, candidate) {
 		role_id: proposal.role_id,
 		roles: proposal.roles,
 		capabilities,
+		catalog_decision: catalog,
+		team: candidate.team || null,
+		requires_user_interview: !!candidate.requires_user_interview,
 		promotion_policy: { min_successful_runs: 1, min_projects: 1, require_clean_watcher: true, require_user_feedback: true, require_planner_approval: true },
 		created_at: proposal.created_at,
 	};
@@ -232,6 +323,56 @@ function loadProposal(db, proposalId) {
 	const proposal = db.prepare("SELECT * FROM architect_proposals WHERE proposal_id = ?").get(proposalId);
 	if (!proposal) throw new Error(`yano architect: proposta non trovata: ${proposalId}`);
 	return proposal;
+}
+
+function interviewQuestions(candidate, catalog) {
+	const questions = [
+		{ id: "reuse_scope", prompt: "Confermi che il playbook deve essere globale, riutilizzabile e indipendente dal progetto che ha originato la richiesta?", options: ["yes", "no"] },
+		{ id: "team_mode", prompt: "Preferisci un agente singolo o un team specializzato? Se team, il Planner potrà selezionare una variante per ogni task.", options: ["single", "multi", "planner-decides"] },
+		{ id: "quality_tradeoff", prompt: "Quale priorità deve guidare il playbook?", options: ["speed-and-cost", "balanced", "maximum-depth"] },
+	];
+	if (catalog?.exact_match) questions.unshift({ id: "catalog_action", prompt: `Esiste già il playbook ${catalog.exact_match.id}. Vuoi riusarlo/estenderlo invece di creare un duplicato?`, options: ["reuse", "new-version"] });
+	return questions;
+}
+
+function createInterview(db, proposalId, candidate, catalog, actor = "architect") {
+	const existing = db.prepare("SELECT * FROM architect_interviews WHERE proposal_id=? AND status='open' ORDER BY created_at DESC LIMIT 1").get(proposalId);
+	if (existing) return { interview_id: existing.interview_id, status: existing.status, questions: parseJson(existing.questions_json, []) };
+	const interviewId = `INT-${crypto.randomUUID()}`;
+	const questions = interviewQuestions(candidate, catalog);
+	db.prepare("INSERT INTO architect_interviews(interview_id,proposal_id,status,questions_json,answers_json,actor,created_at,answered_at) VALUES(?,?,?,?,?,?,?,?)").run(interviewId, proposalId, "open", JSON.stringify(questions), null, actor, now(), null);
+	recordEvent(db, proposalId, "architect_user_interview_opened", { interview_id: interviewId, questions });
+	return { interview_id: interviewId, status: "open", questions };
+}
+
+function currentInterview(db, proposalId) {
+	const row = db.prepare("SELECT * FROM architect_interviews WHERE proposal_id=? ORDER BY created_at DESC LIMIT 1").get(proposalId);
+	return row ? { ...row, questions: parseJson(row.questions_json, []), answers: parseJson(row.answers_json, null) } : null;
+}
+
+function answerInterview(db, proposal, opts) {
+	const interview = db.prepare("SELECT * FROM architect_interviews WHERE proposal_id=? AND status='open' ORDER BY created_at DESC LIMIT 1").get(proposal.proposal_id);
+	if (!interview) throw new Error("yano architect: nessuna intervista aperta per questa proposta");
+	if (!new Set(["approved", "changes_requested"]).has(opts.status)) throw new Error("yano architect: --status deve essere approved o changes_requested");
+	if (!opts.text?.trim() && !opts.answers) throw new Error("yano architect: answer richiede --text oppure --answers JSON");
+	const answers = opts.answers ? parseJson(opts.answers, { text: opts.answers }) : { text: opts.text.trim() };
+	db.prepare("UPDATE architect_interviews SET status=?,answers_json=?,answered_at=? WHERE interview_id=?").run(opts.status === "approved" ? "answered" : "changes_requested", JSON.stringify(answers), now(), interview.interview_id);
+	const next = opts.status === "approved" ? "draft" : "revision_required";
+	db.prepare("UPDATE architect_proposals SET status=?,updated_at=? WHERE proposal_id=?").run(next, now(), proposal.proposal_id);
+	recordEvent(db, proposal.proposal_id, "architect_user_interview_answered", { interview_id: interview.interview_id, status: opts.status, actor: opts.actor || "user" });
+	return { proposal_id: proposal.proposal_id, interview_id: interview.interview_id, status: opts.status, next_state: next, answers };
+}
+
+function selectTeam(db, proposal, opts) {
+	if (proposal.status === "awaiting_user_input") throw new Error("yano architect: il team non è selezionabile finché l’intervista utente è aperta");
+	const manifest = parseJson(fs.readFileSync(proposal.manifest_path, "utf8"), {});
+	const playbook = loadPlaybook(proposal.playbook_path);
+	const team = playbook.team || manifest.team;
+	if (!team?.variants?.length) throw new Error(`yano architect: il playbook ${proposal.playbook_id} non dichiara varianti di team`);
+	const variant = team.variants.find((item) => item.id === (opts.variant || team.default_variant));
+	if (!variant) throw new Error(`yano architect: variante team non trovata: ${opts.variant || team.default_variant}`);
+	recordEvent(db, proposal.proposal_id, "team_variant_selected", { variant: variant.id, roles: variant.roles, parallel_groups: variant.parallel_groups || [] });
+	return { proposal_id: proposal.proposal_id, playbook_id: playbook.id, strategy: team.strategy, variant: variant.id, roles: variant.roles, parallel_groups: variant.parallel_groups || [], reason: variant.reason || null };
 }
 
 function skillCandidates(name) {
@@ -460,8 +601,10 @@ function assess(task, projectRoot, explicitProject) {
 	const candidate = candidateForTask(task);
 	const configs = roleConfig();
 	const roles = candidate.roles.filter((role) => configs[role]);
-	const capabilities = aggregateCapabilities(roles.length ? roles : ["coder", "reviewer"], configs);
-	return { task, project: info, candidate_playbook: candidate.playbook, candidate_reason: candidate.reason, roles, capabilities, needs_new_playbook: true, note: "La proposta generata resta ephemeral finché readiness, validazione watcher e feedback utente non sono positivi." };
+	const capabilityRoles = roles.length ? roles : (candidate.team ? [] : ["coder", "reviewer"]);
+	const capabilities = aggregateCapabilities(capabilityRoles, configs, candidate.capabilities);
+	const catalog = catalogDecision(candidate);
+	return { task, project: info, candidate_playbook: candidate.playbook, candidate_reason: candidate.reason, roles: candidate.roles, capabilities, team: candidate.team || null, catalog, needs_new_playbook: catalog.action === "create", requires_user_interview: catalog.action === "create" && !!candidate.requires_user_interview, note: "Un playbook nuovo è globale ed ephemeral finché intervista, readiness, validazione watcher e feedback utente non sono positivi." };
 }
 
 function createProposal(db, opts) {
@@ -469,20 +612,32 @@ function createProposal(db, opts) {
 	const info = projectInfo(opts.projectRoot, opts.project);
 	const assessment = assess(opts.task, opts.projectRoot, opts.project);
 	const candidate = candidateForTask(opts.task);
+	if (assessment.catalog.action === "reuse" && !opts.newPlaybook) {
+		return { reused: true, decision: "reuse", playbook: assessment.catalog.exact_match, assessment, no_project_mutation: true, message: `Playbook ${assessment.catalog.exact_match.id} già presente nel catalogo globale: nessuna copia specifica del progetto viene creata.` };
+	}
 	const timestamp = now();
 	const proposalId = `PROP-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
 	const base = slug(candidate.playbook);
-	const playbookId = `${base}-${slug(opts.task).slice(0, 24)}`;
-	const roleId = `${slug(base)}-specialist`;
+	// A team proposal is a reusable catalog candidate, never a project/task slug.
+	// Non-team flows remain task-scoped because they are ordinary ephemeral
+	// implementation contracts rather than reusable playbooks.
+	const playbookId = candidate.team ? base : `${base}-${slug(opts.task).slice(0, 24)}`;
+	const roleId = candidate.primaryRole || `${slug(base)}-specialist`;
 	const capabilities = assessment.capabilities;
-	const provisional = { proposal_id: proposalId, project_key: info.key, project_root: info.root, project_name: info.name, task: opts.task.trim(), status: "draft", version: "0.1.0", base_playbook: candidate.playbook, playbook_id: playbookId, role_id: roleId, roles: assessment.roles, created_at: timestamp };
-	const paths = writeProposalFiles(provisional, capabilities, candidate);
-	db.prepare("INSERT INTO architect_proposals(proposal_id,project_key,project_root,project_name,task,status,version,base_playbook,playbook_id,role_id,ephemeral_dir,playbook_path,manifest_path,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(proposalId, info.key, info.root, info.name, opts.task.trim(), "draft", "0.1.0", candidate.playbook, playbookId, roleId, paths.dir, paths.playbook, paths.manifest, timestamp, timestamp);
-	recordEvent(db, proposalId, "proposal_created", { base_playbook: candidate.playbook, roles: assessment.roles, capabilities });
-	return { proposal: db.prepare("SELECT * FROM architect_proposals WHERE proposal_id=?").get(proposalId), assessment, paths };
+	const status = assessment.catalog.action === "create" || opts.newPlaybook ? "awaiting_user_input" : "draft";
+	const provisional = { proposal_id: proposalId, project_key: info.key, project_root: info.root, project_name: info.name, task: opts.task.trim(), status, version: "0.1.0", base_playbook: candidate.playbook, playbook_id: playbookId, role_id: roleId, roles: assessment.roles, created_at: timestamp };
+	const paths = writeProposalFiles(provisional, capabilities, candidate, assessment.catalog);
+	db.prepare("INSERT INTO architect_proposals(proposal_id,project_key,project_root,project_name,task,status,version,base_playbook,playbook_id,role_id,ephemeral_dir,playbook_path,manifest_path,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(proposalId, info.key, info.root, info.name, opts.task.trim(), status, "0.1.0", candidate.playbook, playbookId, roleId, paths.dir, paths.playbook, paths.manifest, timestamp, timestamp);
+	const interview = status === "awaiting_user_input" ? createInterview(db, proposalId, candidate, assessment.catalog) : null;
+	recordEvent(db, proposalId, "proposal_created", { base_playbook: candidate.playbook, roles: assessment.roles, capabilities, catalog: assessment.catalog, requires_user_interview: !!interview });
+	return { proposal: db.prepare("SELECT * FROM architect_proposals WHERE proposal_id=?").get(proposalId), assessment, paths, interview };
 }
 
 function provision(db, proposal, { dryRun = false, once = false, install = false } = {}) {
+	if (proposal.status === "awaiting_user_input") {
+		const interview = currentInterview(db, proposal.proposal_id);
+		return { proposal_id: proposal.proposal_id, status: "awaiting_user_input", ready: false, operational: false, reason: "awaiting_user_input", interview, no_project_mutation: true };
+	}
 	const checks = checkCapabilities(proposal, db);
 	persistChecks(db, proposal.proposal_id, checks);
 	// A declared MCP is only "pending" until an initialize/tools handshake has
@@ -528,7 +683,8 @@ function proposalStatus(db, proposal) {
 	const validations = db.prepare("SELECT * FROM architect_validations WHERE proposal_id=? ORDER BY created_at DESC").all(proposal.proposal_id);
 	const feedback = db.prepare("SELECT * FROM architect_feedback WHERE proposal_id=? ORDER BY created_at DESC").all(proposal.proposal_id);
 	const events = db.prepare("SELECT * FROM architect_events WHERE proposal_id=? ORDER BY created_at DESC LIMIT 50").all(proposal.proposal_id);
-	return { proposal, capabilities, validations, feedback, events, db_path: dbPath(), data_root: dataRoot(), catalog_root: catalogRoot() };
+	const interviews = db.prepare("SELECT * FROM architect_interviews WHERE proposal_id=? ORDER BY created_at DESC").all(proposal.proposal_id).map((row) => ({ ...row, questions: parseJson(row.questions_json, []), answers: parseJson(row.answers_json, null) }));
+	return { proposal, capabilities, validations, feedback, interviews, events, db_path: dbPath(), data_root: dataRoot(), catalog_root: catalogRoot() };
 }
 
 function recordValidation(db, proposal, opts) {
@@ -610,21 +766,28 @@ function promote(db, proposal, opts) {
 function revise(db, proposal, opts) {
 	if (!opts.task?.trim()) throw new Error("yano architect: revise richiede il nuovo --task o feedback incorporato");
 	const candidate = candidateForTask(opts.task);
-	const capabilities = aggregateCapabilities(candidate.roles, roleConfig());
-	const next = { ...proposal, task: opts.task.trim(), base_playbook: candidate.playbook, roles: candidate.roles, version: `0.${Number(String(proposal.version).split(".")[1] || 1) + 1}.0`, playbook_id: `${slug(candidate.playbook)}-${slug(opts.task).slice(0, 24)}`, role_id: `${slug(candidate.playbook)}-specialist` };
-	const paths = writeProposalFiles(next, capabilities, candidate);
-	db.prepare("UPDATE architect_proposals SET task=?,status=?,version=?,base_playbook=?,playbook_id=?,role_id=?,ephemeral_dir=?,playbook_path=?,manifest_path=?,updated_at=? WHERE proposal_id=?").run(next.task, "revision_required", next.version, next.base_playbook, next.playbook_id, next.role_id, paths.dir, paths.playbook, paths.manifest, now(), proposal.proposal_id);
+	const configs = roleConfig();
+	const capabilities = aggregateCapabilities(candidate.roles.filter((role) => configs[role]), configs, candidate.capabilities);
+	const catalog = catalogDecision(candidate);
+	const nextStatus = candidate.team ? "awaiting_user_input" : "revision_required";
+	const next = { ...proposal, task: opts.task.trim(), status: nextStatus, base_playbook: candidate.playbook, roles: candidate.roles, version: `0.${Number(String(proposal.version).split(".")[1] || 1) + 1}.0`, playbook_id: candidate.team ? slug(candidate.playbook) : `${slug(candidate.playbook)}-${slug(opts.task).slice(0, 24)}`, role_id: candidate.primaryRole || `${slug(candidate.playbook)}-specialist` };
+	const paths = writeProposalFiles(next, capabilities, candidate, catalog);
+	db.prepare("UPDATE architect_proposals SET task=?,status=?,version=?,base_playbook=?,playbook_id=?,role_id=?,ephemeral_dir=?,playbook_path=?,manifest_path=?,updated_at=? WHERE proposal_id=?").run(next.task, next.status, next.version, next.base_playbook, next.playbook_id, next.role_id, paths.dir, paths.playbook, paths.manifest, now(), proposal.proposal_id);
 	db.prepare("DELETE FROM architect_capabilities WHERE proposal_id=?").run(proposal.proposal_id);
 	recordEvent(db, proposal.proposal_id, "proposal_revised", { version: next.version, task: next.task });
+	if (nextStatus === "awaiting_user_input") createInterview(db, proposal.proposal_id, candidate, catalog);
 	return db.prepare("SELECT * FROM architect_proposals WHERE proposal_id=?").get(proposal.proposal_id);
 }
 
 function usage() {
 	return [
-		"Uso: yano architect <assess|propose|provision|verify|status|validation|feedback|revise|promote|start>",
+		"Uso: yano architect <assess|propose|interview|answer|team|provision|verify|status|validation|feedback|revise|promote|start>",
 		"",
 		"  assess --task <testo> --project-root <dir> [--json]              valuta copertura e capability",
-		"  propose --task <testo> --project-root <dir> [--json]             crea proposta ephemeral",
+		"  propose --task <testo> --project-root <dir> [--new-playbook]    riusa il catalogo o crea una proposta globale",
+		"  interview --proposal-id <id> [--json]                           apre/mostra domande all utente",
+		"  answer --proposal-id <id> --status approved|changes_requested   registra la decisione dell utente",
+		"  team --proposal-id <id> --variant <id> [--json]                 seleziona una variante del team",
 		"  provision --proposal-id <id> [--install] [--dry-run] [--once]    prepara e verifica capability",
 		"  verify --proposal-id <id> [--json]                              ripete il capability gate",
 		"  status --proposal-id <id> [--json]                              mostra proposal, evidenze e readiness",
@@ -650,6 +813,8 @@ export async function runYanoArchitect({ argv = [] } = {}) {
 		projectRoot: value(argv, "--project-root") || process.cwd(),
 		project: value(argv, "--project"),
 		proposalId: value(argv, "--proposal-id"),
+		variant: value(argv, "--variant"),
+		answers: value(argv, "--answers"),
 		runId: value(argv, "--run-id"),
 		result: value(argv, "--result"),
 		kind: value(argv, "--kind"),
@@ -663,6 +828,7 @@ export async function runYanoArchitect({ argv = [] } = {}) {
 		dryRun: has(argv, "--dry-run"),
 		once: has(argv, "--once"),
 		install: has(argv, "--install"),
+		newPlaybook: has(argv, "--new-playbook"),
 		yes: has(argv, "--yes"),
 	};
 	if (sub === "assess") { const result = assess(opts.task || "", opts.projectRoot, opts.project); print(result, opts.json); return result; }
@@ -671,6 +837,9 @@ export async function runYanoArchitect({ argv = [] } = {}) {
 		if (sub === "propose") { const result = createProposal(db, opts); print(result, opts.json); return result; }
 		const proposal = loadProposal(db, opts.proposalId);
 		if (sub === "status") { const result = proposalStatus(db, proposal); print(result, opts.json); return result; }
+		if (sub === "interview") { const manifest = parseJson(fs.readFileSync(proposal.manifest_path, "utf8"), {}); const result = createInterview(db, proposal.proposal_id, candidateForTask(proposal.task), manifest.catalog_decision || {}); print(result, opts.json); return result; }
+		if (sub === "answer") { const result = answerInterview(db, proposal, opts); print(result, opts.json); return result; }
+		if (sub === "team") { const result = selectTeam(db, proposal, opts); print(result, opts.json); return result; }
 		if (sub === "provision" || sub === "verify") { const result = provision(db, proposal, { dryRun: opts.dryRun, once: opts.once, install: opts.install }); print(result, opts.json); return result; }
 		if (sub === "validation") { const result = recordValidation(db, proposal, opts); print(result, opts.json); return result; }
 		if (sub === "feedback") { const result = recordFeedback(db, proposal, opts); print(result, opts.json); return result; }
@@ -678,6 +847,7 @@ export async function runYanoArchitect({ argv = [] } = {}) {
 		if (sub === "revise") { const result = revise(db, proposal, opts); print(result, opts.json); return result; }
 		if (sub === "promote") { const result = promote(db, proposal, opts); print(result, opts.json); return result; }
 		if (sub === "start") {
+			if (proposal.status === "awaiting_user_input") throw new Error("yano architect: la proposta è in attesa dell’intervista utente; esegui `yano architect answer --proposal-id ... --status approved --text ...` prima dello start");
 			if (opts.once) { const result = provision(db, proposal, { dryRun: true, once: true, install: false }); const onceResult = { ...result, once: true }; print(onceResult, opts.json); return onceResult; }
 			if (proposal.status === "draft") throw new Error("yano architect: esegui prima `yano architect provision --proposal-id ... --install`");
 			const result = launchArchitect(db, proposal, { dryRun: opts.dryRun });

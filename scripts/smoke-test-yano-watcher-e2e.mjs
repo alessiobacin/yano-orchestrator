@@ -11,8 +11,9 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), "yano-watcher-e2e-"));
 const yanoRepo = path.join(root, "yano-orchestrator");
 const projectRoot = path.join(root, "focusboard-trace-test");
 const genericProjectRoot = path.join(root, "ordinary-project");
+const uninitializedProjectRoot = path.join(root, "uninitialized-project");
 const traceRoot = path.join(root, "temp");
-for (const dir of [yanoRepo, projectRoot, genericProjectRoot]) fs.mkdirSync(dir, { recursive: true });
+for (const dir of [yanoRepo, projectRoot, genericProjectRoot, uninitializedProjectRoot]) fs.mkdirSync(dir, { recursive: true });
 fs.writeFileSync(path.join(yanoRepo, ".env"), `YANO_ORCHESTRATOR_REPO=${yanoRepo}\nTELEGRAM_BOT_TOKEN=e2e-token\nTELEGRAM_DESTINATION_CHAT_ID=5228139669\n`);
 
 function seedDatabase(cwd) {
@@ -89,6 +90,15 @@ try {
 	assert.equal(fs.readdirSync(issueDir).filter((file) => file.endsWith(".md")).length, 1);
 	assert.equal(requests.length, 1);
 
+	// A validation watcher must not silently exit when the project has no DB:
+	// it must escalate the blocked precondition to Telegram when no live planner
+	// is present. This is the exact Sales Companion failure mode.
+	const blocked = await runWatch({ cwd: uninitializedProjectRoot, argv: ["--once", "--project", "uninitialized-project", "--validation-run", "validation-uninitialized"], packageRoot: yanoRepo });
+	assert.equal(blocked.status, "blocked");
+	assert.equal(blocked.reason, "not_initialized");
+	assert.equal(requests.length, 2);
+	assert.match(requests[1].body.text, /validation_blocked|non è inizializzato/i);
+
 	// With a live planner presence, a new Yano finding is routed to its command
 	// topic instead of paging Telegram.
 	const broker = "mqtt://127.0.0.1:1883";
@@ -107,7 +117,7 @@ try {
 	await runWatch({ cwd: projectRoot, argv: ["--once", "--project", "focusboard-trace-test"], packageRoot: yanoRepo });
 	await new Promise((resolve) => setTimeout(resolve, 150));
 	assert.ok(plannerCommands.some((command) => command.type === "command" && command.sender_instance === "yano-watcher" && /trace_preflight_mismatch/.test(command.prompt)));
-	assert.equal(requests.length, 1, "un planner live evita il Telegram duplicato");
+	assert.equal(requests.length, 2, "un planner live evita il Telegram duplicato per il nuovo finding");
 	await observer.publishAsync("pi/focusboard-trace-test/agents/planner-01/status", JSON.stringify({ instance: "planner-01", role: "planner", project: "focusboard-trace-test", status: "offline", last_heartbeat: new Date().toISOString() }), { qos: 1, retain: true });
 	observer.end(true);
 

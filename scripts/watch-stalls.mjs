@@ -101,20 +101,6 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 	}
 
 	const dbPath = path.join(watchCwd, ".pi", "extensions", "yano-orchestrator", "orchestratorStorage", "orchestrator.db");
-	if (!existsSync(dbPath)) {
-		console.log(`yano watch: nessun orchestrator.db per questo progetto (${dbPath}) — niente da sorvegliare.`);
-		process.exit(0);
-	}
-
-	let DatabaseSync;
-	try {
-		({ DatabaseSync } = yanoRequire("node:sqlite"));
-	} catch (err) {
-		console.error(`yano watch: node:sqlite non disponibile (${err instanceof Error ? err.message : String(err)}).`);
-		process.exit(1);
-	}
-
-	const db = new DatabaseSync(dbPath, { readOnly: true });
 	const brokerUrl = config.PI_ORCH_BROKER_URL || process.env.PI_ORCH_BROKER_URL || "mqtt://127.0.0.1:1883";
 
 	let client = null;
@@ -132,6 +118,75 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 	}
 	const liveAgents = await discoverLiveAgents(client, project);
 	const livePlanners = liveAgents.filter((agent) => agent.role === "planner");
+
+	// A validation watcher must report a blocked precondition just as it reports
+	// a stall. Previously the missing-DB branch exited before connecting to
+	// MQTT, so a live Planner never received the result and no Telegram fallback
+	// happened. Do not call process.exit: runWatch is imported by tests and by
+	// the Architect control plane.
+	if (!existsSync(dbPath)) {
+		const details = {
+			project,
+			project_root: watchCwd,
+			validation_run_id: opts.validationRun || null,
+			proposal_id: opts.playbookProposal || null,
+			playbook_id: opts.playbookId || null,
+			reason: "not_initialized",
+			orchestrator_db: dbPath,
+			live_agents: liveAgents.map((agent) => ({ instance: agent.instance, role: agent.role, status: agent.status })),
+		};
+		const previous = readTraceRecords({ cwd: watchCwd, project, limit: 100000 }).some((record) =>
+			record.type === "yano_watcher_notification_route" &&
+			record.signal === "validation_blocked" &&
+			record.validation_run_id === (opts.validationRun || null),
+		);
+		try { appendRawTraceRecord({ cwd: watchCwd, project, record: { type: "yano_watcher_validation_blocked", record_type: "event", instance: "yano-watcher", signal: "validation_blocked", ...details } }); } catch { /* best effort */ }
+		let route = { route: "deduplicated", delivered: 0 };
+		if (!previous) {
+			if (livePlanners.length && client) {
+				let delivered = 0;
+				for (const planner of livePlanners) {
+					try {
+						await client.publishAsync(`pi/${project}/agents/${planner.instance}/commands`, JSON.stringify({
+							type: "command",
+							assignment_id: `watcher-${crypto.randomUUID()}`,
+							sender_instance: "yano-watcher",
+							sender_role: "yano-watcher",
+							target_instance: planner.instance,
+							project,
+							correlation_id: opts.validationRun || null,
+							prompt: `[yano-watcher] Validazione bloccata: il progetto non è inizializzato per Yano (manca orchestrator.db). Segnale: validation_blocked. Evidenze: ${JSON.stringify(details)}. Non modificare il progetto; informa l'utente o inizializza Yano prima di ripetere la validazione.`,
+							timestamp: new Date().toISOString(),
+						}), { qos: 1 });
+						delivered++;
+					} catch { /* best effort */ }
+				}
+				route = { route: "planner", delivered };
+			} else {
+				const telegram = await sendTelegramWatcherNotification({
+					yanoRepo,
+					env: config,
+					message: `🚨 Yano watcher: validazione bloccata perché il progetto non è inizializzato (manca orchestrator.db).\nProgetto: ${project}\nSegnale: validation_blocked\nNessun planner live è presente: serve attenzione dell’utente.\nDettagli: ${JSON.stringify(details)}`,
+				});
+				if (!telegram.ok && telegram.detail === "telegram_env_missing") throw missingConfigError("watch", telegram.missing, { packageRoot: effectivePackageRoot });
+				route = { route: "telegram", telegram };
+			}
+			try { appendRawTraceRecord({ cwd: watchCwd, project, record: { type: "yano_watcher_notification_route", record_type: "event", instance: "yano-watcher", route: route.route, delivered: route.delivered || 0, planner_instances: livePlanners.map((agent) => agent.instance), signal: "validation_blocked", validation_run_id: opts.validationRun || null, telegram: route.telegram ? { ok: route.telegram.ok, detail: route.telegram.detail } : null } }); } catch { /* best effort */ }
+		}
+		console.log(`yano watch: validation blocked — nessun orchestrator.db per questo progetto (${dbPath})${previous ? " (notifica già inviata)" : ""}.`);
+		if (client) { try { await new Promise((resolve) => setTimeout(resolve, 120)); client.end(false); } catch { /* best effort */ } }
+		return { status: "blocked", reason: "not_initialized", route, project, db_path: dbPath };
+	}
+
+	let DatabaseSync;
+	try {
+		({ DatabaseSync } = yanoRequire("node:sqlite"));
+	} catch (err) {
+		console.error(`yano watch: node:sqlite non disponibile (${err instanceof Error ? err.message : String(err)}).`);
+		return { status: "error", reason: "sqlite_unavailable", project, db_path: dbPath };
+	}
+
+	const db = new DatabaseSync(dbPath, { readOnly: true });
 
 	const now = Date.now();
 	let stalled = [];

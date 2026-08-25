@@ -302,6 +302,8 @@ interface RoleConfig {
 	// bespoke prompts/<role>.md file — see loadRolePrompt()/prompts/specialist.md.
 	label?: string;
 	brief?: string;
+	playbook_path?: string;
+	source_proposal?: string;
 }
 
 interface InstanceConfig {
@@ -650,7 +652,9 @@ function roleCapabilitiesPrompt(roleCfg?: RoleConfig): string {
 	const mcp = roleCfg?.mcp?.length ? roleCfg.mcp.join(", ") : "nessun MCP dichiarato";
 	const activation = roleCfg?.activation === "lazy" ? "lazy: installazione/verifica eseguita quando il planner lancia questo ruolo" : "core: prerequisiti verificati da yano init/doctor";
 	const playbook = roleCfg?.playbook || "default-orchestration";
-	return `## Contratto delle capacità (enforced da roles.yaml)\n- Playbook: ${playbook}\n- Attivazione: ${activation}\n- Skill autorizzate: ${skills}\n- CLI autorizzate: ${cli}\n- MCP autorizzati: ${mcp}\nUsa solo queste capacità. Se una è mancante, interrompi il round, descrivi il comando/documentazione per risolvere e informa il planner; non sostituirla silenziosamente con strumenti equivalenti.`;
+	const playbookPath = roleCfg?.playbook_path ? `\n- Sorgente playbook immutabile: ${roleCfg.playbook_path}` : "";
+	const proposal = roleCfg?.source_proposal ? `\n- Proposta Architect: ${roleCfg.source_proposal}` : "";
+	return `## Contratto delle capacità (enforced da roles.yaml)\n- Playbook: ${playbook}${playbookPath}${proposal}\n- Attivazione: ${activation}\n- Skill autorizzate: ${skills}\n- CLI autorizzate: ${cli}\n- MCP autorizzati: ${mcp}\nUsa solo queste capacità. Se una è mancante, interrompi il round, descrivi il comando/documentazione per risolvere e informa il planner; non sostituirla silenziosamente con strumenti equivalenti.`;
 }
 
 // Sets the terminal window/tab title via the standard OSC 0/2 escape

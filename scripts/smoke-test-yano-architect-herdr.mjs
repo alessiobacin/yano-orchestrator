@@ -64,6 +64,9 @@ try {
 	const assessment = runCli(["architect", "assess", "--task", "Implementa una funzione backend", "--project-root", projectRoot, "--json"]);
 	assert.equal(assessment.candidate_playbook, "backend-change");
 	assert.ok(assessment.capabilities.skills.includes("tdd-development"));
+	const docsAssessment = runCli(["architect", "assess", "--task", "Scrivi documenti strategici di vendita, SEO e sito web", "--project-root", projectRoot, "--json"]);
+	assert.equal(docsAssessment.candidate_playbook, "documentation-release");
+	assert.equal(docsAssessment.candidate_reason, "documentation/business-authoring intent");
 
 	const created = runCli(["architect", "propose", "--task", "Implementa una funzione backend", "--project-root", projectRoot, "--json"]);
 	const proposalId = created.proposal.proposal_id;

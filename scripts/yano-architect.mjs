@@ -129,6 +129,7 @@ function roleConfig() {
 function candidateForTask(task) {
 	const text = String(task).toLowerCase();
 	if (/deploy|release|staging|production|docker|rollout/.test(text)) return { playbook: "deployment-delivery", roles: ["deployment-agent"], reason: "deployment intent" };
+	if (/document|documenti|documentale|authoring|knowledge|strategic|strategia|strategico|vendita|sales|seo|marketing|acquisizione clienti|contenuti|copywriting|business docs/.test(text)) return { playbook: "documentation-release", roles: ["docs-sync"], reason: "documentation/business-authoring intent" };
 	if (/frontend|front-end|ui|ux|browser|responsive|redesign|design system|dashboard|sito|applicazione/.test(text)) return { playbook: "frontend-browser", roles: ["frontend-developer", "frontend-reviewer"], reason: "frontend/browser intent" };
 	if (/test|qa|tdd|regression|fuzz|mutation/.test(text)) return { playbook: "qa-hardening", roles: ["tdd-agent", "reviewer"], reason: "quality/testing intent" };
 	if (/refactor|refactoring|architettura|modular|cleanup|manutenibil/.test(text)) return { playbook: "backend-change", roles: ["refactoring-specialist", "reviewer"], reason: "refactoring/backend intent" };
@@ -212,7 +213,14 @@ function writeProposalFiles(proposal, capabilities, candidate) {
 		created_at: proposal.created_at,
 	};
 	fs.writeFileSync(paths.manifest, `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
+	fs.writeFileSync(paths.readiness, `${JSON.stringify({ ready: false, operational: false, status: proposal.status || "draft", checks: [], checked_at: null }, null, 2)}\n`, { mode: 0o600 });
 	return paths;
+}
+
+function writeReadiness(proposal, { ready, operational, status, checks }) {
+	const readinessPath = proposalPaths(proposal.proposal_id).readiness;
+	fs.mkdirSync(path.dirname(readinessPath), { recursive: true, mode: 0o700 });
+	fs.writeFileSync(readinessPath, `${JSON.stringify({ ready: !!ready, operational: !!operational, status, checks, checked_at: now() }, null, 2)}\n`, { mode: 0o600 });
 }
 
 function recordEvent(db, proposalId, type, payload = {}) {
@@ -511,6 +519,7 @@ function provision(db, proposal, { dryRun = false, once = false, install = false
 			recordEvent(db, proposal.proposal_id, "external_agent_launch_failed", { error: detail, architect: result.architect || null });
 		}
 	}
+	writeReadiness(proposal, { ready, operational: result.operational, status: result.status, checks });
 	return result;
 }
 

@@ -71,7 +71,7 @@
 // (quello del pacchetto, non quello del progetto).
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import YAML from "yaml";
@@ -188,6 +188,70 @@ function generatedRoleManifest(role) {
 	return null;
 }
 
+function isWithin(parent, child) {
+	const canonical = (value) => {
+		try { return realpathSync(value); } catch { return path.resolve(value); }
+	};
+	const parentPath = canonical(parent);
+	const childPath = canonical(child);
+	return childPath === parentPath || childPath.startsWith(`${parentPath}${path.sep}`);
+}
+
+// An Architect proposal is intentionally ephemeral: it must be usable by the
+// Planner before promotion, but it must never be copied into the application
+// repository. The old launcher only resolved roles from the persistent global
+// catalog, so `business-docs-author` could be reported READY and still be
+// impossible to launch. `--proposal-id` is the explicit, auditable handoff.
+function ephemeralRoleManifest({ proposalId, role, cwd }) {
+	if (!proposalId) return null;
+	const proposalDir = path.join(traceRoot(), "architect", "proposals", proposalId);
+	const manifestPath = path.join(proposalDir, "manifest.json");
+	const playbookPath = path.join(proposalDir, "playbook.yaml");
+	const readinessPath = path.join(proposalDir, "readiness.json");
+	if (!existsSync(manifestPath)) throw new Error(`launch-planner: proposta Architect non trovata: ${proposalId}`);
+	let manifest;
+	try { manifest = JSON.parse(readFileSync(manifestPath, "utf8")); }
+	catch (error) { throw new Error(`launch-planner: manifest Architect non leggibile (${proposalId}): ${error.message}`); }
+	const projectRoot = manifest?.project?.root;
+	if (!projectRoot || !isWithin(projectRoot, cwd)) {
+		throw new Error(`launch-planner: la proposta ${proposalId} appartiene a un altro progetto; cwd=${cwd}`);
+	}
+	const declaredRoles = Array.isArray(manifest.roles) ? manifest.roles : [manifest.role_id];
+	if (!declaredRoles.includes(role)) {
+		throw new Error(`launch-planner: il ruolo "${role}" non è dichiarato dalla proposta ${proposalId}`);
+	}
+	if (!existsSync(playbookPath)) throw new Error(`launch-planner: playbook ephemeral mancante: ${playbookPath}`);
+	if (!existsSync(readinessPath)) throw new Error(`launch-planner: readiness Architect mancante per ${proposalId}; esegui yano architect verify --proposal-id ${proposalId}`);
+	let readiness;
+	try { readiness = JSON.parse(readFileSync(readinessPath, "utf8")); }
+	catch (error) { throw new Error(`launch-planner: readiness Architect non leggibile (${proposalId}): ${error.message}`); }
+	if (readiness.ready !== true || readiness.operational !== true || (readiness.checks || []).some((check) => check.status !== "ready")) {
+		throw new Error(`launch-planner: proposta ${proposalId} non operativa; capability readiness incompleta. Esegui yano architect verify --proposal-id ${proposalId}`);
+	}
+	const capabilities = manifest.capabilities || { skills: [], cli: [], mcp: [] };
+	return {
+		document: {
+			id: role,
+			label: `Generated ${role}`,
+			brief: `Agente ephemeral creato da Yano Architect per la proposta ${proposalId}. Segui il playbook ${manifest.playbook_id} e consegna evidenze al planner.`,
+			activation: "lazy",
+			playbook: manifest.playbook_id,
+			playbook_path: playbookPath,
+			model: { provider: "llmproxy", model: "reasoning-model" },
+			skills: capabilities.skills || [],
+			cli: capabilities.cli || [],
+			mcp: capabilities.mcp || [],
+			teams: ["generated"],
+			source_proposal: proposalId,
+			read_only: false,
+		},
+		file: manifestPath,
+		playbookPath,
+		proposalId,
+		ephemeral: true,
+	};
+}
+
 function generatedSkillPath(packageRoot, name) {
 	const candidates = [
 		path.join(packageRoot, "skills-vendor", "yano", name),
@@ -214,6 +278,12 @@ function generatedRoleConfigDir({ cwd, role, roleManifest, sourceDir: preferredS
 	const configDir = path.join(traceRoot(), "architect", "runtime-config", slugify(resolveTraceProject(cwd)), role);
 	mkdirSync(configDir, { recursive: true, mode: 0o700 });
 	writeFileSync(path.join(configDir, "roles.yaml"), YAML.stringify(config), { mode: 0o600 });
+	if (roleManifest.playbookPath && existsSync(roleManifest.playbookPath)) {
+		const playbooksDir = path.join(configDir, "playbooks");
+		mkdirSync(playbooksDir, { recursive: true, mode: 0o700 });
+		const playbookId = roleManifest.document.playbook || "ephemeral-playbook";
+		writeFileSync(path.join(playbooksDir, `${slugify(playbookId)}.yaml`), readFileSync(roleManifest.playbookPath), { mode: 0o600 });
+	}
 	return configDir;
 }
 
@@ -223,6 +293,7 @@ function parseArgs(argv) {
 	let json = false;
 	let role; // undefined finché non trovato — risolto a "planner" più sotto se mai passato
 	let traceMode;
+	let proposalId;
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i];
 		if (a === "--print-only") {
@@ -242,6 +313,15 @@ function parseArgs(argv) {
 			i++; // consuma anche il valore, verrà comunque riaggiunto sotto in modo esplicito
 			continue;
 		}
+		if (a === "--proposal-id" || a === "--playbook-proposal") {
+			proposalId = argv[i + 1];
+			if (!proposalId) {
+				console.error(`launch-planner: ${a} richiede un proposal ID Architect.`);
+				process.exit(1);
+			}
+			i++;
+			continue;
+		}
 		if (a === "--trace-mode") {
 			traceMode = argv[++i];
 			if (!traceMode || !TRACE_MODES.includes(traceMode)) {
@@ -252,7 +332,7 @@ function parseArgs(argv) {
 		}
 		passthrough.push(a);
 	}
-	return { passthrough, printOnly, json, role: role ?? "planner", traceMode };
+	return { passthrough, printOnly, json, role: role ?? "planner", traceMode, proposalId };
 }
 
 // runLaunchPlanner({ packageRoot, cwd, argv }) — packageRoot risolve le
@@ -281,7 +361,8 @@ function parseArgs(argv) {
 // `yano init` scrive sempre: agents/roles.yaml oppure
 // .pi/extensions/yano-orchestrator/config/project.json.
 export function runLaunchPlanner({ packageRoot, cwd, argv }) {
-	const { passthrough, printOnly, json, role, traceMode } = parseArgs(argv);
+	const { passthrough, printOnly, json, role, traceMode, proposalId } = parseArgs(argv);
+	const ephemeralRole = ephemeralRoleManifest({ proposalId, role, cwd });
 	if (!isSupportedNodeRuntime()) {
 		console.error(`launch-planner: Node.js ${process.version} non supportato — serve Node 22.5.0 o superiore.`);
 		return;
@@ -345,7 +426,7 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 	// Promoted roles live in the global catalog, not in a project roster. Build
 	// a short-lived merged roles.yaml so `yano start --role <generated-role>`
 	// remains immediately usable without copying catalog state into the app.
-	const generatedRole = generatedRoleManifest(role);
+	const generatedRole = ephemeralRole || generatedRoleManifest(role);
 	const generatedConfigDir = generatedRole ? generatedRoleConfigDir({ cwd, role, roleManifest: generatedRole }) : null;
 
 	// Revisione 34 — caso reale osservato dall'operatore: un progetto
@@ -445,7 +526,7 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 	const piArgs = [...extensionFlags, ...passthrough, ...projectScopeFlags, ...legacyConfigDirFlags, ...generatedConfigFlags, "--role", role, ...skillFlags];
 
 	const printable = ["pi", ...piArgs].map((a) => (a.includes(" ") ? `"${a}"` : a)).join(" ");
-	if (json) console.log(JSON.stringify({ command: "pi", args: piArgs, cwd, trace_mode: traceConfig.mode, project: traceProject }));
+	if (json) console.log(JSON.stringify({ command: "pi", args: piArgs, cwd, trace_mode: traceConfig.mode, project: traceProject, proposal_id: proposalId || null, playbook_path: generatedRole?.playbookPath || null, role_source: ephemeralRole ? "architect-ephemeral" : (generatedRole ? "architect-catalog" : "project") }));
 	else console.log(`launch-planner: comando composto (cwd ${cwd}, trace ${traceConfig.mode}, progetto ${traceProject}):\n  ${printable}\n`);
 
 	if (printOnly) {

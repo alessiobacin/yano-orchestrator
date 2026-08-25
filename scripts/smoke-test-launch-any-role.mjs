@@ -42,8 +42,8 @@ function ok(cond, msg) {
 	console.log(`   OK — ${msg}`);
 }
 
-function run(cwd, args) {
-	const result = spawnSync("node", [LAUNCH_SCRIPT, ...args], { cwd, encoding: "utf8" });
+function run(cwd, args, extraEnv = {}) {
+	const result = spawnSync("node", [LAUNCH_SCRIPT, ...args], { cwd, env: { ...process.env, ...extraEnv }, encoding: "utf8" });
 	return `${result.stdout || ""}${result.stderr || ""}`;
 }
 
@@ -107,6 +107,29 @@ ok(frontendReviewerOut.includes(path.join(PACKAGE_ROOT, "skills-vendor", "yano",
 		!defaultOut.includes(path.join(PACKAGE_ROOT, "skills-vendor", "awesome-copilot", "chrome-devtools")),
 		"planner: does NOT receive --skill chrome-devtools (Revisione 49 — reviewer/frontend-developer only)",
 	);
+
+	console.log("\n=== TEST 3b — an Architect ephemeral role is launchable before promotion ===");
+	const ephemeralData = scratchDir("yano-ephemeral-proposal");
+	const proposalId = "PROP-EPHEMERAL-LAUNCH";
+	const proposalDir = path.join(ephemeralData, "architect", "proposals", proposalId);
+	fs.mkdirSync(proposalDir, { recursive: true });
+	fs.writeFileSync(path.join(proposalDir, "playbook.yaml"), "schema_version: 1\nid: knowledge-authoring\nstates: []\n");
+	fs.writeFileSync(path.join(proposalDir, "manifest.json"), JSON.stringify({
+		proposal_id: proposalId,
+		status: "ephemeral",
+		project: { root: dir, name: "any-role-test-project" },
+		playbook_id: "knowledge-authoring",
+		role_id: "business-docs-author",
+		roles: ["business-docs-author"],
+		capabilities: { skills: [], cli: ["git"], mcp: [] },
+	}, null, 2));
+	fs.writeFileSync(path.join(proposalDir, "readiness.json"), JSON.stringify({ ready: true, operational: true, status: "ready_ephemeral", checks: [{ kind: "cli", name: "git", status: "ready" }] }, null, 2));
+	const ephemeralOut = run(dir, ["--instance", "business-docs-author-01", "--role", "business-docs-author", "--proposal-id", proposalId, "--print-only"], { YANO_DATA_DIR: ephemeralData });
+	ok(ephemeralOut.includes("--role business-docs-author"), "ephemeral role: role reaches the Pi command");
+	ok(!ephemeralOut.includes(`--proposal-id ${proposalId}`), "ephemeral role: proposal control flag is consumed by Yano and not leaked to Pi");
+	ok(ephemeralOut.includes(path.join(ephemeralData, "architect", "runtime-config")), "ephemeral role: runtime config is created outside the project");
+	ok(fs.existsSync(path.join(ephemeralData, "architect", "runtime-config", "any-role-test-project", "business-docs-author", "roles.yaml")), "ephemeral role: runtime role manifest exists");
+	ok(fs.existsSync(path.join(ephemeralData, "architect", "runtime-config", "any-role-test-project", "business-docs-author", "playbooks", "knowledge-authoring.yaml")), "ephemeral role: the generated playbook is exposed to the launched role");
 
 	console.log("\n=== TEST 4 — a --session <id> (or any other unrecognized flag) passes through untouched ===");
 	const sessionOut = run(dir, ["--instance", "coder-01", "--role", "coder", "--session", "01M0JKKF0YYBJZWZKCDPG3AM1D", "--print-only"]);

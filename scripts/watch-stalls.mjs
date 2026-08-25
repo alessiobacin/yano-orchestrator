@@ -25,6 +25,7 @@
 //   yano watch [--project <slug>] [--project-root <dir>]
 //              [--lookback-ms 86400000] [--stall-ms 900000]
 //              [--interval-ms 60000] [--once] [--away]
+//              [--validation-run <id>] [--playbook-proposal <id>]
 //   (in locale: node scripts/watch-stalls.mjs [stesse opzioni])
 //
 // Away-mode (Ticket 07): con `--away` il watcher assorbe il rumore di routine
@@ -52,7 +53,7 @@ const yanoRequire = createRequire(import.meta.url);
 let missingYanoRepoWarned = false;
 
 function parseArgs(argv) {
-	const o = { project: null, projectRoot: null, lookbackMs: 86_400_000, stallMs: 900000, intervalMs: 60000, once: false, away: false };
+	const o = { project: null, projectRoot: null, lookbackMs: 86_400_000, stallMs: 900000, intervalMs: 60000, once: false, away: false, validationRun: null, playbookProposal: null, playbookId: null, playbookChecksum: null, validationRound: null };
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i];
 		if (a === "--project") o.project = argv[++i];
@@ -62,6 +63,11 @@ function parseArgs(argv) {
 		else if (a === "--interval-ms") o.intervalMs = Number(argv[++i]);
 		else if (a === "--once") o.once = true;
 		else if (a === "--away" || a === "-aw") o.away = true;
+		else if (a === "--validation-run") o.validationRun = argv[++i];
+		else if (a === "--playbook-proposal") o.playbookProposal = argv[++i];
+		else if (a === "--playbook-id") o.playbookId = argv[++i];
+		else if (a === "--playbook-checksum") o.playbookChecksum = argv[++i];
+		else if (a === "--validation-round") o.validationRound = argv[++i];
 	}
 	return o;
 }
@@ -256,6 +262,7 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 	// Escalation path for defects in Yano itself. The classifier is deliberately
 	// conservative: generic project failures stay in the project trace and do
 	// not create maintenance tickets in the Yano repository.
+	let validationFindings = [];
 	try {
 		const traceRecords = readTraceRecords({ cwd: watchCwd, project, since: new Date(Date.now() - Math.max(0, opts.lookbackMs)), limit: 100000 });
 		const escalation = await processYanoWatcherFindings({
@@ -267,6 +274,7 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 			notify: livePlanners.length === 0,
 			env: config,
 		});
+		validationFindings = escalation.findings || [];
 		if (escalation.created || escalation.notified || escalation.findings.length) {
 			console.log(`yano watch: ${escalation.findings.length} segnal${escalation.findings.length === 1 ? "e" : "i"} Yano, ${escalation.created} ticket creat${escalation.created === 1 ? "o" : "i"}, ${escalation.notified} notific${escalation.notified === 1 ? "a" : "he"} Telegram.`);
 		}
@@ -281,6 +289,47 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 	} catch (error) {
 		if (error?.code === "YANO_CONFIG_MISSING") throw error;
 		console.warn(`yano watch: escalation Yano non riuscita — ${error instanceof Error ? error.message : String(error)}`);
+	}
+
+	// A clean validation pass is positive evidence only for the architect's
+	// bounded proposal. It is never sent to Telegram as an alert and never
+	// promotes anything by itself; the planner still collects user feedback.
+	if (opts.validationRun && marker.length === 0 && validationFindings.length === 0) {
+		const healthy = {
+			ts: new Date().toISOString(),
+			type: "yano_watcher_round_ok",
+			record_type: "event",
+			source: "yano-watcher",
+			instance: "yano-watcher",
+			project,
+			validation_run_id: opts.validationRun,
+			proposal_id: opts.playbookProposal,
+			playbook_id: opts.playbookId,
+			playbook_checksum: opts.playbookChecksum,
+			round: opts.validationRound,
+			message: "Passata di osservazione bounded senza stall o finding Yano.",
+		};
+		try { appendRawTraceRecord({ cwd: watchCwd, project, record: healthy }); } catch { /* best effort */ }
+		if (livePlanners.length && client) {
+			for (const planner of livePlanners) {
+				try {
+					await client.publishAsync(`pi/${project}/agents/${planner.instance}/commands`, JSON.stringify({
+						type: "command",
+						assignment_id: `watcher-healthy-${crypto.randomUUID()}`,
+						sender_instance: "yano-watcher",
+						sender_role: "yano-watcher",
+						target_instance: planner.instance,
+						project,
+						correlation_id: opts.validationRun,
+						display: true,
+						triggerTurn: true,
+						followUp: true,
+						prompt: `[yano-watcher] Round di validazione sano per la proposta ${opts.playbookProposal || "?"}. Nessuno stall o finding Yano osservato. Il playbook resta ephemeral: raccogli il feedback dell'utente prima di chiedere la promozione.`,
+						timestamp: new Date().toISOString(),
+					}), { qos: 1 });
+				} catch { /* best effort */ }
+			}
+		}
 	}
 
 	try { db.close(); } catch { /* ignore */ }

@@ -71,11 +71,12 @@
 // (quello del pacchetto, non quello del progetto).
 
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import YAML from "yaml";
 import { ensureRolePrerequisites, isSupportedNodeRuntime } from "./doctor.mjs";
-import { TRACE_MODES, getTraceConfig, resolveTraceProject, setTraceMode, slugify } from "./yano-trace-storage.mjs";
+import { TRACE_MODES, getTraceConfig, resolveTraceProject, setTraceMode, slugify, traceRoot } from "./yano-trace-storage.mjs";
 
 // Le 6 skill vendorizzate destinate al ruolo planner — vedi
 // skills-vendor/mattpocock/VERSION.md per la motivazione di ciascuna
@@ -107,6 +108,8 @@ const YANO_AUTO_IMPROVEMENT_SKILL = "yano-auto-improvement";
 const YANO_AUTO_IMPROVEMENT_SKILL_ROLES = ["auto-improver"];
 const YANO_SUGGESTER_SKILL = "yano-suggester";
 const YANO_SUGGESTER_SKILL_ROLES = ["suggester"];
+const YANO_ARCHITECT_SKILL = "yano-architect";
+const YANO_ARCHITECT_SKILL_ROLES = ["architect"];
 
 // Revisione 49 — skill vendorizzata destinata SOLO ai ruoli reviewer e
 // frontend-developer (vedi skills-vendor/awesome-copilot/VERSION.md).
@@ -160,6 +163,58 @@ function resolveYanoAutoImprovementSkillPath(packageRoot) {
 
 function resolveYanoSuggesterSkillPath(packageRoot) {
 	return resolveVendoredSkillPaths(packageRoot, "yano", [YANO_SUGGESTER_SKILL])[0];
+}
+
+function resolveYanoArchitectSkillPath(packageRoot) {
+	return resolveVendoredSkillPaths(packageRoot, "yano", [YANO_ARCHITECT_SKILL])[0];
+}
+
+function generatedRoleManifest(role) {
+	const root = path.join(traceRoot(), "catalog", "agents", role);
+	if (!existsSync(root)) return null;
+	const versions = readdirSync(root, { withFileTypes: true })
+		.filter((entry) => entry.isDirectory())
+		.map((entry) => entry.name)
+		.sort()
+		.reverse();
+	for (const version of versions) {
+		const file = path.join(root, version, "role.yaml");
+		if (!existsSync(file)) continue;
+		try {
+			const document = YAML.parse(readFileSync(file, "utf8"));
+			if (document?.id === role) return { document, file };
+		} catch { /* an invalid catalog entry is ignored; yano agent resolution remains unchanged */ }
+	}
+	return null;
+}
+
+function generatedSkillPath(packageRoot, name) {
+	const candidates = [
+		path.join(packageRoot, "skills-vendor", "yano", name),
+		path.join(packageRoot, "skills-vendor", "mattpocock", name),
+		path.join(packageRoot, "skills-vendor", "awesome-copilot", name),
+		path.join(traceRoot(), "catalog", "skills", name),
+		path.join(process.env.HOME || process.env.USERPROFILE || "", ".agents", "skills", name),
+		path.join(process.env.HOME || process.env.USERPROFILE || "", ".codex", "skills", name),
+	];
+	return candidates.find((candidate) => existsSync(path.join(candidate, "SKILL.md"))) || null;
+}
+
+function generatedRoleConfigDir({ cwd, role, roleManifest, sourceDir: preferredSourceDir = null }) {
+	if (!roleManifest) return null;
+	const sourceDirs = [path.join(cwd, "agents"), path.join(cwd, ".pi", "agents")];
+	const sourceDir = preferredSourceDir || sourceDirs.find((candidate) => existsSync(path.join(candidate, "roles.yaml"))) || sourceDirs[0];
+	let config = { roles: {} };
+	const sourceFile = path.join(sourceDir, "roles.yaml");
+	if (existsSync(sourceFile)) {
+		try { config = YAML.parse(readFileSync(sourceFile, "utf8")) || { roles: {} }; } catch { config = { roles: {} }; }
+	}
+	config.roles ||= {};
+	config.roles[role] = roleManifest.document;
+	const configDir = path.join(traceRoot(), "architect", "runtime-config", slugify(resolveTraceProject(cwd)), role);
+	mkdirSync(configDir, { recursive: true, mode: 0o700 });
+	writeFileSync(path.join(configDir, "roles.yaml"), YAML.stringify(config), { mode: 0o600 });
+	return configDir;
 }
 
 function parseArgs(argv) {
@@ -282,6 +337,11 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 	if (!printOnly) setTraceMode({ cwd, project: traceProject, mode: requestedTraceMode });
 	const traceConfig = getTraceConfig({ cwd, project: traceProject });
 	const packageVersion = JSON.parse(readFileSync(path.join(packageRoot, "package.json"), "utf8")).version;
+	// Promoted roles live in the global catalog, not in a project roster. Build
+	// a short-lived merged roles.yaml so `yano start --role <generated-role>`
+	// remains immediately usable without copying catalog state into the app.
+	const generatedRole = generatedRoleManifest(role);
+	const generatedConfigDir = generatedRole ? generatedRoleConfigDir({ cwd, role, roleManifest: generatedRole }) : null;
 
 	// Revisione 34 — caso reale osservato dall'operatore: un progetto
 	// scaffoldato da una versione di `yano init` PRECEDENTE alla Revisione 33
@@ -351,8 +411,18 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 	const yanoSuggesterSkillFlags = YANO_SUGGESTER_SKILL_ROLES.includes(role)
 		? ["--skill", resolveYanoSuggesterSkillPath(packageRoot)]
 		: [];
+	const yanoArchitectSkillFlags = YANO_ARCHITECT_SKILL_ROLES.includes(role)
+		? ["--skill", resolveYanoArchitectSkillPath(packageRoot)]
+		: [];
+	const generatedSkillFlags = generatedRole
+		? (generatedRole.document.skills || []).flatMap((name) => {
+			const skillPath = generatedSkillPath(packageRoot, name);
+			return skillPath ? ["--skill", skillPath] : [];
+		})
+		: [];
 	const yanoTraceSkillFlags = ["--skill", resolveYanoPlannerSkillPath(packageRoot)];
-	const skillFlags = [...mattPocockSkillFlags, ...yanoTraceSkillFlags, ...chromeDevToolsSkillFlags, ...yanoReviewSkillFlags, ...yanoDeploymentSkillFlags, ...yanoObserverSkillFlags, ...yanoAutoImprovementSkillFlags, ...yanoSuggesterSkillFlags];
+	const allSkillFlags = [...mattPocockSkillFlags, ...yanoTraceSkillFlags, ...chromeDevToolsSkillFlags, ...yanoReviewSkillFlags, ...yanoDeploymentSkillFlags, ...yanoObserverSkillFlags, ...yanoAutoImprovementSkillFlags, ...yanoSuggesterSkillFlags, ...yanoArchitectSkillFlags, ...generatedSkillFlags];
+	const skillFlags = [...new Set(allSkillFlags.filter((_, index) => index % 2 === 1))].flatMap((skillPath) => ["--skill", skillPath]);
 	// -e esplicito SOLO in sviluppo del pacchetto stesso (looksLikePackageRepo)
 	// — mai per una copia locale residua in un progetto scaffoldato, anche se
 	// esiste sul disco (vedi Revisione 38 sopra): l'estensione installata
@@ -366,7 +436,8 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 	const legacyConfigDirFlags = !hasExplicitConfigDir && !existsSync(path.join(cwd, "agents", "roles.yaml")) && existsSync(path.join(cwd, ".pi", "agents", "roles.yaml"))
 		? ["--config-dir", path.join(".pi", "agents")]
 		: [];
-	const piArgs = [...extensionFlags, ...passthrough, ...projectScopeFlags, ...legacyConfigDirFlags, "--role", role, ...skillFlags];
+	const generatedConfigFlags = generatedConfigDir && !hasExplicitConfigDir ? ["--config-dir", generatedConfigDir] : [];
+	const piArgs = [...extensionFlags, ...passthrough, ...projectScopeFlags, ...legacyConfigDirFlags, ...generatedConfigFlags, "--role", role, ...skillFlags];
 
 	const printable = ["pi", ...piArgs].map((a) => (a.includes(" ") ? `"${a}"` : a)).join(" ");
 	console.log(`launch-planner: comando composto (cwd ${cwd}, trace ${traceConfig.mode}, progetto ${traceProject}):\n  ${printable}\n`);

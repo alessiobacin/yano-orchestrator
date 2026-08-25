@@ -40,6 +40,8 @@
 //   yano debugger           registra e gestisce bug applicativi con un worker Herdr esterno
 //   yano auto-improve       esegue audit periodici read-only e inoltra report al planner
 //   yano suggester          raccoglie proposte utenti read-only e le inoltra dopo approvazione
+//   yano architect          crea, prepara e promuove playbook/ruoli globali
+//   yano playbook|agent     consulta il catalogo globale di playbook e ruoli
 //
 // Installazione: `npm install -g <repo>` (o `npm link` in locale, per lo
 // sviluppo di questo pacchetto stesso) espone `yano` sul PATH — campo "bin" di
@@ -70,6 +72,8 @@ import { runTrace } from "../scripts/yano-trace.mjs";
 import { runYanoDebugger } from "../scripts/yano-debugger.mjs";
 import { runYanoAutoImprove } from "../scripts/yano-auto-improver.mjs";
 import { runYanoSuggester } from "../scripts/yano-suggester.mjs";
+import { runYanoArchitect } from "../scripts/yano-architect.mjs";
+import { runYanoCatalog } from "../scripts/yano-catalog.mjs";
 import { runRecovery } from "../scripts/yano-recovery.mjs";
 import { applyGlobalConfig, runYanoConfig } from "../scripts/yano-config.mjs";
 
@@ -109,6 +113,8 @@ function printTopUsage() {
 			"  debugger [opzioni] Gestisce bug applicativi e worker esterni — `yano debugger --help`",
 			"  auto-improve [opzioni] Audit periodici read-only e report al planner — `yano auto-improve --help`",
 			"  suggester [opzioni]  Suggerimenti utenti read-only e gate superadmin — `yano suggester --help`",
+			"  architect [opzioni]  Progetta/provisiona playbook e ruoli globali — `yano architect --help`",
+			"  playbook|agent [opzioni] Catalogo read-only di playbook, ruoli e capability",
 			"  config [opzioni] Gestisce la configurazione globale utente — `yano config --help`",
 			"  pause [opzioni]  Salva uno snapshot non distruttivo e mette in pausa i run",
 			"  resume [opzioni] Ripristina uno snapshot e riapre gli agenti mancanti",
@@ -198,6 +204,14 @@ async function main() {
 	}
 	if (sub === "suggester") {
 		await runYanoSuggester({ argv: rest });
+		return;
+	}
+	if (sub === "architect") {
+		await runYanoArchitect({ argv: rest });
+		return;
+	}
+	if (sub === "playbook" || sub === "agent") {
+		runYanoCatalog({ kind: sub, argv: rest });
 		return;
 	}
 	if (sub === "config") {

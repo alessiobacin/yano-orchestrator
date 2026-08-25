@@ -123,6 +123,23 @@ roles:
       - platform
       - deployment
 
+  architect:
+    activation: lazy
+    playbook: architect-provisioning
+    label: "Yano Architect"
+    brief: "Progetta e prepara playbook e ruoli specialistici nel catalogo globale Yano. Verifica e, quando autorizzato, provvisiona skill, CLI e MCP; non modificare mai il progetto di riferimento. Un playbook resta non operativo finché tutte le capability richieste non risultano verificate. Gestisci revisioni ephemeral e promozione persistente solo dopo validazione del watcher e feedback positivo del planner/utente."
+    model:
+      provider: llmproxy
+      model: reasoning-model
+    skills:
+      - yano-architect
+      - yano-planner-trace-analysis
+    cli: [git, node, npm, npx, herdr]
+    mcp: []
+    teams:
+      - architecture
+      - platform
+
   # ── Roster di agenti specialisti (nessun prompts/<role>.md dedicato: usano
   # prompts/specialist.md, un template generico che l'estensione riempie con
   # `label`/`brief` qui sotto — vedi loadRolePrompt() in orchestrator.ts e

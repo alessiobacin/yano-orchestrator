@@ -20,6 +20,10 @@ capabilities:
     kind: cli
     command: npx
     probe: [--version]
+  herdr:
+    kind: cli
+    command: herdr
+    probe: [--version]
   gh:
     kind: cli
     command: gh

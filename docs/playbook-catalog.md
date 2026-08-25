@@ -19,6 +19,13 @@ workflow instead of launching every specialist.
 | `security-review` | security-evaluator, dependency-health | scanner/audit evidence, concrete finding or clean result |
 | `documentation-release` | docs-sync, architecture-diagrammer, release-notes-writer | source-to-doc diff, examples/diagram/changelog verification |
 | `performance-observability` | observability-agent, speed-benchmarker | before/after measurements with units, environment and sample context |
+| `architect-provisioning` | architect | proposal scope, capability readiness, watcher validation, user feedback and explicit promotion evidence |
+
+The `architect` role is global rather than project-scoped. It stages generated
+playbooks and roles under `temp/architect/proposals/`, validates every declared
+skill/CLI/MCP before operation, and promotes immutable versions only into the
+global `temp/catalog/` after a healthy watcher round and positive planner/user
+feedback. See [`yano-architect.md`](yano-architect.md).
 
 ## Universal gates
 

@@ -1,0 +1,116 @@
+schema_version: 1
+id: architect-provisioning
+label: Yano architect provisioning and promotion
+description: >-
+  Controlled global workflow for designing task-specific Playbooks and roles,
+  verifying every declared skill/CLI/MCP capability, observing an ephemeral
+  validation run and promoting only after planner and user approval.
+enforcement:
+  status: partial
+  note: The architect changes only the global Yano catalog; the reference project is read-only.
+states:
+  - id: requested
+    owner: planner
+    terminal: false
+  - id: designing
+    owner: architect
+    terminal: false
+  - id: provisioning
+    owner: architect
+    terminal: false
+  - id: ready_ephemeral
+    owner: architect
+    terminal: false
+  - id: validation
+    owner: watcher
+    terminal: false
+  - id: awaiting_feedback
+    owner: planner_and_human
+    terminal: false
+  - id: persistent
+    owner: architect
+    terminal: true
+  - id: revision_required
+    owner: planner_and_human
+    terminal: false
+  - id: blocked
+    owner: planner_and_human
+    terminal: true
+transitions:
+  - id: design
+    from: requested
+    to: designing
+    actor: architect
+    requires:
+      - task_intent_recorded
+      - catalog_assessed
+  - id: provision
+    from: designing
+    to: provisioning
+    actor: architect
+    requires:
+      - proposal_files_written
+      - capability_plan_written
+  - id: ready
+    from: provisioning
+    to: ready_ephemeral
+    actor: architect
+    requires:
+      - all_skills_verified
+      - all_cli_verified
+      - all_mcp_handshakes_verified
+  - id: observe
+    from: ready_ephemeral
+    to: validation
+    actor: planner
+    requires:
+      - watcher_started
+      - validation_run_created
+  - id: ask_user
+    from: validation
+    to: awaiting_feedback
+    actor: planner
+    requires:
+      - watcher_rounds_healthy
+      - validation_run_completed
+  - id: promote
+    from: awaiting_feedback
+    to: persistent
+    actor: architect
+    requires:
+      - positive_user_feedback
+      - planner_approval
+      - successful_validation
+  - id: revise
+    from: [validation, awaiting_feedback]
+    to: revision_required
+    actor: planner
+    requires:
+      - requested_changes_recorded
+  - id: block
+    from: [designing, provisioning, validation, awaiting_feedback]
+    to: blocked
+    actor: planner_and_human
+    requires:
+      - blocker_recorded
+failure_routes:
+  - condition: capability_missing
+    action: keep_ephemeral_and_block_operation
+    terminal: false
+  - condition: mcp_handshake_failed
+    action: keep_ephemeral_and_request_provisioning_fix
+    terminal: false
+  - condition: watcher_finding
+    action: keep_ephemeral_and_request_revision
+    terminal: false
+invariants:
+  - id: global_catalog_only
+    description: The architect never writes to the reference project.
+  - id: capability_gate
+    description: No generated Playbook is operational before all declared capabilities are verified.
+  - id: ephemeral_until_approved
+    description: Generated artifacts stay ephemeral until validation and positive human feedback.
+  - id: immutable_promoted_versions
+    description: A promoted version is checksum-bound and later changes create a new version.
+  - id: no_implicit_production
+    description: Generated workflows cannot bypass deployment approval gates.

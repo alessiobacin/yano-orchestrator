@@ -37,6 +37,8 @@ const YANO_AUTO_IMPROVEMENT_SKILL = "yano-auto-improvement";
 const YANO_AUTO_IMPROVEMENT_SKILL_ROLES = ["auto-improver"];
 const YANO_SUGGESTER_SKILL = "yano-suggester";
 const YANO_SUGGESTER_SKILL_ROLES = ["suggester"];
+const YANO_ARCHITECT_SKILL = "yano-architect";
+const YANO_ARCHITECT_SKILL_ROLES = ["architect"];
 const CHROME_DEVTOOLS_SKILL = "chrome-devtools";
 const CHROME_DEVTOOLS_SKILL_ROLES = ["frontend-reviewer", "frontend-developer"];
 
@@ -289,6 +291,20 @@ assert.match(read("prompts/debugger.md"), /Non modificare|mai.*modificare/i, "il
 assert.match(read("skills-vendor/yano/yano-observer/SKILL.md"), /No project mutation|read-only/i, "la skill observer deve esplicitare il vincolo read-only");
 console.log("   OK");
 
+console.log("\n16. la skill Yano architect è presente e riservata all'architect...");
+const yanoArchitectSkillPath = path.join(repoRoot, "skills-vendor", "yano", YANO_ARCHITECT_SKILL);
+assert.ok(existsSync(path.join(yanoArchitectSkillPath, "SKILL.md")), "la skill architect deve contenere SKILL.md");
+assert.ok(existsSync(path.join(yanoArchitectSkillPath, "evals", "evals.json")), "la skill architect deve contenere evals/evals.json");
+assert.ok(launcherSrc.includes(`"${YANO_ARCHITECT_SKILL}"`), "launch-planner.mjs deve referenziare la skill architect");
+for (const [roleName, cfg] of Object.entries(roles)) {
+		assert.equal((cfg.skills ?? []).includes(YANO_ARCHITECT_SKILL), YANO_ARCHITECT_SKILL_ROLES.includes(roleName), `skill architect non correttamente isolata per '${roleName}'`);
+}
+const printedArchitect = execFileSync("node", ["scripts/launch-planner.mjs", "--instance", "architect-check", "--role", "architect", "--print-only"], { cwd: repoRoot, encoding: "utf8" });
+assert.ok(printedArchitect.includes(yanoArchitectSkillPath), "architect deve ricevere la skill yano-architect");
+assert.equal(roles.architect.playbook, "architect-provisioning", "architect deve usare architect-provisioning");
+assert.match(read("prompts/architect.md"), /capability|provision/i, "il prompt architect deve descrivere il provisioning");
+console.log("   OK");
+
 console.log(
-  "\nOK: skill planner, skill Yano trace, code-review, deployment, observer/auto-improvement/suggester e chrome-devtools risultano cablate ai soli ruoli previsti.",
+  "\nOK: scripts/check-skill-isolation — skill planner, skill Yano trace, code-review, deployment, observer/auto-improvement/suggester, architect e chrome-devtools risultano cablate ai soli ruoli previsti.",
 );

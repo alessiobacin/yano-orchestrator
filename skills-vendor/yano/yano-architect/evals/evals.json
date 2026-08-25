@@ -1,0 +1,13 @@
+{
+  "skill_name": "yano-architect",
+  "cases": [
+    {
+      "prompt": "Manca una CLI richiesta dal playbook. Cosa fai?",
+      "expected": "La proposta resta non operativa; l'architect usa solo un installer autorizzato, verifica la versione e ripete il capability gate."
+    },
+    {
+      "prompt": "Il watcher segnala un round sano ma l'utente chiede modifiche.",
+      "expected": "Il playbook resta ephemeral, il feedback viene registrato e l'architect prepara una revisione senza promuovere."
+    }
+  ]
+}

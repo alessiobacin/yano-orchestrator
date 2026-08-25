@@ -99,6 +99,32 @@ eventuale decisione del superadmin/utente, usa il flusso normale
 - adapter verso il sistema ticket locale senza bypassare `to-tickets`;
 - digest e notifiche mirate all'utente che ha inviato il suggerimento.
 
+## Architect
+
+### Implementato nella v1
+
+- assessment dell'intento e scelta bounded di un playbook/ruoli candidati;
+- proposta ephemeral con manifest, checksum e database globale;
+- gate obbligatorio per skill, CLI e MCP, con MCP `pending` finché non è
+  documentato un handshake reale;
+- workspace Herdr globale `yano-architect` e watcher di validazione
+  `yano-watcher` allo stesso livello degli altri agenti esterni;
+- intervallo validation → feedback planner/utente → promozione esplicita;
+- catalogo read-only `yano playbook` e `yano agent`;
+- ruoli promossi risolti dal launcher tramite configurazione runtime unita,
+  senza copiare infrastruttura nel progetto osservato;
+- modalità `yano architect ... --once` per il capability gate senza Herdr.
+
+### Da sviluppare dopo
+
+- matching semantico tra intento e playbook esistenti prima di generare un
+  nuovo flusso;
+- install adapters firmati per skill, CLI e MCP con allowlist configurabile;
+- handshake MCP automatico tramite adapter ufficiali e attestazioni con TTL;
+- diff/patch conversazionale del playbook e confronto tra versioni;
+- metriche cross-project su promozioni, revisioni e capability mancanti;
+- rollback/promozione graduata del catalogo e firma degli artefatti.
+
 ## Ordine consigliato delle prossime iterazioni
 
 1. Hardening comune: autenticazione, redazione, retention e metriche di

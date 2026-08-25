@@ -192,6 +192,31 @@ registrata in [`docs/agents/external-agents-roadmap.md`](agents/external-agents-
 `yano suggester start|submit --once` consente un test bounded; `--dry-run`
 evita l'apertura del worker Herdr.
 
+### Global `yano-architect`
+
+`yano architect` è un agente globale di progettazione del catalogo, non un
+worker del progetto osservato. Vive nel workspace Herdr `yano-architect` e
+scrive il database `temp/architect/architect.sqlite`, le proposte ephemeral in
+`temp/architect/proposals/` e, solo dopo promozione, le versioni immutabili in
+`temp/catalog/`.
+
+Il lifecycle è `assess → propose → capability gate → watcher validation →
+feedback planner/utente → revise|promote`. L'architect non modifica mai
+codice, test, configurazioni, worktree o deployment del progetto. Prima di
+avviare un playbook controlla tutte le skill, CLI e MCP dichiarate; un MCP solo
+presente in `.mcp.json` resta `pending` fino a un handshake reale registrato
+con `yano architect capability`. `--once` esegue soltanto il gate e non apre
+Herdr.
+
+Quando la readiness è completa, l'architect avvia anche una tab di
+`yano-watcher` per osservare il nuovo round. Il watcher può segnalare il round
+sano ma non può promuovere. Il planner intervista l'utente, chiede una
+revisione oppure usa `promote --yes` solo con capability pronte, almeno una
+validation riuscita e feedback positivo. Il catalogo espone
+`yano playbook list|show|check` e `yano agent list|show`; il launcher unisce un
+ruolo promosso al roster del progetto in una configurazione runtime temporanea,
+senza copiare file nel repository applicativo.
+
 ### Deployment agent
 
 Il `deployment-agent` è un worker distinto dal debugger applicativo. Il suo

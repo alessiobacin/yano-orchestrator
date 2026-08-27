@@ -19,7 +19,7 @@ Per un solo run usare `--run <run-id>`. Il comando:
    precedente;
 2. raccoglie ticket `running`/`pending`, presenza MQTT e stato Git;
 3. salva `snapshot.json`, copia del database e WAL/SHM disponibili e gli
-   eventi trace osservabili sotto `<installazione-yano>/temp/recovery/`;
+   eventi trace osservabili sotto `<YANO_DATA_DIR>/recovery/`;
 4. crea un checkpoint e un evento `run_paused` senza modificare lo status del
    run o dei ticket;
 5. con `--yes`, invia ai processi presenti un `terminate` graceful. Non usa
@@ -91,7 +91,7 @@ corrente e non chiude né duplica le tab Herdr.
 Gli snapshot e l'esito del reload sono in:
 
 ```text
-<installazione-yano>/temp/recovery/<progetto>/<run>/<timestamp>/
+<YANO_DATA_DIR>/recovery/<progetto>/<run>/<timestamp>/
 ```
 
 La ripresa è semantica: eventi, output dei tool, report, ticket, checkpoint e

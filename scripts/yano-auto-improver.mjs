@@ -393,7 +393,7 @@ async function notifyPlanner(info, audit, summary) {
 function assertTempPath(file) {
 	const resolved = path.resolve(file);
 	const root = path.resolve(dataRoot()) + path.sep;
-	if (!resolved.startsWith(root)) throw new Error("yano auto-improve: report e summary devono restare nella directory globale temp/auto-improver");
+	if (!resolved.startsWith(root)) throw new Error("yano auto-improve: report e summary devono restare nella directory globale <YANO_DATA_DIR>/auto-improver");
 	return resolved;
 }
 
@@ -439,7 +439,7 @@ function usage() {
 		"  pause|resume|stop --project-root <dir>                 cambia stato senza toccare il progetto",
 		"  complete --audit-id <id> --report-file <temp-file>     chiude audit e notifica planner",
 		"",
-		"Nessun sottocomando modifica il progetto osservato. I dati vivono in temp/auto-improver/.",
+		"Nessun sottocomando modifica il progetto osservato. I dati vivono in <YANO_DATA_DIR>/auto-improver/.",
 	].join("\n");
 }
 

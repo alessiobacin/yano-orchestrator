@@ -41,7 +41,19 @@ export const CONFIG_SPECS = Object.freeze([
 
 const SPEC_BY_KEY = new Map(CONFIG_SPECS.map((spec) => [spec.key, spec]));
 
-export function configSpec(key) { return SPEC_BY_KEY.get(String(key || "")); }
+const RESERVED_DYNAMIC_KEYS = new Set(["PATH", "HOME", "PWD", "OLDPWD", "SHELL", "NODE_OPTIONS", "LD_PRELOAD", "DYLD_INSERT_LIBRARIES"]);
+
+export function isConfigKey(key) {
+	const normalized = String(key || "");
+	return /^[A-Z][A-Z0-9_]*$/.test(normalized) && !RESERVED_DYNAMIC_KEYS.has(normalized) && !normalized.startsWith("DYLD_");
+}
+
+export function configSpec(key) {
+	const normalized = String(key || "");
+	if (SPEC_BY_KEY.has(normalized)) return SPEC_BY_KEY.get(normalized);
+	if (!isConfigKey(normalized)) return undefined;
+	return { key: normalized, secret: /(?:API_KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|PRIVATE_KEY)/i.test(normalized), description: "variabile richiesta da un playbook o da una capability" };
+}
 
 export function globalConfigPath({ env = process.env, platform = process.platform, home = os.homedir() } = {}) {
 	if (env.YANO_CONFIG_FILE) return path.resolve(env.YANO_CONFIG_FILE);
@@ -49,6 +61,16 @@ export function globalConfigPath({ env = process.env, platform = process.platfor
 	if (platform === "darwin") return path.join(home, "Library", "Application Support", "yano", "config.env");
 	if (platform === "win32") return path.join(env.APPDATA || path.join(home, "AppData", "Roaming"), "yano", "config.env");
 	return path.join(home, ".config", "yano", "config.env");
+}
+
+/** Per-user data root, kept separate from the installed package. */
+export function globalDataPath({ env = process.env, platform = process.platform, home = os.homedir() } = {}) {
+	if (env.YANO_DATA_DIR) return path.resolve(env.YANO_DATA_DIR);
+	if (env.YANO_TEMP_DIR) return path.resolve(env.YANO_TEMP_DIR);
+	if (env.XDG_DATA_HOME) return path.join(path.resolve(env.XDG_DATA_HOME), "yano");
+	if (platform === "darwin") return path.join(home, "Library", "Application Support", "yano", "data");
+	if (platform === "win32") return path.join(env.LOCALAPPDATA || env.APPDATA || path.join(home, "AppData", "Local"), "yano", "data");
+	return path.join(home, ".local", "share", "yano");
 }
 
 export function parseEnvText(text) {
@@ -91,7 +113,7 @@ export function resolveYanoConfig({ packageRoot = null, env = process.env } = {}
 
 export function applyGlobalConfig({ packageRoot = null, env = process.env } = {}) {
 	const values = resolveYanoConfig({ packageRoot, env });
-	for (const spec of CONFIG_SPECS) if (!env[spec.key] && values[spec.key]) env[spec.key] = values[spec.key];
+	for (const [key, value] of Object.entries(values)) if (isConfigKey(key) && !env[key] && value) env[key] = value;
 	return values;
 }
 
@@ -106,7 +128,8 @@ function writeConfig(values, file) {
 		"# Yano global user configuration — chmod 600; never commit this file.",
 		"# Set values with: yano config set KEY VALUE (or --stdin for secrets)",
 	];
-	for (const spec of CONFIG_SPECS) if (values[spec.key] !== undefined && values[spec.key] !== "") lines.push(`${spec.key}=${quoteEnvValue(values[spec.key])}`);
+	const keys = new Set([...CONFIG_SPECS.map((spec) => spec.key), ...Object.keys(values).filter(isConfigKey)]);
+	for (const key of [...keys].sort()) if (values[key] !== undefined && values[key] !== "") lines.push(`${key}=${quoteEnvValue(values[key])}`);
 	lines.push("");
 	const temporary = `${file}.tmp-${process.pid}`;
 	fs.writeFileSync(temporary, lines.join("\n"), { mode: 0o600 });
@@ -114,8 +137,8 @@ function writeConfig(values, file) {
 	fs.renameSync(temporary, file);
 }
 
-function assertKnownKey(key) {
-	if (!configSpec(key)) throw new Error(`variabile non supportata: ${key}. Usa \`yano config list --all\` per vedere quelle configurabili.`);
+function assertConfigKey(key) {
+	if (!configSpec(key)) throw new Error(`nome variabile non valido: ${key}. Usa un nome uppercase come MY_SERVICE_API_KEY.`);
 }
 
 function redacted(spec, value, showSecrets = false) {
@@ -131,11 +154,12 @@ export function configUsage() {
 		"  path                         mostra il file globale (mai il contenuto)",
 		"  list [--all]                 mostra configurazione, segreti oscurati",
 		"  get <KEY> [--show]           legge una variabile; --show rivela un segreto esplicitamente",
-		"  set <KEY> <VALUE>            salva una variabile globale",
+		"  set <KEY> <VALUE>            salva una variabile globale (anche per playbook importati)",
 		"  set <KEY> --stdin            legge il valore da stdin, consigliato per segreti",
 		"  unset <KEY>                  rimuove una variabile globale",
 		"",
 		"Il file globale non viene inserito nel pacchetto npm e non dipende dal repository di sviluppo.",
+		"YANO_DATA_DIR è opzionale: se omesso, Yano sceglie automaticamente la directory dati della piattaforma.",
 	].join("\n");
 }
 
@@ -158,19 +182,20 @@ export async function runYanoConfig({ argv = [] } = {}) {
 	const values = loadConfigFile(file);
 	if (sub === "path") { console.log(file); return { path: file }; }
 	if (sub === "list") {
-		const specs = argv.includes("--all") ? CONFIG_SPECS : CONFIG_SPECS.filter((spec) => values[spec.key]);
+		const storedDynamic = Object.keys(values).filter((key) => !SPEC_BY_KEY.has(key) && isConfigKey(key)).map((key) => configSpec(key));
+		const specs = argv.includes("--all") ? [...CONFIG_SPECS, ...storedDynamic] : [...CONFIG_SPECS, ...storedDynamic].filter((spec) => values[spec.key]);
 		for (const spec of specs) console.log(`${spec.key}=${redacted(spec, values[spec.key])}  # ${spec.description}`);
 		return values;
 	}
 	if (sub === "get") {
 		const key = argv[1];
-		assertKnownKey(key);
+		assertConfigKey(key);
 		console.log(redacted(configSpec(key), values[key], argv.includes("--show")));
 		return values[key];
 	}
 	if (sub === "set") {
 		const key = argv[1];
-		assertKnownKey(key);
+		assertConfigKey(key);
 		const stdin = argv.includes("--stdin");
 		let next = stdin ? fs.readFileSync(0, "utf8").trimEnd() : argv[2];
 		if (next === "--stdin") next = undefined;
@@ -182,7 +207,7 @@ export async function runYanoConfig({ argv = [] } = {}) {
 	}
 	if (sub === "unset") {
 		const key = argv[1];
-		assertKnownKey(key);
+		assertConfigKey(key);
 		delete values[key];
 		writeConfig(values, file);
 		console.log(`yano config: ${key} rimossa da ${file}.`);

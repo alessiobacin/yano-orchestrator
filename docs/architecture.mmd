@@ -5,6 +5,8 @@ flowchart TD
     INIT --> HERDR_INIT["init --herdr\nHerdr workspace + root pane"]
     CLI --> OBS["status / fleet / deps / gantt / watch / trace"]
     CLI --> RELOAD["update --reload\ncontrolled restart"]
+    CLI --> REPAIR["repair\nreconcile project + Herdr + MQTT"]
+    CLI --> REPAIR_ALL["repair --all-projects\nsequential global sweep"]
     CLI --> GLOBAL_CONFIG["Global config.env\nmanaged by `yano config`\ncredentials + runtime defaults"]
     INIT --> PLANNER["pi planner\nrole + instance identity"]
     HERDR_INIT --> PLANNER
@@ -68,7 +70,7 @@ flowchart TD
         REPORTS[".pi/.../reports\nround evidence"]
     end
 
-    subgraph GLOBAL_TRACE["Global Yano installation / temp"]
+    subgraph GLOBAL_TRACE["Global Yano per-user data root (platform default or YANO_DATA_DIR)"]
         TRACE["traces/<project-key>/events\nJSONL forensic trace\nevents / standard / full"]
         TRACE_ANALYSIS["feedback / summaries / opinions\nfiltered context + cross-project overview"]
         TRACE_INDEX["semantic-index.sqlite\ntrace_documents + Ollama embeddings\nhybrid filtered search"]
@@ -76,6 +78,7 @@ flowchart TD
         TRACE_LINKS["trace_memory_links + context\nprovenance / causal evidence links"]
         PROJECTIONS["projections/\nplanner-context.json\nrecurring-failures.md"]
         TRACE_CONFIG["tracing.json\nper-project mode"]
+        DATA_DEFAULT["macOS: ~/Library/Application Support/yano/data\nLinux: ~/.local/share/yano\nWindows: %LOCALAPPDATA%/yano/data"]
     end
 
     subgraph YANO_WATCHER["Global watcher boundary"]
@@ -103,7 +106,7 @@ flowchart TD
         AUTO_ONCE["run|start --once\none audit, no scheduler"]
         AUTO_DB["auto-improver.sqlite\nprojects / audits / recommendations"]
         AUTO_WS["Herdr workspace\nyano-auto-improver\ntab: auto-improver-<project-name>"]
-        AUTO_REPORTS["temp/auto-improver\nevidence + reports"]
+        AUTO_REPORTS["auto-improver/\nevidence + reports"]
     end
 
     subgraph YANO_SUGGESTER["Global suggester boundary"]
@@ -111,7 +114,7 @@ flowchart TD
         SUGGESTER_ONCE["start|submit --once\nbounded test"]
         SUGGESTER_DB["suggester.sqlite\nprojects / suggestions / approvals"]
         SUGGESTER_WS["Herdr workspace\nyano-suggester\ntab: suggester-<project-name>"]
-        SUGGESTER_REPORTS["temp/suggester\nevidence + reports"]
+        SUGGESTER_REPORTS["suggester/\nevidence + reports"]
         SUGGESTER_GATE["superadmin approval gate"]
     end
 
@@ -120,13 +123,17 @@ flowchart TD
         ARCHITECT_ONCE["--once\ncapability gate only"]
         ARCHITECT_DB["architect.sqlite\nproposals / capabilities / feedback"]
         ARCHITECT_WS["Herdr workspace\nyano-architect\ntab: architect-<project-name>"]
-        ARCHITECT_EPHEMERAL["temp/architect/proposals\nephemeral artifacts"]
+        ARCHITECT_EPHEMERAL["architect/proposals\nephemeral artifacts"]
         ARCHITECT_GATE["skill / CLI / MCP\nreadiness gate"]
-        ARCHITECT_CATALOG["temp/catalog\nimmutable promoted versions"]
+        ARCHITECT_CATALOG["catalog/playbooks + agents\nimmutable promoted versions"]
         ARCHITECT_ASSESS["catalog-first assess\nexact / related / missing"]
+        ARCHITECT_SELECT["candidate ranking\nrecommended + user choice"]
         ARCHITECT_INTERVIEW["user interview\nscope + single/multi-agent + quality"]
         ARCHITECT_TEAM["generic team contract\nroles + outputs + parallel groups"]
         ARCHITECT_VARIANT["Planner selects variant\ninstance count + task order"]
+        PLAYBOOK_BUNDLE["portable JSON bundle\nexport / import"]
+        PLAYBOOK_LIFECYCLE["remove = soft disable\npurge = confirmed delete"]
+        REQUIREMENT_GATE["requirements gate\nCLI / MCP / skill / credential"]
     end
 
     subgraph DELIVERY_AGENT["Deployment boundary"]
@@ -147,6 +154,7 @@ flowchart TD
     WORKERS --> TRACE
     CLI --> TRACE_CONFIG
     TRACE_CONFIG --> TRACE
+    DATA_DEFAULT --> TRACE_CONFIG
     TRACE --> TRACE_ANALYSIS
     TRACE --> TRACE_INDEX
     TRACE_ANALYSIS --> TRACE_INDEX
@@ -209,11 +217,19 @@ flowchart TD
     ARCHITECT_ONCE --> ARCHITECT_GATE
     PLANNER --> ARCHITECT_ASSESS
     ARCHITECT_ASSESS --> ARCHITECT_CATALOG
+    ARCHITECT_ASSESS --> ARCHITECT_SELECT
+    ARCHITECT_SELECT --> PLANNER
     ARCHITECT_ASSESS --> ARCHITECT_INTERVIEW
     ARCHITECT_INTERVIEW --> ARCHITECT_TEAM
     ARCHITECT_TEAM --> ARCHITECT_VARIANT
     PLANNER --> ARCHITECT_VARIANT
     ARCHITECT_VARIANT --> PLANNER
+    CLI --> PLAYBOOK_BUNDLE
+    PLAYBOOK_BUNDLE --> ARCHITECT
+    ARCHITECT --> REQUIREMENT_GATE
+    REQUIREMENT_GATE --> GLOBAL_CONFIG
+    CLI --> PLAYBOOK_LIFECYCLE
+    PLAYBOOK_LIFECYCLE --> ARCHITECT_CATALOG
     ARCHITECT --> ARCHITECT_DB
     ARCHITECT --> ARCHITECT_WS
     ARCHITECT --> ARCHITECT_EPHEMERAL
@@ -248,6 +264,14 @@ flowchart TD
     BARRIER --> SNAPSHOT
     SNAPSHOT --> RELOAD
     RELOAD --> FINALIZE
+    REPAIR --> SNAPSHOT
+    REPAIR --> PRESENCE
+    REPAIR --> PLANNER
+    REPAIR --> ARCHITECT
+    REPAIR_ALL --> REPAIR
+    REPAIR_ALL --> DEBUG_DB
+    REPAIR_ALL --> AUTO_DB
+    REPAIR_ALL --> SUGGESTER_DB
     SQLITE --> GATES
     GATES --> COMMANDS
     WATCHDOG --> PLANNER
@@ -263,6 +287,6 @@ flowchart TD
     classDef durable fill:#253b2b,stroke:#7ec488,color:#e5e7eb
     classDef risk fill:#3a1f1f,stroke:#e06c75,color:#e5e7eb
     class USER user
-    class CLI,INIT,OBS,PLANNER,GATES,FINALIZE,MERGE,RELOAD,BARRIER,DEBUGGER,DEPLOY_AGENT,ARCHITECT,ARCHITECT_ASSESS,ARCHITECT_INTERVIEW,ARCHITECT_TEAM,ARCHITECT_VARIANT control
+    class CLI,INIT,OBS,PLANNER,GATES,FINALIZE,MERGE,RELOAD,REPAIR,REPAIR_ALL,BARRIER,DEBUGGER,DEPLOY_AGENT,ARCHITECT,ARCHITECT_ASSESS,ARCHITECT_INTERVIEW,ARCHITECT_TEAM,ARCHITECT_VARIANT control
     class SQLITE,WORKTREES,REPORTS,TRACE,TRACE_MEMORY,TRACE_LINKS,PROJECTIONS,TRACE_CONFIG,SNAPSHOT,DEBUG_DB,DEBUG_WS,ENVIRONMENTS,AUTO_DB,AUTO_WS,AUTO_REPORTS,SUGGESTER_DB,SUGGESTER_WS,SUGGESTER_REPORTS,SUGGESTER_GATE,ARCHITECT_DB,ARCHITECT_WS,ARCHITECT_EPHEMERAL,ARCHITECT_CATALOG,DEPLOY_PLAYBOOK,DEV_SOURCE,DOCKER_ENVS,RELEASE durable
     class WATCHDOG,ADAPTERS,WATCHER,ARCHITECT_GATE risk

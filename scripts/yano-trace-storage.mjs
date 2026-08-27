@@ -1,9 +1,9 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
-import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { resolveYanoWorkspaceDir } from "./yano-project.mjs";
+import { globalConfigPath, globalDataPath, loadConfigFile } from "./yano-config.mjs";
 
 export const TRACE_MODES = Object.freeze(["off", "events", "standard", "full"]);
 export const DEFAULT_TRACE_MODE = "events";
@@ -11,13 +11,9 @@ export const DEFAULT_TRACE_MODE = "events";
 const TRACE_SCHEMA_VERSION = 1;
 const require = createRequire(import.meta.url);
 
-function packageRoot() {
-	return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-}
-
 export function traceRoot() {
-	const configured = process.env.YANO_DATA_DIR || process.env.YANO_TEMP_DIR;
-	return path.resolve(configured || path.join(packageRoot(), "temp"));
+	const global = loadConfigFile(globalConfigPath({ env: process.env }));
+	return path.resolve(globalDataPath({ env: { ...global, ...process.env } }));
 }
 
 export function slugify(value) {

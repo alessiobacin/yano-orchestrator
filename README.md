@@ -81,8 +81,8 @@ yano start --instance planner-01
 Yano uses Ollama's local HTTP API for embeddings. The default endpoint is
 `http://127.0.0.1:11434`; override it with `YANO_OLLAMA_URL` if needed. The
 model can be changed for an experimental setup with `YANO_EMBEDDING_MODEL`,
-and the semantic index is created on demand under the same global `temp/`
-directory with `yano trace index`.
+and the semantic index is created on demand under the same global Yano data
+directory (`<YANO_DATA_DIR>` or the platform default) with `yano trace index`.
 
 The ticket/DAG layer uses Node's built-in `node:sqlite` API, so Node 22.5 or newer is required. `yano doctor` refuses unsupported runtimes before initialization.
 
@@ -93,6 +93,10 @@ yano update           # reinstall the global package from the latest GitHub main
 yano update --check   # just check whether an update is available, without installing
 yano update --reload --dry-run # preview a controlled reload of this project's Herdr team
 yano update --reload --yes     # pause, update, restart and verify live instances
+yano repair --dry-run          # detect stale MQTT/Herdr agents and scope drift
+yano repair --yes --update     # snapshot, reconcile, update if needed and restart
+yano repair --all-projects --dry-run # inventory every active project safely
+yano repair --all-projects --yes --update # repair all active projects sequentially
 yano uninstall        # remove the global installation (asks for confirmation; add --yes to skip it)
 ```
 
@@ -107,6 +111,20 @@ to extend the safe-point/version wait or `--force` to explicitly allow an
 interrupted operation. If the update fails, agents remain paused and can be
 resumed from the saved snapshot.
 
+If the project has no `orchestrator.db`, agents are still alive under an old
+MQTT name, or Herdr contains stale panes from a previous initialization, use
+`yano repair --dry-run` followed by `yano repair --yes --update`. Repair saves
+its own snapshot under global `<YANO_DATA_DIR>/recovery/repair/`, reconciles all Pi panes
+whose cwd is the current project, restarts all observed agents with the
+canonical scope and preserves application files, traces, database, worktrees
+and tabs.
+
+For an explicit operator-wide sweep use `yano repair --all-projects --dry-run`
+first, then `yano repair --all-projects --yes --update`. It groups active Herdr
+project roots with the persistent debugger/auto-improver/suggester registries,
+repairs each project sequentially and writes one recovery snapshot per project;
+paused or stopped external workers are left paused or stopped.
+
 **Role prompts are always read live from whichever global install `pi` actually loaded — never from a per-project copy — so `yano update` alone is enough.** `yano init` no longer creates a `prompts/` folder in a scaffolded project at all; every instance simply reads `<installed-package>/prompts/<role>.md` at launch, so a `yano update` immediately takes effect for every existing project too, with no extra step.
 
 **If you want to customize a role's prompt for one specific project**, run `yano copy-prompts` from inside that project's directory — it copies the package's current `prompts/` into `.pi/extensions/yano-orchestrator/prompts/` (backing up any previous local copy first, as `prompts.bak-<timestamp>`, so nothing is ever silently lost), then edit the copied files as you like. That local copy is inert on its own: launch instances with `yano start ... --custom-prompts` to actually make them read it. The override is per-file, not all-or-nothing — a role you never customized locally is always read fresh from the global install, even with `--custom-prompts` on, so customizing one role's prompt can never accidentally freeze every other role's prompt at copy time. And if the local `prompts/` folder doesn't exist at all (e.g. you never ran `yano copy-prompts`), `--custom-prompts` is a safe no-op and everything simply reads from the global install, same as the default.
@@ -116,11 +134,11 @@ resumed from the saved snapshot.
 **If you scaffolded a project with an older `yano init`** (one that still copied `extensions/` into new projects), that project directory may have its own leftover `extensions/orchestrator.ts`. `yano start` detects this and simply ignores it, relying on the globally-installed extension instead — it prints a note pointing this out, but the leftover folder no longer causes `pi` to fail with `Tool "..." conflicts with ...`/`Flag "..." conflicts with ...` (a real bug in that detection, fixed — it used to warn about the impending crash and then cause it anyway). The folder is inert at that point; delete it whenever convenient (`rm -rf extensions` / `Remove-Item -Recurse -Force extensions`) — nothing needs it once the extension is installed globally.
 
 **Tracing is global and outside the project checkout.** The observable agent
-events and payloads are stored under `<yano-install>/temp/traces/`, so they
+events and payloads are stored under `<YANO_DATA_DIR>/traces/`, so they
 survive worktree cleanup and are never pushed with the application. Use
 `yano trace status` to see the exact location, `yano trace enable --mode full`
 to capture the maximum observable detail, and `yano trace clear --all --yes`
-to remove the global temporary store. Existing project-local reports and the
+to remove the global Yano data store. Existing project-local reports and the
 operational SQLite database remain workspace state used by the orchestrator;
 they are not the forensic trace. The complete command reference is in
 [`docs/yano-trace.md`](docs/yano-trace.md).
@@ -145,6 +163,12 @@ yano config list --all           # variabili configurabili, segreti oscurati
 yano config set YANO_ORCHESTRATOR_REPO /path/to/yano-orchestrator
 yano config set TELEGRAM_DESTINATION_CHAT_ID CHAT_ID
 # printf '%s' "$TELEGRAM_BOT_TOKEN" | yano config set TELEGRAM_BOT_TOKEN --stdin
+yano config set SERVICE_API_KEY --stdin # credenziale richiesta da un playbook importato
+yano playbook candidates --task "<obiettivo>" --project-root "$PWD" --json
+yano playbook export knowledge-authoring --out ./knowledge-authoring.yano-playbook.json
+yano playbook import ./knowledge-authoring.yano-playbook.json
+yano playbook remove <playbook-personale> --yes
+yano playbook purge <playbook-personale> --yes
 yano trace status              # modalità e percorso del trace globale
 yano trace enable --mode full  # trace completo dei dati osservabili
 yano trace events --follow     # segue gli eventi raw mentre gli agenti lavorano
@@ -284,7 +308,7 @@ from the watched project's `.env`.
 | `SENDGRID_FROM_EMAIL` | Verified sender email in SendGrid |
 | `SENDGRID_TO_EMAIL` | Recipient email(s), comma-separated if needed |
 | `YANO_ORCHESTRATOR_REPO` | Yano checkout for watcher maintenance tickets |
-| `YANO_DATA_DIR` | Optional global trace/index directory |
+| `YANO_DATA_DIR` | Optional override for global Yano data; defaults to the platform data directory |
 | `YANO_OLLAMA_URL` | Optional Ollama endpoint; default `http://127.0.0.1:11434` |
 | `YANO_EMBEDDING_MODEL` | Optional embedding model; default `nomic-embed-text` |
 | `PI_ORCH_BROKER_URL` | Optional MQTT broker URL |

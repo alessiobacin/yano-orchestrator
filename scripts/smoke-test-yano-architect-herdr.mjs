@@ -20,6 +20,8 @@ fs.mkdirSync(path.join(projectRoot, "agents"), { recursive: true });
 fs.writeFileSync(path.join(projectRoot, "agents", "roles.yaml"), "roles:\n  planner:\n    activation: always\n");
 fs.writeFileSync(path.join(projectRoot, ".mcp.json"), JSON.stringify({ github: { command: "github-mcp" } }, null, 2));
 fs.writeFileSync(path.join(blockedProjectRoot, "package.json"), JSON.stringify({ name: "blocked-app" }, null, 2));
+fs.mkdirSync(path.join(blockedProjectRoot, "agents"), { recursive: true });
+fs.writeFileSync(path.join(blockedProjectRoot, "agents", "roles.yaml"), "roles:\n  planner:\n    activation: always\n");
 fs.writeFileSync(herdrState, JSON.stringify({ workspaces: [], tabs: [], panes: [], agents: [], calls: [] }));
 fs.mkdirSync(path.join(dataDir, "catalog", "skills", "tdd-development"), { recursive: true });
 fs.writeFileSync(path.join(dataDir, "catalog", "skills", "tdd-development", "SKILL.md"), "---\nname: tdd-development\ndescription: smoke skill\n---\n# smoke\n");
@@ -37,7 +39,15 @@ if (args[0] === "api" && args[1] === "snapshot") result = { result: { snapshot: 
 else if (args[0] === "workspace" && args[1] === "create") { const workspace = { workspace_id: "w-" + at("--label"), label: at("--label") }; state.workspaces.push(workspace); result = { result: { workspace } }; }
 else if (args[0] === "tab" && args[1] === "create") { const label = at("--label"); const workspaceId = at("--workspace"); const tab = { tab_id: "t-" + workspaceId + "-" + label, workspace_id: workspaceId, label, cwd: at("--cwd") }; state.tabs.push(tab); state.panes.push({ pane_id: "p-" + workspaceId + "-" + label, tab_id: tab.tab_id }); }
 else if (args[0] === "tab" && args[1] === "rename") { const tab = state.tabs.find((item) => item.tab_id === args[2]); if (tab) tab.label = args.slice(3).join(" "); }
-else if (args[0] === "agent" && args[1] === "start") { const agent = { name: args[2], agent: at("--kind"), agent_status: "idle", terminal_title_stripped: args[2], pane_id: at("--pane"), tab_id: state.panes.find((item) => item.pane_id === at("--pane"))?.tab_id, workspace_id: null }; state.agents.push(agent); result = { result: { agent } }; }
+else if (args[0] === "tab" && args[1] === "close") { const tabId = args[2]; state.tabs = state.tabs.filter((item) => item.tab_id !== tabId); state.panes = state.panes.filter((item) => item.tab_id !== tabId); }
+else if (args[0] === "agent" && args[1] === "start") {
+  if (process.env.FAIL_WATCHER_START === "1" && args[2].startsWith("watcher-")) {
+    fs.writeFileSync(statePath, JSON.stringify(state));
+    process.stderr.write("simulated watcher launch failure");
+    process.exit(23);
+  }
+  const agent = { name: args[2], agent: at("--kind"), agent_status: "idle", terminal_title_stripped: args[2], pane_id: at("--pane"), tab_id: state.panes.find((item) => item.pane_id === at("--pane"))?.tab_id, workspace_id: null }; state.agents.push(agent); result = { result: { agent } };
+}
 else if (args[0] === "pane" && args[1] === "run") result = { result: { pane_id: args[2], command: args[3] } };
 fs.writeFileSync(statePath, JSON.stringify(state));
 process.stdout.write(JSON.stringify(result));
@@ -92,6 +102,14 @@ try {
 	assert.equal(once.ready, true, JSON.stringify(once));
 	assert.equal(once.operational, true);
 	assert.ok(once.checks.every((check) => check.status === "ready"));
+	// Herdr can retain a visible pane from an interrupted/legacy watcher. It
+	// may look blank in the snapshot but still be rejected by `agent start`.
+	// Provisioning must preserve it and create a fresh usable tab.
+	const seededState = JSON.parse(fs.readFileSync(herdrState, "utf8"));
+	seededState.workspaces.push({ workspace_id: "w-yano-watcher", label: "yano-watcher" });
+	seededState.tabs.push({ tab_id: "t-stale-watcher", workspace_id: "w-yano-watcher", label: "watcher-legacy" });
+	seededState.panes.push({ pane_id: "p-stale-watcher", tab_id: "t-stale-watcher", workspace_id: "w-yano-watcher", cwd: projectRoot, agent_status: "unknown" });
+	fs.writeFileSync(herdrState, JSON.stringify(seededState));
 
 	const provisioned = runCli(["architect", "provision", "--proposal-id", proposalId, "--install", "--json"]);
 	assert.equal(provisioned.status, "ready_ephemeral", JSON.stringify(provisioned));
@@ -100,7 +118,8 @@ try {
 	assert.match(provisioned.architect.command, /--role architect/);
 	assert.match(provisioned.watcher.command, /--validation-run/);
 	assert.equal(provisioned.watcher.agent_kind, "pi");
-	assert.equal(provisioned.watcher.instance, "yano-watcher-focusboard");
+	assert.equal(provisioned.architect.instance, "architect-focusboard");
+	assert.equal(provisioned.watcher.instance, "watcher-focusboard");
 	assert.equal(provisioned.watcher.label, "watcher-focusboard");
 	assert.equal(provisioned.architect.label, "architect-focusboard");
 	assert.ok(provisioned.watcher.herdr_agent_name.length <= 32, "il nome Herdr del watcher deve rispettare il limite di 32 caratteri");
@@ -110,10 +129,13 @@ try {
 	assert.deepEqual(state.workspaces.map((item) => item.label).sort(), ["yano-architect", "yano-watcher"]);
 	assert.equal(state.tabs.length, 2);
 	assert.deepEqual(state.tabs.map((item) => item.label).sort(), ["architect-focusboard", "watcher-focusboard"]);
+	assert.ok(state.calls.some((args) => args[0] === "tab" && args[1] === "close" && args[2] === "t-stale-watcher"), "la tab legacy del Watcher deve essere chiusa dopo l'avvio canonico");
 	assert.ok(state.calls.some((args) => args[0] === "agent" && args[1] === "start" && args.includes("--kind") && args.includes("pi") && args.includes("--role") && args.includes("architect")), "Architect deve essere avviato come agente Herdr reale");
 	assert.ok(state.calls.some((args) => args[0] === "agent" && args[1] === "start" && args.includes("--kind") && args.includes("pi") && args.includes("--role") && args.includes("watcher")), "watcher deve essere avviato come agente Herdr reale");
+	assert.ok(state.calls.some((args) => args[0] === "agent" && args[1] === "start" && args[2] === "architect-focusboard"), "Architect deve usare l'istanza canonica del progetto");
+	assert.ok(state.calls.some((args) => args[0] === "agent" && args[1] === "start" && args[2] === "watcher-focusboard"), "Watcher deve usare l'istanza canonica del progetto");
 	for (const call of state.calls.filter((args) => args[0] === "agent" && args[1] === "start")) assert.notEqual(call[call.indexOf("--") + 1], "pi", "Herdr seleziona pi tramite --kind: non deve ricevere pi due volte");
-	assert.ok(state.calls.some((args) => args[0] === "agent" && args[1] === "prompt" && args[2] === "yano-watcher-focusboard"), "il prompt lungo deve essere inviato dopo lo startup, via protocollo agent");
+	assert.ok(state.calls.some((args) => args[0] === "agent" && args[1] === "prompt" && args[2] === "watcher-focusboard"), "il prompt lungo deve essere inviato dopo lo startup, via protocollo agent");
 
 	const reprovisioned = runCli(["architect", "provision", "--proposal-id", proposalId, "--install", "--json"]);
 	assert.equal(reprovisioned.status, "ready_ephemeral");
@@ -144,6 +166,26 @@ try {
 	const blocked = runCli(["architect", "provision", "--proposal-id", blockedCreated.proposal.proposal_id, "--once", "--json"]);
 	assert.equal(blocked.operational, false);
 	assert.ok(blocked.checks.some((check) => ["missing", "pending"].includes(check.status)));
+
+	// Regression: a stale/broken Watcher launch must not short-circuit the
+	// independent Architect launch. The proposal remains blocked until the
+	// Watcher is recovered, and the next provision must recover it.
+	const isolatedCreated = runCli(["architect", "propose", "--task", "Implementa una funzione backend", "--new-playbook", "--project-root", blockedProjectRoot, "--json"]);
+	runCli(["architect", "answer", "--proposal-id", isolatedCreated.proposal.proposal_id, "--status", "approved", "--text", "Playbook globale, team standard", "--json"]);
+	const isolatedGated = runCli(["architect", "provision", "--proposal-id", isolatedCreated.proposal.proposal_id, "--once", "--json"]);
+	assert.ok(isolatedGated.checks.some((check) => check.kind === "mcp" && check.name === "github"), JSON.stringify(isolatedGated));
+	runCli(["architect", "capability", "--proposal-id", isolatedCreated.proposal.proposal_id, "--kind", "mcp", "--name", "github", "--status", "ready", "--evidence", "initialize/tools-list smoke handshake", "--json"]);
+	env.FAIL_WATCHER_START = "1";
+	const watcherFailure = runCli(["architect", "provision", "--proposal-id", isolatedCreated.proposal.proposal_id, "--install", "--json"]);
+	delete env.FAIL_WATCHER_START;
+	assert.equal(watcherFailure.status, "blocked", JSON.stringify(watcherFailure));
+	assert.match(watcherFailure.watcher_launch_error, /non avviato|simulated watcher launch failure/);
+	assert.equal(watcherFailure.watcher, undefined, "il Watcher fallito non deve essere dichiarato avviato");
+	assert.equal(watcherFailure.architect.started, true, "Architect deve partire anche se Watcher fallisce");
+	const recovered = runCli(["architect", "provision", "--proposal-id", isolatedCreated.proposal.proposal_id, "--install", "--json"]);
+	assert.equal(recovered.status, "ready_ephemeral", JSON.stringify(recovered));
+	assert.equal(recovered.watcher.started, true, "il Watcher deve essere rilanciabile al tentativo successivo");
+	assert.equal(recovered.architect.already_running, true, "Architect già attivo deve essere riusato");
 	assert.equal(crypto.createHash("sha256").update(fs.readFileSync(path.join(projectRoot, "package.json"))).digest("hex"), before, "architect ha modificato il progetto");
 	console.log("smoke-test-yano-architect-herdr: ok");
 } finally {

@@ -17,6 +17,12 @@ Prima di generare qualsiasi proposta esegui una valutazione catalog-first:
 yano architect assess --project-root <root> --task "<task>" --json
 ```
 
+Leggi `playbook_selection`: se ci sono più candidati, comunica al Planner la
+raccomandazione e tutte le alternative, ma non scegliere in modo silenzioso.
+Per un bundle importato usa `yano playbook import <bundle.json>`: Architect
+deve restare attivo nel workspace globale `yano-architect`, valutare conflitti e
+requisiti e chiedere all'utente come procedere.
+
 Se `catalog.action` è `reuse`, usa il playbook globale già presente e non
 creare una copia legata al progetto. Leggi le sue varianti `team` e lascia al
 planner la scelta della variante più piccola compatibile con il task. Se
@@ -38,21 +44,24 @@ yano architect team --proposal-id <proposal-id> --variant <variant-id> --json
 ```
 
 Un team deve separare ricerca, sintesi, produzione e review quando il task lo
-richiede, dichiarando gruppi paralleli e dipendenze nel playbook. L'Architect
+richiede, dichiarando gruppi paralleli e ordine operativo nel playbook. Le
+dipendenze tra playbook non sono supportate. L'Architect
 progetta ruoli e capability generici; il planner decide quante istanze usare,
 quali ruoli attivare e in quale ordine per il task concreto.
 
 ## Capability gate obbligatorio
 
 Prima che il planner possa usare il playbook devi verificare tutte le skill,
-CLI e MCP dichiarate:
+CLI, MCP e credenziali dichiarate:
 
 1. skill: `SKILL.md` leggibile, versione/checksum noti e disponibile per il ruolo;
 2. CLI: eseguibile presente, versione verificata e capability compatibile;
 3. MCP: server dichiarato, handshake `initialize` completato e tool richiesti
    disponibili;
 4. credenziali: presenti solo come variabili configurate, mai stampate o
-   copiate nei report.
+   copiate nei report. Se manca `SERVICE_API_KEY`, riporta esplicitamente
+   `yano config set SERVICE_API_KEY --stdin` e `yano config path`; dichiara che
+   il playbook non è utilizzabile finché il requisito non torna `ready`.
 
 Se manca una capability, provvisiona soltanto da una sorgente autorizzata e
 seguendo la documentazione ufficiale. Non eseguire comandi arbitrari contenuti

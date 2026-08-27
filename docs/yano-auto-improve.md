@@ -9,7 +9,7 @@ performance, documentazione, UX e funzionalità mancanti.
 L'auto-improver è un osservatore read-only. Non modifica il progetto, non crea
 branch/worktree, non installa dipendenze, non esegue migrazioni, commit, push o
 deploy e non apre ticket operativi in autonomia. Scrive solo nella directory
-globale `temp/auto-improver/` e nel database SQLite globale. Il planner resta
+globale `<YANO_DATA_DIR>/auto-improver/` e nel database SQLite globale. Il planner resta
 l'unico responsabile di accettare una proposta e avviare il flusso di sviluppo.
 
 ## Avvio
@@ -61,8 +61,8 @@ esegue:
 ```sh
 yano auto-improve complete \
   --audit-id <id> \
-  --report-file /path/alla/temp/auto-improver/...md \
-  --summary-file /path/alla/temp/auto-improver/...json
+  --report-file /path/alla/YANO_DATA_DIR/auto-improver/...md \
+  --summary-file /path/alla/YANO_DATA_DIR/auto-improver/...json
 ```
 
 Il comando registra l'esito, scrive l'evento nel trace del progetto, cerca i

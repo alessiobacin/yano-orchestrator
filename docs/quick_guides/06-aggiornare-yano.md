@@ -46,7 +46,8 @@ yano update --reload --yes --force
 ## Se il reload fallisce
 
 Gli agenti vengono lasciati in pausa e lo snapshot resta nella cartella globale
-temp/recovery/. Controlla lo stato:
+`<YANO_DATA_DIR>/recovery/` (usa `yano trace status` per il percorso effettivo).
+Controlla lo stato:
 
 ~~~
 yano recovery status
@@ -56,3 +57,17 @@ yano resume --all --yes
 
 Il reload riguarda solo il progetto corrente. Non esiste un reload globale
 implicito di tutti i progetti.
+
+## Progetto incoerente o agenti con scope vecchio
+
+Se fleet mostra agenti con un vecchio nome progetto, il database manca o le
+tab Herdr sono rimaste disallineate, usa il comando di riconciliazione:
+
+~~~
+yano repair --dry-run
+yano repair --yes --update
+~~~
+
+repair salva uno snapshot prima di fermare gli agenti e non cancella tab,
+trace, database, worktree o codice applicativo. La guida completa è in
+[17-ripristino-automatico](./17-ripristino-automatico.md).

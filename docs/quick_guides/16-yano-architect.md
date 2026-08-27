@@ -35,7 +35,8 @@ yano architect provision --proposal-id <PROP-ID> --once --json
 ```
 
 Solo dopo readiness completa il Planner avvia i ruoli della variante con lo
-stesso `--proposal-id`. Gli artefatti restano globali sotto `temp/architect/`
+stesso `--proposal-id`. Gli artefatti restano globali sotto
+`<YANO_DATA_DIR>/architect/`
 e non vengono copiati nel progetto osservato.
 
 ```bash
@@ -70,6 +71,15 @@ Le tab create nei workspace globali hanno nomi stabili per progetto:
 `architect-<project-name>` nel workspace `yano-architect` e
 `watcher-<project-name>` nel workspace `yano-watcher`.
 
+Se Herdr mostra ancora `architect-prop-*` o `yano-watcher-*` attivi, non
+lanciare un secondo provisioning: esegui il riallineamento controllato, che
+conserva codice, trace e database e chiude le vecchie tab dopo il riavvio:
+
+```bash
+yano repair --dry-run
+yano repair --yes
+```
+
 Il watcher `yano-watcher` controlla il round. Dopo il suo esito, il planner
 chiede il feedback all'utente:
 
@@ -91,3 +101,28 @@ yano playbook list
 yano agent list
 yano agent show <role-id>
 ```
+
+Per vedere più alternative per lo stesso task e la raccomandazione di Yano:
+
+```bash
+yano playbook candidates --task "<obiettivo>" --project-root "$PWD" --json
+```
+
+Se sono presenti più alternative, il Planner deve mostrarle e attendere la
+scelta dell'utente. I requisiti mancanti includono sempre il comando esatto
+per configurarli, ad esempio `yano config set SERVICE_API_KEY --stdin`.
+
+## Bundle, importazione e rimozione
+
+```bash
+yano playbook export knowledge-authoring --out ./knowledge-authoring.yano-playbook.json
+yano playbook import ./knowledge-authoring.yano-playbook.json
+yano playbook remove personal-playbook --yes
+yano playbook purge personal-playbook --yes
+```
+
+L'importazione crea una proposta globale e avvia sempre Architect nel workspace
+`yano-architect`, che controlla conflitti, CLI/MCP/skill e credenziali. Non
+promuove automaticamente il bundle. `remove` è reversibile e conserva le
+versioni; `purge` è definitivo e richiede che il playbook sia già stato rimosso.
+Le dipendenze tra playbook non sono supportate in questa versione.

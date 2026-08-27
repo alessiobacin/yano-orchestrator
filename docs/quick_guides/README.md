@@ -21,6 +21,8 @@ pensate per chi usa Yano per la prima volta e lavora dalla root del progetto.
 14. [Auto-improve periodico](./14-auto-improve.md)
 15. [Yano suggester](./15-yano-suggester.md)
 16. [Yano Architect: playbook e agenti on-the-fly](./16-yano-architect.md)
+17. [Ripristino automatico di un progetto](./17-ripristino-automatico.md)
+18. [Catalogo playbook: requisiti, bundle e rimozione](./18-catalogo-playbook.md)
 
 Per una spiegazione completa del primo task, consulta anche la
 [quick start estesa](../quick-start.md). Per il comportamento dettagliato del
@@ -37,3 +39,5 @@ reload controllato, consulta [yano-recovery](../yano-recovery.md).
 - 'yano end' chiude un run; 'yano pause' lo sospende senza chiuderlo.
 - 'yano update' non riavvia i processi attivi; usa 'yano update --reload --yes'
   quando vuoi applicare il nuovo codice alle istanze già aperte.
+- 'yano repair --yes' riallinea agenti, scope MQTT e Planner quando il progetto
+  è in uno stato incoerente; aggiungi '--update' per aggiornare anche Yano.

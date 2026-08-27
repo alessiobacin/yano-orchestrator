@@ -66,7 +66,7 @@ Expected behavior:
 - `consolidate` derives typed, provenance-preserving memories from raw JSONL:
   episodic summaries, observations, failures and planner opinions, plus
   systemic `trace_pattern` memories when a signal recurs. It writes evidence
-  links and compact projections under `temp/traces/<project-key>/projections/`.
+  links and compact projections under `<YANO_DATA_DIR>/traces/<project-key>/projections/`.
   It is deterministic and excludes generated summaries from its input, so it
   can be safely repeated. It requires the configured local embedding model.
 - `plan` reports the available raw/memory scope, suggested commands and an
@@ -80,7 +80,7 @@ Expected behavior:
   hypothesis with future outcomes. It is an observation, not an automatic
   authorization to change Yano.
 - `pause` creates a non-destructive recovery snapshot under Yano's global
-  `temp/recovery/` directory before sending graceful `terminate` messages. It
+  `<YANO_DATA_DIR>/recovery/` directory before sending graceful `terminate` messages. It
   preserves the SQLite run/ticket state, Git worktrees, branches, presence
   cards and the filtered observable trace. Without `--yes` it only saves the
   checkpoint and does not stop agents; it never means `end` and never marks a

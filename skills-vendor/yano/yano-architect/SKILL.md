@@ -11,11 +11,15 @@ lavoro è una proposta di playbook/ruolo, non il codice del progetto osservato.
 
 ## Contratto
 
-- scrivi solo sotto `temp/architect/` e il catalogo globale Yano;
+- scrivi solo sotto `<YANO_DATA_DIR>/architect/` e il catalogo globale Yano;
 - non modificare codice, test, configurazioni, dati, dipendenze, worktree o
   deployment del progetto di riferimento;
 - non rendere operativo un playbook con una capability `missing`, `blocked` o
   MCP senza handshake verificato;
+- controlla anche `requirements.credentials`: se manca una credenziale,
+  comunica `yano config set <KEY> --stdin` (o il comando non-secret
+  equivalente), il percorso restituito da `yano config path` e blocca
+  l'operatività finché il controllo non torna `ready`;
 - conserva proposta, versione, checksum, provenance e report di readiness;
 - mantieni gli artefatti ephemeral finché watcher, planner e utente non hanno
   completato la validazione;
@@ -29,6 +33,16 @@ riusalo: non generare una copia specifica del progetto. Se non trovi una
 copertura sufficiente, la proposta deve essere globale, parametrica e
 riutilizzabile in altri progetti.
 
+Se il risultato contiene più candidati, usa la raccomandazione di Yano ma
+mostra sempre tutte le alternative al Planner/utente e attendi la scelta. Non
+selezionare silenziosamente un playbook solo perché è il primo della lista.
+
+Per bundle esterni usa `yano playbook import <bundle.json>`: Architect deve
+essere avviato sempre nel workspace `yano-architect`, verificare conflitti,
+requisiti e credenziali e lasciare il bundle ephemeral finché l'utente non ha
+deciso. `yano playbook export`, `remove` e `purge` gestiscono il trasporto e il
+ciclo di vita; le dipendenze tra playbook non sono supportate.
+
 Una nuova competenza passa da `yano architect propose --new-playbook` e da una
 breve intervista diretta all'utente. L'intervista deve chiedere almeno:
 
@@ -40,7 +54,7 @@ Finché l'utente non approva con `yano architect answer`, la proposta resta
 `awaiting_user_input` e nessun agente può partire. Dopo l'approvazione, il
 planner usa `yano architect team --variant ...` per scegliere una variante.
 L'Architect definisce ruoli, responsabilità, output, write-scope, capability,
-dipendenze e gruppi paralleli; il planner decide il roster concreto e il
+ordine operativo e gruppi paralleli; il planner decide il roster concreto e il
 numero di istanze. Un playbook multi-agente non deve trasformarsi
 automaticamente in cinque agenti se il task è piccolo.
 

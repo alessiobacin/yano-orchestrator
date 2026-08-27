@@ -12,11 +12,11 @@ del modello.
 
 ## Dove vengono salvati i dati
 
-Per impostazione predefinita i dati sono fuori dal progetto, nella directory
-`temp/` dell'installazione globale di Yano:
+Per impostazione predefinita i dati sono fuori dal progetto e dal pacchetto
+installato, nella directory dati per-user di Yano:
 
 ```text
-<installazione-yano>/temp/
+<YANO_DATA_DIR>/
 ├── tracing.json
 ├── semantic-index.sqlite
 └── traces/<project-key>/
@@ -34,17 +34,19 @@ Per impostazione predefinita i dati sono fuori dal progetto, nella directory
 lo scope MQTT sono alias, non identità di persistenza: così `FocusBoard` e
 `focusboard-trace-test` non dividono più lo stesso trace. Le directory legacy
 nome-hash restano leggibili durante la migrazione.
-La posizione può essere cambiata con:
+Il percorso viene scelto automaticamente: macOS `~/Library/Application
+Support/yano/data`, Linux `~/.local/share/yano`, Windows
+`%LOCALAPPDATA%/yano/data`. Per usare un percorso diverso:
 
 ```bash
-export YANO_DATA_DIR="$HOME/.local/share/yano-trace"
+yano config set YANO_DATA_DIR "$HOME/.local/share/yano-trace"
 ```
 
 È supportato anche `YANO_TEMP_DIR`; `YANO_DATA_DIR` ha precedenza.
 
 `yano start` propaga automaticamente la stessa directory al processo Pi e agli
 agenti che il planner avvia. Questo evita che CLI npm globale ed estensione
-caricata da un clone Pi scrivano in due `temp/` diversi. Per ispezionare un run
+caricata da un clone Pi scrivano in due directory dati diverse. Per ispezionare un run
 avviato da una vecchia versione si può indicare temporaneamente il suo store
 con `--data-dir`.
 

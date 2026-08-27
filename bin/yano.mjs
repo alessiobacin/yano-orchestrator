@@ -74,7 +74,9 @@ import { runYanoAutoImprove } from "../scripts/yano-auto-improver.mjs";
 import { runYanoSuggester } from "../scripts/yano-suggester.mjs";
 import { runYanoArchitect } from "../scripts/yano-architect.mjs";
 import { runYanoCatalog } from "../scripts/yano-catalog.mjs";
+import { runYanoData } from "../scripts/yano-data.mjs";
 import { runRecovery } from "../scripts/yano-recovery.mjs";
+import { runRepair } from "../scripts/yano-repair.mjs";
 import { applyGlobalConfig, runYanoConfig } from "../scripts/yano-config.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -87,10 +89,9 @@ const cwd = process.cwd();
 applyGlobalConfig({ packageRoot });
 
 // The CLI and the Pi extension may be loaded from different installations
-// (npm global package vs ~/.pi/agent/git/... clone). Make every child started
-// by this CLI inherit the same trace root. An explicit YANO_DATA_DIR remains
-// authoritative, and `yano trace --data-dir` can still inspect another store.
-process.env.YANO_DATA_DIR ??= path.join(packageRoot, "temp");
+// (npm global package vs ~/.pi/agent/git/... clone). Child processes resolve
+// the same per-user data root through yano-config. An explicit YANO_DATA_DIR
+// remains authoritative; no data is silently written inside the package.
 
 function printTopUsage() {
 	console.log(
@@ -116,9 +117,11 @@ function printTopUsage() {
 			"  architect [opzioni]  Progetta/provisiona playbook e ruoli globali — `yano architect --help`",
 			"  playbook|agent [opzioni] Catalogo read-only di playbook, ruoli e capability",
 			"  config [opzioni] Gestisce la configurazione globale utente — `yano config --help`",
+			"  data [opzioni]    Mostra o migra il data-root globale — `yano data --help`",
 			"  pause [opzioni]  Salva uno snapshot non distruttivo e mette in pausa i run",
 			"  resume [opzioni] Ripristina uno snapshot e riapre gli agenti mancanti",
 			"  recovery [opzioni] Ispeziona gli snapshot e lo stato di ripristino",
+			"  repair [opzioni]   Riconcilia progetto o tutti i progetti attivi, agenti Herdr/MQTT e versione Yano",
 			"",
 			"  --version, -v    Stampa la versione del pacchetto installato",
 			"  --help, -h       Mostra questo messaggio",
@@ -211,15 +214,23 @@ async function main() {
 		return;
 	}
 	if (sub === "playbook" || sub === "agent") {
-		runYanoCatalog({ kind: sub, argv: rest });
+		await runYanoCatalog({ kind: sub, argv: rest });
 		return;
 	}
 	if (sub === "config") {
 		await runYanoConfig({ argv: rest });
 		return;
 	}
+	if (sub === "data") {
+		runYanoData({ packageRoot, argv: rest });
+		return;
+	}
 	if (["pause", "resume", "recovery"].includes(sub)) {
 		await runRecovery({ cwd, argv: [sub, ...rest], packageRoot });
+		return;
+	}
+	if (sub === "repair") {
+		await runRepair({ cwd, argv: rest, packageRoot });
 		return;
 	}
 

@@ -72,7 +72,7 @@ function usage() {
 		"Opzioni comuni: --project <nome>, --data-dir <directory>",
 		"Filtri: --run <id>, --round <n>, --task <slug>, --instance <id>, --type <tipo>, --since <ISO>, --limit <n>, --json",
 		"Search: --mode keyword|semantic|hybrid, --memory-only, --explain, --include-payload",
-		"Consolidate: genera temp/traces/<project-key>/projections/planner-context.json",
+		"Consolidate: genera <YANO_DATA_DIR>/traces/<project-key>/projections/planner-context.json",
 	].join("\n"));
 }
 
@@ -134,6 +134,7 @@ export async function runTrace({ cwd, argv }) {
 	applyDataDir(argv);
 	const sub = argv[0];
 	if (!sub || sub === "--help" || sub === "-h") { usage(); return; }
+	if (has(argv, "--help") || has(argv, "-h")) { usage(); return; }
 	const explicitProject = value(argv, "--project");
 	const runId = value(argv, "--run");
 	const project = explicitProject || (runId ? resolveTraceProjectForRun(cwd, runId, resolveTraceProject(cwd)) : resolveTraceProject(cwd));

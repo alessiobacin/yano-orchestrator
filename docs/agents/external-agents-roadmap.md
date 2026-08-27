@@ -66,7 +66,7 @@ eventuale decisione del superadmin/utente, usa il flusso normale
 - audit periodico configurabile, default `5d`;
 - workspace Herdr `yano-auto-improver`, una tab per progetto;
 - evidence pack di manifest, Git, test/lint/build, trace, feedback e piano di retrieval;
-- SQLite globale, report e raccomandazioni in `temp/auto-improver/`;
+- SQLite globale, report e raccomandazioni in `<YANO_DATA_DIR>/auto-improver/`;
 - notifiche Telegram, WhatsApp e SendGrid configurabili;
 - report e handoff al planner, senza ticket o modifica del progetto.
 - modalità singola `yano auto-improve run|start --once`, senza scheduler detached.
@@ -84,7 +84,7 @@ eventuale decisione del superadmin/utente, usa il flusso normale
 ### Implementato nella v1
 
 - `yano suggester init/start/submit/status/reports/complete/approve/reject/pause/resume/stop`;
-- SQLite globale in `temp/suggester/suggester.sqlite`;
+- SQLite globale in `<YANO_DATA_DIR>/suggester/suggester.sqlite`;
 - workspace Herdr `yano-suggester`, una tab per progetto;
 - intake CLI con source, user, priorità, route e app version;
 - redazione di pattern comuni di segreti e fingerprint esatto;

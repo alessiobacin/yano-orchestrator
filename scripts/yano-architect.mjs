@@ -13,7 +13,8 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import mqtt from "mqtt";
 import YAML from "yaml";
-import { loadPlaybook } from "./playbook-loader.mjs";
+import { loadPlaybook, validatePlaybook } from "./playbook-loader.mjs";
+import { configSpec, resolveYanoConfig } from "./yano-config.mjs";
 import { projectKey, resolveTraceProject, traceRoot } from "./yano-trace-storage.mjs";
 
 const require = createRequire(import.meta.url);
@@ -181,6 +182,7 @@ function catalogPlaybooks() {
 		for (const id of fs.readdirSync(persistentRoot)) {
 			const currentPath = path.join(persistentRoot, id, "current.json");
 			const pointer = fs.existsSync(currentPath) ? parseJson(fs.readFileSync(currentPath, "utf8"), {}) : {};
+			if (pointer.status === "removed") continue;
 			const filePath = pointer.path || path.join(persistentRoot, id, `v${pointer.version || "0.1.0"}`, "playbook.yaml");
 			if (fs.existsSync(filePath)) files.push({ source: "persistent", path: filePath });
 		}
@@ -195,14 +197,39 @@ function catalogPlaybooks() {
 	return result.sort((a, b) => a.id.localeCompare(b.id));
 }
 
-function catalogDecision(candidate) {
+function taskTokens(text) {
+	return new Set(String(text || "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").split(/[^a-z0-9]+/).filter((token) => token.length >= 3));
+}
+
+function catalogCandidates(task, candidate = candidateForTask(task)) {
+	const entries = catalogPlaybooks();
+	const tokens = taskTokens(task);
+	const alternatives = new Set(candidate.catalog_alternatives || []);
+	const scored = entries.map((entry) => {
+		const intents = entry.document.catalog?.intents || [];
+		const intentTokens = new Set(intents.flatMap((intent) => [...taskTokens(intent)]));
+		const overlap = [...intentTokens].filter((token) => tokens.has(token)).length;
+		let score = overlap * 10;
+		if (entry.id === candidate.playbook) score += 100;
+		if (alternatives.has(entry.id)) score += 40;
+		if (score === 0 && (tokens.has(entry.id) || tokens.has(slug(entry.label)))) score = 20;
+		return { id: entry.id, label: entry.label, source: entry.source, path: entry.path, score, requirements: entry.document.requirements || {}, reasons: [entry.id === candidate.playbook ? "candidate_for_task" : null, alternatives.has(entry.id) ? "declared_related_playbook" : null, overlap ? `intent_overlap:${overlap}` : null].filter(Boolean) };
+	}).filter((entry) => entry.score > 0).sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+	return scored;
+}
+
+function catalogDecision(candidate, task = "") {
 	const entries = catalogPlaybooks();
 	const exact = entries.find((entry) => entry.id === candidate.playbook) || null;
 	const related = (candidate.catalog_alternatives || []).map((id) => entries.find((entry) => entry.id === id)).filter(Boolean);
+	const candidates = catalogCandidates(task, candidate);
 	return {
 		action: exact ? "reuse" : "create",
 		exact_match: exact ? { id: exact.id, label: exact.label, source: exact.source, path: exact.path } : null,
 		related_matches: related.map((entry) => ({ id: entry.id, label: entry.label, source: entry.source, path: entry.path })),
+		candidates,
+		recommended: candidates[0] || null,
+		selection_required: candidates.length > 1,
 		catalog_size: entries.length,
 	};
 }
@@ -241,6 +268,7 @@ function generatedPlaybook({ playbookId, task, candidate, roles, catalog }) {
 		label: candidate.team ? `Reusable specialization: ${candidate.playbook}` : `Generated task flow: ${candidate.playbook}`,
 		description: candidate.team ? `Global reusable playbook for ${candidate.reason}. The project "${task}" is only the originating use case.` : `Ephemeral task-specific contract generated for: ${task}`,
 		...(candidate.team ? { catalog: { scope: "global", reusable: true, intents: [candidate.reason], parameters: ["project_name", "project_root", "domain", "audience", "language", "deliverables"] }, team: candidate.team } : {}),
+		...(candidate.requirements ? { requirements: candidate.requirements } : {}),
 		enforcement: { status: "partial", note: `Derived from ${candidate.playbook}; only the approved task scope is active.` },
 		states: [
 			{ id: "received", owner: "planner", terminal: false },
@@ -297,6 +325,7 @@ function writeProposalFiles(proposal, capabilities, candidate, catalog) {
 		role_id: proposal.role_id,
 		roles: proposal.roles,
 		capabilities,
+		requirements: document.requirements || {},
 		catalog_decision: catalog,
 		team: candidate.team || null,
 		requires_user_interview: !!candidate.requires_user_interview,
@@ -306,6 +335,68 @@ function writeProposalFiles(proposal, capabilities, candidate, catalog) {
 	fs.writeFileSync(paths.manifest, `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
 	fs.writeFileSync(paths.readiness, `${JSON.stringify({ ready: false, operational: false, status: proposal.status || "draft", checks: [], checked_at: null }, null, 2)}\n`, { mode: 0o600 });
 	return paths;
+}
+
+function importConflicts(playbook) {
+	const conflicts = [];
+	for (const entry of catalogPlaybooks()) {
+		if (entry.id === playbook.id) conflicts.push({ kind: "same-id", existing: entry.id, source: entry.source, detail: "un playbook con lo stesso id è già nel catalogo" });
+		const incomingIntents = new Set((playbook.catalog?.intents || []).map((intent) => slug(intent)));
+		const existingIntents = new Set((entry.document.catalog?.intents || []).map((intent) => slug(intent)));
+		const overlap = [...incomingIntents].filter((intent) => existingIntents.has(intent));
+		if (overlap.length) conflicts.push({ kind: "overlapping-intent", existing: entry.id, source: entry.source, intents: overlap, detail: "gli intent del playbook sono parzialmente sovrapposti" });
+	}
+	return conflicts;
+}
+
+function importedCapabilities(bundle) {
+	const result = { skills: new Set(["yano-planner-trace-analysis"]), cli: new Set(["git"]), mcp: new Set() };
+	for (const role of bundle.roles || []) {
+		for (const key of ["skills", "cli", "mcp"]) for (const value of role[key] || []) result[key].add(value);
+	}
+	for (const item of bundle.playbook.requirements?.cli || []) result.cli.add(requirementName(item));
+	for (const item of bundle.playbook.requirements?.mcp || []) result.mcp.add(requirementName(item));
+	return Object.fromEntries(Object.entries(result).map(([key, set]) => [key, [...set].filter(Boolean).sort()]));
+}
+
+function readImportBundle(filePath) {
+	const origin = path.resolve(filePath || "");
+	if (!fs.existsSync(origin)) throw new Error(`yano architect import: bundle non trovato: ${origin}`);
+	let bundle;
+	try { bundle = JSON.parse(fs.readFileSync(origin, "utf8")); } catch (error) { throw new Error(`yano architect import: JSON non valido: ${error.message}`); }
+	if (bundle?.format !== "yano-playbook-bundle" || bundle?.bundle_version !== 1) throw new Error("yano architect import: formato non riconosciuto; usa un bundle esportato da yano playbook export");
+	validatePlaybook(bundle.playbook, origin);
+	if (!Array.isArray(bundle.roles)) throw new Error("yano architect import: il bundle deve contenere roles[]");
+	for (const role of bundle.roles) if (!role || typeof role.id !== "string" || !role.id.trim()) throw new Error("yano architect import: ogni ruolo deve avere un id");
+	return { ...bundle, origin: origin };
+}
+
+function writeImportedProposalFiles(proposal, bundle, conflicts) {
+	const paths = proposalPaths(proposal.proposal_id);
+	fs.mkdirSync(paths.dir, { recursive: true, mode: 0o700 });
+	fs.writeFileSync(paths.playbook, YAML.stringify(bundle.playbook), { mode: 0o600 });
+	const roleIds = bundle.roles.map((role) => role.id);
+	const manifest = {
+		schema_version: 1,
+		proposal_id: proposal.proposal_id,
+		status: "imported_pending_review",
+		project: { name: proposal.project_name, root: proposal.project_root, key: proposal.project_key },
+		task: proposal.task,
+		base_playbook: bundle.playbook.id,
+		playbook_id: bundle.playbook.id,
+		role_id: roleIds[0] || `${slug(bundle.playbook.id)}-specialist`,
+		roles: roleIds,
+		role_manifests: bundle.roles,
+		capabilities: importedCapabilities(bundle),
+		requirements: bundle.playbook.requirements || {},
+		import: { origin: bundle.origin, conflicts, imported_at: now() },
+		promotion_policy: { min_successful_runs: 1, min_projects: 1, require_clean_watcher: true, require_user_feedback: true, require_planner_approval: true },
+		created_at: proposal.created_at,
+	};
+	loadPlaybook(paths.playbook);
+	fs.writeFileSync(paths.manifest, `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
+	fs.writeFileSync(paths.readiness, `${JSON.stringify({ ready: false, operational: false, status: proposal.status, checks: [], checked_at: null }, null, 2)}\n`, { mode: 0o600 });
+	return { ...paths, manifest_document: manifest };
 }
 
 function writeReadiness(proposal, { ready, operational, status, checks }) {
@@ -412,16 +503,42 @@ function verifyMcp(name, projectRoot) {
 	return { status: "missing", detail: `MCP ${name} non dichiarato`, install_command: `Dichiarare il server MCP ${name} nel progetto o nel catalogo globale e ripetere yano architect verify` };
 }
 
-function checkCapabilities(proposal, db = null) {
-	const capabilities = parseJson(fs.readFileSync(proposal.manifest_path, "utf8"), {} ).capabilities || {};
-	const checks = [];
-	for (const name of capabilities.skills || []) checks.push({ kind: "skill", name, ...verifySkill(name) });
-	for (const name of capabilities.cli || []) checks.push({ kind: "cli", name, ...verifyCli(name) });
-	for (const name of capabilities.mcp || []) {
-		const recorded = db?.prepare("SELECT status,source,detail,checked_at FROM architect_capabilities WHERE proposal_id=? AND kind='mcp' AND name=?").get(proposal.proposal_id, name);
-		if (recorded?.status === "ready" && String(recorded.detail || "").startsWith("verified by ")) checks.push({ kind: "mcp", name, status: "ready", source: recorded.source, detail: recorded.detail, checked_at: recorded.checked_at });
-		else checks.push({ kind: "mcp", name, ...verifyMcp(name, proposal.project_root) });
+function requirementName(item) { return typeof item === "string" ? item : item?.name; }
+function credentialName(item) { return typeof item === "string" ? item : item?.key; }
+
+function verifyCredential(item) {
+	const name = credentialName(item);
+	const spec = configSpec(name);
+	const configured = resolveYanoConfig({ packageRoot: PACKAGE_ROOT })[name];
+	if (configured && String(configured).trim() && !/^<(your|set|insert)|changeme|replace[-_ ]?me$/i.test(String(configured).trim())) {
+		return { status: "ready", source: "yano-global-config-or-environment", detail: spec?.secret ? "valorizzata (segreto non esposto)" : "valorizzata" };
 	}
+	return {
+		status: "missing",
+		detail: `${name} non è valorizzata nella configurazione globale di Yano`,
+		install_command: spec?.secret ? `yano config set ${name} --stdin` : `yano config set ${name} <valore>`,
+		configure_at: "yano config path",
+	};
+}
+
+function checkCapabilities(proposal, db = null) {
+	const manifest = parseJson(fs.readFileSync(proposal.manifest_path, "utf8"), {});
+	const capabilities = manifest.capabilities || {};
+	const requirements = manifest.requirements || {};
+	const checks = [];
+	const seen = new Set();
+	const add = (check) => { const key = `${check.kind}:${check.name}`; if (!seen.has(key)) { seen.add(key); checks.push(check); } };
+	for (const name of capabilities.skills || []) add({ kind: "skill", name, ...verifySkill(name) });
+	for (const name of capabilities.cli || []) add({ kind: "cli", name, ...verifyCli(name) });
+	for (const item of requirements.cli || []) add({ kind: "cli", name: requirementName(item), ...verifyCli(requirementName(item)) });
+	for (const item of [...(capabilities.mcp || []), ...(requirements.mcp || [])]) {
+		const name = requirementName(item);
+		const recorded = db?.prepare("SELECT status,source,detail,checked_at FROM architect_capabilities WHERE proposal_id=? AND kind='mcp' AND name=?").get(proposal.proposal_id, name);
+		if (recorded?.status === "ready" && String(recorded.detail || "").startsWith("verified by ")) add({ kind: "mcp", name, status: "ready", source: recorded.source, detail: recorded.detail, checked_at: recorded.checked_at });
+		else add({ kind: "mcp", name, ...verifyMcp(name, proposal.project_root) });
+		for (const credential of item && typeof item === "object" ? (item.credentials || []) : []) add({ kind: "credential", name: credentialName(credential), ...verifyCredential(credential) });
+	}
+	for (const credential of requirements.credentials || []) add({ kind: "credential", name: credentialName(credential), ...verifyCredential(credential) });
 	return checks;
 }
 
@@ -456,6 +573,14 @@ function herdrAgentName(instance) {
 	return `${normalized.slice(0, 25)}-${suffix}`.slice(0, 32);
 }
 
+// The Herdr workspace identifies the worker class; the Pi/Herdr instance
+// identifies the project-specific worker. Keep this identity deterministic so
+// a proposal id (which is ephemeral) can never leak into a visible tab name.
+function canonicalExternalInstance(role, projectName) {
+	const prefix = role === "architect" ? "architect" : role === "watcher" ? "watcher" : role;
+	return `${prefix}-${slug(projectName)}`;
+}
+
 function printableCommand(args) {
 	return args.map((arg) => /\s|['"]/.test(String(arg)) ? safeShell(arg) : String(arg)).join(" ");
 }
@@ -483,15 +608,82 @@ function composePiArgs({ cwd, instance, role, project, prompt }) {
 }
 
 function activeHerdrAgent(snapshot, instance, agentName) {
-	return (snapshot?.agents || []).find((item) => {
+	const matches = (item) => {
 		if (["done", "unknown", "offline"].includes(item.agent_status)) return false;
 		return [item.name, item.terminal_title_stripped, item.terminal_title]
 			.some((candidate) => candidate === instance || candidate === agentName);
-	});
+	};
+	const registered = (snapshot?.agents || []).find(matches);
+	if (registered) return registered;
+	// Some Herdr snapshots expose the live Pi identity only on the pane
+	// (terminal title/agent), not in the top-level agents array. Use that
+	// identity too, otherwise a retry can create a duplicate external tab.
+	return (snapshot?.panes || []).find((item) => item.agent === "pi" && matches(item));
 }
 
 function activeHerdrAgentOnPane(snapshot, paneId) {
+	const pane = (snapshot?.panes || []).find((item) => item.pane_id === paneId);
+	if (pane?.agent && !["done", "unknown", "offline"].includes(pane.agent_status)) return pane;
 	return (snapshot?.agents || []).find((item) => item.pane_id === paneId && !["done", "unknown", "offline"].includes(item.agent_status));
+}
+
+function samePath(left, right) {
+	if (!left || !right) return false;
+	try { return fs.realpathSync(left) === fs.realpathSync(right); }
+	catch { return path.resolve(left) === path.resolve(right); }
+}
+
+function externalRoleFromIdentity(identity) {
+	const text = String(identity || "").toLowerCase();
+	if (text.includes("architect")) return "architect";
+	if (text.includes("yano-watcher") || text.startsWith("watcher")) return "watcher";
+	return null;
+}
+
+function activeLegacyExternalAgent(snapshot, { role, instance, agentName, cwd, workspaceId }) {
+	const panesById = new Map((snapshot?.panes || []).map((pane) => [pane.pane_id, pane]));
+	const candidates = [
+		...(snapshot?.agents || []).map((agent) => ({ ...panesById.get(agent.pane_id), ...agent })),
+		...(snapshot?.panes || []),
+	];
+	return candidates.find((candidate) => {
+		if (candidate.agent !== "pi" || ["done", "unknown", "offline"].includes(candidate.agent_status)) return false;
+		if (workspaceId && candidate.workspace_id && candidate.workspace_id !== workspaceId) return false;
+		// A top-level Herdr agent card without cwd is not enough evidence for a
+		// cross-project legacy match; require the pane/process scope as well.
+		if (cwd && (!candidate.cwd || !samePath(candidate.cwd, cwd))) return false;
+		const identities = [candidate.name, candidate.terminal_title_stripped, candidate.terminal_title, candidate.agent_instance, candidate.label].filter(Boolean).map(String);
+		const isExpected = identities.some((identity) => identity === instance || identity === agentName);
+		return !isExpected && identities.some((identity) => externalRoleFromIdentity(identity) === role);
+	});
+}
+
+function closeLegacyExternalTabs({ role, projectRoot, workspaceId, canonicalTabId, dryRun }) {
+	const snapshot = herdrSnapshot();
+	if (!snapshot || !workspaceId) return { closed: [], candidates: [], skipped: "herdr_unavailable" };
+	const agentsByPane = new Map((snapshot.agents || []).map((agent) => [agent.pane_id, agent]));
+	const tabs = (snapshot.tabs || []).filter((tab) => tab.workspace_id === workspaceId && tab.tab_id !== canonicalTabId);
+	const candidates = tabs.filter((tab) => {
+		// Herdr may expose identity/status on `agents` and cwd/labels on `panes`.
+		// Merge both views before deciding whether a tab is safe to close.
+		const panes = (snapshot.panes || [])
+			.filter((pane) => pane.tab_id === tab.tab_id)
+			.map((pane) => ({ ...pane, ...(agentsByPane.get(pane.pane_id) || {}) }));
+		if (!panes.some((pane) => pane.cwd && samePath(pane.cwd, projectRoot))) return false;
+		const identities = [tab.label, ...panes.flatMap((pane) => [pane.name, pane.label, pane.terminal_title_stripped, pane.terminal_title, pane.agent_instance])]
+			.filter(Boolean).map(String);
+		if (!identities.some((identity) => externalRoleFromIdentity(identity) === role)) return false;
+		// Never close a tab that still has a live agent. Repair can restart it
+		// first, after which the next provisioning pass may clean it up.
+		return !panes.some((pane) => pane.agent === "pi" && !["done", "unknown", "offline"].includes(pane.agent_status));
+	});
+	if (dryRun) return { closed: [], candidates: candidates.map((tab) => tab.tab_id), dry_run: true };
+	const closed = [];
+	for (const tab of candidates) {
+		const result = spawnSync("herdr", ["tab", "close", tab.tab_id], { encoding: "utf8" });
+		if (result.status === 0) closed.push(tab.tab_id);
+	}
+	return { closed, candidates: candidates.map((tab) => tab.tab_id), dry_run: false };
 }
 
 function ensureHerdrTabLabel(tabId, label) {
@@ -527,27 +719,44 @@ function launchAgentTab({ label, cwd, workspaceId, instance, role, project, prom
 			dry_run: false,
 		};
 	}
+	// A previous release may still have a live project-scoped Architect or
+	// Watcher under its old instance. Never create a second worker in that
+	// case: repair performs the controlled stop/restart and applies the
+	// canonical identity without interrupting work implicitly here.
+	const legacy = ["architect", "watcher"].includes(role)
+		? activeLegacyExternalAgent(refreshed, { role, instance, agentName, cwd, workspaceId })
+		: null;
+	if (legacy) {
+		const oldName = legacy.name || legacy.terminal_title_stripped || legacy.terminal_title || "istanza legacy";
+		throw new Error(`yano architect: ${role} legacy ${oldName} già attivo per questo progetto; nessun duplicato creato. Esegui "yano repair --yes" per riallinearlo a ${instance}.`);
+	}
 	let tab = refreshed?.tabs?.find((item) => item.workspace_id === workspaceId && item.label === label);
 	let pane = tab && refreshed?.panes?.find((item) => item.tab_id === tab.tab_id);
 	if (pane?.cwd && !fs.existsSync(pane.cwd)) {
 		tab = null;
 		pane = null;
 	}
-	// Workspace creation can leave a default shell tab behind. Reuse that blank
-	// pane before creating another tab; a visible Herdr panel is not disposable
-	// state and should become the requested real Pi agent when it is available.
-	if (!tab) {
-		pane = refreshed?.panes?.find((candidate) => {
-			const ownerTab = refreshed?.tabs?.find((item) => item.tab_id === candidate.tab_id && item.workspace_id === workspaceId);
-			return ownerTab && (!candidate.cwd || fs.existsSync(candidate.cwd)) && !activeHerdrAgentOnPane(refreshed, candidate.pane_id);
-		});
-		tab = pane && refreshed?.tabs?.find((item) => item.tab_id === pane.tab_id && item.workspace_id === workspaceId);
+	// A stale tab label can point to a pane now occupied by another agent
+	// (for example Planner accidentally left in yano-watcher). Never reuse
+	// that pane: look for a genuinely blank pane or create a new tab.
+	if (pane && activeHerdrAgentOnPane(refreshed, pane.pane_id)) {
+		tab = null;
+		pane = null;
+	}
+	// A pane without an agent is not enough evidence that Herdr can accept an
+	// agent start. Retained/old panes are reported as `unknown` but can still be
+	// unavailable shells (the exact failure seen when repair reused wN:p7).
+	// Keep those panes untouched and create a fresh Herdr tab instead.
+	if (pane && !pane.agent) {
+		tab = null;
+		pane = null;
 	}
 	if (!tab) {
-		const created = spawnSync("herdr", ["tab", "create", "--workspace", workspaceId, "--cwd", cwd, "--label", label, "--no-focus"], { encoding: "utf8" });
+		const createLabel = `${label}-new-${Date.now().toString(36)}`.slice(0, 60);
+		const created = spawnSync("herdr", ["tab", "create", "--workspace", workspaceId, "--cwd", cwd, "--label", createLabel, "--no-focus"], { encoding: "utf8" });
 		if (created.status !== 0) throw new Error(`yano architect: tab Herdr ${label} non creata${created.stderr ? `: ${created.stderr.trim()}` : ""}`);
 		const next = herdrSnapshot();
-		tab = next?.tabs?.find((item) => item.workspace_id === workspaceId && item.label === label);
+		tab = next?.tabs?.find((item) => item.workspace_id === workspaceId && item.label === createLabel);
 		pane = tab && next?.panes?.find((item) => item.tab_id === tab.tab_id);
 	}
 	if (!tab || !pane) throw new Error(`yano architect: tab/pane non trovati per ${label}`);
@@ -571,14 +780,18 @@ function launchAgentTab({ label, cwd, workspaceId, instance, role, project, prom
 function launchArchitect(db, proposal, { dryRun = false } = {}) {
 	const workspaceRoot = path.join(dataRoot(), "agent-workspaces", ARCHITECT_WORKSPACE);
 	fs.mkdirSync(workspaceRoot, { recursive: true, mode: 0o700 });
-	const instance = proposal.architect_instance || `architect-${slug(proposal.proposal_id)}`;
+	// Do not reuse architect_instance from legacy proposals: old versions used
+	// architect-prop-<id>, which made Herdr display the proposal id instead of
+	// the required architect-<project> identity.
+	const instance = canonicalExternalInstance("architect", proposal.project_name);
 	const prompt = `Gestisci la proposta ${proposal.proposal_id} in modo controllato. Leggi ${proposal.manifest_path} e ${proposal.playbook_path}. Verifica/installare solo le capability dichiarate e autorizzate. Non modificare mai il progetto ${proposal.project_root}. Usa yano architect verify --proposal-id ${proposal.proposal_id} dopo il provisioning. Il playbook può diventare operativo solo con readiness completa.`;
 	const workspace = ensureWorkspace(ARCHITECT_WORKSPACE, workspaceRoot, dryRun);
 	const label = `architect-${slug(proposal.project_name)}`.slice(0, 60);
 	const launched = launchAgentTab({ label, cwd: proposal.project_root, workspaceId: workspace.workspace.workspace_id, instance, role: "architect", project: proposal.project_name, prompt, dryRun });
+	const cleanup = closeLegacyExternalTabs({ role: "architect", projectRoot: proposal.project_root, workspaceId: launched.workspace_id, canonicalTabId: launched.tab_id, dryRun });
 	const timestamp = now();
 	db.prepare("UPDATE architect_proposals SET workspace_id=?,tab_id=?,pane_id=?,architect_instance=?,updated_at=? WHERE proposal_id=?").run(launched.workspace_id, launched.tab_id, launched.pane_id, instance, timestamp, proposal.proposal_id);
-	return { ...launched, instance, workspace_label: ARCHITECT_WORKSPACE };
+	return { ...launched, instance, workspace_label: ARCHITECT_WORKSPACE, legacy_tabs: cleanup };
 }
 
 function launchValidationWatcher(db, proposal, { dryRun = false } = {}) {
@@ -587,13 +800,14 @@ function launchValidationWatcher(db, proposal, { dryRun = false } = {}) {
 	const runId = proposal.validation_run_id || `validation-${proposal.proposal_id}`;
 	const manifest = parseJson(fs.readFileSync(proposal.manifest_path, "utf8"), {});
 	const playbookChecksum = fs.existsSync(proposal.playbook_path) ? crypto.createHash("sha256").update(fs.readFileSync(proposal.playbook_path)).digest("hex") : "";
-	const instance = `yano-watcher-${slug(proposal.project_name)}`;
+	const instance = canonicalExternalInstance("watcher", proposal.project_name);
 	const prompt = `Valida il round del playbook ${proposal.proposal_id} per il progetto ${proposal.project_root} in modo esclusivamente read-only. Usa yano watch --once --project-root ${safeShell(proposal.project_root)} --project ${safeShell(proposal.project_name)} --validation-run ${safeShell(runId)} --playbook-proposal ${safeShell(proposal.proposal_id)} --playbook-id ${safeShell(manifest.playbook_id || proposal.playbook_id)} --playbook-checksum ${safeShell(playbookChecksum)}; poi leggi il trace e comunica al planner un esito healthy, finding o blocked con evidenze. Non modificare mai il progetto e non promuovere il playbook. Non usare mai find /, scansioni dell'intero filesystem o comandi senza timeout: limita ogni lettura alla root del progetto e ai percorsi Yano esplicitamente indicati.`;
 	const workspace = ensureWorkspace(WATCHER_WORKSPACE, workspaceRoot, dryRun);
 	const label = `watcher-${slug(proposal.project_name)}`.slice(0, 60);
 	const launched = launchAgentTab({ label, cwd: proposal.project_root, workspaceId: workspace.workspace.workspace_id, instance, role: "watcher", project: proposal.project_name, prompt, dryRun });
+	const cleanup = closeLegacyExternalTabs({ role: "watcher", projectRoot: proposal.project_root, workspaceId: launched.workspace_id, canonicalTabId: launched.tab_id, dryRun });
 	db.prepare("UPDATE architect_proposals SET watcher_workspace_id=?,watcher_tab_id=?,watcher_pane_id=?,validation_run_id=?,updated_at=? WHERE proposal_id=?").run(launched.workspace_id, launched.tab_id, launched.pane_id, runId, now(), proposal.proposal_id);
-	return { ...launched, run_id: runId, workspace_label: WATCHER_WORKSPACE };
+	return { ...launched, run_id: runId, workspace_label: WATCHER_WORKSPACE, legacy_tabs: cleanup };
 }
 
 function assess(task, projectRoot, explicitProject) {
@@ -603,8 +817,8 @@ function assess(task, projectRoot, explicitProject) {
 	const roles = candidate.roles.filter((role) => configs[role]);
 	const capabilityRoles = roles.length ? roles : (candidate.team ? [] : ["coder", "reviewer"]);
 	const capabilities = aggregateCapabilities(capabilityRoles, configs, candidate.capabilities);
-	const catalog = catalogDecision(candidate);
-	return { task, project: info, candidate_playbook: candidate.playbook, candidate_reason: candidate.reason, roles: candidate.roles, capabilities, team: candidate.team || null, catalog, needs_new_playbook: catalog.action === "create", requires_user_interview: catalog.action === "create" && !!candidate.requires_user_interview, note: "Un playbook nuovo è globale ed ephemeral finché intervista, readiness, validazione watcher e feedback utente non sono positivi." };
+	const catalog = catalogDecision(candidate, task);
+	return { task, project: info, candidate_playbook: candidate.playbook, candidate_reason: candidate.reason, roles: candidate.roles, capabilities, requirements: candidate.requirements || {}, team: candidate.team || null, catalog, playbook_selection: { recommended: catalog.recommended, options: catalog.candidates, user_choice_required: catalog.selection_required }, needs_new_playbook: catalog.action === "create", requires_user_interview: catalog.action === "create" && !!candidate.requires_user_interview, note: "Un playbook nuovo è globale ed ephemeral finché intervista, readiness, validazione watcher e feedback utente non sono positivi." };
 }
 
 function createProposal(db, opts) {
@@ -633,6 +847,39 @@ function createProposal(db, opts) {
 	return { proposal: db.prepare("SELECT * FROM architect_proposals WHERE proposal_id=?").get(proposalId), assessment, paths, interview };
 }
 
+function createImport(db, opts) {
+	const bundle = readImportBundle(opts.file);
+	const importedId = bundle.playbook.id;
+	const projectRoot = dataRoot();
+	const projectName = "yano-global";
+	const projectKeyValue = projectKey(projectRoot, projectName);
+	const proposalId = `IMPORT-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+	const timestamp = now();
+	const conflicts = importConflicts(bundle.playbook);
+	const roleIds = bundle.roles.map((role) => role.id);
+	const provisional = { proposal_id: proposalId, project_key: projectKeyValue, project_root: projectRoot, project_name: projectName, task: `Importa playbook globale ${importedId}`, status: "awaiting_user_input", version: String(bundle.playbook.schema_version || 1) === "1" ? "1.0.0" : `1.0.0`, base_playbook: importedId, playbook_id: importedId, role_id: roleIds[0] || `${slug(importedId)}-specialist`, roles: roleIds, created_at: timestamp };
+	const paths = writeImportedProposalFiles(provisional, bundle, conflicts);
+	db.prepare("INSERT INTO architect_proposals(proposal_id,project_key,project_root,project_name,task,status,version,base_playbook,playbook_id,role_id,ephemeral_dir,playbook_path,manifest_path,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(proposalId, projectKeyValue, projectRoot, projectName, provisional.task, provisional.status, provisional.version, importedId, importedId, provisional.role_id, paths.dir, paths.playbook, paths.manifest, timestamp, timestamp);
+	const proposal = db.prepare("SELECT * FROM architect_proposals WHERE proposal_id=?").get(proposalId);
+	const checks = checkCapabilities(proposal, db);
+	persistChecks(db, proposalId, checks);
+	const sameIdConflict = conflicts.find((item) => item.kind === "same-id");
+	const interview = createInterview(db, proposalId, { ...candidateForTask("crea un nuovo playbook"), requires_user_interview: true }, { exact_match: sameIdConflict ? { id: sameIdConflict.existing, label: sameIdConflict.existing, source: sameIdConflict.source } : null, related_matches: conflicts.filter((item) => item.kind === "overlapping-intent") });
+	recordEvent(db, proposalId, "playbook_import_staged", { origin: bundle.origin, conflicts, checks });
+	const result = { proposal, paths, conflicts, checks, requirements: bundle.playbook.requirements || {}, requires_user_decision: true, architect_required: true, no_reference_project_mutation: true };
+	if (!opts.dryRun && !opts.once) {
+		try {
+			result.architect = launchArchitect(db, proposal, { dryRun: false });
+			db.prepare("UPDATE architect_proposals SET status=?,updated_at=? WHERE proposal_id=?").run("awaiting_user_input", now(), proposalId);
+		} catch (error) {
+			result.architect_launch_error = error instanceof Error ? error.message : String(error);
+			recordEvent(db, proposalId, "external_agent_launch_failed", { error: result.architect_launch_error });
+		}
+	}
+	result.interview = interview;
+	return result;
+}
+
 function provision(db, proposal, { dryRun = false, once = false, install = false } = {}) {
 	if (proposal.status === "awaiting_user_input") {
 		const interview = currentInterview(db, proposal.proposal_id);
@@ -649,18 +896,25 @@ function provision(db, proposal, { dryRun = false, once = false, install = false
 	recordEvent(db, proposal.proposal_id, "capability_readiness_checked", { ready, install_requested: install, checks });
 	const result = { proposal_id: proposal.proposal_id, status, ready, install_requested: install, checks, operational: ready, no_project_mutation: true };
 	if (ready && !once) {
-		try {
-			result.watcher = launchValidationWatcher(db, { ...proposal, status }, { dryRun });
-			result.architect = launchArchitect(db, { ...proposal, status }, { dryRun });
+		// Launch the two external roles independently. A stale/busy Watcher
+		// pane must not prevent Architect from starting and repairing the
+		// proposal. The proposal remains blocked until both launches succeed.
+		const launchErrors = [];
+		try { result.watcher = launchValidationWatcher(db, { ...proposal, status }, { dryRun }); }
+		catch (error) { result.watcher_launch_error = error instanceof Error ? error.message : String(error); launchErrors.push(`watcher: ${result.watcher_launch_error}`); }
+		try { result.architect = launchArchitect(db, { ...proposal, status }, { dryRun }); }
+		catch (error) { result.architect_launch_error = error instanceof Error ? error.message : String(error); launchErrors.push(`architect: ${result.architect_launch_error}`); }
+		const watcherStarted = result.watcher && (result.watcher.started === true || result.watcher.already_running === true);
+		const architectStarted = result.architect && (result.architect.started === true || result.architect.already_running === true);
+		if (watcherStarted && architectStarted && launchErrors.length === 0) {
 			db.prepare("UPDATE architect_proposals SET status=?,updated_at=? WHERE proposal_id=?").run("ready_ephemeral", now(), proposal.proposal_id);
-		} catch (error) {
-			const detail = error instanceof Error ? error.message : String(error);
+		} else {
 			result.status = "blocked";
 			result.ready = false;
 			result.operational = false;
-			result.launch_error = detail;
+			result.launch_error = launchErrors.join("; ") || "Watcher e Architect non risultano entrambi attivi dopo il provisioning";
 			db.prepare("UPDATE architect_proposals SET status=?,updated_at=? WHERE proposal_id=?").run("blocked", now(), proposal.proposal_id);
-			recordEvent(db, proposal.proposal_id, "external_agent_launch_failed", { error: detail, watcher: result.watcher || null, architect: result.architect || null });
+			recordEvent(db, proposal.proposal_id, "external_agent_launch_failed", { error: result.launch_error, watcher: result.watcher || null, architect: result.architect || null });
 		}
 	} else if (!ready && install && !once) {
 		try {
@@ -727,13 +981,15 @@ function promote(db, proposal, opts) {
 	const checks = db.prepare("SELECT status FROM architect_capabilities WHERE proposal_id=?").all(proposal.proposal_id);
 	const validations = db.prepare("SELECT * FROM architect_validations WHERE proposal_id=? AND result='passed'").all(proposal.proposal_id);
 	const feedback = db.prepare("SELECT * FROM architect_feedback WHERE proposal_id=? AND status='positive'").all(proposal.proposal_id);
-	if (!checks.length || checks.some((check) => check.status !== "ready")) throw new Error("yano architect: capability readiness incompleta; esegui provision/verify prima della promozione");
+	if (!checks.length || checks.some((check) => check.status !== "ready")) {
+		const status = db.prepare("SELECT kind,name,status,detail,install_command FROM architect_capabilities WHERE proposal_id=? AND status!='ready' ORDER BY kind,name").all(proposal.proposal_id);
+		const lines = status.map((check) => `- ${check.kind}/${check.name}: ${check.detail || check.status}${check.install_command ? `; soluzione: ${check.install_command}` : ""}`).join("\n");
+		throw new Error(`yano architect: il playbook non può essere installato/promosso perché mancano requisiti:\n${lines}\nRipeti yano architect verify dopo averli configurati.`);
+	}
 	if (!validations.length) throw new Error("yano architect: serve almeno una validation passed");
 	if (!feedback.length) throw new Error("yano architect: serve feedback utente positivo");
 	const versionDir = path.join(catalogRoot(), "playbooks", proposal.playbook_id, `v${proposal.version}`);
-	const roleDir = path.join(catalogRoot(), "agents", proposal.role_id, `v${proposal.version}`);
 	fs.mkdirSync(versionDir, { recursive: true, mode: 0o700 });
-	fs.mkdirSync(roleDir, { recursive: true, mode: 0o700 });
 	fs.copyFileSync(proposal.playbook_path, path.join(versionDir, "playbook.yaml"));
 	const manifest = parseJson(fs.readFileSync(proposal.manifest_path, "utf8"), {});
 	manifest.status = "persistent";
@@ -741,26 +997,36 @@ function promote(db, proposal, opts) {
 	manifest.validation_ids = validations.map((row) => row.validation_id);
 	manifest.feedback_ids = feedback.map((row) => row.feedback_id);
 	fs.writeFileSync(path.join(versionDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
- fs.writeFileSync(path.join(roleDir, "role.yaml"), YAML.stringify({
-		schema_version: 1,
-		id: proposal.role_id,
-		label: `Generated ${proposal.role_id}`,
-		brief: `Specialist generated by Yano Architect for proposal ${proposal.proposal_id}. Follow the assigned playbook and report evidence to the planner.`,
-		activation: "lazy",
-		playbook: proposal.playbook_id,
-		model: { provider: "llmproxy", model: "reasoning-model" },
-		skills: manifest.capabilities?.skills || [],
-		cli: manifest.capabilities?.cli || [],
-		mcp: manifest.capabilities?.mcp || [],
-		teams: ["generated"],
-		source_proposal: proposal.proposal_id,
-		capabilities: manifest.capabilities,
-		read_only: false,
-	}), { mode: 0o600 });
+	const roleManifests = Array.isArray(manifest.role_manifests) && manifest.role_manifests.length
+		? manifest.role_manifests
+		: [{
+			id: proposal.role_id,
+			label: `Generated ${proposal.role_id}`,
+			brief: `Specialist generated by Yano Architect for proposal ${proposal.proposal_id}. Follow the assigned playbook and report evidence to the planner.`,
+			activation: "lazy",
+			playbook: proposal.playbook_id,
+			model: { provider: "llmproxy", model: "reasoning-model" },
+			skills: manifest.capabilities?.skills || [],
+			cli: manifest.capabilities?.cli || [],
+			mcp: manifest.capabilities?.mcp || [],
+			teams: ["generated"],
+			source_proposal: proposal.proposal_id,
+			capabilities: manifest.capabilities,
+			read_only: false,
+		}];
+	const rolePaths = [];
+	for (const role of roleManifests) {
+		const roleId = role.id;
+		const roleDir = path.join(catalogRoot(), "agents", roleId, `v${proposal.version}`);
+		fs.mkdirSync(roleDir, { recursive: true, mode: 0o700 });
+		const roleDocument = { ...role, playbook: proposal.playbook_id, source_proposal: proposal.proposal_id };
+		fs.writeFileSync(path.join(roleDir, "role.yaml"), YAML.stringify(roleDocument), { mode: 0o600 });
+		rolePaths.push(path.join(roleDir, "role.yaml"));
+	}
 	fs.writeFileSync(path.join(catalogRoot(), "playbooks", proposal.playbook_id, "current.json"), `${JSON.stringify({ id: proposal.playbook_id, version: proposal.version, path: path.join(versionDir, "playbook.yaml"), promoted_at: now() }, null, 2)}\n`, { mode: 0o600 });
 	db.prepare("UPDATE architect_proposals SET status=?,updated_at=? WHERE proposal_id=?").run("persistent", now(), proposal.proposal_id);
 	recordEvent(db, proposal.proposal_id, "proposal_promoted", { version: proposal.version, playbook_path: path.join(versionDir, "playbook.yaml") });
-	return { proposal_id: proposal.proposal_id, status: "persistent", playbook_path: path.join(versionDir, "playbook.yaml"), role_path: path.join(roleDir, "role.yaml") };
+	return { proposal_id: proposal.proposal_id, status: "persistent", playbook_path: path.join(versionDir, "playbook.yaml"), role_path: rolePaths[0], role_paths: rolePaths };
 }
 
 function revise(db, proposal, opts) {
@@ -768,7 +1034,7 @@ function revise(db, proposal, opts) {
 	const candidate = candidateForTask(opts.task);
 	const configs = roleConfig();
 	const capabilities = aggregateCapabilities(candidate.roles.filter((role) => configs[role]), configs, candidate.capabilities);
-	const catalog = catalogDecision(candidate);
+	const catalog = catalogDecision(candidate, opts.task);
 	const nextStatus = candidate.team ? "awaiting_user_input" : "revision_required";
 	const next = { ...proposal, task: opts.task.trim(), status: nextStatus, base_playbook: candidate.playbook, roles: candidate.roles, version: `0.${Number(String(proposal.version).split(".")[1] || 1) + 1}.0`, playbook_id: candidate.team ? slug(candidate.playbook) : `${slug(candidate.playbook)}-${slug(opts.task).slice(0, 24)}`, role_id: candidate.primaryRole || `${slug(candidate.playbook)}-specialist` };
 	const paths = writeProposalFiles(next, capabilities, candidate, catalog);
@@ -781,10 +1047,12 @@ function revise(db, proposal, opts) {
 
 function usage() {
 	return [
-		"Uso: yano architect <assess|propose|interview|answer|team|provision|verify|status|validation|feedback|revise|promote|start>",
+		"Uso: yano architect <assess|candidates|propose|import|interview|answer|team|provision|verify|status|validation|feedback|revise|promote|start>",
 		"",
 		"  assess --task <testo> --project-root <dir> [--json]              valuta copertura e capability",
+		"  candidates --task <testo> --project-root <dir> [--json]          elenca alternative e raccomandazione",
 		"  propose --task <testo> --project-root <dir> [--new-playbook]    riusa il catalogo o crea una proposta globale",
+		"  import --file <bundle.json> [--dry-run|--once]                   importa e avvia Architect per la verifica",
 		"  interview --proposal-id <id> [--json]                           apre/mostra domande all utente",
 		"  answer --proposal-id <id> --status approved|changes_requested   registra la decisione dell utente",
 		"  team --proposal-id <id> --variant <id> [--json]                 seleziona una variante del team",
@@ -798,7 +1066,7 @@ function usage() {
 		"  promote --proposal-id <id> --yes                                  pubblica nel catalogo globale",
 		"  start --proposal-id <id> [--dry-run] [--once]                     avvia tab Herdr yano-architect",
 		"",
-		"Il playbook non è operativo con capability mancanti. I dati vivono in temp/architect/ e catalog/.",
+		"Il playbook non è operativo con capability mancanti. I dati vivono in <YANO_DATA_DIR>/architect/ e <YANO_DATA_DIR>/catalog/.",
 	].join("\n");
 }
 
@@ -810,6 +1078,7 @@ export async function runYanoArchitect({ argv = [] } = {}) {
 	const opts = {
 		sub,
 		task: value(argv, "--task"),
+		file: value(argv, "--file") || (sub === "import" ? argv[1] : null),
 		projectRoot: value(argv, "--project-root") || process.cwd(),
 		project: value(argv, "--project"),
 		proposalId: value(argv, "--proposal-id"),
@@ -832,9 +1101,11 @@ export async function runYanoArchitect({ argv = [] } = {}) {
 		yes: has(argv, "--yes"),
 	};
 	if (sub === "assess") { const result = assess(opts.task || "", opts.projectRoot, opts.project); print(result, opts.json); return result; }
+	if (sub === "candidates") { const result = assess(opts.task || "", opts.projectRoot, opts.project); print({ task: result.task, project: result.project, recommended: result.playbook_selection.recommended, candidates: result.playbook_selection.options, user_choice_required: result.playbook_selection.user_choice_required }, opts.json); return result; }
 	const db = openDatabase();
 	try {
 		if (sub === "propose") { const result = createProposal(db, opts); print(result, opts.json); return result; }
+		if (sub === "import") { const result = createImport(db, opts); print(result, opts.json); return result; }
 		const proposal = loadProposal(db, opts.proposalId);
 		if (sub === "status") { const result = proposalStatus(db, proposal); print(result, opts.json); return result; }
 		if (sub === "interview") { const manifest = parseJson(fs.readFileSync(proposal.manifest_path, "utf8"), {}); const result = createInterview(db, proposal.proposal_id, candidateForTask(proposal.task), manifest.catalog_decision || {}); print(result, opts.json); return result; }

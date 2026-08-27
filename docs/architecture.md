@@ -39,6 +39,60 @@ Every instance has an `instance`, `role`, `project` and `team` identity. MQTT to
 7. Ticket/DAG and Playbook state are persisted in SQLite. Generation fencing, idempotency keys and the effect outbox make retries resumable.
 8. The planner advances phases and runs the mandatory closing evidence checklist before `worktree_finalize` merges the reviewed branch.
 
+### Project repair and reconciliation
+
+`yano update --reload` is intentionally narrow: it needs the project-local
+`orchestrator.db` and an active run. A project can still be inconsistent before
+that point, for example when Herdr panes were started with an old project name
+and their retained MQTT presence is therefore invisible to the current
+Planner. The recovery command for this wider condition is:
+
+```text
+yano repair --dry-run
+yano repair --yes
+yano repair --yes --update
+```
+
+`repair` derives the canonical identity from the project root, inspects Herdr
+panes whose current working directory is that root, discovers retained MQTT
+cards under the canonical name and aliases visible in the Herdr labels, and
+saves a forensic snapshot under `<YANO_DATA_DIR>/recovery/repair/`. With `--yes` it
+sends graceful termination commands, reuses or creates the project workspace,
+restarts the observed agents in their existing panes with the canonical scope
+(including `planner-01`) and verifies the new presence. Architect and Watcher
+tabs are renamed to `architect-<project-name>` and `watcher-<project-name>`;
+their resumed sessions receive a read-only scope correction.
+With `--update` it first checks for a newer Yano release, runs the normal update
+only when needed (including `pi update --extensions`), then performs the same
+reconciliation. Persisted Architect proposals are re-provisioned when their
+durable record is still available; no new proposal is fabricated without its
+original context.
+
+For an operator-level sweep across all active projects use the explicit global
+mode:
+
+```text
+yano repair --all-projects --dry-run
+yano repair --all-projects --yes --update
+```
+
+This inventories active Herdr project roots and the persistent registries of
+the read-only external workers (`debugger`, `auto-improver` and `suggester`),
+then repairs projects one at a time. Each project gets its own snapshot and
+the update is performed once before the sequence. Workers that are deliberately
+`paused` or `stopped` are not resurrected; a worker with an active registry and
+an absent pane gets a new workspace/tab when Herdr permits it. Unknown MQTT
+scopes are reported but never guessed into a filesystem root.
+
+The repair inventory treats MQTT cards with an `offline` or stale heartbeat as
+historical evidence, not live agents. Herdr can also retain an old `pane.name`
+after a restart, so repair prefers the current terminal title and MQTT card for
+the displayed instance while preserving old labels as aliases for cleanup.
+
+The operation never deletes application files, worktrees, SQLite state, trace
+history or Herdr tabs. `--force` is an explicit acknowledgement that a process
+which did not leave gracefully may be interrupted.
+
 ## Persistence model
 
 The workspace lives under `.pi/extensions/yano-orchestrator/`:
@@ -46,17 +100,24 @@ The workspace lives under `.pi/extensions/yano-orchestrator/`:
 - `orchestratorStorage/orchestrator.db`: SQLite state and audit history;
 - `config/project.json`: project identity and schema metadata;
 - `reports/`: task reports and round evidence;
-- `<yano-install>/temp/traces/<project-key>/events/`: global per-instance trace JSONL, outside the project checkout;
+- `<YANO_DATA_DIR>/traces/<project-key>/events/`: global per-instance trace JSONL, outside the project checkout. If `YANO_DATA_DIR` is omitted, Yano uses the platform data directory;
 - `specs/`, `playbooks/`, `diagrams/`, `knowledge/`, `policies/`, `artifacts/`: project-scoped working artifacts.
 
 The database is intentionally local to a project. MQTT provides fast coordination, while SQLite is the durable source for recovery, status, evidence and outbox state.
 
+When upgrading from a pre-platform-data release, `yano data migrate --dry-run`
+previews and `yano data migrate --yes` copies the old package `temp/` into the
+new per-user data root without deleting the source.
+
 ### Global tracing
 
-Yano's forensic trace is stored under `temp/` in the installed Yano package,
-not under the project. `YANO_DATA_DIR` (or `YANO_TEMP_DIR`) can override this
-location when the global package directory is read-only. The CLI controls the
-capture policy:
+Yano's forensic trace is stored in the per-user Yano data directory, never in
+the installed package and never under the project. `YANO_DATA_DIR` (or the
+legacy alias `YANO_TEMP_DIR`) can override this location. The default is
+`~/Library/Application Support/yano/data` on macOS, `~/.local/share/yano` on
+Linux and `%LOCALAPPDATA%/yano/data` on Windows. Use `yano config path` for
+the configuration file and `yano trace status` for the effective data root.
+The CLI controls the capture policy:
 
 ```text
 yano trace status
@@ -155,11 +216,11 @@ processi persistenti.
 ### Global `yano-auto-improver`
 
 `yano auto-improve` registra un progetto nel database globale
-`temp/auto-improver/auto-improver.sqlite`, crea audit periodici (per default
+`<YANO_DATA_DIR>/auto-improver/auto-improver.sqlite`, crea audit periodici (per default
 ogni `5d`) e avvia, tramite Herdr, una tab `auto-improver-<project-name>` per progetto nel workspace globale
 `yano-auto-improver`. Ogni audit raccoglie un evidence pack limitato con
 manifest, Git, trace/semantic retrieval, test/lint/build disponibili, bug e
-feedback; i report vivono soltanto nella directory globale `temp/`.
+feedback; i report vivono soltanto nella directory globale `<YANO_DATA_DIR>/`.
 
 L'auto-improver è read-only come tutti gli agenti esterni: non modifica il
 progetto osservato, non crea worktree, non fa commit, non installa dipendenze,
@@ -175,8 +236,8 @@ composizione del worker senza aprire Herdr. `yano auto-improve run|start
 ### Global `yano-suggester`
 
 `yano suggester` è un osservatore globale read-only. Registra i suggerimenti in
-`temp/suggester/suggester.sqlite`, conserva evidence pack e report sotto
-`temp/suggester/` e usa il workspace Herdr `yano-suggester`, con una tab
+`<YANO_DATA_DIR>/suggester/suggester.sqlite`, conserva evidence pack e report sotto
+`<YANO_DATA_DIR>/suggester/` e usa il workspace Herdr `yano-suggester`, con una tab
 `suggester-<project-name>` per progetto. La v1 offre intake CLI, redazione di segreti, fingerprint esatto,
 analisi bounded e lifecycle `received → analyzing → awaiting_approval →
 accepted|rejected`.
@@ -196,18 +257,20 @@ evita l'apertura del worker Herdr.
 
 `yano architect` è un agente globale di progettazione del catalogo, non un
 worker del progetto osservato. Vive nel workspace Herdr `yano-architect` e
-scrive il database `temp/architect/architect.sqlite`, le proposte ephemeral in
-`temp/architect/proposals/` e, solo dopo promozione, le versioni immutabili in
-`temp/catalog/`.
+scrive il database `<YANO_DATA_DIR>/architect/architect.sqlite`, le proposte
+ephemeral in `<YANO_DATA_DIR>/architect/proposals/` e, solo dopo promozione, le
+versioni immutabili in `<YANO_DATA_DIR>/catalog/`.
 
 Il lifecycle è catalog-first: `assess → reuse` se esiste un match esatto,
 oppure `assess → propose globale → intervista utente → team variant →
 capability gate → watcher validation → feedback planner/utente → revise|promote`.
 L'architect non modifica mai codice, test, configurazioni, worktree o
 deployment del progetto. Prima di avviare un playbook controlla tutte le skill,
-CLI e MCP dichiarate; un MCP solo presente in `.mcp.json` resta `pending` fino
-a un handshake reale registrato con `yano architect capability`. `--once`
-esegue soltanto il gate e non apre Herdr.
+CLI, MCP e credenziali dichiarate; un MCP solo presente in `.mcp.json` resta
+`pending` fino a un handshake reale registrato con `yano architect capability`.
+Le credenziali mancanti producono il comando esatto `yano config set ...` e il
+percorso della configurazione globale. `--once` esegue soltanto il gate e non
+apre Herdr.
 
 Una proposta nuova è globale e parametrica: il progetto che ha originato la
 richiesta è soltanto il primo caso d'uso. L'intervista chiede all'utente se
@@ -231,6 +294,17 @@ validation riuscita e feedback positivo. Il catalogo espone
 ruolo promosso al roster del progetto in una configurazione runtime temporanea,
 senza copiare file nel repository applicativo.
 
+Il catalogo supporta bundle portabili JSON:
+`yano playbook export <id> --out <file>` e `yano playbook import <file>`.
+L'import non installa silenziosamente il playbook: crea una proposta globale,
+calcola conflitti per id/intenti, controlla requisiti e avvia sempre Architect
+nel workspace `yano-architect` (se Herdr non è disponibile l'import resta
+bloccato e lo dichiara). Il Planner deve mostrare le alternative compatibili,
+raccomandarne una e attendere la scelta dell'utente. `remove` disattiva in modo
+reversibile un playbook personale; `purge` lo elimina solo dopo la rimozione e
+con conferma esplicita. Le dipendenze tra playbook non fanno parte dello schema
+attuale.
+
 ### Deployment agent
 
 Il `deployment-agent` è un worker distinto dal debugger applicativo. Il suo
@@ -244,7 +318,7 @@ rollback checkpoint. Il passaggio in production richiede approvazione esplicita
 del planner/utente: build riuscita o test staging da soli non sono
 autorizzazione al rilascio.
 
-The optional semantic layer is stored at `<yano-install>/temp/semantic-index.sqlite`.
+The optional semantic layer is stored at `<YANO_DATA_DIR>/semantic-index.sqlite`.
 `yano trace index` incrementally embeds observable trace records through local
 Ollama, and `yano trace search` retrieves a small ranked evidence set using
 hybrid semantic/lexical ranking. The same SQLite database contains a derived

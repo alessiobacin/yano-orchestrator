@@ -588,7 +588,7 @@ export async function runControlledReload({ cwd, packageRoot, argv, update }) {
 		writeReloadUpdate(snapshotResults, updateResult, "updated_pending_resume");
 	} catch (error) {
 		writeReloadUpdate(snapshotResults, { error: error instanceof Error ? error.message : String(error) }, "update_failed_agents_left_paused");
-		console.error(`yano update --reload: aggiornamento fallito; gli agenti restano in pausa e lo snapshot è disponibile in ${snapshotResults[0]?.directory || "temp/recovery"}.`);
+		console.error(`yano update --reload: aggiornamento fallito; gli agenti restano in pausa e lo snapshot è disponibile in ${snapshotResults[0]?.directory || "<YANO_DATA_DIR>/recovery"}.`);
 		throw error;
 	}
 	const resumeArgv = [...argv.filter((arg) => !["--dry-run", "--force", "--reload"].includes(arg)), "--yes"];

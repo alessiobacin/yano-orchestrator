@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { configSpec, globalConfigPath, loadConfigFile, missingConfigError, resolveYanoConfig, runYanoConfig } from "./yano-config.mjs";
+import { configSpec, globalConfigPath, globalDataPath, loadConfigFile, missingConfigError, resolveYanoConfig, runYanoConfig } from "./yano-config.mjs";
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "yano-config-"));
 const previous = {
@@ -28,6 +28,10 @@ try {
 	assert.equal(stored.TELEGRAM_BOT_TOKEN, "test-token");
 	assert.equal(fs.statSync(configFile).mode & 0o777, 0o600);
 	assert.equal(configSpec("TELEGRAM_BOT_TOKEN").secret, true);
+	assert.equal(globalDataPath({ env: {}, platform: "darwin", home: "/Users/test" }), "/Users/test/Library/Application Support/yano/data");
+	assert.equal(globalDataPath({ env: {}, platform: "linux", home: "/home/test" }), "/home/test/.local/share/yano");
+	assert.equal(globalDataPath({ env: {}, platform: "win32", home: "C:\\Users\\test" }), "C:\\Users\\test/AppData/Local/yano/data");
+	assert.equal(globalDataPath({ env: { YANO_DATA_DIR: path.join(root, "custom-data") }, platform: "linux", home: "/home/test" }), path.join(root, "custom-data"));
 	const missing = missingConfigError("watch", ["TELEGRAM_BOT_TOKEN", "YANO_ORCHESTRATOR_REPO"]);
 	assert.equal(missing.code, "YANO_CONFIG_MISSING");
 	assert.match(missing.message, /yano config set TELEGRAM_BOT_TOKEN --stdin/);

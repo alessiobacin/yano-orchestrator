@@ -125,11 +125,12 @@ sessione diagnostica completa usa `full`:
 yano trace enable --mode full
 ```
 
-I dati restano nella directory globale di Yano, non nel repository. Se
-l'installazione globale non è scrivibile:
+I dati restano nella directory globale di Yano, non nel repository e non nel
+pacchetto installato. Il percorso viene scelto automaticamente per il sistema
+operativo. Se vuoi un percorso esplicito:
 
 ```bash
-export YANO_DATA_DIR="$HOME/.local/share/yano-trace"
+yano config set YANO_DATA_DIR "$HOME/.local/share/yano-data"
 yano trace enable --mode standard
 ```
 
@@ -230,7 +231,7 @@ yano trace search \
   --mode hybrid --limit 10 --json --explain
 ```
 
-L'indice è incrementale, vive nella stessa `temp/` globale e può essere
+L'indice è incrementale, vive nella stessa directory dati globale e può essere
 ricreato dai JSONL. Usa `--project`, `--round`, `--task`, `--instance`,
 `--type` o `--since` per restringere ulteriormente la ricerca.
 
@@ -246,8 +247,8 @@ yano trace plan \
 ```
 
 La consolidazione crea memorie episodiche e pattern ricorrenti in SQLite, oltre
-alle proiezioni `planner-context.json` e `recurring-failures.md` nella temp
-globale. Sono dati derivati: il trace JSONL resta la fonte primaria.
+alle proiezioni `planner-context.json` e `recurring-failures.md` nella directory
+dati globale. Sono dati derivati: il trace JSONL resta la fonte primaria.
 
 Per conservare o trasferire un'indagine:
 
@@ -278,7 +279,7 @@ yano resume --all --yes --supervisor auto
 ```
 
 La pausa conserva SQLite, ticket, worktree, branch, presenza disponibile e
-trace nella `temp/` globale dell'installazione Yano. Il ripristino controlla
+trace nella directory dati globale di Yano. Il ripristino controlla
 quali istanze sono ancora vive, riapre solo quelle mancanti e riattiva il
 planner con la sessione precedente. Non usare `yano end`: quel comando chiude
 formalmente il run.

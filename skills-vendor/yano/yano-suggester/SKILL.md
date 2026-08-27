@@ -16,7 +16,7 @@ autonomamente in codice. Il progetto osservato è sempre read-only.
   leggendo soltanto l'evidenza necessaria.
 - Distingui `bug`, `feature`, `improvement`, `ux`, `duplicate`, `out_of_scope`
   e `unsafe`; non presentare un'ipotesi come fatto.
-- Scrivi il report solo sotto `temp/suggester/` e completalo con
+- Scrivi il report solo sotto `<YANO_DATA_DIR>/suggester/` e completalo con
   `yano suggester complete`.
 - Ogni proposta deve contenere valore utente, priorità, complessità, rischio,
   confidenza, evidenze, duplicati candidati, domande aperte e

@@ -182,7 +182,7 @@ function writeEvidence(info, suggestion) {
 		collected_at: now(),
 		trace: { count: records.length, records: records.slice(-40), overview },
 		semantic_retrieval: retrieval,
-		instructions: "Usa solo queste evidenze e completa il report nella directory globale temp/suggester.",
+		instructions: "Usa solo queste evidenze e completa il report nella directory globale <YANO_DATA_DIR>/suggester.",
 	};
 	const evidencePath = path.join(dir, "evidence", `${suggestion.suggestion_id}.json`);
 	fs.writeFileSync(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`, { mode: 0o600 });
@@ -305,7 +305,7 @@ async function notifyPlanner(info, suggestion, analysis) {
 
 function assertTempPath(file) {
 	const resolved = path.resolve(file);
-	if (!resolved.startsWith(`${path.resolve(dataRoot())}${path.sep}`)) throw new Error("yano suggester: report deve restare nella directory globale temp/suggester");
+	if (!resolved.startsWith(`${path.resolve(dataRoot())}${path.sep}`)) throw new Error("yano suggester: report deve restare nella directory globale <YANO_DATA_DIR>/suggester");
 	return resolved;
 }
 
@@ -333,7 +333,7 @@ function parseOptions(argv) {
 }
 
 function print(result) { console.log(JSON.stringify(result, null, 2)); }
-function usage() { return ["Uso: yano suggester <init|start|submit|status|reports|complete|approve|reject|pause|resume|stop>", "", "  init --project-root <dir> [--notify auto]", "  submit --project-root <dir> --title <titolo> --description <testo> [--queue-only] [--once]", "  start --project-root <dir> [--dry-run] [--once]     processa una sola proposta senza scheduler", "  complete --suggestion-id <id> --report-file <temp-file> --category <bug|feature|improvement|ux>", "  approve --suggestion-id <id> --actor <superadmin> --yes", "  reject --suggestion-id <id> --actor <superadmin> --reason <motivo> --yes", "  status|reports|pause|resume|stop --project-root <dir>", "", "Il worker è read-only; il planner viene notificato soltanto dopo approve. I dati vivono in temp/suggester/."] .join("\n"); }
+function usage() { return ["Uso: yano suggester <init|start|submit|status|reports|complete|approve|reject|pause|resume|stop>", "", "  init --project-root <dir> [--notify auto]", "  submit --project-root <dir> --title <titolo> --description <testo> [--queue-only] [--once]", "  start --project-root <dir> [--dry-run] [--once]     processa una sola proposta senza scheduler", "  complete --suggestion-id <id> --report-file <temp-file> --category <bug|feature|improvement|ux>", "  approve --suggestion-id <id> --actor <superadmin> --yes", "  reject --suggestion-id <id> --actor <superadmin> --reason <motivo> --yes", "  status|reports|pause|resume|stop --project-root <dir>", "", "Il worker è read-only; il planner viene notificato soltanto dopo approve. I dati vivono in <YANO_DATA_DIR>/suggester/."] .join("\n"); }
 
 export async function runYanoSuggester({ argv = [] } = {}) {
 	const opts = parseOptions(argv);

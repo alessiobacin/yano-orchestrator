@@ -4,6 +4,44 @@ La configurazione globale serve quando Yano è installato con npm e non si sta
 lavorando dentro il checkout sorgente. Non viene salvata nella cartella del
 pacchetto e non viene sovrascritta da `yano update`.
 
+## `YANO_DATA_DIR`
+
+È la radice opzionale dei dati utente di Yano: trace, indice semantico,
+snapshot, catalogo playbook e database degli agenti esterni. Normalmente non
+va valorizzata: Yano sceglie automaticamente `~/Library/Application
+Support/yano/data` su macOS, `~/.local/share/yano` su Linux e
+`%LOCALAPPDATA%/yano/data` su Windows. Per vedere il percorso effettivo usa:
+
+```bash
+yano trace status
+```
+
+Imposta un percorso personalizzato solo se vuoi spostare i dati o migrare una
+vecchia installazione; il valore va nel file globale mostrato da `yano config
+path`, non nel `.env` del progetto applicativo:
+
+```bash
+yano config set YANO_DATA_DIR /percorso/dati/yano
+yano trace status
+```
+
+`YANO_TEMP_DIR` resta disponibile soltanto come alias legacy. Il checkout di
+sviluppo di Yano può avere un `.env` per variabili di sviluppo, ma il pacchetto
+globale non dipende da quel file.
+
+Se aggiorni da una versione che scriveva nel `temp/` del pacchetto, controlla e
+migra lo store senza cancellare l'origine:
+
+```bash
+yano data path
+yano data migrate --dry-run
+yano data migrate --yes
+```
+
+La migrazione copia trace, indice, snapshot, catalogo e database nel nuovo
+data-root per-user. Il vecchio `temp/` resta conservato finché non lo rimuovi
+manualmente dopo avere verificato il risultato.
+
 ## Vedere il percorso e le variabili
 
 ```bash

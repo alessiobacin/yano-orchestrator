@@ -6,7 +6,8 @@ workspace Herdr `yano-architect`, allo stesso livello globale di
 `yano-watcher`, `yano-debugger`, `yano-auto-improver` e `yano-suggester`.
 
 L'architect non modifica mai il progetto osservato. Scrive soltanto sotto la
-directory dati globale di Yano (`temp/`, o `YANO_DATA_DIR`) e nel catalogo
+directory dati globale di Yano (`<YANO_DATA_DIR>`, scelta automaticamente per
+piattaforma) e nel catalogo
 globale dopo una promozione esplicita.
 
 ## Catalog-first e lifecycle
@@ -28,7 +29,7 @@ parametri e i ruoli devono restare riutilizzabili in altri repository.
 
 Per le competenze ampie Architect definisce un team con varianti, non un
 agente monolitico. `single-author`, `research-and-author` e `full-team` sono
-esempi: Architect dichiara ruoli, capability, output, dipendenze e gruppi
+esempi: Architect dichiara ruoli, capability, output, ordine operativo e gruppi
 paralleli; il Planner sceglie la variante e il numero di istanze in base al
 task reale. Non si avviano tutti gli agenti solo perché sono presenti nel
 playbook.
@@ -107,6 +108,12 @@ arbitrari provenienti dal task: crea/riusa i workspace globali
 solo pannello Herdr. Le tab sono nominate `architect-<project-name>` e
 `watcher-<project-name>`; se viene incontrata una tab legacy con il solo nome
 del progetto, viene rinominata e riusata invece di crearne una duplicata.
+Le istanze delle versioni precedenti (`architect-prop-*` e
+`yano-watcher-*`) non vengono duplicate: se sono ancora attive il provisioning
+si ferma e indica `yano repair --yes`, che salva lo snapshot e le riavvia in
+modo controllato; se invece sono già inattive, la loro tab viene chiusa subito
+dopo che la nuova istanza è risultata attiva. Il risultato finale è
+`architect-<project-name>` e `watcher-<project-name>`.
 
 ## Catalogo globale
 
@@ -118,10 +125,14 @@ yano agent list
 yano agent show <role-id>
 ```
 
-Le versioni promosse sono immutabili in `temp/catalog/playbooks/` e
-`temp/catalog/agents/`. Il launcher risolve un ruolo promosso creando un
+Le versioni promosse sono immutabili in `<YANO_DATA_DIR>/catalog/playbooks/` e
+`<YANO_DATA_DIR>/catalog/agents/`. Il launcher risolve un ruolo promosso creando un
 `roles.yaml` runtime unito alla configurazione del progetto e allegando le
 skill dichiarate dal manifest; non copia il catalogo nel repository applicativo.
+
+Per il trasporto usa `yano playbook export/import`; per la gestione usa
+`remove` (soft disable) e `purge` (cancellazione confermata). I playbook non
+incorporano né dipendono da altri playbook in questa versione.
 
 ## Regole di sicurezza
 

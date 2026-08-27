@@ -76,6 +76,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import YAML from "yaml";
 import { ensureRolePrerequisites, isSupportedNodeRuntime } from "./doctor.mjs";
+import { globalDataPath } from "./yano-config.mjs";
 import { TRACE_MODES, getTraceConfig, resolveTraceProject, setTraceMode, slugify, traceRoot } from "./yano-trace-storage.mjs";
 
 // Le 6 skill vendorizzate destinate al ruolo planner — vedi
@@ -559,7 +560,7 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 		// store, even when Pi loads Yano from its own git clone.
 		env: {
 			...process.env,
-			YANO_DATA_DIR: process.env.YANO_DATA_DIR || path.join(packageRoot, "temp"),
+			YANO_DATA_DIR: process.env.YANO_DATA_DIR || globalDataPath({ env: process.env }),
 			YANO_EXPECTED_TRACE_MODE: requestedTraceMode,
 			YANO_EXPECTED_YANO_VERSION: packageVersion,
 		},

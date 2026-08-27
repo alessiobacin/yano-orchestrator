@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { parse as parseYaml } from "yaml";
 
-const TOP_LEVEL_KEYS = new Set(["schema_version", "id", "label", "description", "enforcement", "catalog", "team", "states", "transitions", "failure_routes", "invariants", "non_code_tasks"]);
+const TOP_LEVEL_KEYS = new Set(["schema_version", "id", "label", "description", "enforcement", "catalog", "requirements", "team", "states", "transitions", "failure_routes", "invariants", "non_code_tasks"]);
 const EFFECT_KINDS = new Set(["audit", "human_approval", "mqtt_event", "notification"]);
 
 export class PlaybookValidationError extends Error {
@@ -41,6 +41,31 @@ function validateCatalog(catalog, source) {
 	if (catalog.reusable !== undefined) assert(typeof catalog.reusable === "boolean", "catalog.reusable must be boolean", { source });
 	for (const field of ["intents", "exclusions", "parameters"]) {
 		if (catalog[field] !== undefined) assert(Array.isArray(catalog[field]) && catalog[field].every((value) => typeof value === "string" && value.trim()), `catalog.${field} must be an array of strings`, { source });
+	}
+}
+
+function validateRequirements(requirements, source) {
+	if (requirements === undefined) return;
+	assert(requirements && typeof requirements === "object" && !Array.isArray(requirements), "requirements must be a mapping", { source });
+	for (const kind of ["cli", "mcp"]) {
+		if (requirements[kind] === undefined) continue;
+		assert(Array.isArray(requirements[kind]), `requirements.${kind} must be an array`, { source });
+		for (const item of requirements[kind]) {
+			const name = typeof item === "string" ? item : item?.name;
+			assert(typeof name === "string" && name.trim(), `requirements.${kind} item requires name`, { source });
+			if (typeof item === "object" && item.credentials !== undefined) assert(Array.isArray(item.credentials) && item.credentials.every((key) => typeof key === "string"), `requirements.${kind}.${name}.credentials must be an array of variable names`, { source });
+		}
+	}
+	if (requirements.credentials === undefined) return;
+	assert(Array.isArray(requirements.credentials), "requirements.credentials must be an array", { source });
+	for (const item of requirements.credentials) {
+		const key = typeof item === "string" ? item : item?.key;
+		assert(typeof key === "string" && /^[A-Z][A-Z0-9_]*$/.test(key), `requirements.credentials has invalid key: ${key}`, { source });
+		if (typeof item === "object") {
+			if (item.required !== undefined) assert(typeof item.required === "boolean", `credential ${key}.required must be boolean`, { source });
+			if (item.secret !== undefined) assert(typeof item.secret === "boolean", `credential ${key}.secret must be boolean`, { source });
+			if (item.description !== undefined) assert(typeof item.description === "string", `credential ${key}.description must be a string`, { source });
+		}
 	}
 }
 
@@ -83,6 +108,7 @@ export function validatePlaybook(document, source = "<memory>") {
 	assert(Array.isArray(document.failure_routes), "failure_routes must be an array", { source });
 	assert(Array.isArray(document.invariants), "invariants must be an array", { source });
 	validateCatalog(document.catalog, source);
+	validateRequirements(document.requirements, source);
 	validateTeam(document.team, source);
 	uniqueIds(document.states, "state");
 	uniqueIds(document.transitions, "transition");

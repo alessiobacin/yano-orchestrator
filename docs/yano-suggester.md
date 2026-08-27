@@ -7,8 +7,8 @@ proposta approvata in un task di sviluppo.
 
 ## Prima versione
 
-- registro globale SQLite in `temp/suggester/suggester.sqlite`;
-- dati, evidence pack e report in `temp/suggester/`;
+- registro globale SQLite in `<YANO_DATA_DIR>/suggester/suggester.sqlite`;
+- dati, evidence pack e report in `<YANO_DATA_DIR>/suggester/`;
 - workspace Herdr globale `yano-suggester`, una tab per progetto chiamata
   `suggester-<project-name>`;
 - intake CLI con testo redatto e fingerprint esatto per deduplicare;
@@ -51,12 +51,12 @@ L'agente completa il report con:
 ```bash
 yano suggester complete --project-root /path/progetto \
   --suggestion-id SUG-... \
-  --report-file /path/assoluto/sotto/temp/suggester/...md \
+  --report-file /path/assoluto/sotto/YANO_DATA_DIR/suggester/...md \
   --category feature --summary "..." --value "..." \
   --complexity medium --risk low --confidence high
 ```
 
-Il report deve restare nella directory globale `temp/suggester`; questa
+Il report deve restare nella directory globale `<YANO_DATA_DIR>/suggester`; questa
 barriera impedisce che il worker usi la CLI per scrivere nel progetto.
 
 ## Flusso di approvazione

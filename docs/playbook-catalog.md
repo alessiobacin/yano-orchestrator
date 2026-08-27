@@ -23,9 +23,9 @@ workflow instead of launching every specialist.
 | `knowledge-authoring` | market-researcher, seo-strategist, website-content-strategist, business-docs-author, business-docs-reviewer | catalog-first intent match, parameterized project context, research evidence, structured deliverables and review; variants `single-author`, `research-and-author`, `full-team` |
 
 The `architect` role is global rather than project-scoped. It stages generated
-playbooks and roles under `temp/architect/proposals/`, validates every declared
+playbooks and roles under `<YANO_DATA_DIR>/architect/proposals/`, validates every declared
 skill/CLI/MCP before operation, and promotes immutable versions only into the
-global `temp/catalog/` after a healthy watcher round and positive planner/user
+global `<YANO_DATA_DIR>/catalog/` after a healthy watcher round and positive planner/user
 feedback. See [`yano-architect.md`](yano-architect.md).
 
 ## Universal gates

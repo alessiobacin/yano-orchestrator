@@ -14,8 +14,8 @@ Herdr globale con una tab per progetto.
   codice. Il planner apre il normale flusso con coder/reviewer e
   deployment-agent quando la diagnosi viene accettata.
 
-Il registro si trova in `debugger/debugger.sqlite` sotto la directory globale
-di Yano (`YANO_DATA_DIR`, normalmente `temp/`). Gli eventi importanti vengono
+Il registro si trova in `<YANO_DATA_DIR>/debugger/debugger.sqlite` sotto la
+directory globale di Yano. Gli eventi importanti vengono
 anche scritti nel trace del progetto; il trace resta la fonte forense, mentre
 SQLite è la fonte dello stato del bug.
 

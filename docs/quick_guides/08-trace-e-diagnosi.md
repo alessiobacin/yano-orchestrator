@@ -7,8 +7,10 @@ yano trace enable --mode full
 yano trace status
 ~~~
 
-Il trace vive nella cartella globale temp/ dell'installazione Yano, non nella
-repository del progetto.
+Il trace vive nella directory dati globale dell'utente, non nella repository del
+progetto e non dentro il pacchetto installato. Il percorso è automatico per
+macOS/Linux/Windows; usa `yano trace status` per vederlo. `YANO_DATA_DIR` è
+soltanto un override opzionale, configurabile con `yano config set`.
 
 Per seguire gli eventi mentre il team lavora:
 

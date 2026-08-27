@@ -116,8 +116,11 @@ MQTT name, or Herdr contains stale panes from a previous initialization, use
 `yano repair --dry-run` followed by `yano repair --yes --update`. Repair saves
 its own snapshot under global `<YANO_DATA_DIR>/recovery/repair/`, reconciles all Pi panes
 whose cwd is the current project, restarts all observed agents with the
-canonical scope and preserves application files, traces, database, worktrees
-and tabs.
+canonical scope and preserves application files, traces, database and
+worktrees. After a canonical replacement is ready it may close only stale
+duplicate singleton tabs for that same project (`planner`, `architect`, or
+`watcher`); it never closes application workers or tabs belonging to another
+project.
 
 For an explicit operator-wide sweep use `yano repair --all-projects --dry-run`
 first, then `yano repair --all-projects --yes --update`. It groups active Herdr

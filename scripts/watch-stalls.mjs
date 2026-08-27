@@ -48,6 +48,7 @@ import { readTraceRecords, tracePaths } from "./yano-trace-storage.mjs";
 import { appendRawTraceRecord } from "./yano-trace-storage.mjs";
 import { processYanoWatcherFindings, resolveYanoRepository, sendTelegramWatcherNotification } from "./yano-watcher-findings.mjs";
 import { missingConfigError, resolveYanoConfig } from "./yano-config.mjs";
+import { projectDbPath } from "./yano-project.mjs";
 
 const yanoRequire = createRequire(import.meta.url);
 let missingYanoRepoWarned = false;
@@ -100,7 +101,7 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 		console.warn("yano watch: YANO_ORCHESTRATOR_REPO non trovato nel .env di sviluppo né nella configurazione globale — se viene rilevato un difetto Yano, il comando mostrerà come configurarlo.");
 	}
 
-	const dbPath = path.join(watchCwd, ".pi", "extensions", "yano-orchestrator", "orchestratorStorage", "orchestrator.db");
+	const dbPath = projectDbPath(watchCwd, project);
 	const brokerUrl = config.PI_ORCH_BROKER_URL || process.env.PI_ORCH_BROKER_URL || "mqtt://127.0.0.1:1883";
 
 	let client = null;
@@ -292,12 +293,12 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 					delivered++;
 				} catch { /* best effort */ }
 			}
-			try { appendRawTraceRecord({ cwd: watchCwd, project, record: { type: "yano_watcher_notification_route", record_type: "event", instance: "yano-watcher", route: "planner", planner_instances: livePlanners.map((agent) => agent.instance), delivered, signal, run_id: details.run_id || null, ticket_id: details.ticket_id || null } }); } catch { /* best effort */ }
+			try { appendRawTraceRecord({ cwd: watchCwd, project, record: { type: "yano_watcher_notification_route", record_type: "event", instance: "yano-watcher", route: "planner", planner_instances: livePlanners.map((agent) => agent.instance), delivered, signal, fingerprint: details.fingerprint || null, ticket_path: details.ticket_path || null, run_id: details.run_id || null, ticket_id: details.ticket_id || null } }); } catch { /* best effort */ }
 			return { route: "planner", delivered };
 		}
 		const telegram = await sendTelegramWatcherNotification({ yanoRepo, env: config, message: `🚨 Yano watcher: ${summary}\nProgetto: ${project}\nSegnale: ${signal}\nNessun planner live è presente: serve attenzione dell’utente.\nDettagli: ${JSON.stringify(details)}` });
 		if (!telegram.ok && telegram.detail === "telegram_env_missing") throw missingConfigError("watch", telegram.missing, { packageRoot: effectivePackageRoot });
-		try { appendRawTraceRecord({ cwd: watchCwd, project, record: { type: "yano_watcher_notification_route", record_type: "event", instance: "yano-watcher", route: "telegram", planner_instances: [], telegram: { ok: telegram.ok, detail: telegram.detail }, signal, run_id: details.run_id || null, ticket_id: details.ticket_id || null } }); } catch { /* best effort */ }
+		try { appendRawTraceRecord({ cwd: watchCwd, project, record: { type: "yano_watcher_notification_route", record_type: "event", instance: "yano-watcher", route: "telegram", planner_instances: [], telegram: { ok: telegram.ok, detail: telegram.detail }, signal, fingerprint: details.fingerprint || null, ticket_path: details.ticket_path || null, run_id: details.run_id || null, ticket_id: details.ticket_id || null } }); } catch { /* best effort */ }
 		return { route: "telegram", telegram };
 	};
 	const previouslyRoutedStalls = new Set(readTraceRecords({ cwd: watchCwd, project, limit: 100000 })
@@ -320,6 +321,9 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 	let validationFindings = [];
 	try {
 		const traceRecords = readTraceRecords({ cwd: watchCwd, project, since: new Date(Date.now() - Math.max(0, opts.lookbackMs)), limit: 100000 });
+		const routedFindingKeys = new Set(traceRecords
+			.filter((record) => record.type === "yano_watcher_notification_route")
+			.flatMap((record) => [record.fingerprint, record.ticket_path].filter(Boolean)));
 		const escalation = await processYanoWatcherFindings({
 			records: traceRecords,
 			projectRoot: watchCwd,
@@ -339,7 +343,10 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 		}
 		for (const result of escalation.results.filter((item) => (livePlanners.length && (item.created || item.skipped)) || (item.skipped && !livePlanners.length))) {
 			if (result.skipped && !yanoRepo) throw missingConfigError("watch", ["YANO_ORCHESTRATOR_REPO"], { packageRoot: effectivePackageRoot });
-			await routeNotice({ summary: result.finding.summary, signal: result.finding.signal, details: { ticket_path: result.path || null, severity: result.finding.severity } });
+			const findingKey = result.finding.fingerprint || result.path || null;
+			if (findingKey && routedFindingKeys.has(findingKey)) continue;
+			await routeNotice({ summary: result.finding.summary, signal: result.finding.signal, details: { fingerprint: result.finding.fingerprint || null, ticket_path: result.path || null, severity: result.finding.severity } });
+			if (findingKey) routedFindingKeys.add(findingKey);
 		}
 	} catch (error) {
 		if (error?.code === "YANO_CONFIG_MISSING") throw error;

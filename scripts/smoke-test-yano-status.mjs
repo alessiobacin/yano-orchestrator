@@ -111,6 +111,8 @@ async function main() {
 	console.log("\n=== PART 6 — yano fleet ===");
 	out = await capture(() => runYanoStatus({ cwd, argv: ["fleet"] }));
 	ok(/planner-01|nessun agente/i.test(out), "yano fleet lists the live planner-01 from retrieved presence (or a graceful empty message)");
+	out = await capture(() => runYanoStatus({ cwd: PROJECT_ROOT, argv: ["fleet", "--project-root", cwd] }));
+	ok(/yano-status-smoke|planner-01|nessun agente/i.test(out), "yano fleet honors --project-root even when invoked from another directory");
 
 	console.log(`\n${PASS} assertions passed.`);
 	console.log("YANO-STATUS SMOKE TEST PASSED");

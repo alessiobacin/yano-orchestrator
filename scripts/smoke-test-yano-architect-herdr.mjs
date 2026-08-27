@@ -136,6 +136,9 @@ try {
 	assert.ok(state.calls.some((args) => args[0] === "agent" && args[1] === "start" && args[2] === "watcher-focusboard"), "Watcher deve usare l'istanza canonica del progetto");
 	for (const call of state.calls.filter((args) => args[0] === "agent" && args[1] === "start")) assert.notEqual(call[call.indexOf("--") + 1], "pi", "Herdr seleziona pi tramite --kind: non deve ricevere pi due volte");
 	assert.ok(state.calls.some((args) => args[0] === "agent" && args[1] === "prompt" && args[2] === "watcher-focusboard"), "il prompt lungo deve essere inviato dopo lo startup, via protocollo agent");
+	for (const call of state.calls.filter((args) => args[0] === "agent" && args[1] === "prompt")) {
+		assert.ok(call.includes("--wait") && call.includes("--until") && call.includes("working") && call.includes("--timeout"), "i prompt Herdr con timeout devono attendere uno stato esplicito");
+	}
 
 	const reprovisioned = runCli(["architect", "provision", "--proposal-id", proposalId, "--install", "--json"]);
 	assert.equal(reprovisioned.status, "ready_ephemeral");

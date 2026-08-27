@@ -1,6 +1,6 @@
 # Yano Orchestrator Architecture
 
-This document is the human-readable companion to [`architecture.mmd`](./architecture.mmd), the Mermaid source diagram for the current system.
+This document is the human-readable companion to [`architecture.mmd`](./architecture.mmd), the Mermaid source diagram for the current system. The detailed command flows are split into [`docs/diagramma/`](diagramma/README.md), so each operational path can be read without loading the whole architecture graph.
 
 ## Purpose
 
@@ -89,9 +89,65 @@ historical evidence, not live agents. Herdr can also retain an old `pane.name`
 after a restart, so repair prefers the current terminal title and MQTT card for
 the displayed instance while preserving old labels as aliases for cleanup.
 
-The operation never deletes application files, worktrees, SQLite state, trace
-history or Herdr tabs. `--force` is an explicit acknowledgement that a process
-which did not leave gracefully may be interrupted.
+The operation never deletes application files, worktrees, SQLite state or trace
+history. Once a canonical replacement is ready, it may close only stale
+duplicate singleton tabs for the same project (`planner`, `architect` or
+`watcher`); it does not close unrelated worker tabs. `--force` is an explicit
+acknowledgement that a process which did not leave gracefully may be
+interrupted.
+
+### Inventario degli agenti esterni
+
+Herdr è la fonte di verità per sapere se un agente è realmente attivo. I
+comandi brevi interrogano quella fonte senza dover filtrare manualmente lo
+snapshot:
+
+```text
+yano architect projects
+yano watcher projects
+yano debugger projects
+yano auto-improve projects
+yano suggester projects
+```
+
+Per includere anche proposte e registrazioni offline usa `--all`; per script
+usa `--json`. `active_projects` indica solo agenti Pi live, mentre
+`registered_projects` può contenere una proposta Architect pronta ma con
+Architect già terminato. Architect è normalmente transitorio: serve a creare,
+verificare o revisionare un playbook; Watcher può restare attivo come tripwire.
+Il Planner è invece un agente del progetto e si controlla con
+`yano fleet --project-root <dir>`.
+
+`fleet` è una vista read-only: filtra heartbeat recenti, ignora card retained
+stale/offline e, quando Herdr è disponibile, esclude anche un processo marcato
+`done`. Non crea agenti né ripara tab.
+
+`external_workers` nel report di `repair` contiene i worker esterni effettivamente
+osservati da Herdr o presenti nei registri globali. Architect e Watcher non hanno
+un registro `*_projects` autonomo: quando non sono live, il loro contesto è
+visibile in `architect_proposals`, non in `external_workers`.
+
+### Database operativo e Gantt
+
+Il database locale non viene creato per il solo fatto che la directory sia
+stata inizializzata. Il Planner lo crea chiamando `orchestrator_init`, così un
+progetto appena scaffoldato può legittimamente avere `orchestrator.db` assente.
+Se serve preparare la struttura prima del primo run:
+
+```text
+yano repair --project-root <dir> --yes --init-db
+```
+
+Questo crea lo schema corrente in modo idempotente e non modifica il codice
+dell'applicazione. Rimane necessario che il Planner esegua
+`orchestrator_init`, `run_create`, `spec_create` e `ticket_create` per avere
+dati da visualizzare. Perciò Gantt può rispondere `ok: true` con `runs: []`:
+significa che il DB esiste ma non è ancora stato creato un run. Se il DB manca,
+il server mostra il percorso preciso e il comando `repair --init-db`.
+
+```text
+yano gantt --project-root <dir> --project <nome> --port 8174
+```
 
 ## Persistence model
 
@@ -187,6 +243,14 @@ Routing is presence-aware: with at least one live planner, the watcher sends a
 direct MQTT command to each live planner instance; if no live planner exists,
 it sends the alert to Telegram. A project with no agents and no detected fault
 is considered idle and does not page the user.
+
+The external Watcher created for a playbook performs one bounded validation pass
+and then keeps a zero-token `yano watch` process alive with a ten-minute
+interval. The continuous pass detects liveness, stalled tickets and explicit
+high-confidence Yano signals. It is not an LLM semantic review of every line
+of every conversation: deeper interpretation requires a bounded prompt to the
+Watcher, with evidence in the trace. A tab labelled `watcher-<project-name>`
+without a live Pi process is not an active Watcher.
 
 ### Global `yano-debugger`
 

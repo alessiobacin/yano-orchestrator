@@ -69,6 +69,9 @@ fs.writeFileSync(path.join(fakeBin, "herdr"), [
 	"  const im=cmd.match(/--instance '([^']+)'/);const rm=cmd.match(/--role '([^']+)'/);",
 	"  if(im&&rm){if(!s.panes)s.panes=s.agents.map(a=>({...a}));const old=s.panes.find(p=>p.pane_id===pane)||{tab_id:null,workspace_id:'w-project'};s.agents=s.agents.filter(a=>a.pane_id!==pane);s.agents.push({agent:'pi',name:im[1],agent_status:'idle',cwd,pane_id:pane,tab_id:old.tab_id,workspace_id:old.workspace_id,terminal_title_stripped:im[1]});write(s);}process.exit(0);",
 	"}",
+	"if(args[0]==='agent'&&args[1]==='start'){",
+	"  const herdrName=args[2];const instance=args[args.indexOf('--instance')+1]||herdrName;const pane=args[args.indexOf('--pane')+1];if(!s.panes)s.panes=s.agents.map(a=>({...a}));const old=s.panes.find(p=>p.pane_id===pane)||{tab_id:null,workspace_id:'w-project'};s.agents=s.agents.filter(a=>a.pane_id!==pane);s.agents.push({agent:'pi',name:herdrName,agent_status:'idle',cwd,pane_id:pane,tab_id:old.tab_id,workspace_id:old.workspace_id,terminal_title_stripped:instance});write(s);process.exit(0);",
+	"}",
 	"if(args[0]==='agent'&&args[1]==='prompt'){process.exit(0);}",
 	"if(args[0]==='tab'&&args[1]==='rename'){const t=s.tabs.find(x=>x.tab_id===args[2]);if(t)t.label=args.slice(3).join(' ');write(s);process.exit(0);}",
 	"process.exit(0);",
@@ -90,7 +93,7 @@ assert.deepEqual(result.restarted.filter((item) => item.ok).map((item) => item.i
 	"watcher-repair-apply",
 ].sort());
 const finalState = JSON.parse(fs.readFileSync(statePath, "utf8"));
-const planner = finalState.agents.find((agent) => agent.name === "planner-01");
+const planner = finalState.agents.find((agent) => agent.terminal_title_stripped === "planner-01");
 assert.equal(planner.workspace_id, "w-project", "Planner riallineato nel workspace del progetto, non in yano-watcher");
 assert.deepEqual(finalState.tabs.filter((tab) => tab.tab_id !== "t-planner").map((tab) => tab.label).sort(), ["architect-repair-apply", "planner-01", "watcher-repair-apply"].sort());
 assert.equal(fs.readFileSync(path.join(projectRoot, "package.json"), "utf8"), "{\"name\":\"repair-apply\"}\n", "repair non modifica il progetto");

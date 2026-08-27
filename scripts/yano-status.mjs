@@ -13,7 +13,7 @@
 //   yano status --project <scope> stato per uno scope MQTT esplicito
 //   yano logs [instance]          ultime righe del log JSONL di un'istanza
 //   yano logs --project <scope>   log per uno scope MQTT esplicito
-//   yano fleet [--project <scope>] lista agenti live dal broker (retained presence)
+//   yano fleet [--project <scope>] lista agenti live da MQTT, verificati in Herdr quando disponibile
 //   yano mcp [role]               MCP dichiarati per ruolo/istanza (mcp.json + roles)
 //   yano skills [role]            skill dichiarate per ruolo/istanza (roles.yaml/agents.yaml)
 //   yano doctor --network         verifica raggiungibilità broker + git + pi
@@ -48,8 +48,13 @@ function applyDataDir(argv) {
 	if (dataDir) process.env.YANO_DATA_DIR = path.resolve(dataDir);
 }
 
+function projectCwd(cwd, argv) {
+	const root = optionValue(argv, "--project-root");
+	return root ? path.resolve(root) : cwd;
+}
+
 function positionalArg(argv) {
-	const valueFlags = new Set(["--project", "--run", "--data-dir"]);
+	const valueFlags = new Set(["--project", "--project-root", "--run", "--data-dir"]);
 	for (let index = 0; index < argv.length; index++) {
 		const arg = argv[index];
 		if (valueFlags.has(arg)) { index++; continue; }
@@ -72,16 +77,47 @@ function resolveProject(cwd, argv = []) {
 	return slugify(path.basename(cwd));
 }
 
+function herdrProjectStatuses(projectRoot) {
+	if (!projectRoot) return new Map();
+	const result = spawnSync("herdr", ["api", "snapshot"], { encoding: "utf8", maxBuffer: 32_000_000 });
+	if (result.error || result.status !== 0) return new Map();
+	let snapshot;
+	try {
+		const parsed = JSON.parse(result.stdout || "");
+		snapshot = parsed?.result?.snapshot || parsed?.result || parsed;
+	} catch { return new Map(); }
+	const sameRoot = (candidate) => {
+		if (!candidate) return false;
+		try { return fs.realpathSync(candidate) === fs.realpathSync(projectRoot); }
+		catch { return path.resolve(candidate) === path.resolve(projectRoot); }
+	};
+	const statuses = new Map();
+	const panesById = new Map((snapshot?.panes || []).map((pane) => [pane.pane_id, pane]));
+	const cards = [
+		...(snapshot?.agents || []).map((agent) => ({ ...(panesById.get(agent.pane_id) || {}), ...agent })),
+		...(snapshot?.panes || []),
+	];
+	for (const card of cards) {
+		if (card.agent !== "pi" || !sameRoot(card.cwd || card.foreground_cwd)) continue;
+		const status = String(card.agent_status || "unknown").toLowerCase();
+		const identities = [card.name, card.agent_instance, card.terminal_title_stripped, card.terminal_title, card.label]
+			.map((item) => String(item || "").trim()).filter(Boolean);
+		for (const identity of identities) statuses.set(identity, status);
+	}
+	return statuses;
+}
+
 function loadYamlOrNull(file) { try { if (!existsSync(file)) return null; return parseYaml(readFileSync(file, "utf-8")); } catch { return null; } }
 
 function runStatus(cwd, argv) {
-	const dbPath = projectDbPath(cwd, optionValue(argv, "--project"));
+	const effectiveCwd = projectCwd(cwd, argv);
+	const dbPath = projectDbPath(effectiveCwd, optionValue(argv, "--project"));
 	if (!existsSync(dbPath)) { console.log("yano status: nessun orchestrator.db per questo progetto — niente da mostrare."); return; }
 	let DatabaseSync;
 	try { ({ DatabaseSync } = yanoRequire("node:sqlite")); } catch (e) { console.error(`yano status: node:sqlite non disponibile (${e.message})`); process.exit(1); }
 	const db = new DatabaseSync(dbPath, { readOnly: true });
 	const runId = optionValue(argv, "--run");
-	const project = resolveProject(cwd, argv);
+	const project = resolveProject(effectiveCwd, argv);
 	const runs = runId
 		? (db.prepare("SELECT * FROM runs WHERE id = ?").get(runId) ? [db.prepare("SELECT * FROM runs WHERE id = ?").get(runId)] : [])
 		: db.prepare("SELECT * FROM runs WHERE project = ? ORDER BY created_at DESC").all(project);
@@ -98,6 +134,7 @@ function runStatus(cwd, argv) {
 }
 
 function runLogs(cwd, argv) {
+	cwd = projectCwd(cwd, argv);
 	const instance = positionalArg(argv);
 	const logsDir = tracePaths({ cwd, project: resolveProject(cwd, argv) }).eventsDir;
 	if (!existsSync(logsDir)) { console.log("yano logs: nessuna directory logs per questo progetto."); return; }
@@ -114,7 +151,13 @@ function runLogs(cwd, argv) {
 }
 
 function runFleet(cwd, argv) {
-	const project = resolveProject(cwd, argv);
+	// `--project-root` is deliberately resolved before deriving the project
+	// name. Previously the flag was accepted by the CLI but ignored here, so
+	// invoking `yano fleet --project-root /path/to/app` from another directory
+	// silently queried the wrong MQTT scope.
+	const projectRoot = optionValue(argv, "--project-root");
+	const effectiveCwd = projectRoot ? path.resolve(projectRoot) : cwd;
+	const project = resolveProject(effectiveCwd, argv);
 	const broker = process.env.PI_ORCH_BROKER_URL || "mqtt://127.0.0.1:1883";
 	const staleAfterMs = Number(process.env.PI_ORCH_STALE_AFTER_MS) || 45_000;
 	return new Promise((resolve) => {
@@ -127,18 +170,21 @@ function runFleet(cwd, argv) {
 			client.subscribe(`pi/${project}/agents/+/status`, { qos: 0 }, () => {
 				setTimeout(() => {
 					const now = Date.now();
+					const herdrStatuses = herdrProjectStatuses(effectiveCwd);
 					const live = [...agents.values()].filter((a) => {
 						if (a.status === "offline") return false;
 						const heartbeat = Date.parse(a.last_heartbeat || "");
-						return Number.isFinite(heartbeat) && now - heartbeat <= staleAfterMs;
+						if (!Number.isFinite(heartbeat) || now - heartbeat > staleAfterMs) return false;
+						const herdrStatus = herdrStatuses.get(a.instance);
+						return !herdrStatus || !["unknown", "offline", "done", "completed", "stopped", "paused"].includes(herdrStatus);
 					});
 					const ignored = agents.size - live.length;
 					if (!live.length) {
-						console.log(`yano fleet: nessun agente live per il progetto "${project}"${ignored ? ` (${ignored} card retained offline/stale ignorate)` : ""}.`);
+						console.log(`yano fleet: nessun agente live per il progetto "${project}"${ignored ? ` (${ignored} card retained/offline/stale o già terminata in Herdr ignorate)` : ""}.`);
 					} else {
 						console.log(`yano fleet: ${live.length} agente/i live nel progetto "${project}":`);
 						live.forEach((a) => console.log(`   ${a.instance} (${a.role}) ${a.status} team=[${(a.team || []).join(",")}]`));
-						if (ignored) console.log(`   (${ignored} card retained offline/stale ignorate)`);
+						if (ignored) console.log(`   (${ignored} card retained/offline/stale o già terminata in Herdr ignorate)`);
 					}
 					try { client.end(true); } catch { /* ignore */ }
 					resolve();
@@ -149,6 +195,7 @@ function runFleet(cwd, argv) {
 }
 
 function runMcp(cwd, argv) {
+	cwd = projectCwd(cwd, argv);
 	const project = resolveProject(cwd, argv);
 	const dir = path.join(cwd, ".pi");
 	const mcpJson = loadYamlOrNull(path.join(cwd, "mcp.json")) || loadYamlOrNull(path.join(dir, "mcp.json")) || {};
@@ -176,6 +223,7 @@ function runMcp(cwd, argv) {
 }
 
 function runSkills(cwd, argv) {
+	cwd = projectCwd(cwd, argv);
 	const project = resolveProject(cwd, argv);
 	const rolesDoc = loadYamlOrNull(path.join(cwd, "agents", "roles.yaml"));
 	const agentsDoc = loadYamlOrNull(path.join(cwd, "agents", "agents.yaml"));
@@ -210,6 +258,7 @@ function cmdExists(cmd, args = ["--version"]) {
 }
 
 async function runDoctorNetwork(cwd, argv = []) {
+	cwd = projectCwd(cwd, argv);
 	console.log(`yano doctor --network — progetto "${resolveProject(cwd, argv)}"\n`);
 	const rows = [];
 	const brokerUp = await tcpReachable("127.0.0.1", 1883);

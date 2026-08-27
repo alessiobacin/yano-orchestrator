@@ -1,0 +1,10 @@
+flowchart LR
+    AGENTS["Pi + Herdr + CLI"] --> JSONL["trace globale JSONL\n<YANO_DATA_DIR>/traces"]
+    JSONL --> INDEX["semantic-index.sqlite\nOllama embeddings opzionali"]
+    JSONL --> MEMORY["memorie/proiezioni\nrebuildable"]
+    PLANNER["orchestrator tools"] --> DB["project .pi/.../orchestrator.db"]
+    DB --> RUNS["runs/specs/tickets/DAG"]
+    DB --> GANTT["yano gantt"]
+    INIT["repair --init-db\no orchestrator_init"] --> DB
+    DB --> EMPTY["DB presente + runs=[]\nGantt: nessun run"]
+    MISSING["DB assente"] --> HINT["Gantt indica\nrepair --yes --init-db"]

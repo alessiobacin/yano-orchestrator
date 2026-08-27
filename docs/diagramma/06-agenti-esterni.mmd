@@ -1,0 +1,16 @@
+flowchart TD
+    PROJECT["progetto applicativo"] --> WATCHER["yano-watcher\nread-only"]
+    PROJECT --> DEBUGGER["yano-debugger\nread-only"]
+    PROJECT --> AUTO["yano-auto-improver\nread-only"]
+    PROJECT --> SUGGESTER["yano-suggester\nread-only"]
+    PROJECT --> ARCHITECT["yano-architect\ncatalogo globale"]
+    WATCHER --> PLANNER["Planner\nverifica/decide"]
+    DEBUGGER --> PLANNER
+    AUTO --> PLANNER
+    SUGGESTER --> PLANNER
+    ARCHITECT --> PLANNER
+    PLANNER --> DEV["normale flusso\nspec → tickets → team"]
+    WATCHER -. "mai codice app" .-> PROJECT
+    DEBUGGER -. "mai fix" .-> PROJECT
+    AUTO -. "mai modifica" .-> PROJECT
+    SUGGESTER -. "mai implementazione" .-> PROJECT

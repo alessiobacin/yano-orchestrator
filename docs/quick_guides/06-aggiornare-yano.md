@@ -68,6 +68,9 @@ yano repair --dry-run
 yano repair --yes --update
 ~~~
 
-repair salva uno snapshot prima di fermare gli agenti e non cancella tab,
-trace, database, worktree o codice applicativo. La guida completa è in
+repair salva uno snapshot prima di fermare gli agenti e non cancella trace,
+database, worktree o codice applicativo. Dopo che l'istanza canonica è pronta
+può chiudere soltanto eventuali copie stale duplicate di Planner, Architect o
+Watcher dello stesso progetto; non chiude worker applicativi o tab di altri
+progetti. La guida completa è in
 [17-ripristino-automatico](./17-ripristino-automatico.md).

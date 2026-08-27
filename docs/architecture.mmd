@@ -4,8 +4,9 @@ flowchart TD
     CLI --> INIT["init / doctor / start"]
     INIT --> HERDR_INIT["init --herdr\nHerdr workspace + root pane"]
     CLI --> OBS["status / fleet / deps / gantt / watch / trace"]
+    CLI --> EXT_STATUS["architect|watcher|debugger|auto-improve|suggester projects\nactive vs registered"]
     CLI --> RELOAD["update --reload\ncontrolled restart"]
-    CLI --> REPAIR["repair\nreconcile project + Herdr + MQTT"]
+    CLI --> REPAIR["repair\nsnapshot + Herdr agent start\nreconcile + stale singleton cleanup"]
     CLI --> REPAIR_ALL["repair --all-projects\nsequential global sweep"]
     CLI --> GLOBAL_CONFIG["Global config.env\nmanaged by `yano config`\ncredentials + runtime defaults"]
     INIT --> PLANNER["pi planner\nrole + instance identity"]
@@ -83,7 +84,7 @@ flowchart TD
 
     subgraph YANO_WATCHER["Global watcher boundary"]
         WATCHER["yano-watcher\nrole watcher\nread-only validation agent\ntab: watcher-<project-name>"]
-        WATCHER_ONCE["yano watch --once\nzero-token bounded scan"]
+        WATCHER_ONCE["yano watch --once / --interval-ms\nzero-token bounded scan / polling"]
         YANO_TICKETS["yano-orchestrator/.scratch/optimize-orchestrator/issues\nMarkdown maintenance tickets"]
     end
 

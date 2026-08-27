@@ -1,0 +1,16 @@
+flowchart LR
+    PLANNER["Planner: task"] --> ASSESS["Architect assess\ncatalog-first"]
+    ASSESS --> REUSE["match esatto\nriuso"]
+    ASSESS --> PROPOSE["nessun match\nproposta globale"]
+    PROPOSE --> INTERVIEW["intervista utente\nsingle/team/priorità"]
+    INTERVIEW --> TEAM["team contract\nruoli + varianti"]
+    TEAM --> GATE["install/check\nskill CLI MCP credenziali"]
+    GATE --> EPHEMERAL["playbook ephemeral\nYANO_DATA_DIR"]
+    EPHEMERAL --> WATCHER["Watcher: validation\nhealthy/finding/blocked"]
+    WATCHER --> FEEDBACK["feedback utente\nPlanner"]
+    FEEDBACK --> PROMOTE{"validation + feedback OK?"}
+    PROMOTE -- no --> REVISE["revision_required\nArchitect modifica"]
+    REVISE --> GATE
+    PROMOTE -- sì --> CATALOG["catalogo globale\nversione persistente"]
+    REUSE --> PLANNER
+    CATALOG --> PLANNER

@@ -23,6 +23,8 @@ pensate per chi usa Yano per la prima volta e lavora dalla root del progetto.
 16. [Yano Architect: playbook e agenti on-the-fly](./16-yano-architect.md)
 17. [Ripristino automatico di un progetto](./17-ripristino-automatico.md)
 18. [Catalogo playbook: requisiti, bundle e rimozione](./18-catalogo-playbook.md)
+19. [Inventario agenti, repair e Gantt](./19-inventario-agenti-e-gantt.md)
+20. [Sales Companion: riprendere i 17 documenti](./20-sales-companion-17-documenti.md)
 
 Per una spiegazione completa del primo task, consulta anche la
 [quick start estesa](../quick-start.md). Per il comportamento dettagliato del

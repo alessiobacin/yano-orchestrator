@@ -548,7 +548,7 @@ function persistChecks(db, proposalId, checks) {
 }
 
 function herdrSnapshot() {
-	const result = spawnSync("herdr", ["api", "snapshot"], { encoding: "utf8" });
+	const result = spawnSync("herdr", ["api", "snapshot"], { encoding: "utf8", maxBuffer: 32_000_000 });
 	if (result.status !== 0) return null;
 	try { const parsed = JSON.parse(result.stdout); return parsed?.result?.snapshot || parsed?.result || parsed; } catch { return null; }
 }
@@ -743,11 +743,12 @@ function launchAgentTab({ label, cwd, workspaceId, instance, role, project, prom
 		tab = null;
 		pane = null;
 	}
-	// A pane without an agent is not enough evidence that Herdr can accept an
-	// agent start. Retained/old panes are reported as `unknown` but can still be
-	// unavailable shells (the exact failure seen when repair reused wN:p7).
+	// A pane without a live agent is not enough evidence that Herdr can accept
+	// an agent start. Retained/old panes are reported as `unknown`, `done` or
+	// `offline` but can still be unavailable shells (the exact failure seen when
+	// provisioning tried to reuse wN:pD after the previous watcher exited).
 	// Keep those panes untouched and create a fresh Herdr tab instead.
-	if (pane && !pane.agent) {
+	if (pane && (!pane.agent || ["unknown", "offline", "done", "completed"].includes(String(pane.agent_status || "").toLowerCase()))) {
 		tab = null;
 		pane = null;
 	}
@@ -771,7 +772,11 @@ function launchAgentTab({ label, cwd, workspaceId, instance, role, project, prom
 	const started = spawnSync("herdr", ["agent", "start", agentName, "--kind", "pi", "--pane", pane.pane_id, "--timeout", "120000", "--", ...startupArgs], { cwd, encoding: "utf8", maxBuffer: 2_000_000 });
 	if (started.status !== 0) throw new Error(`yano architect: agente Herdr ${agentName} non avviato${started.stderr ? `: ${started.stderr.trim()}` : (started.stdout ? `: ${started.stdout.trim()}` : "")}`);
 	if (initialPrompt) {
-		const prompted = spawnSync("herdr", ["agent", "prompt", agentName, initialPrompt, "--timeout", "120000"], { cwd, encoding: "utf8", maxBuffer: 2_000_000 });
+		// Herdr requires --wait whenever --timeout is supplied. Wait only until
+		// the agent becomes active: waiting for the whole LLM turn would make
+		// provisioning look hung and could prevent the registry from being
+		// updated when the prompt was already accepted.
+		const prompted = spawnSync("herdr", ["agent", "prompt", agentName, initialPrompt, "--wait", "--until", "working", "--timeout", "120000"], { cwd, encoding: "utf8", maxBuffer: 2_000_000 });
 		if (prompted.status !== 0) throw new Error(`yano architect: prompt iniziale non consegnato all'agente Herdr ${agentName}${prompted.stderr ? `: ${prompted.stderr.trim()}` : (prompted.stdout ? `: ${prompted.stdout.trim()}` : "")}`);
 	}
 	return { workspace_id: workspaceId, tab_id: tab.tab_id, pane_id: pane.pane_id, label, command, instance, agent_kind: "pi", herdr_agent_name: agentName, started: true, dry_run: false };
@@ -801,7 +806,9 @@ function launchValidationWatcher(db, proposal, { dryRun = false } = {}) {
 	const manifest = parseJson(fs.readFileSync(proposal.manifest_path, "utf8"), {});
 	const playbookChecksum = fs.existsSync(proposal.playbook_path) ? crypto.createHash("sha256").update(fs.readFileSync(proposal.playbook_path)).digest("hex") : "";
 	const instance = canonicalExternalInstance("watcher", proposal.project_name);
-	const prompt = `Valida il round del playbook ${proposal.proposal_id} per il progetto ${proposal.project_root} in modo esclusivamente read-only. Usa yano watch --once --project-root ${safeShell(proposal.project_root)} --project ${safeShell(proposal.project_name)} --validation-run ${safeShell(runId)} --playbook-proposal ${safeShell(proposal.proposal_id)} --playbook-id ${safeShell(manifest.playbook_id || proposal.playbook_id)} --playbook-checksum ${safeShell(playbookChecksum)}; poi leggi il trace e comunica al planner un esito healthy, finding o blocked con evidenze. Non modificare mai il progetto e non promuovere il playbook. Non usare mai find /, scansioni dell'intero filesystem o comandi senza timeout: limita ogni lettura alla root del progetto e ai percorsi Yano esplicitamente indicati.`;
+	const validationCommand = `yano watch --once --project-root ${safeShell(proposal.project_root)} --project ${safeShell(proposal.project_name)} --validation-run ${safeShell(runId)} --playbook-proposal ${safeShell(proposal.proposal_id)} --playbook-id ${safeShell(manifest.playbook_id || proposal.playbook_id)} --playbook-checksum ${safeShell(playbookChecksum)}`;
+	const continuousCommand = `yano watch --project-root ${safeShell(proposal.project_root)} --project ${safeShell(proposal.project_name)} --lookback-ms 3600000 --interval-ms 600000 --away`;
+	const prompt = `Valida il round del playbook ${proposal.proposal_id} per il progetto ${proposal.project_root} in modo esclusivamente read-only. Esegui prima una sola scansione bounded con ${validationCommand}, poi avvia e lascia attivo il controllo continuo con ${continuousCommand}: il secondo comando deve restare in esecuzione e controllare il workflow ogni 10 minuti, non terminare dopo la prima scansione. Usa il trace e i segnali MQTT per rilevare ticket stalled, agenti assenti, scope errati, errori dei tool interni e deviazioni osservabili; comunica al planner gli esiti con evidenze. Non modificare mai il progetto, non promuovere il playbook e non eseguire fix. Non usare mai find /, scansioni dell'intero filesystem o comandi senza timeout: limita ogni lettura alla root del progetto e ai percorsi Yano esplicitamente indicati.`;
 	const workspace = ensureWorkspace(WATCHER_WORKSPACE, workspaceRoot, dryRun);
 	const label = `watcher-${slug(proposal.project_name)}`.slice(0, 60);
 	const launched = launchAgentTab({ label, cwd: proposal.project_root, workspaceId: workspace.workspace.workspace_id, instance, role: "watcher", project: proposal.project_name, prompt, dryRun });

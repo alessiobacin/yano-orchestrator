@@ -33,12 +33,28 @@ Yano salva prima uno snapshot in:
 <YANO_DATA_DIR>/recovery/repair/<progetto>/
 ~~~
 
-Poi termina gli agenti del progetto via MQTT, libera le eventuali pane Herdr,
-riusa o crea i workspace necessari, rilancia gli agenti osservati con lo scope
-corretto (incluso planner-01) e verifica la nuova presence.
+Poi termina gli agenti del progetto via MQTT, riusa o crea i workspace necessari,
+avvia gli agenti direttamente con `herdr agent start` e attende la loro
+readiness prima di verificare la nuova presence. Planner, Architect e Watcher
+mantengono rispettivamente l'identità visibile `planner-01`,
+`architect-<project-name>` e `watcher-<project-name>`; il nome tecnico Herdr è
+project-scoped per evitare collisioni tra progetti.
 
-Il codice applicativo, i worktree, il database, i trace e le tab Herdr non
-vengono cancellati.
+Il codice applicativo, i worktree, il database e i trace non vengono cancellati.
+Quando una nuova istanza canonica è pronta, `repair` può chiudere soltanto le
+copie stale duplicate di Planner, Architect o Watcher dello stesso progetto.
+Non chiude i worker applicativi e non tocca tab di altri progetti. Per forzare
+la chiusura di un processo che non risponde serve esplicitamente `--force`.
+
+Se il progetto non ha ancora il database operativo, puoi far creare soltanto
+lo schema corrente senza cancellare nulla:
+
+~~~
+yano repair --yes --init-db
+~~~
+
+Questo non crea un run né ticket: il Planner deve ancora chiamare
+`orchestrator_init` e `run_create`.
 
 ## Riparazione con aggiornamento
 

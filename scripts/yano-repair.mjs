@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import mqtt from "mqtt";
 import { buildTraceOverview, projectKey, readTraceRecords, resolveTraceProject, traceRoot } from "./yano-trace-storage.mjs";
 import { projectDbPath, resolveYanoWorkspaceDir, slugifyProject } from "./yano-project.mjs";
+import { ensureProjectDatabase } from "./yano-project-db.mjs";
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -40,10 +41,6 @@ function safeJson(valueToSerialize) {
 }
 function canonicalRoot(valueToResolve) {
 	try { return fs.realpathSync(valueToResolve); } catch { return path.resolve(valueToResolve); }
-}
-function shellQuote(valueToQuote) {
-	if (process.platform === "win32") return "\"" + String(valueToQuote).replaceAll("\"", "\\\"") + "\"";
-	return "'" + String(valueToQuote).replaceAll("'", "\\'\"'\"'") + "'";
 }
 function commandExists(command) {
 	const result = spawnSync(command, ["--version"], { stdio: "ignore", shell: process.platform === "win32" });
@@ -87,7 +84,7 @@ function workerIsActive(status) {
 	return !new Set(["", "stopped", "paused", "rejected", "completed", "done", "blocked", "offline"]).has(String(status || "").toLowerCase());
 }
 
-function externalWorkerRows() {
+function externalWorkerRows(snapshot = null) {
 	const root = traceRoot();
 	const registries = [
 		{ source: "debugger", role: "debugger", file: path.join(root, "debugger", "debugger.sqlite"), table: "debugger_projects", defaultInstance: (name) => `debugger-${slugifyProject(name)}` },
@@ -100,7 +97,7 @@ function externalWorkerRows() {
 			if (!row.root || !workerIsActive(row.worker_status)) continue;
 			const name = String(row.name || path.basename(row.root));
 			rows.push({
-				source: registry.source,
+				source: [registry.source],
 				role: registry.role,
 				root: canonicalRoot(row.root),
 				name,
@@ -113,26 +110,62 @@ function externalWorkerRows() {
 			});
 		}
 	}
+	// Architect e Watcher non hanno un registro projects dedicato: la loro
+	// presenza runtime è pubblicata da Herdr. Prima del fix venivano quindi
+	// esclusi da `external_workers`, anche se erano regolarmente attivi.
+	const workspaceLabels = new Map((snapshot?.workspaces || []).map((workspace) => [workspace.workspace_id, workspace.label]));
+	for (const pane of allSnapshotPanes(snapshot)) {
+		const role = roleFromInstance(pane.instance, pane.label);
+		if (!role || !["architect", "watcher", "debugger", "auto-improver", "suggester"].includes(role)) continue;
+		if (pane.agent !== "pi" || ["unknown", "offline", "done", "completed"].includes(String(pane.agent_status || "").toLowerCase()) || !pane.cwd) continue;
+		const name = resolveTraceProject(pane.cwd);
+		const key = projectKey(pane.cwd, name);
+		const existing = rows.find((worker) => worker.role === role && canonicalRoot(worker.root) === canonicalRoot(pane.cwd));
+		if (existing) {
+			Object.assign(existing, {
+				root: canonicalRoot(pane.cwd), name, key, status: pane.agent_status || "idle",
+				workspace_id: pane.workspace_id || existing.workspace_id,
+				tab_id: pane.tab_id || existing.tab_id, pane_id: pane.pane_id || existing.pane_id,
+				instance: pane.instance || existing.instance, active: true,
+				workspace: workspaceLabels.get(pane.workspace_id) || existing.workspace || null,
+			});
+			existing.source = [...new Set([...(existing.source || []), "herdr"] )];
+		} else {
+			rows.push({ source: "herdr", role, root: canonicalRoot(pane.cwd), name, key, status: pane.agent_status || "idle", active: true, workspace_id: pane.workspace_id || null, workspace: workspaceLabels.get(pane.workspace_id) || null, tab_id: pane.tab_id || null, pane_id: pane.pane_id || null, instance: pane.instance || pane.label });
+		}
+	}
 	return rows;
 }
 
 function allSnapshotPanes(snapshot) {
 	if (!snapshot) return [];
-	return (snapshot.panes || []).map((pane) => ({
-		pane_id: pane.pane_id,
-		tab_id: pane.tab_id,
-		workspace_id: pane.workspace_id,
-		label: paneLabel(pane),
-		agent: pane.agent || null,
-		agent_status: pane.agent_status || "unknown",
-		instance: paneInstance(pane) || (pane.agent === "pi" ? paneLabel(pane) : null),
-		cwd: pane.cwd || pane.foreground_cwd || null,
-		raw_labels: [pane.label, pane.terminal_title_stripped, pane.terminal_title, pane.name].filter(Boolean),
-	}));
+	const agentsByPane = new Map((snapshot.agents || []).map((agent) => [agent.pane_id, agent]));
+	const tabsById = new Map((snapshot.tabs || []).map((tab) => [tab.tab_id, tab]));
+	const source = [...(snapshot.panes || [])];
+	const known = new Set(source.map((pane) => pane.pane_id).filter(Boolean));
+	for (const agent of snapshot.agents || []) {
+		if (!agent.pane_id || !known.has(agent.pane_id)) source.push(agent);
+	}
+	return source.map((pane) => {
+		const companion = agentsByPane.get(pane.pane_id) || {};
+		const merged = { ...companion, ...pane };
+		const tabLabel = tabsById.get(merged.tab_id)?.label;
+		return {
+			pane_id: merged.pane_id,
+			tab_id: merged.tab_id,
+			workspace_id: merged.workspace_id,
+			label: paneLabel(merged) || String(tabLabel || "").trim(),
+			agent: merged.agent || null,
+			agent_status: merged.agent_status || "unknown",
+			instance: paneInstance(merged) || (merged.agent === "pi" ? paneLabel(merged) : null),
+			cwd: merged.cwd || merged.foreground_cwd || null,
+			raw_labels: [merged.label, merged.terminal_title_stripped, merged.terminal_title, merged.name, tabLabel].filter(Boolean),
+		};
+	});
 }
 
-function externalWorkersForProject(info) {
-	return externalWorkerRows().filter((worker) => canonicalRoot(worker.root) === canonicalRoot(info.root));
+function externalWorkersForProject(info, snapshot = null) {
+	return externalWorkerRows(snapshot).filter((worker) => canonicalRoot(worker.root) === canonicalRoot(info.root));
 }
 
 function findWorkerPane(snapshot, worker) {
@@ -193,7 +226,7 @@ function ensureWorkerPane(snapshot, info, worker) {
 
 function herdrSnapshot() {
 	if (!commandExists("herdr")) return null;
-	const result = spawnSync("herdr", ["api", "snapshot"], { encoding: "utf8" });
+	const result = spawnSync("herdr", ["api", "snapshot"], { encoding: "utf8", maxBuffer: 32_000_000 });
 	if (result.status !== 0) return null;
 	try {
 		const parsed = JSON.parse(result.stdout);
@@ -216,17 +249,17 @@ function paneInstance(pane) {
 function allProjectPanes(snapshot, root) {
 	if (!snapshot) return [];
 	const canonical = canonicalRoot(root);
-	return (snapshot.panes || [])
+	return allSnapshotPanes(snapshot)
 		.filter((pane) => canonicalRoot(pane.cwd || pane.foreground_cwd || "") === canonical)
 		.map((pane) => ({
 			pane_id: pane.pane_id,
 			tab_id: pane.tab_id,
 			workspace_id: pane.workspace_id,
-			label: paneLabel(pane),
+			label: pane.label,
 			agent: pane.agent || null,
 			agent_status: pane.agent_status || "unknown",
-			instance: paneInstance(pane) || (pane.agent === "pi" ? paneLabel(pane) : null),
-			raw_labels: [pane.label, pane.terminal_title_stripped, pane.terminal_title, pane.name].filter(Boolean),
+			instance: pane.instance || (pane.agent === "pi" ? pane.label : null),
+			raw_labels: pane.raw_labels || [pane.label].filter(Boolean),
 			cwd: pane.cwd || pane.foreground_cwd || root,
 		}));
 }
@@ -423,12 +456,27 @@ function ensureProjectWorkspace(snapshot, info) {
 }
 
 function ensurePlannerPane(snapshot, info, workspace) {
-	const blank = workspace?.workspace_id ? blankProjectPaneInWorkspace(snapshot, info.root, workspace.workspace_id) : null;
-	if (blank) return blank;
 	if (!workspace || !commandExists("herdr")) return null;
-	const result = spawnSync("herdr", ["tab", "create", "--workspace", workspace.workspace_id, "--cwd", info.root, "--label", "planner-01", "--no-focus"], { encoding: "utf8" });
+	// A pane that looks blank/unknown in the snapshot may still contain a
+	// dead shell and be rejected by `herdr agent start`. Always allocate a
+	// fresh project tab for a missing Planner; the duplicate cleanup below
+	// closes the retained legacy tab once the new agent is ready.
+	const label = `planner-01-new-${Date.now().toString(36)}`.slice(0, 60);
+	const result = spawnSync("herdr", ["tab", "create", "--workspace", workspace.workspace_id, "--cwd", info.root, "--label", label, "--no-focus"], { encoding: "utf8" });
 	if (result.status !== 0) return null;
-	return blankProjectPaneInWorkspace(herdrSnapshot(), info.root, workspace.workspace_id) || null;
+	const refreshed = herdrSnapshot();
+	const tab = refreshed?.tabs?.find((item) => item.workspace_id === workspace.workspace_id && item.label === label);
+	return tab ? (refreshed.panes || []).find((pane) => pane.tab_id === tab.tab_id) || null : null;
+}
+
+function createProjectAgentPane(info, workspace, role) {
+	if (!workspace?.workspace_id || !commandExists("herdr")) return null;
+	const label = `${canonicalTabLabel(info, role) || role}-new-${Date.now().toString(36)}`.slice(0, 60);
+	const result = spawnSync("herdr", ["tab", "create", "--workspace", workspace.workspace_id, "--cwd", info.root, "--label", label, "--no-focus"], { encoding: "utf8" });
+	if (result.status !== 0) return null;
+	const refreshed = herdrSnapshot();
+	const tab = refreshed?.tabs?.find((item) => item.workspace_id === workspace.workspace_id && item.label === label);
+	return tab ? (refreshed.panes || []).find((pane) => pane.tab_id === tab.tab_id) || null : null;
 }
 
 function roleFromInstance(instance, label) {
@@ -466,12 +514,64 @@ function canonicalTabLabel(info, role) {
 	return null;
 }
 
-function launchAgentInPane(info, pane, role, instance, traceMode, continueSession) {
+function herdrAgentNameForProject(info, instance) {
+	// Herdr agent names are globally unique, while Pi's `--instance` is the
+	// project-facing identity (for example `planner-01`). A bare planner-01
+	// collides as soon as two projects are open. Keep the visible Pi instance
+	// unchanged and give Herdr a deterministic project-scoped name.
+	const normalized = `${slugifyProject(instance)}-${slugifyProject(info.name)}`;
+	if (normalized.length <= 32) return normalized;
+	const suffix = crypto.createHash("sha256").update(normalized).digest("hex").slice(0, 6);
+	return `${normalized.slice(0, 25)}-${suffix}`.slice(0, 32);
+}
+
+function composePiArgs(info, instance, role, traceMode, continueSession, packageRoot) {
+	const launcher = path.join(packageRoot, "scripts", "launch-planner.mjs");
+	if (!fs.existsSync(launcher)) throw new Error("launcher Yano non trovato: " + launcher);
+	const launcherArgs = [
+		launcher,
+		"--instance", instance,
+		"--role", role,
+		"--project", info.name,
+		"--trace-mode", traceMode,
+		"--print-only",
+		"--json",
+	];
+	if (continueSession) launcherArgs.push("--continue");
+	const result = spawnSync(process.execPath, launcherArgs, { cwd: info.root, encoding: "utf8", maxBuffer: 2_000_000 });
+	if (result.status !== 0) {
+		const output = ((result.stderr || "") + (result.stdout || "")).trim();
+		throw new Error("composizione comando agente fallita" + (output ? ": " + output.slice(-1_000) : ""));
+	}
+	try {
+		const composed = JSON.parse(String(result.stdout || "").trim());
+		if (!Array.isArray(composed.args) || composed.args.length === 0) throw new Error("args pi assenti");
+		return composed.args;
+	} catch (error) {
+		throw new Error("output JSON del launcher non valido: " + error.message);
+	}
+}
+
+function launchAgentInPane(info, pane, role, instance, traceMode, continueSession, packageRoot = PACKAGE_ROOT) {
 	if (!pane?.pane_id || !role || !instance) return { ok: false, error: "pane, ruolo o istanza mancanti" };
-	const continuation = continueSession ? " --continue" : "";
-	const command = "exec yano start --instance " + shellQuote(instance) + " --role " + shellQuote(role) + " --project " + shellQuote(info.name) + " --trace-mode " + shellQuote(traceMode) + continuation;
-	const result = spawnSync("herdr", ["pane", "run", pane.pane_id, command], { cwd: info.root, encoding: "utf8" });
-	if (result.status !== 0) return { ok: false, pane_id: pane.pane_id, instance, role, command, error: (result.stderr || "avvio agente fallito").trim() };
+	let piArgs;
+	try {
+		piArgs = composePiArgs(info, instance, role, traceMode, continueSession, packageRoot);
+	} catch (error) {
+		return { ok: false, pane_id: pane.pane_id, instance, role, error: error.message };
+	}
+	// `herdr pane run` submits a shell command and may return 0 before the
+	// interactive Pi process is detected. Herdr's agent API instead returns
+	// success only after readiness in the requested pane, which prevents repair
+	// from claiming a Planner restart when the pane is still just a shell.
+	const herdrName = herdrAgentNameForProject(info, instance);
+	const command = [
+		"herdr", "agent", "start", herdrName, "--kind", "pi", "--pane", pane.pane_id,
+		"--timeout", String(Math.min(120_000, Math.max(5_000, Number(process.env.YANO_REPAIR_AGENT_TIMEOUT_MS) || 30_000))),
+		"--", ...piArgs,
+	];
+	const result = spawnSync("herdr", command.slice(1), { cwd: info.root, encoding: "utf8", maxBuffer: 2_000_000 });
+	if (result.status !== 0) return { ok: false, pane_id: pane.pane_id, instance, role, command: command.join(" "), error: ((result.stderr || result.stdout || "avvio agente fallito")).trim() };
 	const label = canonicalTabLabel(info, role);
 	if (label && pane.tab_id) spawnSync("herdr", ["tab", "rename", pane.tab_id, label], { encoding: "utf8" });
 	let promptSent = false;
@@ -481,24 +581,35 @@ function launchAgentInPane(info, pane, role, instance, traceMode, continueSessio
 			: role === "architect"
 				? "Riallineamento Yano completato. Il progetto canonico è " + info.name + " alla root " + info.root + ". Non modificare il progetto; se la proposta Architect precedente non è disponibile nel catalogo globale, informa il Planner e non inventare un playbook."
 				: "Riallineamento Yano completato. Il progetto canonico è " + info.name + " alla root " + info.root + ". Riprendi esclusivamente dal registro persistente, resta read-only sul progetto e comunica al Planner lo stato del worker."
-		const prompted = spawnSync("herdr", ["agent", "prompt", instance, text, "--timeout", "30000"], { cwd: info.root, encoding: "utf8" });
+		// Herdr rejects --timeout without --wait. Waiting for `working` confirms
+		// that the alignment prompt was accepted without waiting for the LLM
+		// response to finish.
+		const prompted = spawnSync("herdr", ["agent", "prompt", herdrName, text, "--wait", "--until", "working", "--timeout", "30000"], { cwd: info.root, encoding: "utf8" });
 		promptSent = prompted.status === 0;
 	}
-	return { ok: true, pane_id: pane.pane_id, tab_id: pane.tab_id, instance, role, command, label, prompt_sent: promptSent };
+	return { ok: true, pane_id: pane.pane_id, tab_id: pane.tab_id, instance, herdr_agent_name: herdrName, role, command: command.join(" "), launch_method: "herdr-agent-start", label, prompt_sent: promptSent };
 }
 
-function launchPlanner(info, pane, traceMode, continueSession = false) {
+function launchPlanner(info, pane, traceMode, continueSession = false, packageRoot = PACKAGE_ROOT) {
 	if (!pane?.pane_id) return { ok: false, error: "nessuna pane Herdr disponibile per il Planner" };
-	return launchAgentInPane(info, pane, "planner", "planner-01", traceMode, continueSession);
+	return launchAgentInPane(info, pane, "planner", "planner-01", traceMode, continueSession, packageRoot);
 }
 
-function restartObservedAgents(info, beforePanes, traceMode, projectWorkspace) {
+function restartObservedAgents(info, beforePanes, traceMode, projectWorkspace, packageRoot = PACKAGE_ROOT) {
 	const results = [];
 	let snapshot = herdrSnapshot();
 	const ordered = [...beforePanes].sort((a, b) => (a.instance === "planner-01" ? -1 : b.instance === "planner-01" ? 1 : 0));
+	const singletonRoles = new Set(["planner", "architect", "watcher"]);
+	const selectedRoles = new Set();
 	for (const oldPane of ordered) {
 		const role = roleFromInstance(oldPane.instance, oldPane.label);
 		if (!role) continue;
+		// Only one Planner, Architect and Watcher may exist for a project. A
+		// previous repair could restart every duplicate pane, creating several
+		// visible copies. Keep one deterministic candidate and clean up the
+		// remaining stale tabs after the canonical agent is live.
+		if (singletonRoles.has(role) && selectedRoles.has(role)) continue;
+		if (singletonRoles.has(role)) selectedRoles.add(role);
 		const isExternal = ["architect", "watcher", "debugger", "auto-improver", "suggester"].includes(role);
 		let pane = allProjectPanes(snapshot, info.root).find((candidate) => candidate.pane_id === oldPane.pane_id && (!candidate.agent || candidate.agent_status === "unknown"));
 		// A project agent must never be relaunched into a global Yano workspace.
@@ -515,11 +626,49 @@ function restartObservedAgents(info, beforePanes, traceMode, projectWorkspace) {
 			continue;
 		}
 		const instance = canonicalInstance(info, oldPane, role);
-		const launched = launchAgentInPane(info, pane, role, instance, traceMode, true);
+		let launched = launchAgentInPane(info, pane, role, instance, traceMode, true, packageRoot);
+		if (!launched.ok && projectWorkspace?.workspace_id && /busy|available shell|non disponibile/i.test(launched.error || "")) {
+			const freshPane = createProjectAgentPane(info, projectWorkspace, role);
+			if (freshPane) launched = launchAgentInPane(info, freshPane, role, instance, traceMode, true, packageRoot);
+		}
 		results.push({ ...launched, old_instance: oldPane.instance });
 		snapshot = herdrSnapshot();
 	}
 	return results;
+}
+
+async function closeDuplicateProjectTabs(info, restarted, force) {
+	const snapshot = herdrSnapshot();
+	if (!snapshot) return [];
+	const singletonRoles = new Set(["planner", "architect", "watcher"]);
+	const keepByRole = new Map();
+	for (const item of restarted.filter((candidate) => candidate.ok && candidate.pane_id)) {
+		if (singletonRoles.has(item.role) && !keepByRole.has(item.role)) keepByRole.set(item.role, item.pane_id);
+	}
+	const current = allProjectPanes(snapshot, info.root);
+	for (const role of singletonRoles) {
+		if (keepByRole.has(role)) continue;
+		const canonical = canonicalTabLabel(info, role);
+		const preferred = current.find((pane) => roleFromInstance(pane.instance, pane.label) === role && pane.label === canonical);
+		if (preferred) keepByRole.set(role, preferred.pane_id);
+	}
+	const closed = [];
+	for (const pane of current) {
+		const role = roleFromInstance(pane.instance, pane.label);
+		if (!singletonRoles.has(role) || keepByRole.get(role) === pane.pane_id || !pane.tab_id) continue;
+		let live = pane.agent === "pi" && !["unknown", "offline", "done", "completed"].includes(String(pane.agent_status || "").toLowerCase());
+		if (live) {
+			sendPaneKeys(pane.pane_id, ["ctrl-c"]);
+			await sleep(300);
+			const refreshed = allProjectPanes(herdrSnapshot(), info.root).find((candidate) => candidate.pane_id === pane.pane_id);
+			live = refreshed?.agent === "pi" && !["unknown", "offline", "done", "completed"].includes(String(refreshed.agent_status || "").toLowerCase());
+			if (live && !force) continue;
+			if (live && force) sendPaneKeys(pane.pane_id, ["ctrl-c", "ctrl-d"]);
+		}
+		const result = spawnSync("herdr", ["tab", "close", pane.tab_id], { encoding: "utf8" });
+		if (result.status === 0) closed.push({ role, pane_id: pane.pane_id, tab_id: pane.tab_id, label: pane.label });
+	}
+	return closed;
 }
 
 function stopExternalWorkerPanes(beforeSnapshot, workers, projectPanes) {
@@ -533,7 +682,7 @@ function stopExternalWorkerPanes(beforeSnapshot, workers, projectPanes) {
 	return stopped;
 }
 
-function restartExternalWorkers(info, workers, traceMode) {
+function restartExternalWorkers(info, workers, traceMode, packageRoot = PACKAGE_ROOT) {
 	const results = [];
 	let snapshot = herdrSnapshot();
 	for (const worker of workers) {
@@ -547,8 +696,13 @@ function restartExternalWorkers(info, workers, traceMode) {
 			results.push({ ok: false, role: worker.role, instance: worker.instance, error: "workspace/tab/pane dell'agente esterno non disponibile", source: worker.source });
 			continue;
 		}
-		const instance = worker.instance || `${worker.role}-${slugifyProject(info.name)}`;
-		const launched = launchAgentInPane(info, pane, worker.role, instance, traceMode, true);
+		const instance = canonicalTabLabel(info, worker.role) || worker.instance || `${worker.role}-${slugifyProject(info.name)}`;
+		let launched = launchAgentInPane(info, pane, worker.role, instance, traceMode, true, packageRoot);
+		if (!launched.ok && /busy|available shell|non disponibile/i.test(launched.error || "")) {
+			const workspace = snapshot?.workspaces?.find((item) => item.workspace_id === pane.workspace_id || item.label === workerWorkspaceLabel(worker.role));
+			const freshPane = createProjectAgentPane(info, workspace, worker.role);
+			if (freshPane) launched = launchAgentInPane(info, freshPane, worker.role, instance, traceMode, true, packageRoot);
+		}
 		results.push({ ...launched, source: worker.source, registry_status: worker.status });
 		snapshot = herdrSnapshot();
 	}
@@ -601,15 +755,24 @@ function migrateArchitectProposal(info, proposal) {
 	}
 	const playbookPath = fs.existsSync(path.join(targetDir, "playbook.yaml")) ? path.join(targetDir, "playbook.yaml") : proposal.playbook_path;
 	const manifestPath = fs.existsSync(path.join(targetDir, "manifest.json")) ? path.join(targetDir, "manifest.json") : proposal.manifest_path;
+	let manifest = null;
 	if (manifestPath && fs.existsSync(manifestPath)) {
 		try {
-			const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+			manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
 			manifest.project = { ...(manifest.project || {}), name: info.name, root: info.root, key: info.key };
 			fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
 		} catch { /* malformed legacy manifest is reported by Architect itself */ }
 	}
+	// The manifest is the durable source of truth for a proposal's generated
+	// playbook. Older registries could contain stale playbook/role fields even
+	// though the generated manifest was already correct.
+	const manifestPlaybook = manifest?.playbook_id || manifest?.playbook || null;
+	const manifestRole = manifest?.role_id || manifest?.roles?.[0] || manifest?.role_manifests?.[0]?.id || null;
+	const basePlaybook = manifest?.base_playbook || manifestPlaybook || proposal.base_playbook || null;
+	const playbookId = manifestPlaybook || proposal.playbook_id || basePlaybook;
+	const roleId = manifestRole || proposal.role_id || null;
 	const sqlite = sqliteClass();
-	if (!sqlite) return { ...proposal, project_name: info.name, project_key: info.key, architect_instance: canonicalArchitectInstance, ephemeral_dir: targetDir, playbook_path: playbookPath, manifest_path: manifestPath };
+	if (!sqlite) return { ...proposal, project_name: info.name, project_key: info.key, architect_instance: canonicalArchitectInstance, ephemeral_dir: targetDir, playbook_path: playbookPath, manifest_path: manifestPath, base_playbook: basePlaybook, playbook_id: playbookId, role_id: roleId };
 	let db = null;
 	try {
 		// This is the global Architect registry. `projectInfo().dbPath` is the
@@ -617,19 +780,22 @@ function migrateArchitectProposal(info, proposal) {
 		// only have an Architect proposal.
 		const architectDbPath = path.join(traceRoot(), "architect", "architect.sqlite");
 		db = new sqlite(architectDbPath);
-		db.prepare("UPDATE architect_proposals SET project_key=?,project_root=?,project_name=?,architect_instance=?,ephemeral_dir=?,playbook_path=?,manifest_path=?,updated_at=? WHERE proposal_id=?").run(info.key, info.root, info.name, canonicalArchitectInstance, targetDir, playbookPath, manifestPath, new Date().toISOString(), proposal.proposal_id);
-		return db.prepare("SELECT proposal_id,status,project_root,project_name,project_key,playbook_id,ephemeral_dir,playbook_path,manifest_path,architect_instance,watcher_workspace_id,watcher_tab_id,watcher_pane_id,validation_run_id,updated_at FROM architect_proposals WHERE proposal_id=?").get(proposal.proposal_id) || { ...proposal, project_name: info.name, project_key: info.key, architect_instance: canonicalArchitectInstance, ephemeral_dir: targetDir, playbook_path: playbookPath, manifest_path: manifestPath };
+		db.prepare("UPDATE architect_proposals SET project_key=?,project_root=?,project_name=?,base_playbook=?,playbook_id=?,role_id=?,architect_instance=?,ephemeral_dir=?,playbook_path=?,manifest_path=?,updated_at=? WHERE proposal_id=?").run(info.key, info.root, info.name, basePlaybook, playbookId, roleId, canonicalArchitectInstance, targetDir, playbookPath, manifestPath, new Date().toISOString(), proposal.proposal_id);
+		return db.prepare("SELECT proposal_id,status,project_root,project_name,project_key,base_playbook,playbook_id,role_id,ephemeral_dir,playbook_path,manifest_path,architect_instance,watcher_workspace_id,watcher_tab_id,watcher_pane_id,validation_run_id,updated_at FROM architect_proposals WHERE proposal_id=?").get(proposal.proposal_id) || { ...proposal, project_name: info.name, project_key: info.key, architect_instance: canonicalArchitectInstance, ephemeral_dir: targetDir, playbook_path: playbookPath, manifest_path: manifestPath, base_playbook: basePlaybook, playbook_id: playbookId, role_id: roleId };
 	} catch {
-		return { ...proposal, project_name: info.name, project_key: info.key, architect_instance: canonicalArchitectInstance, ephemeral_dir: targetDir, playbook_path: playbookPath, manifest_path: manifestPath };
+		return { ...proposal, project_name: info.name, project_key: info.key, architect_instance: canonicalArchitectInstance, ephemeral_dir: targetDir, playbook_path: playbookPath, manifest_path: manifestPath, base_playbook: basePlaybook, playbook_id: playbookId, role_id: roleId };
 	} finally { try { db?.close(); } catch { /* best effort */ } }
 }
 
-function reprovisionArchitectProposals(info, proposals) {
+function reprovisionArchitectProposals(info, proposals, packageRoot = PACKAGE_ROOT) {
 	const results = [];
 	const reprovisionable = new Set(["blocked", "provisioning", "provisioned", "ready", "operational", "ready_ephemeral", "promotion_candidate"]);
 	for (const original of proposals.filter((proposal) => reprovisionable.has(proposal.status)).slice(0, 3)) {
 		const proposal = migrateArchitectProposal(info, original);
-		const result = spawnSync("yano", ["architect", "provision", "--proposal-id", proposal.proposal_id, "--install", "--json"], { cwd: info.root, encoding: "utf8", maxBuffer: 2_000_000 });
+		// Use the same package that is executing repair. Calling `yano` through
+		// PATH could silently invoke an older global installation and recreate
+		// the very Herdr prompt bug that repair is meant to fix.
+		const result = spawnSync(process.execPath, [path.join(packageRoot, "bin", "yano.mjs"), "architect", "provision", "--proposal-id", proposal.proposal_id, "--install", "--json"], { cwd: info.root, encoding: "utf8", maxBuffer: 2_000_000 });
 		const output = ((result.stdout || "") + (result.stderr || "")).trim();
 		let provisioned = null;
 		try { provisioned = JSON.parse(String(result.stdout || "").trim()); } catch { /* output is retained below */ }
@@ -657,9 +823,10 @@ function usage() {
 		"  yano repair --all-projects --dry-run inventario globale senza modifiche",
 		"  yano repair --all-projects --yes   ripara sequenzialmente tutti i progetti attivi",
 		"  yano repair --yes --force           forza i processi Herdr rimasti dopo il primo stop",
+		"  yano repair --yes --init-db         crea in modo non distruttivo il DB orchestrator.db se manca",
 		"  yano repair --json                  output machine-readable",
 		"",
-		"Non vengono cancellati codice, trace, worktree, database o tab Herdr.",
+		"Non vengono cancellati codice, trace, worktree o database; solo copie di tab agente stale vengono chiuse dopo il riavvio canonico.",
 	].join("\n"));
 }
 
@@ -675,7 +842,7 @@ export async function runRepair({ cwd = process.cwd(), argv = [], packageRoot = 
 	const panes = activeProjectPanes(before, info.root);
 	const aliases = aliasesFromSnapshot(before, panes, info.name);
 	const presence = await discoverPresence(aliases, broker);
-	const externalWorkers = externalWorkersForProject(info);
+	const externalWorkers = externalWorkersForProject(info, before);
 	const proposals = persistedArchitectProposals(info);
 	const updateCheck = has(argv, "--update") ? checkUpdate() : null;
 	const plan = {
@@ -683,6 +850,7 @@ export async function runRepair({ cwd = process.cwd(), argv = [], packageRoot = 
 		aliases,
 		package_version: packageVersion(packageRoot),
 		database: { path: info.dbPath, exists: fs.existsSync(info.dbPath) },
+		database_initialization: { requested: has(argv, "--init-db"), will_create: has(argv, "--init-db") && !fs.existsSync(info.dbPath) },
 		herdr: { reachable: !!before, panes },
 		presence,
 		external_workers: externalWorkers,
@@ -700,6 +868,7 @@ export async function runRepair({ cwd = process.cwd(), argv = [], packageRoot = 
 			console.log("   root: " + info.root);
 			console.log("   alias MQTT: " + aliases.join(", "));
 			console.log("   database: " + (fs.existsSync(info.dbPath) ? "presente" : "assente"));
+			if (has(argv, "--init-db")) console.log("   inizializzazione DB: " + (fs.existsSync(info.dbPath) ? "nessuna, già presente" : "verrà creato con --yes"));
 			console.log("   agenti Herdr: " + (panes.map((pane) => pane.instance || pane.pane_id).join(", ") || "nessuno"));
 			console.log("   presence MQTT: " + (presence.cards.map((card) => card.scope + "/" + card.instance).join(", ") || "nessuna"));
 			console.log("   proposte Architect: " + proposals.length);
@@ -720,6 +889,9 @@ export async function runRepair({ cwd = process.cwd(), argv = [], packageRoot = 
 		options: { update: has(argv, "--update"), force: has(argv, "--force"), timeout_ms: timeoutMs },
 	});
 	if (!quiet) console.log("yano repair: snapshot salvato in " + snapshot.directory);
+	const databaseInitialization = has(argv, "--init-db")
+		? ensureProjectDatabase({ projectRoot: info.root, project: info.name, packageRoot })
+		: null;
 
 	const livePresence = presence.live_cards || presence.cards.filter(isLivePresenceCard);
 	const termination = await terminatePresence(livePresence, broker, "yano repair: riallineamento progetto " + info.name + "; snapshot " + snapshot.directory);
@@ -756,16 +928,23 @@ export async function runRepair({ cwd = process.cwd(), argv = [], packageRoot = 
 	const update = has(argv, "--update") ? applyUpdate(updateCheck, info.root) : null;
 
 	const projectWorkspace = ensureProjectWorkspace(herdrSnapshot(), info);
-	let restarted = restartObservedAgents(info, panes, traceMode, projectWorkspace);
-	const restartedExternal = restartExternalWorkers(info, externalWorkers, traceMode);
+	let restarted = restartObservedAgents(info, panes, traceMode, projectWorkspace, packageRoot);
+	// Workers already observed in a project pane are restarted by the same
+	// canonical path as Planner/Architect/Watcher. Do not run them a second
+	// time through the registry path: that used to relaunch into an already
+	// active pane and was a source of duplicate tabs.
+	const restartedRoles = new Set(restarted.filter((item) => item.ok).map((item) => item.role));
+	const unobservedWorkers = externalWorkers.filter((worker) => !restartedRoles.has(worker.role));
+	const restartedExternal = restartExternalWorkers(info, unobservedWorkers, traceMode, packageRoot);
 	restarted = [...restarted, ...restartedExternal];
 	let launched = restarted.find((item) => item.ok && item.role === "planner") || null;
 	if (!launched) {
 		const pane = ensurePlannerPane(herdrSnapshot(), info, projectWorkspace);
-		launched = launchPlanner(info, pane, traceMode, false);
+		launched = launchPlanner(info, pane, traceMode, false, packageRoot);
 		restarted.push(launched);
 	}
 	if (!launched.ok) throw new Error("Planner non rilanciato (" + (launched.error || "errore sconosciuto") + "); snapshot: " + snapshot.directory);
+	const duplicateTabs = await closeDuplicateProjectTabs(info, restarted, has(argv, "--force"));
 
 	const expectedInstances = new Set(restarted.filter((item) => item.ok).map((item) => item.instance));
 	let verification = await discoverPresence([info.name], broker);
@@ -778,9 +957,8 @@ export async function runRepair({ cwd = process.cwd(), argv = [], packageRoot = 
 	} else {
 		verification.skipped = "broker_unavailable";
 	}
-	const restartedExternalRoles = new Set(restarted.filter((item) => item.ok && ["architect", "watcher"].includes(item.role)).map((item) => item.role));
-	const reprovision = has(argv, "--no-reprovision") || restartedExternalRoles.size ? [] : reprovisionArchitectProposals(info, proposals);
-	const result = { ...plan, dry_run: false, snapshot: snapshot.directory, termination, offline, update, restarted, launched, verification, reprovision };
+	const reprovision = has(argv, "--no-reprovision") ? [] : reprovisionArchitectProposals(info, proposals, packageRoot);
+	const result = { ...plan, dry_run: false, snapshot: snapshot.directory, database_initialization: databaseInitialization || { requested: false, created: false, exists: fs.existsSync(info.dbPath), path: info.dbPath }, termination, offline, update, restarted, launched, duplicate_tabs_closed: duplicateTabs, verification, reprovision };
 	result.stopped_external = stoppedExternal;
 	if (!quiet && has(argv, "--json")) console.log(JSON.stringify(result, null, 2));
 	else if (!quiet) {
@@ -788,7 +966,7 @@ export async function runRepair({ cwd = process.cwd(), argv = [], packageRoot = 
 		console.log("   scope verificato: " + info.name);
 		console.log("   agenti live: " + (verification.live_cards || verification.cards.filter(isLivePresenceCard)).map((card) => card.instance).join(", "));
 		if (reprovision.length) console.log("   Architect: " + reprovision.filter((item) => item.ok).length + "/" + reprovision.length + " proposte ri-provisionate.");
-		console.log("   Nessun file applicativo, trace o database è stato cancellato.");
+		console.log("   copie duplicate chiuse: " + duplicateTabs.length + "; nessun file applicativo, trace o database è stato cancellato.");
 	}
 	return result;
 }
@@ -796,7 +974,7 @@ export async function runRepair({ cwd = process.cwd(), argv = [], packageRoot = 
 async function runRepairAll({ cwd = process.cwd(), argv = [], packageRoot = PACKAGE_ROOT, quiet = false } = {}) {
 	const broker = value(argv, "--broker") || process.env.PI_ORCH_BROKER_URL || "mqtt://127.0.0.1:1883";
 	const before = herdrSnapshot();
-	const workers = externalWorkerRows();
+	const workers = externalWorkerRows(before);
 	const allPresence = await discoverAllPresence(broker);
 	const presenceSummary = {
 		ok: allPresence.ok,
@@ -814,6 +992,8 @@ async function runRepairAll({ cwd = process.cwd(), argv = [], packageRoot = PACK
 			name: info.name,
 			root: info.root,
 			key: info.key,
+			database: { path: info.dbPath, exists: fs.existsSync(info.dbPath) },
+			database_initialization: { requested: has(argv, "--init-db"), will_create: has(argv, "--init-db") && !fs.existsSync(info.dbPath) },
 			external_workers: workers.filter((worker) => worker.root === info.root),
 			architect_proposals: architectProposals,
 			architect_reprovision_candidates: architectProposals.filter((proposal) => ["blocked", "provisioning", "provisioned", "ready", "operational", "ready_ephemeral", "promotion_candidate"].includes(proposal.status)),
@@ -829,7 +1009,7 @@ async function runRepairAll({ cwd = process.cwd(), argv = [], packageRoot = PACK
 		presence: presenceSummary,
 		update_check: updateCheck ? { ok: updateCheck.ok, needed: updateCheck.needed } : null,
 		dry_run: dryRun,
-		safety: "projects are processed sequentially; each project gets its own repair snapshot; no project source or tab is deleted",
+		safety: "projects are processed sequentially; each project gets its own repair snapshot; only stale duplicate agent tabs may be closed after canonical restart",
 	};
 	if (dryRun) {
 		if (!quiet && has(argv, "--json")) console.log(JSON.stringify(plan, null, 2));

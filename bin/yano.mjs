@@ -77,6 +77,7 @@ import { runYanoCatalog } from "../scripts/yano-catalog.mjs";
 import { runYanoData } from "../scripts/yano-data.mjs";
 import { runRecovery } from "../scripts/yano-recovery.mjs";
 import { runRepair } from "../scripts/yano-repair.mjs";
+import { runExternalStatus } from "../scripts/yano-external-status.mjs";
 import { applyGlobalConfig, runYanoConfig } from "../scripts/yano-config.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -110,6 +111,8 @@ function printTopUsage() {
 			"  deps [opzioni]   Verifica CLI, credenziali e autenticazione richieste dal task",
 			"  gantt [opzioni]  Avvia la dashboard web live dei run/ticket",
 			"  watch [opzioni]  Osserva stall e segnala falle Yano ( --once | --project-root | --lookback-ms | --interval-ms )",
+			"  architect projects|watcher projects|debugger projects|auto-improve|auto-improver projects",
+			"                   Elenca i progetti attivi dei worker esterni (aggiungi --all per gli offline)",
 			"  trace [opzioni]  Attiva/disattiva, cerca e cancella il tracing globale — `yano trace --help`",
 			"  debugger [opzioni] Gestisce bug applicativi e worker esterni — `yano debugger --help`",
 			"  auto-improve [opzioni] Audit periodici read-only e report al planner — `yano auto-improve --help`",
@@ -190,6 +193,10 @@ async function main() {
 		return;
 	}
 	if (sub === "watch") {
+		if (rest[0] === "projects" || rest.includes("--projects")) {
+			await runExternalStatus({ role: "watcher", argv: rest });
+			return;
+		}
 		await runWatch({ cwd, argv: rest });
 		return;
 	}
@@ -198,19 +205,43 @@ async function main() {
 		return;
 	}
 	if (sub === "debugger") {
+		if (rest[0] === "projects" || rest.includes("--projects")) {
+			await runExternalStatus({ role: "debugger", argv: rest });
+			return;
+		}
 		await runYanoDebugger({ argv: rest });
 		return;
 	}
-	if (sub === "auto-improve") {
+	if (sub === "auto-improve" || sub === "auto-improver") {
+		if (rest[0] === "projects" || rest.includes("--projects")) {
+			await runExternalStatus({ role: "auto-improver", argv: rest });
+			return;
+		}
 		await runYanoAutoImprove({ argv: rest });
 		return;
 	}
 	if (sub === "suggester") {
+		if (rest[0] === "projects" || rest.includes("--projects")) {
+			await runExternalStatus({ role: "suggester", argv: rest });
+			return;
+		}
 		await runYanoSuggester({ argv: rest });
 		return;
 	}
 	if (sub === "architect") {
+		if (rest[0] === "projects" || rest.includes("--projects")) {
+			await runExternalStatus({ role: "architect", argv: rest });
+			return;
+		}
 		await runYanoArchitect({ argv: rest });
+		return;
+	}
+	if (sub === "watcher") {
+		if (rest[0] !== "projects" && !rest.includes("--projects")) {
+			console.error("Uso: yano watcher projects [--all] [--json] [--project-root <dir>]");
+			process.exit(1);
+		}
+		await runExternalStatus({ role: "watcher", argv: rest });
 		return;
 	}
 	if (sub === "playbook" || sub === "agent") {

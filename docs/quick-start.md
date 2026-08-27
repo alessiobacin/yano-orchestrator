@@ -172,6 +172,21 @@ yano logs
 yano trace status
 ```
 
+Per sapere su quali progetti sono attivi i worker esterni, senza interrogare
+manualmente Herdr:
+
+```bash
+yano architect projects
+yano watcher projects
+yano debugger projects
+yano auto-improve projects       # alias: yano auto-improver projects
+yano suggester projects
+```
+
+Le viste mostrano gli agenti live. Aggiungi `--all --json` per includere anche
+proposte e registrazioni offline. `yano fleet --project-root /path` resta la
+vista degli agenti del progetto, inclusi Planner e worker di sviluppo.
+
 Se l'avvio usa uno scope MQTT esplicito, usa lo stesso valore anche nelle
 viste read-only:
 

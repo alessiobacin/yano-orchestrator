@@ -1,0 +1,15 @@
+flowchart TD
+    START["yano repair --dry-run"] --> INVENTORY["root canonica\nHerdr + MQTT + DB + proposte"]
+    INVENTORY --> APPLY{"--yes?"}
+    APPLY -- no --> PREVIEW["nessuna modifica"]
+    APPLY -- yes --> SNAP["snapshot recovery\ntrace, DB, Git, Herdr"]
+    SNAP --> STOP["terminate graceful\npoi --force se autorizzato"]
+    STOP --> DB{"--init-db e DB assente?"}
+    DB -- sì --> INIT["crea schema SQLite\nidempotente"]
+    DB -- no --> WORKSPACE
+    INIT --> WORKSPACE["workspace progetto\n+ pane nuova se stale"]
+    WORKSPACE --> START_AGENTS["herdr agent start\nidentità Herdr project-scoped"]
+    START_AGENTS --> VERIFY["heartbeat/presence"]
+    VERIFY --> CLEAN["chiudi solo duplicate\nsingleton stale"]
+    CLEAN --> REPROV["ri-provision Architect\nse proposta persistita"]
+    REPROV --> DONE["Planner/Watcher live o errore esplicito"]

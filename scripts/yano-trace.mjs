@@ -87,7 +87,11 @@ function eventFilter(argv) {
 
 function matchingEvents(records, filters) {
 	return records
-		.filter((record) => !record.record_type)
+		// Raw lifecycle logs have no record_type; events appended by external
+		// observers (Watcher, repair, import, ...) use record_type="event".
+		// Both are events. Only feedback/opinion/summary projections belong to
+		// their dedicated commands and must stay out of `trace events`.
+		.filter((record) => !record.record_type || record.record_type === "event")
 		.filter((record) => !filters.run || record.run_id === filters.run)
 		.filter((record) => !filters.instance || record.instance === filters.instance)
 		.filter((record) => !filters.type || record.type === filters.type)

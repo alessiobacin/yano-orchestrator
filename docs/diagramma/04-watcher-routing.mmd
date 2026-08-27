@@ -1,0 +1,16 @@
+flowchart TD
+    LOOP["yano watch\n--interval-ms 600000"] --> DB["DB read-only\nticket stalled"]
+    LOOP --> HEARTBEAT["MQTT heartbeat\nagent live"]
+    LOOP --> TRACE["trace bounded\nsegnali Yano"]
+    DB --> FINDING["finding"]
+    HEARTBEAT --> FINDING
+    TRACE --> FINDING
+    FINDING --> PLANNER{"Planner live?"}
+    PLANNER -- sì --> MQTT["comando MQTT\nal Planner"]
+    PLANNER -- no --> TELEGRAM["Telegram\nconfig globale"]
+    TRACE --> YANO{"segnale Yano ad alta confidenza?"}
+    YANO -- sì --> TICKET[".scratch/optimize-orchestrator/issues\nticket deduplicato"]
+    TICKET --> TICKET_ROUTE{"Planner live?"}
+    TICKET_ROUTE -- sì --> TICKET_MQTT["MQTT al Planner\nTelegram non inviato"]
+    TICKET_ROUTE -- no --> TICKET_TELEGRAM["Telegram\nall'utente"]
+    CLEAN["nessuna anomalia"] --> QUIET["nessuna pagina\n--away"]

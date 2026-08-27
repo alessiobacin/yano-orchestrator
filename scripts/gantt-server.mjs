@@ -27,6 +27,7 @@ import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import mqtt from "mqtt";
+import { projectDbPath } from "./yano-project.mjs";
 
 const yanoRequire = createRequire(import.meta.url);
 
@@ -38,13 +39,13 @@ function resolveProject(cwd) {
 }
 
 // ── Snapshot: runs + tickets + open holds from orchestrator.db ───────────
-function buildSnapshot(cwd) {
-	const dbPath = path.join(workspaceDir(cwd), "orchestratorStorage", "orchestrator.db");
-	if (!existsSync(dbPath)) return { project: resolveProject(cwd), runs: [], ok: false };
+function buildSnapshot(cwd, explicitProject = null) {
+	const project = explicitProject || resolveProject(cwd);
+	const dbPath = projectDbPath(cwd, project);
+	if (!existsSync(dbPath)) return { project, runs: [], ok: false, db_path: dbPath, hint: "Run `yano repair --yes --init-db`, then let Planner call orchestrator_init/run_create." };
 	let DatabaseSync;
-	try { ({ DatabaseSync } = yanoRequire("node:sqlite")); } catch { return { project: resolveProject(cwd), runs: [], ok: false, error: "node:sqlite unavailable" }; }
+	try { ({ DatabaseSync } = yanoRequire("node:sqlite")); } catch { return { project, runs: [], ok: false, db_path: dbPath, error: "node:sqlite unavailable" }; }
 	const db = new DatabaseSync(dbPath, { readOnly: true });
-	const project = resolveProject(cwd);
 	const runs = db.prepare("SELECT * FROM runs WHERE project = ? ORDER BY created_at ASC").all(project);
 	const enriched = runs.map((r) => {
 		const tickets = db.prepare("SELECT * FROM tickets WHERE run_id = ? ORDER BY created_at ASC").all(r.id);
@@ -98,7 +99,7 @@ function esc(s){return String(s??"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;
 function render(snap){
   document.getElementById("title").textContent="Orchestrator — "+ (snap.project||"") +" (live)";
   const root=document.getElementById("root");
-  if(!snap.ok){ root.innerHTML="<p>no orchestrator.db found for this project</p>"; return; }
+  if(!snap.ok){ root.innerHTML="<p>orchestrator.db non presente. Esegui <code>yano repair --yes --init-db</code>, poi chiedi al Planner di inizializzare il run.</p>"; return; }
   if(!snap.runs.length){ root.innerHTML="<p>no runs yet</p>"; return; }
   root.innerHTML=snap.runs.map(function(r){
     const tickets=(r.tickets||[]);
@@ -117,8 +118,9 @@ load();setInterval(load,5000);
 
 export async function runGantt({ cwd, argv, packageRoot }) {
 	const portArg = argv.includes("--port") ? Number(argv[argv.indexOf("--port") + 1]) : 8174;
-	const project = argv.includes("--project") ? argv[argv.indexOf("--project") + 1] : resolveProject(cwd);
-	const useCwd = argv.includes("--cwd") ? argv[argv.indexOf("--cwd") + 1] : cwd;
+	const projectRoot = argv.includes("--project-root") ? argv[argv.indexOf("--project-root") + 1] : null;
+	const useCwd = projectRoot ? path.resolve(projectRoot) : (argv.includes("--cwd") ? argv[argv.indexOf("--cwd") + 1] : cwd);
+	const project = argv.includes("--project") ? argv[argv.indexOf("--project") + 1] : resolveProject(useCwd);
 	const open = argv.includes("--open");
 	const dbg = argv.includes("--once"); // one snapshot + exit (for tests / health probes)
 
@@ -127,7 +129,7 @@ export async function runGantt({ cwd, argv, packageRoot }) {
 	const server = http.createServer((req, res) => {
 		const url = (req.url || "/").split("?")[0];
 		if (url === "/" || url === "/index.html") { res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }); res.end(PAGE); return; }
-		if (url === "/data") { res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" }); res.end(JSON.stringify(buildSnapshot(useCwd))); return; }
+		if (url === "/data") { res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" }); res.end(JSON.stringify(buildSnapshot(useCwd, project))); return; }
 		if (url === "/healthz") { res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify({ ok: true, project })); return; }
 		res.writeHead(404); res.end("not found");
 	});
@@ -140,7 +142,7 @@ export async function runGantt({ cwd, argv, packageRoot }) {
 	const client = mqtt.connect(broker, { clean: true, reconnectPeriod: 3000 });
 	mqttClients.add(client);
 	client.on("connect", () => { try { client.subscribe(`pi/${project}/runs/+/events`, { qos: 0 }); } catch {} });
-	client.on("message", () => { wsBroadcast(wss, buildSnapshot(useCwd)); });
+	client.on("message", () => { wsBroadcast(wss, buildSnapshot(useCwd, project)); });
 	client.on("error", () => { /* broker optional; HTTP still serves /data */ });
 
 	const host = "127.0.0.1";

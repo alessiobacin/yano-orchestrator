@@ -8,7 +8,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { appendTraceRecord, buildTraceOverview, ensureTraceProject, readTraceRecords, tracePaths } from "./yano-trace-storage.mjs";
+import { appendRawTraceRecord, appendTraceRecord, buildTraceOverview, ensureTraceProject, readTraceRecords, tracePaths } from "./yano-trace-storage.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "yano-trace-analysis-"));
@@ -44,6 +44,10 @@ try {
 	assert.match(feedbackOutput, /feedback rejected registrato/);
 	appendEvent(cwdA, "project-a", { type: "tool_execution_end", ok: false, run_id: "run-a", round: "2", task_slug: "fix-login" });
 	appendEvent(cwdA, "project-a", { type: "worktree_finalize", conflict: true, run_id: "run-a", round: "2", task_slug: "fix-login" });
+	appendRawTraceRecord({ cwd: cwdA, project: "project-a", record: {
+		type: "yano_watcher_finding", record_type: "event", signal: "no_live_target", instance: "yano-watcher",
+		run_id: "run-a", round: "2", task_slug: "fix-login", id: "watcher-event-1", ts: new Date().toISOString(),
+	} });
 
 	const context = JSON.parse(run(cwdA, [
 		"context", "--project", "project-a", "--run", "run-a", "--round", "2", "--task", "fix-login", "--json",
@@ -55,6 +59,7 @@ try {
 		"events", "--project", "project-a", "--run", "run-a", "--json",
 	]));
 	assert.ok(events.some((event) => event.type === "tool_execution_end"), "events deve esporre gli eventi raw del run");
+	assert.ok(events.some((event) => event.type === "yano_watcher_finding"), "events deve esporre anche gli eventi record_type=event del watcher");
 
 	run(cwdA, [
 		"opinion", "--project", "project-a", "--text", "La causa più probabile è un gap di verifica e di orchestrazione.",

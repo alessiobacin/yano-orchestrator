@@ -62,6 +62,20 @@ yano watch --project-root /path/progetto --interval-ms 3600000
 indica l'intervallo tra le scansioni. Con `--once` viene eseguita una sola
 scansione e il processo termina.
 
+Per un Watcher persistente lanciato dall'Architect, la prima verifica è
+bounded e poi il processo resta in polling read-only ogni dieci minuti:
+
+~~~bash
+yano watch --project-root /path/progetto \
+  --lookback-ms 3600000 --interval-ms 600000 --away
+~~~
+
+Il polling zero-token controlla stall, heartbeat e segnali Yano ad alta
+confidenza. Non equivale a una rilettura LLM completa di ogni conversazione:
+per una revisione semantica approfondita il Watcher deve ricevere un round o
+un controllo esplicito e deve riportare evidenze, non dichiarare il flusso sano
+solo perché il processo di polling è vivo.
+
 ## Watcher LLM per un playbook ephemeral
 
 Quando l'Architect prepara un nuovo playbook, il watcher non deve essere

@@ -95,35 +95,45 @@ function failure({ category, signal, severity, summary, record, evidence }) {
  */
 export function detectYanoFindings(records, context = {}) {
 	const findings = [];
+	const seen = new Set();
+	const addFinding = (candidate) => {
+		// A polling watcher reads a lookback window, so the same source event can
+		// be present in every pass. Keep one finding per deterministic fingerprint
+		// before ticket creation/routing; otherwise a single old error would cause
+		// one Planner message every ten minutes forever.
+		if (!candidate?.fingerprint || seen.has(candidate.fingerprint)) return;
+		seen.add(candidate.fingerprint);
+		findings.push(candidate);
+	};
 	for (const record of records || []) {
 		const type = String(record.type || "");
 		const text = textOf(record);
 		if (type === "agent_send_no_live_target") {
-			findings.push(failure({ category: "delegation", signal: "no_live_target", severity: "high", summary: "Yano ha tentato di inviare un lavoro ma non ha trovato un destinatario vivo.", record, evidence: context }));
+			addFinding(failure({ category: "delegation", signal: "no_live_target", severity: "high", summary: "Yano ha tentato di inviare un lavoro ma non ha trovato un destinatario vivo.", record, evidence: context }));
 			continue;
 		}
 		if ((type === "notification_dispatch" || type === "whatsapp_notify") && record.reason === "agent_send_timeout") {
-			findings.push(failure({ category: "delegation", signal: "delegation_timeout", severity: "high", summary: "Yano ha esaurito il timeout durante la delega a un agente.", record, evidence: context }));
+			addFinding(failure({ category: "delegation", signal: "delegation_timeout", severity: "high", summary: "Yano ha esaurito il timeout durante la delega a un agente.", record, evidence: context }));
 			continue;
 		}
 		if ((type.includes("scope_mismatch") || type.includes("workspace_scope_mismatch") || type.includes("agent_presence_mismatch")) || record.scope_mismatch === true) {
-			findings.push(failure({ category: "isolation", signal: "workspace_scope_mismatch", severity: "critical", summary: "Yano ha osservato una discordanza tra progetto, workspace o presenza degli agenti.", record, evidence: context }));
+			addFinding(failure({ category: "isolation", signal: "workspace_scope_mismatch", severity: "critical", summary: "Yano ha osservato una discordanza tra progetto, workspace o presenza degli agenti.", record, evidence: context }));
 			continue;
 		}
 		if ((type.includes("orphan") || type === "agent_missing_after_restore") && (record.source === "yano" || record.component === "yano" || record.expected || record.actual)) {
-			findings.push(failure({ category: "lifecycle", signal: "orphaned_agent", severity: "high", summary: "Yano ha rilevato un agente orfano o non ripristinato dal proprio lifecycle.", record, evidence: context }));
+			addFinding(failure({ category: "lifecycle", signal: "orphaned_agent", severity: "high", summary: "Yano ha rilevato un agente orfano o non ripristinato dal proprio lifecycle.", record, evidence: context }));
 			continue;
 		}
 		if (type === "trace_preflight" && (record.ok === false || record.expected !== record.actual || record.runtime_mismatch === true)) {
-			findings.push(failure({ category: "runtime", signal: "trace_preflight_mismatch", severity: "medium", summary: "La preflight di Yano ha rilevato un disallineamento del runtime o della configurazione di tracing.", record, evidence: context }));
+			addFinding(failure({ category: "runtime", signal: "trace_preflight_mismatch", severity: "medium", summary: "La preflight di Yano ha rilevato un disallineamento del runtime o della configurazione di tracing.", record, evidence: context }));
 			continue;
 		}
 		if (type === "tool_execution_end" && record.ok === false && isYanoInternalRecord(record)) {
-			findings.push(failure({ category: "internal_tool", signal: "tool_failure", severity: "high", summary: "Un tool interno di Yano è terminato con errore.", record, evidence: context }));
+			addFinding(failure({ category: "internal_tool", signal: "tool_failure", severity: "high", summary: "Un tool interno di Yano è terminato con errore.", record, evidence: context }));
 			continue;
 		}
 		if (record.record_type === "feedback" && ["rejected", "partial"].includes(record.status) && /yano|planner|deleg|agent|round|workflow|flusso|watchdog|herdr|skill|tool|mcp/i.test(text)) {
-			findings.push(failure({ category: "orchestration", signal: "user_reported_orchestration_gap", severity: "medium", summary: "L’utente ha respinto o giudicato parziale un round indicando un possibile problema di orchestrazione.", record, evidence: context }));
+			addFinding(failure({ category: "orchestration", signal: "user_reported_orchestration_gap", severity: "medium", summary: "L’utente ha respinto o giudicato parziale un round indicando un possibile problema di orchestrazione.", record, evidence: context }));
 		}
 	}
 	return findings;

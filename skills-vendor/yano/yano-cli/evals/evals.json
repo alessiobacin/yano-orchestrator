@@ -1,0 +1,41 @@
+{
+  "skill_name": "yano-cli",
+  "evals": [
+    {
+      "id": 6,
+      "prompt": "L'utente chiede in modo naturale: 'Quanti progetti Yano sono attivi adesso?'. Indica il comando esatto e come interpretare il risultato.",
+      "expected_output": "Usa yano projects --json. Risponde usando project_count, projects e herdr_reachable; conta le root distinte con almeno un agente Pi/Yano live, include planner/coder/reviewer e worker esterni, esclude stale/offline e non sostituisce il comando con watcher/architect/debugger projects o repair.",
+      "files": []
+    },
+    {
+      "id": 1,
+      "prompt": "L'utente chiede in modo naturale: 'Il watcher è attivo su sales-companion e quali progetti sta controllando?'. Rispondi con la procedura CLI più mirata e spiega come distinguere un processo live da una registrazione offline.",
+      "expected_output": "Usa yano watcher projects con --project-root e --json per il progetto, poi yano watcher projects --all --json per l'inventario globale; interpreta active_projects, registered_projects, status e herdr_reachable senza confondere idle con offline.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Un utente vuole usare Yano in una repository esistente con package.json e codice già presenti, aprendo anche Herdr e planner. Indica i comandi sicuri e cosa viene preservato.",
+      "expected_output": "Propone yano init --name '<nome>' --herdr dalla root esistente, poi doctor/trace se necessario; chiarisce che init in-place aggiunge solo infrastruttura Yano mancante e non sovrascrive il codice applicativo.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Dopo un riavvio l'utente vede una tab ma il worker non risulta live e il database orchestrator.db manca. Spiega come diagnosticare e quale comando di riparazione proporre senza cancellare evidenza.",
+      "expected_output": "Parte da fleet, projects dell'agente, trace status/events e repair --dry-run; propone repair --yes --init-db solo con autorizzazione, spiegando snapshot, riavvio canonico e distinzione tra DB operativo assente e trace globale.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "Il planner deve capire se il watcher sta facendo una scansione ogni dieci minuti. Qual è la differenza tra lookback e intervallo e quale evidenza deve cercare?",
+      "expected_output": "Spiega che --lookback-ms è la finestra storica e --interval-ms il polling; --once esegue una sola scansione. Usa trace events filtrato su yano_watcher_scan e indica started_at, completed_at, duration_ms, status, findings e interval_ms.",
+      "files": []
+    },
+    {
+      "id": 5,
+      "prompt": "Un playbook importato richiede un MCP e una API key che non sono configurati. Spiega cosa deve dire il planner e quali comandi usare, senza mostrare il segreto.",
+      "expected_output": "Usa playbook show/check --json, legge credential_checks e warnings, indica l'installazione del capability e yano config set KEY --stdin, e dichiara il playbook non operativo finché Architect non completa il readiness gate.",
+      "files": []
+    }
+  ]
+}

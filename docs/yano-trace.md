@@ -97,9 +97,17 @@ Il watcher non stampa mai il token.
 `--lookback-ms 3600000` significa “analizza i record degli ultimi 60 minuti”;
 non significa eseguire una scansione ogni 60 minuti. Per una scansione unica
 usa `--once`; per il polling continuo usa `--interval-ms 3600000`.
-Per esaminare gli eventi prodotti:
+Ogni scansione produce un evento `yano_watcher_scan`, anche quando non trova
+anomalie. L'evento contiene `started_at`, `completed_at`, `duration_ms`,
+`status`, `findings`, `stalls`, `interval_ms` e `lookback_ms`; `ts` è l'orario
+di completamento. `yano_watcher_round_ok` resta invece riservato alle passate
+positive di validazione bounded con `--validation-run`.
+
+Per elencare gli scan con data e ora di inizio/fine:
 
 ```bash
+yano trace events --instance yano-watcher --type yano_watcher_scan --limit 50
+yano trace events --instance yano-watcher --type yano_watcher_scan --limit 50 --json
 yano trace events --instance yano-watcher --type yano_watcher_finding --limit 50
 find /Users/alessiobacin/Development/testCode/yano-orchestrator/.scratch/optimize-orchestrator/issues -type f -maxdepth 1 -print
 ```

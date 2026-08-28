@@ -25,6 +25,7 @@ pensate per chi usa Yano per la prima volta e lavora dalla root del progetto.
 18. [Catalogo playbook: requisiti, bundle e rimozione](./18-catalogo-playbook.md)
 19. [Inventario agenti, repair e Gantt](./19-inventario-agenti-e-gantt.md)
 20. [Sales Companion: riprendere i 17 documenti](./20-sales-companion-17-documenti.md)
+21. [CLI semantica per gli agenti Pi](./21-yano-cli-semantica.md)
 
 Per una spiegazione completa del primo task, consulta anche la
 [quick start estesa](../quick-start.md). Per il comportamento dettagliato del
@@ -43,3 +44,6 @@ reload controllato, consulta [yano-recovery](../yano-recovery.md).
   quando vuoi applicare il nuovo codice alle istanze già aperte.
 - 'yano repair --yes' riallinea agenti, scope MQTT e Planner quando il progetto
   è in uno stato incoerente; aggiungi '--update' per aggiornare anche Yano.
+- Gli agenti ricevono la skill condivisa `yano-cli`: per richieste come
+  "il watcher è attivo?" o "inizializza questa repository" usano i comandi
+  documentati e preferiscono l'output `--json` per le verifiche.

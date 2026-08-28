@@ -33,6 +33,7 @@ Everything communicates over a local MQTT broker, using role/instance identity a
 - **Global playbook/role architect** — `yano architect` crea proposte ephemeral, verifica skill/CLI/MCP, avvia il watcher di validazione e promuove versioni immutabili solo dopo feedback positivo; `yano playbook|agent` consulta il catalogo
 - **Controlled deployment agent** — `deployment-agent` uses the `deployment-delivery` Playbook and `yano-deployment` skill to keep development source-based, dockerize staging/production, preserve paired ports and require rollback evidence plus explicit production approval
 - **Shared trace-analysis skill** for planner, coder, reviewer and specialists — workers can inspect the filtered origin of a mismatch, while the planner records cross-project opinions and systemic interventions
+- **Shared `yano-cli`** for every Pi/Yano role — agents can translate requests such as “is watcher active?” or “initialize this repository?” into scoped, observable CLI commands, with the complete reference under `skills-vendor/yano/yano-cli/`
 - **Local embeddings prerequisite** — `yano doctor` verifies Ollama, the `nomic-embed-text` model and a real `/api/embed` probe; `yano init` installs/pulls them when missing (no extra npm embedding library is required)
 - **Semantic trace index** — `yano trace index` incrementally stores local Ollama vectors in SQLite and `yano trace search` retrieves only the most relevant observable evidence with project/run/round filters
 - **Consolidated trace memory** — `yano trace consolidate` derives provenance-preserving summaries, failures, opinions and recurring cross-project patterns; `yano trace plan` selects the smallest useful context within a token budget
@@ -100,7 +101,17 @@ yano repair --all-projects --yes --update # repair all active projects sequentia
 yano uninstall        # remove the global installation (asks for confirmation; add --yes to skip it)
 ```
 
-`yano update` updates both places the extension can live: the global npm package (`npm install -g` against this repo's GitHub URL) and, if present, the separate clone `pi extension install` keeps under `~/.pi/agent/git/github.com/<owner>/<repo>` (a plain `git pull`). At the end it also runs `pi update --extensions`, so Pi's installed extension registry is synchronized before the next session. A failure in that final synchronization is reported clearly without hiding the successful Yano package update. `yano update --check` remains read-only and does not run any update command. `yano uninstall` removes both the same way, asking a separate confirmation for the second one.
+`yano update` updates both places the extension can live: the global npm package (`npm install -g` against this repo's GitHub URL) and, if present, the separate clone `pi extension install` keeps under `~/.pi/agent/git/github.com/<owner>/<repo>` (a plain `git pull`). At the end it also runs `pi update --extensions` and synchronizes the global `yano-cli` skill in the detected harness catalogs, so Pi's installed extension registry and CLI skill are synchronized before the next session. A failure in those final synchronizations is reported clearly without hiding the successful Yano package update. `yano update --check` remains read-only and does not run any update command. `yano uninstall` removes both the same way, asking a separate confirmation for the second one.
+
+During a global `npm install -g` the package lifecycle runs the same deterministic skill installer. It detects Claude Code (`~/.claude/skills`), Codex (`~/.codex/skills`) and Pi (`~/.pi/agent/skills`), reads Pi's configured skill roots, and installs only the minimum set of copies. When Pi already discovers the Claude or Codex catalog, it reuses that copy instead of creating a second Pi copy. Inspect or repeat the operation explicitly with:
+
+```bash
+yano skills status --json
+yano skills install --dry-run --json
+yano skills install
+```
+
+Identical, safe duplicate copies discovered by Pi are moved to the Yano data-root backup; modified or unmanaged copies are never deleted automatically. Use `--force` only when deliberately replacing a locally edited Yano-managed copy.
 
 `yano update --reload --yes` is the controlled restart path for a live project:
 it waits for agent safe points, saves recovery and Herdr inventory snapshots,
@@ -156,6 +167,7 @@ yano end --status cancelled    # mark as cancelled instead of completed (also ac
 yano end --yes                 # skip the confirmation prompt
 yano status                    # run/ticket summary from SQLite
 yano fleet                     # live MQTT presence of the agent pool
+yano projects --json           # conteggio globale dei progetti Yano con agenti Pi live in Herdr
 yano deps --cli git,npm        # capability preflight
 yano gantt                     # local live dashboard at 127.0.0.1:8174
 yano watch --once              # one stalled-ticket scan
@@ -342,6 +354,7 @@ scripts/                          CLI internals, dev tooling, and CI checks
 skills-vendor/mattpocock/         vendored planner-only skills (wayfinder, to-spec, to-tickets, and their own
                                    dependencies) — see VERSION.md
 skills-vendor/yano/               bundled trace-analysis skill plus the reviewer code-review adapter
+skills-vendor/yano/yano-cli/      shared semantic CLI skill and complete command reference for every agent
 skills-vendor/awesome-copilot/    vendored chrome-devtools skill, reviewer/frontend-developer only —
                                    see VERSION.md
 mqtt/                             local Mosquitto broker config for development

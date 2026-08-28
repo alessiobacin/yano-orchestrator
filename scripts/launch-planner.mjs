@@ -93,6 +93,13 @@ const MATT_POCOCK_SKILLS = ["wayfinder", "to-spec", "to-tickets", "grilling", "d
 // decisioni di modifica sistemica.
 const YANO_PLANNER_SKILL = "yano-planner-trace-analysis";
 
+// Skill Yano condivisa: insegna a ogni agente a interpretare richieste
+// semantiche sulla CLI completa (`yano watcher projects`, `yano init`, trace,
+// recovery, playbook, ecc.) e a scegliere il comando meno rischioso. Tutte le
+// skill proprie di Yano vivono sotto skills-vendor/yano/; l'installer globale
+// la espone poi come ~/.<harness>/skills/yano-cli.
+const YANO_CLI_SKILL = "yano-cli";
+
 // Adapter Yano della skill /code-review di Matt Pocock: il reviewer riceve il
 // metodo Spec/Standards, ma non il workflow originale con fixed point chiesto
 // all'utente e sub-agent paralleli. Vedi skills-vendor/yano/yano-code-review/.
@@ -144,6 +151,10 @@ function resolveChromeDevToolsSkillPath(packageRoot) {
 
 function resolveYanoPlannerSkillPath(packageRoot) {
 	return resolveVendoredSkillPaths(packageRoot, "yano", [YANO_PLANNER_SKILL])[0];
+}
+
+function resolveYanoCliSkillPath(packageRoot) {
+	return resolveVendoredSkillPaths(packageRoot, "yano", [YANO_CLI_SKILL])[0];
 }
 
 function resolveYanoReviewSkillPath(packageRoot) {
@@ -255,6 +266,7 @@ function ephemeralRoleManifest({ proposalId, role, cwd }) {
 
 function generatedSkillPath(packageRoot, name) {
 	const candidates = [
+		path.join(packageRoot, name),
 		path.join(packageRoot, "skills-vendor", "yano", name),
 		path.join(packageRoot, "skills-vendor", "mattpocock", name),
 		path.join(packageRoot, "skills-vendor", "awesome-copilot", name),
@@ -508,7 +520,8 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 		})
 		: [];
 	const yanoTraceSkillFlags = ["--skill", resolveYanoPlannerSkillPath(packageRoot)];
-	const allSkillFlags = [...mattPocockSkillFlags, ...yanoTraceSkillFlags, ...chromeDevToolsSkillFlags, ...yanoReviewSkillFlags, ...yanoDeploymentSkillFlags, ...yanoObserverSkillFlags, ...yanoAutoImprovementSkillFlags, ...yanoSuggesterSkillFlags, ...yanoArchitectSkillFlags, ...generatedSkillFlags];
+	const yanoCliSkillFlags = ["--skill", resolveYanoCliSkillPath(packageRoot)];
+	const allSkillFlags = [...mattPocockSkillFlags, ...yanoTraceSkillFlags, ...yanoCliSkillFlags, ...chromeDevToolsSkillFlags, ...yanoReviewSkillFlags, ...yanoDeploymentSkillFlags, ...yanoObserverSkillFlags, ...yanoAutoImprovementSkillFlags, ...yanoSuggesterSkillFlags, ...yanoArchitectSkillFlags, ...generatedSkillFlags];
 	const skillFlags = [...new Set(allSkillFlags.filter((_, index) => index % 2 === 1))].flatMap((skillPath) => ["--skill", skillPath]);
 	// -e esplicito SOLO in sviluppo del pacchetto stesso (looksLikePackageRepo)
 	// — mai per una copia locale residua in un progetto scaffoldato, anche se

@@ -103,7 +103,16 @@ function eventIdentity(event) {
 }
 
 function printEvents(events, json) {
-	for (const event of events) console.log(json ? JSON.stringify(event) : `${event.ts || "?"} ${event.instance || "?"} ${event.type || "?"}${event.tool ? ` tool=${event.tool}` : ""}${event.ok === false ? " FAILED" : ""}`);
+	for (const event of events) {
+		if (json) {
+			console.log(JSON.stringify(event));
+			continue;
+		}
+		const scanDetails = event.type === "yano_watcher_scan"
+			? ` scan_started=${event.started_at || "?"} scan_completed=${event.completed_at || event.ts || "?"} duration_ms=${event.duration_ms ?? "?"} status=${event.status || "?"} findings=${event.findings ?? 0} stalls=${event.stalls ?? 0}`
+			: "";
+		console.log(`${event.ts || "?"} ${event.instance || "?"} ${event.type || "?"}${event.tool ? ` tool=${event.tool}` : ""}${event.ok === false ? " FAILED" : ""}${scanDetails}`);
+	}
 }
 
 async function followEvents({ cwd, project, argv }) {

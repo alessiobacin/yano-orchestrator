@@ -76,6 +76,21 @@ per una revisione semantica approfondita il Watcher deve ricevere un round o
 un controllo esplicito e deve riportare evidenze, non dichiarare il flusso sano
 solo perché il processo di polling è vivo.
 
+Ogni passata lascia nel trace un evento `yano_watcher_scan`, con data e ora di
+inizio (`started_at`), fine (`completed_at`), durata, esito, numero di finding e
+stall. Per controllare la ricorrenza:
+
+```bash
+yano trace events \
+  --project sales-companion \
+  --instance yano-watcher \
+  --type yano_watcher_scan \
+  --limit 20
+```
+
+L'evento `yano_watcher_round_ok` non conta tutti i polling: indica soltanto una
+validazione bounded positiva associata a `--validation-run`.
+
 ## Watcher LLM per un playbook ephemeral
 
 Quando l'Architect prepara un nuovo playbook, il watcher non deve essere

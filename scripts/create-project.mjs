@@ -78,6 +78,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runDoctor, ensurePlaywrightPrerequisites, ensureCorePrerequisites, ensureEmbeddingPrerequisites, isSupportedNodeRuntime } from "./doctor.mjs";
 import { runHerdrInit } from "./init-herdr.mjs";
+import { installYanoCliSkill } from "./install-yano-cli.mjs";
 
 function parseArgs(argv) {
 	let name;
@@ -281,6 +282,15 @@ export async function runCreateProject({ packageRoot, cwd, argv, preflightTools 
 	if (!name) {
 		console.error("create-project: --name è obbligatorio (vedi --help).");
 		process.exit(1);
+	}
+	// A project init is also a deterministic retry point for the global skill
+	// installation. Tests can inject preflightTools without touching the
+	// operator's real harness directories.
+	if (typeof preflightTools.installYanoCli === "function" || Object.keys(preflightTools).length === 0) {
+		const harnessSkill = typeof preflightTools.installYanoCli === "function"
+			? preflightTools.installYanoCli({ packageRoot })
+			: installYanoCliSkill({ packageRoot });
+		if (!harnessSkill.ok) console.warn("yano init: yano-cli non sincronizzata in tutti gli harness — esegui `yano skills status` per i dettagli.");
 	}
 	if (herdr) {
 		if (target) {

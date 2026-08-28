@@ -13,6 +13,8 @@
 // Revisione 50 — l'adapter Yano della skill /code-review è cablato SOLO per
 // reviewer e frontend-reviewer; la snapshot originale Matt resta un
 // riferimento vendorizzato e non viene iniettata come workflow autonomo.
+// Revisione 51 — yano-cli è una skill condivisa: tutti i ruoli devono
+// poter interpretare la CLI completa con lo stesso contratto operativo.
 //
 // Usage: node scripts/check-skill-isolation.mjs
 
@@ -27,6 +29,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
 const MATT_POCOCK_SKILLS = ["wayfinder", "to-spec", "to-tickets", "grilling", "domain-modeling", "setup-matt-pocock-skills"];
 const YANO_PLANNER_SKILL = "yano-planner-trace-analysis";
+const YANO_CLI_SKILL = "yano-cli";
 const YANO_REVIEW_SKILL = "yano-code-review";
 const YANO_REVIEW_SKILL_ROLES = ["reviewer", "frontend-reviewer"];
 const YANO_DEPLOYMENT_SKILL = "yano-deployment";
@@ -311,6 +314,23 @@ assert.equal(roles.architect.playbook, "architect-provisioning", "architect deve
 assert.match(read("prompts/architect.md"), /capability|provision/i, "il prompt architect deve descrivere il provisioning");
 console.log("   OK");
 
+console.log("\n17. yano-cli è presente nel catalogo skill Yano, inclusa nel package e condivisa da ogni ruolo...");
+const yanoCliSkillPath = path.join(repoRoot, "skills-vendor", "yano", YANO_CLI_SKILL);
+assert.ok(existsSync(path.join(yanoCliSkillPath, "SKILL.md")), "yano-cli deve contenere SKILL.md");
+assert.ok(existsSync(path.join(yanoCliSkillPath, "references", "command-reference.md")), "yano-cli deve contenere il riferimento completo alla CLI");
+assert.ok(existsSync(path.join(yanoCliSkillPath, "evals", "evals.json")), "yano-cli deve contenere evals/evals.json");
+assert.ok(launcherSrc.includes("YANO_CLI_SKILL"), "launch-planner.mjs deve caricare la skill CLI condivisa");
+for (const [roleName, cfg] of Object.entries(roles)) {
+	assert.ok((cfg.skills ?? []).includes(YANO_CLI_SKILL), `il ruolo '${roleName}' deve dichiarare yano-cli`);
+}
+const printedCliPlanner = execFileSync("node", ["scripts/launch-planner.mjs", "--instance", "cli-skill-planner-check", "--print-only"], { cwd: repoRoot, encoding: "utf8" });
+const printedCliCoder = execFileSync("node", ["scripts/launch-planner.mjs", "--instance", "cli-skill-coder-check", "--role", "coder", "--print-only"], { cwd: repoRoot, encoding: "utf8" });
+assert.ok(printedCliPlanner.includes(yanoCliSkillPath), "planner deve ricevere la skill CLI dal catalogo Yano del pacchetto");
+assert.ok(printedCliCoder.includes(yanoCliSkillPath), "coder deve ricevere la skill CLI dal catalogo Yano del pacchetto");
+assert.ok(existsSync(path.join(repoRoot, "scripts", "install-yano-cli.mjs")), "l'installer globale yano-cli deve essere presente");
+assert.match(read("package.json"), /install-yano-cli\.mjs --if-global/, "il package deve eseguire l'installer durante npm install globale");
+console.log("   OK");
+
 console.log(
-  "\nOK: scripts/check-skill-isolation — skill planner, skill Yano trace, code-review, deployment, observer/auto-improvement/suggester, architect e chrome-devtools risultano cablate ai soli ruoli previsti.",
+  "\nOK: scripts/check-skill-isolation — skill planner, CLI condivisa, trace, code-review, deployment, observer/auto-improvement/suggester, architect e chrome-devtools risultano cablate correttamente.",
 );

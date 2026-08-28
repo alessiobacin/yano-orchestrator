@@ -20,7 +20,7 @@ import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 import assert from "node:assert/strict";
 import mqtt from "mqtt";
-import { tracePaths } from "../scripts/yano-trace-storage.mjs";
+import { readTraceRecords, tracePaths } from "../scripts/yano-trace-storage.mjs";
 
 const execFileP = promisify(execFile);
 const PROJECT_ROOT = path.resolve(new URL(".", import.meta.url).pathname, "..");
@@ -160,6 +160,10 @@ async function main() {
 	await runWatch({ cwd, argv: ["--once", "--project", "watch-smoke"] });
 
 	await sleep(300);
+	const scanRecords = readTraceRecords({ cwd, project: "watch-smoke" }).filter((record) => record.type === "yano_watcher_scan");
+	ok(scanRecords.length === 1, "watcher registra un evento yano_watcher_scan per la passata");
+	ok(scanRecords[0]?.started_at && scanRecords[0]?.completed_at && scanRecords[0]?.ts, "lo scan contiene data e ora di inizio, fine e pubblicazione");
+	ok(scanRecords[0]?.once === true && scanRecords[0]?.mode === "continuous" && scanRecords[0]?.status === "finding", "lo scan descrive modalità, esecuzione bounded e risultato");
 	ok(stalledEvents.some((e) => e.payload?.ticket_id === stalled.id), "MQTT ticket_stalled published for the stalled ticket");
 	ok(!stalledEvents.some((e) => e.payload?.ticket_id === fresh.id), "no ticket_stalled for the fresh (not-yet-stalled) ticket");
 

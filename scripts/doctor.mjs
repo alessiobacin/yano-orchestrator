@@ -35,6 +35,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { globalConfigPath, loadConfigFile } from "./yano-config.mjs";
+import { inspectYanoCliSkill } from "./install-yano-cli.mjs";
 
 const PLAYWRIGHT_CLI_PACKAGE = "@playwright/cli@latest";
 const PLAYWRIGHT_CLI_SKILL_REPO = "https://github.com/microsoft/playwright-cli";
@@ -253,6 +254,10 @@ function skillFile(name, packageRoot) {
 	if (globalFile) return globalFile;
 	if (packageRoot) {
 		const vendorRoots = [
+			// Package-root skills are shipped with Yano itself. They are passed
+			// explicitly to Pi by the launcher and therefore do not need to be
+			// installed into the user's general skill catalog.
+			path.join(packageRoot, name),
 			path.join(packageRoot, "skills-vendor", "yano", name),
 			path.join(packageRoot, "skills-vendor", "mattpocock", name),
 			path.join(packageRoot, "skills-vendor", "awesome-copilot", name),
@@ -499,6 +504,21 @@ export async function runDoctor({ cwd = process.cwd(), json = false, autoStartBr
 	let ok = true;
 	const globalConfig = loadConfigFile(globalConfigPath());
 	rows.push(["Yano global config", true, `${globalConfigPath()}${Object.keys(globalConfig).length ? ` (${Object.keys(globalConfig).length} variabili)` : " (nessuna variabile configurata)"}`]);
+	const yanoCli = inspectYanoCliSkill({ packageRoot });
+	const missingHarnessTargets = yanoCli.targets.filter((target) => !fs.existsSync(path.join(target.path, "yano-cli", "SKILL.md")));
+	const duplicateHarnessSkills = yanoCli.duplicate_roots.filter((root) => fs.existsSync(path.join(root, "yano-cli", "SKILL.md")));
+	const yanoCliDetail = !yanoCli.targets.length
+		? "nessun harness Claude Code/Codex/Pi rilevato"
+		: missingHarnessTargets.length
+			? `mancante in ${missingHarnessTargets.map((target) => target.path).join(", ")} — esegui: yano skills install`
+			: duplicateHarnessSkills.length
+				? `duplicata in ${duplicateHarnessSkills.join(", ")} — esegui: yano skills install`
+				: yanoCli.legacy_paths.length
+					? `cartella legacy ${yanoCli.legacy_paths.join(", ")} — esegui: yano skills install`
+				: `${yanoCli.targets.length} catalogo/cataloghi sincronizzati`;
+	const yanoCliOk = !yanoCli.targets.length || (!missingHarnessTargets.length && !duplicateHarnessSkills.length && !yanoCli.legacy_paths.length);
+	rows.push(["skill globale yano-cli", yanoCliOk, yanoCliDetail]);
+	if (!yanoCliOk) ok = false;
 
 	const nodeOk = isSupportedNodeRuntime();
 	rows.push(["Node.js", nodeOk, nodeOk ? `${process.version} (minimo 22.5.0)` : `${process.version} — richiesto almeno Node 22.5.0`]);

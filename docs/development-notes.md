@@ -1,5 +1,26 @@
 # Development notes
 
+## Revisione 55 — skill CLI condivisa per gli agenti Pi
+
+Non esisteva una skill che spiegasse a tutti gli agenti l'intera superficie
+della CLI Yano: la skill trace copriva solo evidenza, indice, recovery e
+reload. È stata aggiunta `skills-vendor/yano/yano-cli/` nel catalogo delle skill
+Yano del pacchetto, con
+`SKILL.md`, reference completa ed evals. La cartella viene inclusa nel package
+npm e caricata esplicitamente da `scripts/launch-planner.mjs` per ogni ruolo,
+senza copiarla nei progetti gestiti.
+
+La skill impone un mapping semantico verso comandi scoped e `--json`, distingue
+worker live da registrazioni offline, separa `--lookback-ms` da
+`--interval-ms`, protegge credenziali e richiede conferma prima delle azioni
+mutanti. Il launcher e Architect usano sempre la copia vendorizzata nel
+package; in parallelo `scripts/install-yano-cli.mjs` sincronizza una sola copia
+scopribile per ogni catalogo indipendente di Claude Code, Codex o Pi. `doctor`
+segnala cataloghi mancanti, duplicati o conflitti e indica `yano skills install`.
+
+Verifica: `scripts/smoke-test-yano-cli.mjs`,
+`npm run check-skill-isolation`, `npm pack --dry-run` e suite completa.
+
 ## Revisione 50 — reviewer con code review a due assi
 
 La skill `/code-review` di Matt Pocock è stata valutata e integrata senza

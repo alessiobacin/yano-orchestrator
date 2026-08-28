@@ -58,6 +58,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runControlledReload } from "./yano-recovery.mjs";
+import { installYanoCliSkill } from "./install-yano-cli.mjs";
 
 function commandExists(cmd) {
 	const result = spawnSync(cmd, ["--version"], { stdio: "ignore", shell: process.platform === "win32" });
@@ -237,6 +238,10 @@ async function performUpdate({ packageRoot, argv }) {
 
 	console.log("\nyano update: 3/3 — sincronizzo le estensioni registrate in Pi (pi update --extensions)...\n");
 	updatePiExtensions();
+
+	const harnessSkill = installYanoCliSkill({ packageRoot });
+	if (harnessSkill.ok) console.log("yano update: skill globale yano-cli sincronizzata negli harness disponibili.");
+	else console.warn("yano update: skill globale yano-cli non sincronizzata completamente — esegui `yano skills status` per i dettagli.");
 
 	console.log(
 		"\nyano update: i prompt di ruolo di OGNI progetto (anche già scaffoldato prima di questo update) si leggono " +

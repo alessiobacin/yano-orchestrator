@@ -1,4 +1,5 @@
 flowchart LR
+    PROJECTS["yano projects --json\nall active Yano projects"] --> HERDR_ALL["Herdr snapshot\nall Pi panes"]
     CLI["yano <role> projects"] --> HERDR["Herdr snapshot"]
     HERDR --> LIVE["active_projects\nPi live + pane/cwd"]
     HERDR --> OFFLINE["stale/offline\nsolo con --all"]

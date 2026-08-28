@@ -172,6 +172,20 @@ yano logs
 yano trace status
 ```
 
+Per rispondere a «quanti progetti Yano sono attivi adesso?» usa l'inventario
+globale Herdr:
+
+```bash
+yano projects --json
+```
+
+`project_count` conta una sola volta ogni root con almeno un agente Pi/Yano
+live, inclusi planner, coder, reviewer e worker esterni. Non conta terminali
+Codex, card MQTT retained o pane stale/offline; se `herdr_reachable` è falso il
+totale è ignoto. I comandi `yano watcher projects`, `yano architect projects`
+e simili rispondono invece alla domanda più specifica sui soli worker esterni
+di quel ruolo.
+
 Per sapere su quali progetti sono attivi i worker esterni, senza interrogare
 manualmente Herdr:
 

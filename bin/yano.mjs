@@ -79,6 +79,8 @@ import { runRecovery } from "../scripts/yano-recovery.mjs";
 import { runRepair } from "../scripts/yano-repair.mjs";
 import { runExternalStatus } from "../scripts/yano-external-status.mjs";
 import { applyGlobalConfig, runYanoConfig } from "../scripts/yano-config.mjs";
+import { runYanoHarnessSkills } from "../scripts/install-yano-cli.mjs";
+import { runYanoProjects } from "../scripts/yano-projects.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, "..");
@@ -107,7 +109,9 @@ function printTopUsage() {
 			"  uninstall [--yes] Rimuove l'installazione globale",
 			'  end [opzioni]    Chiude i run "active" del progetto nella directory corrente — `yano end --help`',
 			"  copy-prompts     Copia prompts/ dal pacchetto installato nel progetto corrente, per personalizzarli",
-			"  status|logs|fleet|mcp|skills  Viste read-only del progetto e della flotta",
+			"  status|logs|fleet|mcp          Viste read-only del progetto e della flotta",
+			"  projects [--json]             Conta i progetti Yano con agenti live in Herdr",
+			"  skills install|status        Installa/verifica yano-cli negli harness globali",
 			"  deps [opzioni]   Verifica CLI, credenziali e autenticazione richieste dal task",
 			"  gantt [opzioni]  Avvia la dashboard web live dei run/ticket",
 			"  watch [opzioni]  Osserva stall e segnala falle Yano ( --once | --project-root | --lookback-ms | --interval-ms )",
@@ -180,7 +184,19 @@ async function main() {
 		runCopyPrompts({ packageRoot, cwd });
 		return;
 	}
-	if (["status", "logs", "fleet", "mcp", "skills"].includes(sub)) {
+	if (sub === "projects") {
+		runYanoProjects({ argv: rest });
+		return;
+	}
+	if (sub === "skills") {
+		if (rest[0] === "install" || rest[0] === "status" || rest.includes("--help") || rest.includes("-h") || rest.includes("--dry-run") || rest.includes("--force") || rest.includes("--no-prune-duplicates")) {
+			await runYanoHarnessSkills({ packageRoot, argv: rest });
+			return;
+		}
+		await runYanoStatus({ cwd, argv: [sub, ...rest] });
+		return;
+	}
+	if (["status", "logs", "fleet", "mcp"].includes(sub)) {
 		await runYanoStatus({ cwd, argv: [sub, ...rest] });
 		return;
 	}

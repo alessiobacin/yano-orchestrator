@@ -28,7 +28,13 @@ Every instance has an `instance`, `role`, `project` and `team` identity. MQTT to
 ## Main flow
 
 1. `yano init` validates Node, Pi-facing prerequisites, MCP configuration and broker availability before writing a scaffold. In-place initialization of an existing project is non-destructive: it preserves application files and merges only missing Yano infrastructure; if root `agents/` belongs to the application, the Yano roster uses `.pi/agents/`. With `--herdr`, the CLI first creates or reuses and explicitly focuses a Herdr workspace rooted at the current directory, runs the scaffold command in its root pane, then starts `planner-01` in that same terminal; when invoked outside Herdr it opens/attaches the Herdr client, while an invocation already inside Herdr avoids nesting another client. Older projects whose roster is still under `.pi/agents/` remain launchable; the launcher selects that directory explicitly instead of assuming the modern root `agents/` layout.
-2. `yano start` launches any configured role. The trace-analysis skill is attached to every worker; planner-only vendor skills remain restricted to the planner, and browser skills remain restricted to frontend roles.
+2. `yano start` launches any configured role. The shared `yano-cli` and
+   trace-analysis skill are attached to every worker, so every Pi agent can
+   interpret and report the complete Yano CLI consistently. Planner-only vendor
+   skills remain restricted to the planner, and browser skills remain
+   restricted to frontend roles. The CLI skill is packaged at the repository
+   root and included in the global npm package; it is not copied into managed
+   application repositories.
 3. After `to-spec`, the planner invokes the vendored `to-tickets` skill for
    development and mixed tasks. It proposes vertical slices, acceptance
    criteria and blocking edges, waits for the user's granularity approval and
@@ -121,6 +127,17 @@ Il Planner è invece un agente del progetto e si controlla con
 `fleet` è una vista read-only: filtra heartbeat recenti, ignora card retained
 stale/offline e, quando Herdr è disponibile, esclude anche un processo marcato
 `done`. Non crea agenti né ripara tab.
+
+Per il conteggio globale dei progetti realmente attivi si usa invece:
+
+```text
+yano projects --json
+```
+
+Il comando interroga Herdr, considera tutti gli agenti Pi/Yano live (non solo
+gli external worker), raggruppa per root canonica e restituisce ogni progetto
+una sola volta in `projects`, con il totale in `project_count`. Se Herdr non è
+raggiungibile il totale è `null`, perché l'assenza di dati non equivale a zero.
 
 `external_workers` nel report di `repair` contiene i worker esterni effettivamente
 osservati da Herdr o presenti nei registri globali. Architect e Watcher non hanno
@@ -227,7 +244,9 @@ When an eligible signal is found, the watcher:
    does not create an unbounded number of tickets;
 3. appends a `yano_watcher_finding` event to the watched project's trace,
    including the ticket path and the Telegram delivery result (never secrets);
-4. sends a concise Telegram alert using `TELEGRAM_BOT_TOKEN` and
+4. appends a `yano_watcher_scan` event for every pass, including start/end
+   timestamps, duration, interval, lookback, status, findings and stalls;
+5. sends a concise Telegram alert using `TELEGRAM_BOT_TOKEN` and
    `TELEGRAM_DESTINATION_CHAT_ID` from the development `.env` or the global
    user configuration managed by `yano config`.
 

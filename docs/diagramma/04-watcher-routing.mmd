@@ -2,6 +2,7 @@ flowchart TD
     LOOP["yano watch\n--interval-ms 600000"] --> DB["DB read-only\nticket stalled"]
     LOOP --> HEARTBEAT["MQTT heartbeat\nagent live"]
     LOOP --> TRACE["trace bounded\nsegnali Yano"]
+    LOOP --> SCAN["yano_watcher_scan\nstarted_at / completed_at\nduration / status"]
     DB --> FINDING["finding"]
     HEARTBEAT --> FINDING
     TRACE --> FINDING

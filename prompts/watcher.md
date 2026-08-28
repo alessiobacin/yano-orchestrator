@@ -34,7 +34,10 @@ heartbeat/presence, ticket stalled e segnali Yano ad alta confidenza, quindi
 routea l'anomalia al Planner o a Telegram. Un controllo semantico più ampio
 del contenuto di un round va richiesto al watcher LLM con un nuovo prompt
 bounded; non dichiarare `healthy` soltanto perché il processo di polling è
-vivo.
+vivo. Ogni passata deve comunque essere verificabile nel trace tramite
+l'evento `yano_watcher_scan`, che include orari di inizio/fine, durata, esito,
+finding e stall; `yano_watcher_round_ok` è riservato alle sole validazioni
+bounded.
 
 Non usare mai `find /`, scansioni dell'intero home filesystem, processi senza
 timeout o comandi che possono restare indefinitamente in esecuzione. In

@@ -73,6 +73,39 @@ function parseArgs(argv) {
 	return o;
 }
 
+function appendWatcherScan({ cwd, project, opts, startedAt, status, reason = null, stalls = 0, findings = 0, liveAgents = 0, livePlanners = 0 }) {
+	const completedAtMs = Date.now();
+	const completedAt = new Date(completedAtMs).toISOString();
+	const entry = {
+		ts: completedAt,
+		type: "yano_watcher_scan",
+		record_type: "event",
+		source: "yano-watcher",
+		instance: "yano-watcher",
+		scan_id: crypto.randomUUID(),
+		started_at: startedAt,
+		completed_at: completedAt,
+		duration_ms: Math.max(0, completedAtMs - new Date(startedAt).getTime()),
+		mode: opts.validationRun ? "validation" : "continuous",
+		once: opts.once,
+		interval_ms: opts.intervalMs,
+		lookback_ms: opts.lookbackMs,
+		stall_ms: opts.stallMs,
+		away: awayEnabled(opts),
+		status,
+		reason,
+		stalls,
+		findings,
+		live_agents: liveAgents,
+		live_planners: livePlanners,
+		validation_run_id: opts.validationRun || null,
+		proposal_id: opts.playbookProposal || null,
+		playbook_id: opts.playbookId || null,
+	};
+	try { appendRawTraceRecord({ cwd, project, record: entry }); } catch { /* tracing must never block the watcher */ }
+	return entry;
+}
+
 function resolveProject(cwd) {
 	const cfgPath = path.join(cwd, ".pi", "extensions", "yano-orchestrator", "config", "project.json");
 	try {
@@ -91,6 +124,7 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 	// pass process.argv.slice(2) or `--once --project ...`); parseArgs iterates
 	// it directly, matching runEndProject's convention.
 	const opts = parseArgs(argv);
+	const startedAt = new Date().toISOString();
 	const watchCwd = opts.projectRoot ? path.resolve(opts.projectRoot) : cwd;
 	const project = opts.project || resolveProject(watchCwd);
 	const effectivePackageRoot = packageRoot || path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -174,6 +208,7 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 			}
 			try { appendRawTraceRecord({ cwd: watchCwd, project, record: { type: "yano_watcher_notification_route", record_type: "event", instance: "yano-watcher", route: route.route, delivered: route.delivered || 0, planner_instances: livePlanners.map((agent) => agent.instance), signal: "validation_blocked", validation_run_id: opts.validationRun || null, telegram: route.telegram ? { ok: route.telegram.ok, detail: route.telegram.detail } : null } }); } catch { /* best effort */ }
 		}
+		appendWatcherScan({ cwd: watchCwd, project, opts, startedAt, status: "blocked", reason: "not_initialized", liveAgents: liveAgents.length, livePlanners: livePlanners.length });
 		console.log(`yano watch: validation blocked — nessun orchestrator.db per questo progetto (${dbPath})${previous ? " (notifica già inviata)" : ""}.`);
 		if (client) { try { await new Promise((resolve) => setTimeout(resolve, 120)); client.end(false); } catch { /* best effort */ } }
 		return { status: "blocked", reason: "not_initialized", route, project, db_path: dbPath };
@@ -184,6 +219,7 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 		({ DatabaseSync } = yanoRequire("node:sqlite"));
 	} catch (err) {
 		console.error(`yano watch: node:sqlite non disponibile (${err instanceof Error ? err.message : String(err)}).`);
+		appendWatcherScan({ cwd: watchCwd, project, opts, startedAt, status: "error", reason: "sqlite_unavailable", liveAgents: liveAgents.length, livePlanners: livePlanners.length });
 		return { status: "error", reason: "sqlite_unavailable", project, db_path: dbPath };
 	}
 
@@ -195,6 +231,7 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 		const rows = db.prepare("SELECT * FROM tickets WHERE status = 'running' ORDER BY updated_at ASC").all();
 		stalled = rows.filter((t) => now - new Date(t.updated_at).getTime() > opts.stallMs);
 	} catch (err) {
+		appendWatcherScan({ cwd: watchCwd, project, opts, startedAt, status: "error", reason: "sqlite_query_failed", liveAgents: liveAgents.length, livePlanners: livePlanners.length });
 		console.error(`yano watch: query SQLite fallita (${err instanceof Error ? err.message : String(err)})`);
 		process.exit(1);
 	}
@@ -394,6 +431,20 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 		}
 	}
 
+	const scanStatus = marker.length || validationFindings.length ? "finding" : "healthy";
+	const scan = appendWatcherScan({
+		cwd: watchCwd,
+		project,
+		opts,
+		startedAt,
+		status: scanStatus,
+		reason: null,
+		stalls: marker.length,
+		findings: validationFindings.length,
+		liveAgents: liveAgents.length,
+		livePlanners: livePlanners.length,
+	});
+
 	try { db.close(); } catch { /* ignore */ }
 	if (client) {
 		// Graceful close: force:false lets already-published (QoS0 in-flight)
@@ -402,13 +453,14 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 		try { await new Promise((r) => setTimeout(r, 120)); client.end(false); } catch { /* ignore */ }
 	}
 
-	if (opts.once || opts.intervalMs <= 0) return; // single pass — let the caller decide to exit
+	if (opts.once || opts.intervalMs <= 0) return { status: scanStatus, scan }; // single pass — let the caller decide to exit
 	// Real watcher loop: after this pass, wait intervalMs then run again.
 	// Env-gated away mode is honored on every pass, so `--away` can be implied
 	// by PI_ORCH_AWAY=1 even if the process was launched without the flag.
 	setTimeout(() => {
 		runWatch({ cwd, argv, packageRoot }).catch((e) => { console.error(e); process.exit(1); });
 	}, opts.intervalMs);
+	return { status: scanStatus, scan };
 }
 
 function awayEnabled(opts) {

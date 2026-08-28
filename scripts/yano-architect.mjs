@@ -468,6 +468,9 @@ function selectTeam(db, proposal, opts) {
 
 function skillCandidates(name) {
 	return [
+		// Shared skills shipped at the package root are part of Yano itself;
+		// they are not expected to be copied into the user's skill catalog.
+		path.join(PACKAGE_ROOT, name, "SKILL.md"),
 		path.join(PACKAGE_ROOT, "skills-vendor", "yano", name, "SKILL.md"),
 		path.join(PACKAGE_ROOT, "skills-vendor", "mattpocock", name, "SKILL.md"),
 		path.join(PACKAGE_ROOT, "skills-vendor", "awesome-copilot", name, "SKILL.md"),

@@ -16,11 +16,10 @@
 // browser.
 //
 // Uso:
-//   yano gantt [--port 8174] [--open] [--project <slug>]
+//   yano gantt [--port 10000..19999] [--open] [--project <slug>]
 //   (in locale: node scripts/gantt-server.mjs [stesse opzioni])
 
 import { readFileSync, existsSync } from "node:fs";
-import * as net from "node:net";
 import * as http from "node:http";
 import path from "node:path";
 import crypto from "node:crypto";
@@ -28,14 +27,58 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import mqtt from "mqtt";
 import { projectDbPath } from "./yano-project.mjs";
+import { projectKey } from "./yano-trace-storage.mjs";
+import { ganttRegistryPath, listGanttsWithStatus, markGanttStopped, registerGantt } from "./gantt-registry.mjs";
 
 const yanoRequire = createRequire(import.meta.url);
+export const GANTT_PORT_MIN = 10000;
+export const GANTT_PORT_MAX = 19999;
 
 function workspaceDir(cwd) { return path.join(cwd, ".pi", "extensions", "yano-orchestrator"); }
 function resolveProject(cwd) {
 	try { const cfg = JSON.parse(readFileSync(path.join(workspaceDir(cwd), "config", "project.json"), "utf-8")); if (cfg.project) return cfg.project; } catch { /* */ }
 	try { const pkg = JSON.parse(readFileSync(path.join(cwd, "package.json"), "utf-8")); if (pkg.name && !String(pkg.name).startsWith("@otomatik/yano-")) return pkg.name; } catch { /* */ }
 	return path.basename(cwd);
+}
+
+function requestedPort(argv) {
+	const index = argv.indexOf("--port");
+	if (index < 0) return null;
+	const value = Number(argv[index + 1]);
+	if (!Number.isInteger(value) || value < GANTT_PORT_MIN || value > GANTT_PORT_MAX) {
+		throw new Error(`la porta Gantt deve essere un intero nel range ${GANTT_PORT_MIN}-${GANTT_PORT_MAX}`);
+	}
+	return value;
+}
+
+// Start from a stable project-specific slot, then wrap through the range. The
+// actual server bind is the availability check, so two concurrent invocations
+// cannot both claim the same port between a probe and listen().
+function candidatePorts(project) {
+	const size = GANTT_PORT_MAX - GANTT_PORT_MIN + 1;
+	const digest = crypto.createHash("sha256").update(String(project || "gantt")).digest();
+	const preferred = digest.readUInt32BE(0) % size;
+	return Array.from({ length: size }, (_, offset) => GANTT_PORT_MIN + ((preferred + offset) % size));
+}
+
+function listenOnAvailablePort(server, ports, host) {
+	return new Promise((resolve, reject) => {
+		let index = 0;
+		const attempt = () => {
+			const port = ports[index++];
+			const onError = (error) => {
+				server.removeListener("error", onError);
+				if (error.code === "EADDRINUSE" && index < ports.length) return attempt();
+				reject(error);
+			};
+			server.once("error", onError);
+			server.listen(port, host, () => {
+				server.removeListener("error", onError);
+				resolve(server.address().port);
+			});
+		};
+		attempt();
+	});
 }
 
 // ── Snapshot: runs + tickets + open holds from orchestrator.db ───────────
@@ -78,6 +121,36 @@ function wsSend(socket, obj) {
 }
 function wsBroadcast(wss, obj) { for (const s of wss) { if (!s.destroyed) wsSend(s, obj); } }
 
+function projectRootFromArgs(cwd, argv) {
+	const value = argv.includes("--project-root") ? argv[argv.indexOf("--project-root") + 1] : (argv.includes("--cwd") ? argv[argv.indexOf("--cwd") + 1] : cwd);
+	return path.resolve(value || cwd);
+}
+
+async function showGanttLinks({ cwd, argv }) {
+	const all = await listGanttsWithStatus();
+	const allProjects = argv.includes("--links") || argv.includes("--list");
+	if (allProjects) {
+		const result = { registry_path: ganttRegistryPath(), instances: all, project_count: all.length };
+		if (argv.includes("--json")) console.log(JSON.stringify(result, null, 2));
+		else {
+			console.log(`yano gantt: ${all.length} dashboard registrata (${ganttRegistryPath()})`);
+			for (const entry of all) console.log(`  ${entry.project} — ${entry.active ? "attivo" : "fermo"} — ${entry.url}`);
+			if (!all.length) console.log("  nessun Gantt persistente registrato.");
+		}
+		return result;
+	}
+
+	const useCwd = projectRootFromArgs(cwd, argv);
+	const project = argv.includes("--project") ? argv[argv.indexOf("--project") + 1] : resolveProject(useCwd);
+	const key = projectKey(useCwd, project);
+	const entry = all.find((item) => item.project_key === key);
+	const result = { registry_path: ganttRegistryPath(), project, root: useCwd, found: !!entry, instance: entry || null };
+	if (argv.includes("--json")) console.log(JSON.stringify(result, null, 2));
+	else if (entry) console.log(`yano gantt: ${project} — ${entry.active ? "attivo" : "fermo"} — ${entry.url}`);
+	else console.log(`yano gantt: nessun Gantt persistente registrato per ${project} (${useCwd}). Usa yano gantt --persistent --open per avviarlo.`);
+	return result;
+}
+
 // ── Minimal SPA that renders the timeline ─────────────────────────────────
 const PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Orchestrator Gantt</title>
 <style>
@@ -117,12 +190,34 @@ load();setInterval(load,5000);
 </script></body></html>`;
 
 export async function runGantt({ cwd, argv, packageRoot }) {
-	const portArg = argv.includes("--port") ? Number(argv[argv.indexOf("--port") + 1]) : 8174;
-	const projectRoot = argv.includes("--project-root") ? argv[argv.indexOf("--project-root") + 1] : null;
-	const useCwd = projectRoot ? path.resolve(projectRoot) : (argv.includes("--cwd") ? argv[argv.indexOf("--cwd") + 1] : cwd);
+	if (argv.includes("--help") || argv.includes("-h")) {
+		console.log([
+			"Uso: yano gantt [--project-root <dir>] [--project <nome>] [opzioni]",
+			"",
+			"  --persistent  registra il link nel data-root globale e impedisce duplicati dello stesso progetto",
+			"  --link        mostra il link persistente del progetto corrente senza avviare un server",
+			"  --links       elenca tutti i link Gantt persistenti e il loro stato live",
+			"  --open         apre il link nel browser",
+			`  --port <porta> porta esplicita nel range ${GANTT_PORT_MIN}-${GANTT_PORT_MAX}; senza flag viene scelta automaticamente`,
+			"  --once         avvia una verifica HTTP e termina (test/health probe)",
+		].join("\n"));
+		return { ok: true, help: true };
+	}
+	const explicitPort = requestedPort(argv);
+	if (argv.includes("--link") || argv.includes("--links") || argv.includes("--list")) return showGanttLinks({ cwd, argv });
+	const useCwd = projectRootFromArgs(cwd, argv);
 	const project = argv.includes("--project") ? argv[argv.indexOf("--project") + 1] : resolveProject(useCwd);
 	const open = argv.includes("--open");
 	const dbg = argv.includes("--once"); // one snapshot + exit (for tests / health probes)
+	const persistent = argv.includes("--persistent");
+	const identity = projectKey(useCwd, project);
+	if (persistent) {
+		const existing = (await listGanttsWithStatus()).find((entry) => entry.project_key === identity && entry.active);
+		if (existing) {
+			console.log(`yano gantt: ${project} è già attivo su ${existing.url} (usa yano gantt --link per recuperarlo).`);
+			return { existing: true, project, port: existing.port, base: existing.url, instance: existing };
+		}
+	}
 
 	const wss = new Set();
 	const mqttClients = new Set();
@@ -130,7 +225,7 @@ export async function runGantt({ cwd, argv, packageRoot }) {
 		const url = (req.url || "/").split("?")[0];
 		if (url === "/" || url === "/index.html") { res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }); res.end(PAGE); return; }
 		if (url === "/data") { res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" }); res.end(JSON.stringify(buildSnapshot(useCwd, project))); return; }
-		if (url === "/healthz") { res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify({ ok: true, project })); return; }
+		if (url === "/healthz") { res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify({ ok: true, project, root: useCwd, port: server.address()?.port || null })); return; }
 		res.writeHead(404); res.end("not found");
 	});
 	server.on("upgrade", (req, socket, head) => handleUpgrade(req, socket, head, wss));
@@ -147,9 +242,12 @@ export async function runGantt({ cwd, argv, packageRoot }) {
 
 	const host = "127.0.0.1";
 	return new Promise((resolve, reject) => {
-		server.on("error", reject);
-		server.listen(portArg, host, () => {
-			const base = `http://${host}:${portArg}`;
+		listenOnAvailablePort(server, explicitPort ? [explicitPort] : candidatePorts(project), host).then((port) => {
+			const base = `http://${host}:${port}`;
+			if (persistent) {
+				registerGantt({ projectKey: identity, project, root: useCwd, port, url: base });
+				server.once("close", () => markGanttStopped(identity));
+			}
 			console.log(`yano gantt — orchestrator view: ${base}/   (project: ${project})`);
 			if (open) {
 				try {
@@ -165,7 +263,10 @@ export async function runGantt({ cwd, argv, packageRoot }) {
 			if (dbg) {
 				http.get(`${base}/healthz`, () => { server.close(); try { client.end(true); } catch {} });
 			}
-			resolve({ server, client, base, project });
+			resolve({ server, client, base, project, port });
+		}).catch((error) => {
+			try { client.end(true); } catch { /* best effort */ }
+			reject(error);
 		});
 	});
 }

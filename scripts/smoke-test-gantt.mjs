@@ -8,6 +8,7 @@
 //                     open hold (the Gantt data source)
 //   - GET /        -> serves the HTML page (string contains "Orchestrator")
 //   - the server is read-only: run/ticket state is unchanged afterwards
+//   - two projects can run simultaneously: each gets a free port in 10000-19999
 // Uses the server's `--once` variant in wedged form: we import it and call
 // runGantt with a custom argv that makes it serve then close, so the test
 // process can continue after the server's own http.get/destroy handshake.
@@ -84,9 +85,19 @@ async function main() {
 	await planner.call("decision_hold_create", { question: "preflight?", run_id: run.id, owner: "user", idempotency_key: "gantt-preflight" });
 	ok(true, "seeded a run, 2 tickets, 1 open hold for the Gantt view");
 
-	const { runGantt } = await import(pathToFileURL(path.join(PROJECT_ROOT, "scripts", "gantt-server.mjs")).href);
-	const port = 8390 + (process.pid % 50);
-	const serverHandle = await runGantt({ cwd, argv: ["--port", String(port), "--project", "gantt-smoke"], packageRoot: PROJECT_ROOT });
+	// Keep persistent-link metadata inside this disposable smoke-test directory;
+	// never write a test registration into the operator's real data-root.
+	process.env.YANO_DATA_DIR = path.join(cwd, ".yano-test-data");
+	const { runGantt, GANTT_PORT_MIN, GANTT_PORT_MAX } = await import(pathToFileURL(path.join(PROJECT_ROOT, "scripts", "gantt-server.mjs")).href);
+	await assert.rejects(
+		() => runGantt({ cwd, argv: ["--project", "gantt-smoke", "--port", "8174"], packageRoot: PROJECT_ROOT }),
+		/10000-19999/,
+		"a manually requested port outside the Gantt range is rejected clearly",
+	);
+	ok(true, "out-of-range explicit port is rejected");
+	const serverHandle = await runGantt({ cwd, argv: ["--project", "gantt-smoke", "--persistent"], packageRoot: PROJECT_ROOT });
+	const port = serverHandle.port;
+	ok(port >= GANTT_PORT_MIN && port <= GANTT_PORT_MAX, "default server port is inside the 10000-19999 Gantt range");
 
 	console.log("\n=== PART 1 — healthz ===");
 	let up = false;
@@ -111,9 +122,34 @@ async function main() {
 	const after = (await planner.call("run_status", { run_id: run.id })).details;
 	ok(after.tickets.filter((t) => t.id === t1.id).length === 1, "server left the ticket untouched (read-only)");
 
+	console.log("\n=== PART 5 — persistent links are discoverable per project or globally ===");
+	const currentLink = await runGantt({ cwd, argv: ["--link", "--project", "gantt-smoke", "--json"], packageRoot: PROJECT_ROOT });
+	ok(currentLink.found === true && currentLink.instance?.active === true, "--link returns the active persistent Gantt for the current project");
+	ok(currentLink.instance.url === serverHandle.base, "--link returns the same URL printed at startup");
+	const reused = await runGantt({ cwd, argv: ["--persistent", "--project", "gantt-smoke"], packageRoot: PROJECT_ROOT });
+	ok(reused.existing === true && reused.base === serverHandle.base, "repeating --persistent reuses the existing project Gantt instead of creating a duplicate");
+	const allLinks = await runGantt({ cwd, argv: ["--links", "--json"], packageRoot: PROJECT_ROOT });
+	ok(allLinks.project_count === 1 && allLinks.instances[0].project === "gantt-smoke", "--links lists all persistent Gantt registrations");
+
+	console.log("\n=== PART 6 — a second project gets a different free Gantt port ===");
+	const secondCwd = await bootstrapScratchRepo();
+	const secondHandle = await runGantt({ cwd: secondCwd, argv: ["--project", "gantt-second"], packageRoot: PROJECT_ROOT });
+	ok(secondHandle.port >= GANTT_PORT_MIN && secondHandle.port <= GANTT_PORT_MAX, "second project port is inside the Gantt range");
+	ok(secondHandle.port !== serverHandle.port, "two simultaneous projects never share the same automatically selected port");
+	const secondHealth = await httpGetJson(`${secondHandle.base}/healthz`);
+	ok(secondHealth.project === "gantt-second", "second Gantt serves the second project scope");
+
+	const fallbackHandle = await runGantt({ cwd, argv: ["--project", "gantt-smoke"], packageRoot: PROJECT_ROOT });
+	ok(fallbackHandle.port >= GANTT_PORT_MIN && fallbackHandle.port <= GANTT_PORT_MAX, "occupied-slot fallback stays inside the Gantt range");
+	ok(fallbackHandle.port !== serverHandle.port, "an occupied preferred slot falls back to the next free port");
+
 	// Cleanup: close the Gantt server we opened.
 	serverHandle.server?.close?.();
 	try { serverHandle.client?.end?.(true); } catch { /* ignore */ }
+	secondHandle.server?.close?.();
+	try { secondHandle.client?.end?.(true); } catch { /* ignore */ }
+	fallbackHandle.server?.close?.();
+	try { fallbackHandle.client?.end?.(true); } catch { /* ignore */ }
 	for (const fi of ALL_INSTANCES) { try { await fi.shutdown(); } catch { /* ignore */ } }
 
 	console.log(`\n${PASS} assertions passed.`);

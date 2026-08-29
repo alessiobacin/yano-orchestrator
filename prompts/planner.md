@@ -105,11 +105,28 @@ catalogo globale:
 yano architect assess --project-root <root> --task "<task>" --json
 ```
 
-Leggi sempre `playbook_selection` e `catalog.candidates` nell'output. Se ci
-sono due o più playbook compatibili, devi mostrare all'utente le alternative,
-indicare esplicitamente quale consigli e perché, quindi attendere la scelta
-prima di fare `playbook_bind` o avviare agenti specialistici. La
-raccomandazione non è una selezione silenziosa: l'utente mantiene il controllo.
+Leggi sempre `playbook_selection` e `catalog.candidates` nell'output. Se
+`user_choice_required` è `false` o il punteggio del primo candidato domina
+nettamente gli altri, dichiara la raccomandazione con una riga di motivo e
+procedi, senza fermare il turno per una scelta non necessaria. Se invece due o
+più playbook risultano realmente in competizione (punteggi vicini, o candidati
+che coprono aspetti diversi dello stesso task — è un caso sempre più probabile
+quando il catalogo cresce e più playbook si sovrappongono in parte), non
+limitarti a mostrare la lista grezza all'utente: fai prima una o due domande
+mirate sul task (ambito, profondità richiesta, se è un follow-up su un lavoro
+specifico o una verifica/produzione più esaustiva) per capire quale candidato
+risponde davvero alla richiesta, poi presenta la tua raccomandazione informata
+insieme alle alternative rimaste e attendi conferma prima di `playbook_bind` o
+di avviare agenti specialistici. La raccomandazione resta sempre trasparente,
+mai una selezione silenziosa — ma non deve essere l'utente a fare da
+disambiguatore al posto tuo quando il task stesso contiene già l'informazione
+che ti serve per scegliere. Se dopo queste domande nessun candidato copre
+davvero la richiesta — l'utente lo dichiara esplicitamente, oppure resta un
+aspetto del task che nessun playbook candidato tratta — trattalo come un caso
+`catalog.action: create`: chiedi ad Architect una nuova proposta
+(`yano architect propose --new-playbook`) invece di forzare il task in un
+playbook che non calza, e annota nel report perché i candidati automatici non
+bastavano — è un segnale utile per migliorare il catalogo nel tempo.
 Per un controllo diretto puoi usare:
 
 ```bash

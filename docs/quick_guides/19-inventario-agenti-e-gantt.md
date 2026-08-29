@@ -45,8 +45,33 @@ aggiunto solo se un processo non termina in modo graceful.
 
 ```bash
 yano repair --project-root "$PWD" --yes --init-db
-yano gantt --project-root "$PWD" --project "$(basename "$PWD")" --port 8174
+yano gantt --project-root "$PWD" --project "$(basename "$PWD")"
 ```
+
+Senza `--port`, Gantt sceglie automaticamente una porta libera nel range
+`10000-19999`. È quindi possibile eseguire contemporaneamente una dashboard
+per ogni progetto. Se vuoi fissare manualmente la porta, usa per esempio
+`--port 10055` (sempre nel range `10000-19999`).
+
+Per mantenere il link nel catalogo globale e recuperarlo in seguito:
+
+```bash
+yano gantt --project-root "$PWD" --persistent --open
+yano gantt --project-root "$PWD" --link
+yano gantt --links
+```
+
+`--persistent` non crea un processo nascosto: il server resta aggiornato finché
+la relativa istanza è in esecuzione. Salva però il link nel data-root globale;
+`--link` mostra quello del progetto corrente e `--links` mostra tutti i Gantt
+registrati, indicando `attivo` o `fermo`. Se il processo è stato chiuso, il
+link resta recuperabile ma va riavviato con `--persistent`.
+
+La registry è condivisa da tutte le directory e si trova sotto
+`<YANO_DATA_DIR>/gantt/instances.json`; `yano gantt --links --json` eseguito da
+una directory qualunque è quindi sufficiente per l'inventario globale. Per
+aggiornare questa guida quando cambia il comando, segui
+[`docs/documentation-sync.md`](../documentation-sync.md).
 
 Il DB può essere presente ma vuoto: Gantt mostrerà `runs=[]` finché il Planner
 non chiama `orchestrator_init` e `run_create`. Questo è diverso da un DB

@@ -13,7 +13,7 @@ Everything communicates over a local MQTT broker, using role/instance identity a
 
 ## Features
 
-- **Role-based multi-agent coordination** over MQTT 5 — planner, coder, reviewer, and 28 optional specialist roles (TDD, mutation testing, security review, Kubernetes, CI/CD, accessibility, documentation sync, architecture diagrams, read-only observers, and more)
+- **Role-based multi-agent coordination** over MQTT 5 — planner, coder, reviewer, and 35 optional specialist roles (TDD, mutation testing, security review, Kubernetes, CI/CD, accessibility, documentation sync, architecture diagrams, read-only observers, and more)
 - **Git worktree isolation** — every task runs in its own worktree; your main branch is only ever touched by a clean, reviewed merge
 - **A persistent ticket/DAG layer** (SQLite-backed) that tracks runs, specs, and tickets across restarts
 - **A watchdog** that detects stalled tickets, runs that finished all their tickets but were never merged/notified, *and* tickets whose assigned instance has confirmably vanished (offline presence, not just slow) — the last case is auto-failed and escalated within a couple of minutes, not 15-30
@@ -36,6 +36,7 @@ Everything communicates over a local MQTT broker, using role/instance identity a
 - **Shared `yano-cli`** for every Pi/Yano role — agents can translate requests such as “is watcher active?” or “initialize this repository?” into scoped, observable CLI commands, with the complete reference under `skills-vendor/yano/yano-cli/`
 - **Local embeddings prerequisite** — `yano doctor` verifies Ollama, the `nomic-embed-text` model and a real `/api/embed` probe; `yano init` installs/pulls them when missing (no extra npm embedding library is required)
 - **Semantic trace index** — `yano trace index` incrementally stores local Ollama vectors in SQLite and `yano trace search` retrieves only the most relevant observable evidence with project/run/round filters
+- **Project Gantt dashboards** — each project gets a free port in `10000-19999`; `--persistent` registers a live link, while `--link` and `--links` recover it later without scanning Herdr manually
 - **Consolidated trace memory** — `yano trace consolidate` derives provenance-preserving summaries, failures, opinions and recurring cross-project patterns; `yano trace plan` selects the smallest useful context within a token budget
 - **Trace backup and restore** — `yano trace export` creates a portable JSON bundle and `yano trace import --reindex` restores raw evidence before rebuilding derived indexes
 - **Role prompts are always read live from the installed package by default — no per-project copy to keep in sync** — `yano update` alone is enough to bring every project current; `yano copy-prompts` + `yano start --custom-prompts` are there only if you actually want to customize a role's prompt for one specific project
@@ -169,7 +170,9 @@ yano status                    # run/ticket summary from SQLite
 yano fleet                     # live MQTT presence of the agent pool
 yano projects --json           # conteggio globale dei progetti Yano con agenti Pi live in Herdr
 yano deps --cli git,npm        # capability preflight
-yano gantt                     # local live dashboard at 127.0.0.1:8174
+yano gantt --persistent --open # dashboard live persistente, con link recuperabile
+yano gantt --link              # link persistente del progetto corrente
+yano gantt --links             # tutti i link Gantt persistenti registrati
 yano watch --once              # one stalled-ticket scan
 # yano watch also escalates high-confidence Yano faults to .scratch/optimize-orchestrator/issues
 # and Telegram; global-only installs use `yano config`, development checkouts may use .env.
@@ -227,6 +230,11 @@ If you run `pi` against a local LLM proxy instead of a cloud provider directly, 
 
 Per il percorso completo, inclusa l'inizializzazione dei log con `yano trace`,
 vedi [`docs/quick-start.md`](docs/quick-start.md).
+
+Per mantenere la documentazione sincronizzata con ogni modifica al codice,
+segui [`docs/documentation-sync.md`](docs/documentation-sync.md) e usa anche la
+raccolta di [cheat-sheet](docs/cheat-sheet/README.md). Esegui
+`npm run check:docs` prima dei test.
 
 Per le procedure brevi, scegli una singola operazione nella raccolta
 [`docs/quick_guides/`](docs/quick_guides/README.md): installazione, init di

@@ -113,7 +113,7 @@ function printTopUsage() {
 			"  projects [--json]             Conta i progetti Yano con agenti live in Herdr",
 			"  skills install|status        Installa/verifica yano-cli negli harness globali",
 			"  deps [opzioni]   Verifica CLI, credenziali e autenticazione richieste dal task",
-			"  gantt [opzioni]  Avvia la dashboard web live dei run/ticket",
+			"  gantt [opzioni]  Dashboard per progetto; --persistent registra il link, --link/--links lo recuperano",
 			"  watch [opzioni]  Osserva stall e segnala falle Yano ( --once | --project-root | --lookback-ms | --interval-ms )",
 			"  architect projects|watcher projects|debugger projects|auto-improve|auto-improver projects",
 			"                   Elenca i progetti attivi dei worker esterni (aggiungi --all per gli offline)",

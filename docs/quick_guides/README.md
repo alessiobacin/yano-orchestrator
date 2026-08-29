@@ -30,6 +30,10 @@ pensate per chi usa Yano per la prima volta e lavora dalla root del progetto.
 Per una spiegazione completa del primo task, consulta anche la
 [quick start estesa](../quick-start.md). Per il comportamento dettagliato del
 reload controllato, consulta [yano-recovery](../yano-recovery.md).
+Per trovare il comando minimo per ogni operazione, consulta la raccolta
+[`cheat-sheet`](../cheat-sheet/README.md). La policy per aggiornare sempre i
+documenti insieme al codice è in
+[`documentation-sync.md`](../documentation-sync.md).
 
 ## Regole rapide
 

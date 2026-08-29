@@ -10,9 +10,17 @@ yano playbook candidates \
 ```
 
 Il risultato contiene `recommended`, le alternative e
-`user_choice_required`. Il Planner deve mostrare la raccomandazione e le
-alternative all'utente e attendere la scelta; non deve selezionare in silenzio
-un playbook concorrente.
+`user_choice_required`. Se il primo candidato domina nettamente o
+`user_choice_required` è `false`, il Planner dichiara la scelta con una riga
+di motivo e procede. Se invece `user_choice_required` è `true` con candidati
+vicini per punteggio, il Planner non si limita a mostrare la lista grezza:
+fa prima una o due domande mirate sul task per capire quale candidato copre
+davvero la richiesta, poi presenta la raccomandazione informata e le
+alternative residue e attende conferma — non seleziona mai in silenzio un
+playbook concorrente. Se nessun candidato risulta adatto nemmeno dopo le
+domande, il Planner tratta il caso come `catalog.action: create` e chiede ad
+Architect una nuova proposta invece di forzare il task in un playbook che non
+calza.
 
 ## Controllare requisiti e credenziali
 

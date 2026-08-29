@@ -8,6 +8,12 @@
       "files": []
     },
     {
+      "id": 7,
+      "prompt": "L'utente vuole un Gantt sempre aggiornato per ogni progetto e poter recuperare il link del progetto corrente o di tutti i progetti.",
+      "expected_output": "Usa yano gantt --persistent --open per registrare e avviare il Gantt, yano gantt --link --json per il progetto corrente e yano gantt --links --json per tutti; spiega che le porte automatiche sono libere nel range 10000-19999 e che una registrazione ferma conserva il link ma non finge che il processo sia live.",
+      "files": []
+    },
+    {
       "id": 1,
       "prompt": "L'utente chiede in modo naturale: 'Il watcher è attivo su sales-companion e quali progetti sta controllando?'. Rispondi con la procedura CLI più mirata e spiega come distinguere un processo live da una registrazione offline.",
       "expected_output": "Usa yano watcher projects con --project-root e --json per il progetto, poi yano watcher projects --all --json per l'inventario globale; interpreta active_projects, registered_projects, status e herdr_reachable senza confondere idle con offline.",

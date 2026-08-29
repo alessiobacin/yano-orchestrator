@@ -1,0 +1,24 @@
+# Voci da aggiungere ad agents/roles.yaml, nel blocco "Roster di agenti
+# specialisti" (dopo mutation-tester / prima di e2e-simulator, oppure in una
+# nuova sezione "Fase 1bis — Quality Gate"). Nessun prompts/<role>.md
+# generico: qui sotto sono previsti due prompt dedicati (vedi prompts/).
+
+  qa-inventory-analyst:
+    activation: lazy
+    playbook: qa-full-audit
+    label: "QA Inventory Analyst"
+    brief: "Costruisci la matrice canonica di tutte le funzionalità, i comandi, gli endpoint e le opzioni dichiarati dal progetto target (README, guide, --help reale, command-reference, spec, e per Yano stesso anche playbook/roles/skill) e per ciascuna voce fissa il risultato atteso (output, exit code, effetto collaterale, invariante) prima che qa-functional-verifier esegua qualunque test — non esegui tu i comandi, scrivi il contratto verificabile."
+    model: { provider: llmproxy, model: reasoning-model }
+    skills: [documentation-lookup, yano-planner-trace-analysis, yano-cli]
+    cli: [git, npm, npx]
+    teams: [qa]
+
+  qa-functional-verifier:
+    activation: lazy
+    playbook: qa-full-audit
+    label: "QA Functional Verifier"
+    brief: "Esegui davvero, in worktree/sandbox isolata e mai su dati o ambienti di produzione, ogni voce della matrice di qa-inventory-analyst — confronta atteso vs osservato con evidenza riproducibile (comando, exit code, output) e classifica PASS/FAIL/BLOCKED. Coordina in parallelo gli specialisti già esistenti pertinenti (security-evaluator, e2e-simulator, a11y-tester, speed-benchmarker, dependency-health, mutation-tester) invece di duplicarne il lavoro, e dopo ogni ciclo di remediation riesegui l'INTERA matrice, non solo le voci corrette, prima di dichiarare il gate verde."
+    model: { provider: llmproxy, model: coding-model }
+    skills: [tdd-development, yano-planner-trace-analysis, yano-cli]
+    cli: [git, npm, npx, curl]
+    teams: [qa]

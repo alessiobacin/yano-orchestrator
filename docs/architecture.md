@@ -163,8 +163,18 @@ significa che il DB esiste ma non è ancora stato creato un run. Se il DB manca,
 il server mostra il percorso preciso e il comando `repair --init-db`.
 
 ```text
-yano gantt --project-root <dir> --project <nome> --port 8174
+yano gantt --project-root <dir> --project <nome> # porta libera automatica 10000-19999
 ```
+
+Ogni istanza Gantt sceglie una porta libera nel range `10000-19999`, partendo
+da uno slot stabile derivato dal progetto e provando gli slot successivi se
+necessario. Due progetti possono quindi avere dashboard simultanee; `--port`
+resta disponibile per una scelta esplicita, ma deve appartenere allo stesso
+range. Con `--persistent` il link viene registrato in
+`<YANO_DATA_DIR>/gantt/instances.json`; `--link` recupera quello del progetto
+corrente e `--links` elenca tutti i link registrati, verificando se il server è
+ancora raggiungibile. La registrazione è persistente, mentre il processo resta
+foreground e quindi non viene lasciato nascosto o avviato come daemon.
 
 ## Persistence model
 

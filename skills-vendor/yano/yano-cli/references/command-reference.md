@@ -66,8 +66,15 @@ yano fleet [--project-root <dir>] [--project <scope>] [--json]
 yano mcp [<role>] [--json]
 yano skills [<role>] [--json]                 # skill dichiarate dal progetto
 yano deps [--project-root <dir>] [--json]
-yano gantt --project-root <dir> [--project <name>] [--port <port>]
+yano gantt --project-root <dir> [--project <name>] [--port 10000..19999] [--persistent]
+yano gantt --link [--project-root <dir>] [--project <name>] [--json]
+yano gantt --links [--json]
 ```
+
+Senza `--port`, Gantt seleziona automaticamente una porta libera nel range
+`10000-19999`, usando uno slot stabile per progetto e provando il successivo
+se quello slot è occupato. In questo modo più progetti possono avere Gantt
+simultanei. Una porta esplicita deve appartenere allo stesso range.
 
 `projects` is the global read-only live-project inventory. It queries Herdr,
 keeps only live Pi/Yano panes rooted in an initialized Yano project, groups
@@ -77,6 +84,13 @@ them by canonical filesystem root, and returns each root once. Use
 be queried and the number is unknown. The role-specific `*_projects` commands
 below answer a different question: which projects are covered by one external
 worker role.
+
+Gantt is project-scoped. Without `--port`, it selects an available port in
+`10000-19999`; `--persistent` stores the URL under the global Yano data-root.
+Use `--link` for the current project or `--links` for every registered project.
+These lookup commands are read-only. A stored link can be marked `stopped` if
+its health endpoint is no longer reachable; the record is retained so the
+dashboard can be restarted without losing its URL history.
 
 `fleet` and the external `projects` commands are read-only. A retained MQTT
 card can be stale, so use the `active` field and Herdr reachability rather

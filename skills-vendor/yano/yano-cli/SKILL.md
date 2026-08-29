@@ -47,6 +47,8 @@ Use the smallest command that answers the request. Typical translations are:
 | Which projects does the watcher control? | `yano watcher projects --all --json` | `projects`; `--all` includes registered/offline records |
 | Which external workers are active? | `yano architect projects`, `yano watcher projects`, `yano debugger projects`, `yano auto-improve projects`, `yano suggester projects` | Herdr-live rows are authoritative; registrations are context |
 | What agents are live in this project? | `yano fleet --project-root "$PWD" --json` | live MQTT/Herdr agents; stale retained cards are excluded |
+| Open the Gantt for this project | `yano gantt --project-root "$PWD" --persistent --open` | URL and automatically selected free port in `10000-19999` |
+| Recover the current or all persistent Gantt links | `yano gantt --link --json` or `yano gantt --links --json` | registered URL, project root and live/stopped status |
 | Is Yano ready? | `yano doctor --network` and `yano deps --json` | broker, Git, Pi, CLI, credentials and capability checks |
 | Initialize a new or existing repository | `yano init --name "<name>"` | Existing application files are preserved; only missing Yano infrastructure is added |
 | Initialize and open Herdr with planner | `yano init --name "<name>" --herdr` | Herdr workspace, root pane, and `planner-01` launch |
@@ -59,6 +61,11 @@ Use the smallest command that answers the request. Typical translations are:
 | Find or inspect a playbook | `yano playbook list`, `show`, `candidates`, `agent show` | catalog source, requirements, roles and missing credentials |
 | Configure a missing requirement | `yano config set <KEY> <value>` or `... --stdin` | global per-user config path, never application `.env` for global installs |
 | Check/install this skill in local harnesses | `yano skills status --json`, then `yano skills install` | Claude Code/Codex/Pi catalogs and Pi's shared discovery roots |
+
+When the agent is already running from the project directory, the shorter
+equivalent is `yano gantt --persistent --open`. The explicit
+`--project-root "$PWD"` form is preferable when a command is launched from a
+different directory.
 
 For a complete command and option reference, read
 `references/command-reference.md` only after the intent is known. This keeps

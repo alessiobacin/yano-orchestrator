@@ -21,6 +21,7 @@ workflow instead of launching every specialist.
 | `performance-observability` | observability-agent, speed-benchmarker | before/after measurements with units, environment and sample context |
 | `architect-provisioning` | architect | proposal scope, capability readiness, watcher validation, user feedback and explicit promotion evidence |
 | `knowledge-authoring` | market-researcher, seo-strategist, website-content-strategist, business-docs-author, business-docs-reviewer | catalog-first intent match, parameterized project context, research evidence, structured deliverables and review; variants `single-author`, `research-and-author`, `full-team` |
+| `qa-full-audit` | qa-inventory-analyst, qa-functional-verifier (+ existing QA/security/perf specialists coordinated in parallel) | canonical command/feature matrix with source, PASS/FAIL/BLOCKED verdict and evidence per entry, full matrix re-run after remediation, zero open blocking findings; variants `quick-gate`, `full-audit`, `self-audit` |
 
 The `architect` role is global rather than project-scoped. It stages generated
 playbooks and roles under `<YANO_DATA_DIR>/architect/proposals/`, validates every declared
@@ -77,6 +78,26 @@ files directly.
 - Performance/observability: record baseline, units, dataset, cold/warm state,
   p50/p95/p99 or frontend web vitals where applicable; never claim an
   improvement without a numeric comparison.
+- Quality gate: map every documented command/flag/endpoint before testing;
+  never guess an expected result without a traceable source; classify
+  BLOCKED (missing prerequisite/capability) separately from FAIL (real
+  defect); route every blocking finding through the normal coder/reviewer or
+  frontend-developer/frontend-reviewer cycle — this playbook never
+  implements fixes itself; re-run the full matrix (not only the fixed
+  items) before declaring the gate clean; when the reference project is
+  Yano itself, run its existing internal test/lint suite first
+  (`npm test`, `npm run lint:capabilities`, `npm run lint:playbooks`,
+  `npm run check-skill-isolation`, `npm run check-syntax`, `yano doctor`)
+  and use the matrix only to close the gaps that suite does not cover
+  (documentation-vs-behavior drift, untested flag combinations). Testing a
+  command in isolation is not enough: for every command that mutates
+  persistent or shared state, the matrix declares which other commands'
+  expected output changes as a consequence (e.g. `yano init` must change
+  what `yano projects`/`yano fleet` report), and verification snapshots
+  those downstream commands before and after, in an isolated deterministic
+  sandbox, comparing the observed delta against the declared one — a
+  correct direct result with a missing or wrong downstream propagation is
+  a FAIL, not a pass with a caveat.
 
 The detailed source research is maintained in
 `docs/agent-capabilities-research.md`; the gates are based on first-party

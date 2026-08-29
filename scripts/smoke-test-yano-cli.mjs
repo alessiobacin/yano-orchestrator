@@ -29,11 +29,13 @@ assert.match(installer, /discoveryRoots|settings\.json/, "l'installer deve legge
 for (const command of [
 	"yano init", "yano start", "yano doctor", "yano update", "yano repair", "yano trace",
 	"yano config", "yano data", "yano playbook", "yano agent", "yano watcher projects",
-	"yano architect projects", "yano debugger", "yano auto-improve", "yano suggester", "yano projects",
+	"yano architect projects", "yano debugger", "yano auto-improve", "yano suggester", "yano projects", "yano gantt --project-root", "yano gantt --link", "yano gantt --links",
 ]) assert.ok(reference.includes(command), `la reference deve documentare ${command}`);
 
 assert.match(skill, /quanti progetti Yano sono attivi adesso/i, "la skill deve mappare il conteggio globale dei progetti");
 assert.match(skill, /yano projects --json/, "la skill deve indicare il comando globale dei progetti attivi");
+assert.match(skill, /yano gantt --persistent --open/, "la skill deve indicare il Gantt persistente");
+assert.match(skill, /yano gantt --links --json/, "la skill deve indicare il recupero globale dei link Gantt");
 
 for (const [role, config] of Object.entries(roles)) {
 	assert.ok((config.skills || []).includes("yano-cli"), `il ruolo ${role} deve ricevere yano-cli`);

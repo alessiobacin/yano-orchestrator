@@ -69,6 +69,7 @@ async function main() {
 		.sort();
 	const targets = [
 		["syntax", "node", ["--experimental-strip-types", "scripts/check-syntax.mjs", "extensions/orchestrator.ts"]],
+		["documentation sync", npmCommand, ["run", "check:docs"]],
 		["capability lint", npmCommand, ["run", "lint:capabilities"]],
 		["playbook lint", npmCommand, ["run", "lint:playbooks"]],
 		["skill isolation", npmCommand, ["run", "check-skill-isolation"]],

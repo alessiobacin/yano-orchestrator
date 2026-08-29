@@ -1,0 +1,138 @@
+schema_version: 1
+id: qa-full-audit
+label: Full functional quality gate and command/requirement audit
+description: >-
+  Comprehensive, project-agnostic quality gate that builds a canonical
+  inventory of every documented command, feature, endpoint and flag for the
+  reference project (including Yano itself in yano-maintenance mode),
+  verifies each entry against its real, observed behavior with reproducible
+  evidence, routes every finding through the normal remediation cycle
+  (coder/reviewer or frontend-developer/frontend-reviewer), and refuses to
+  close the campaign while any blocking finding remains open — including a
+  final full re-run of the matrix, not only of the items that were fixed.
+enforcement:
+  status: partial
+  note: The matrix format, evidence rules and remediation routing are
+    contractual; the runtime does not yet auto-detect matrix coverage or
+    auto-block completion — the planner and the two roles below enforce it.
+states:
+  - id: received
+    owner: planner
+    terminal: false
+  - id: preflight
+    owner: planner
+    terminal: false
+  - id: mapping
+    owner: qa-inventory-analyst
+    terminal: false
+  - id: verifying
+    owner: qa-functional-verifier
+    terminal: false
+  - id: findings
+    owner: planner
+    terminal: false
+  - id: remediation
+    owner: coder_or_specialist
+    terminal: false
+  - id: reverifying
+    owner: qa-functional-verifier
+    terminal: false
+  - id: completed
+    owner: planner
+    terminal: true
+  - id: blocked
+    owner: planner_and_human
+    terminal: true
+transitions:
+  - id: scope
+    from: received
+    to: preflight
+    actor: planner
+    requires:
+      - objective_received
+      - audit_scope_and_variant_confirmed
+  - id: start_mapping
+    from: preflight
+    to: mapping
+    actor: planner
+    requires:
+      - required_cli_skill_mcp_checked
+      - reference_project_and_boundary_confirmed
+  - id: start_verification
+    from: mapping
+    to: verifying
+    actor: qa-inventory-analyst
+    requires:
+      - command_matrix_published
+      - matrix_covers_every_documented_capability
+  - id: report_findings
+    from: verifying
+    to: findings
+    actor: qa-functional-verifier
+    requires:
+      - every_matrix_entry_has_a_verdict
+      - evidence_has_command_and_exit_status
+      - report_updated
+  - id: open_remediation
+    from: findings
+    to: remediation
+    actor: planner
+    requires:
+      - findings_classified_by_severity
+      - remediation_tickets_created_for_blocking_findings
+  - id: reverify
+    from: remediation
+    to: reverifying
+    actor: planner
+    requires:
+      - remediation_phase_completed
+  - id: gate_clean
+    from: reverifying
+    to: completed
+    actor: planner
+    requires:
+      - full_matrix_rerun_not_only_fixed_items
+      - zero_open_blocking_findings
+      - docs_synced_or_skipped_with_reason
+  - id: gate_still_red
+    from: reverifying
+    to: findings
+    actor: planner
+    requires:
+      - residual_or_new_failures_recorded
+  - id: block
+    from: [mapping, verifying, findings, remediation, reverifying]
+    to: blocked
+    actor: planner_and_human
+    requires:
+      - unresolved_blocker_or_missing_environment
+      - report_updated
+failure_routes:
+  - condition: environment_prerequisite_missing
+    action: report_gap_with_install_command_and_pause
+    terminal: false
+  - condition: flaky_command
+    action: reproduce_then_classify
+    terminal: false
+  - condition: undocumented_behavior_found
+    action: route_to_docs_sync_or_coder_by_intent
+    terminal: false
+  - condition: three_reverify_rounds_still_red
+    action: escalate_to_human_keep_worktree_open
+    terminal: true
+invariants:
+  - id: matrix_covers_every_documented_capability
+    description: Every command/flag/endpoint documented for the reference
+      project appears in the matrix; an unlisted capability blocks the
+      mapping-to-verifying transition.
+  - id: no_test_deleted_to_hide_failure
+  - id: no_finding_marked_resolved_without_reverification
+  - id: reverification_runs_the_full_matrix_not_only_fixed_items
+  - id: no_completion_with_open_blocking_finding
+  - id: evidence_has_command_and_exit_status
+  - id: production_data_never_used
+  - id: self_check_never_mutates_reference_project_outside_isolated_worktree
+    description: Even when the reference project is Yano itself, all checks
+      and fixes happen in a dedicated worktree/yano-maintenance boundary,
+      never directly against the live catalog or a third-party project.
+  - id: no_finalize_before_explicit_user_confirmation

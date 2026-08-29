@@ -214,6 +214,37 @@ yano trace events --project mio-progetto --follow
 SQLite mantiene run, ticket, dipendenze, evidenze e stato di recupero; il trace
 globale mantiene la storia osservabile utile per audit e diagnosi.
 
+## Dashboard Gantt per progetto
+
+Per aprire una dashboard live con porta automatica libera:
+
+```bash
+yano gantt --persistent --open
+```
+
+Le porte automatiche sono sempre nel range `10000-19999`; la scelta parte da
+uno slot stabile per progetto e prova il successivo se occupato. Per recuperare
+il link del progetto dalla sua root:
+
+```bash
+yano gantt --link --json
+```
+
+Da qualunque directory, per elencare tutti i Gantt registrati:
+
+```bash
+yano gantt --links --json
+```
+
+`--persistent` salva il link nel data-root globale di Yano e impedisce di
+avviare una seconda dashboard per lo stesso progetto quando quella esistente è
+raggiungibile. Il registro conserva anche i link fermi, ma il server resta
+foreground: il dashboard è live finché il processo o la tab Herdr restano
+attivi. Per riavviarlo, esegui di nuovo `yano gantt --persistent --open` dalla
+root del progetto. Per il dettaglio tecnico consulta
+[`docs/architecture.md`](./architecture.md) e la
+[quick guide Gantt](./quick_guides/19-inventario-agenti-e-gantt.md).
+
 ## 6. Registra il risultato del round
 
 Quando il planner presenta un risultato, registra il tuo verdetto con le tue

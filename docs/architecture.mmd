@@ -4,6 +4,8 @@ flowchart TD
     CLI --> INIT["init / doctor / start"]
     INIT --> HERDR_INIT["init --herdr\nHerdr workspace + root pane"]
     CLI --> OBS["status / fleet / deps / gantt / watch / trace"]
+    OBS --> GANTT_PORTS["Gantt per progetto\nporta automatica libera\n10000-19999"]
+    GANTT_PORTS --> GANTT_REGISTRY["--persistent\n--link / --links\nYANO_DATA_DIR/gantt/instances.json"]
     CLI --> PROJECTS["projects\nglobal live-project count\ndeduplicated Herdr roots"]
     CLI --> EXT_STATUS["architect|watcher|debugger|auto-improve|suggester projects\nactive vs registered"]
     CLI --> RELOAD["update --reload\ncontrolled restart"]

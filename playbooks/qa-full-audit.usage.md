@@ -135,3 +135,30 @@ yano doctor --network
 Stesso confine di sicurezza già usato dal ruolo `debugger` in modalità
 `yano-maintenance`: mai un altro progetto, mai fuori da un worktree dedicato
 di `yano-orchestrator`.
+
+## 7. Dopo i finding: loop di correzione autonomo fino al verde
+
+Conferma una volta sola l'avvio dell'audit (fase 1, sopra) — da lì in poi il
+loop di correzione non chiede una conferma ad ogni round:
+
+1. `qa-functional-verifier` riporta i finding al planner (fase `findings`).
+2. Il planner li classifica per severità e apre i ticket di correzione nel
+   ciclo normale (`coder` → `reviewer`, o `frontend-developer` →
+   `frontend-reviewer` per la UI; `docs-sync` in chiusura di fase come per
+   ogni piano — non è specifico di `qa-full-audit`); `security-evaluator` o
+   un altro specialista solo se il finding lo richiede davvero.
+3. A correzioni concluse, il planner richiama `qa-functional-verifier` per
+   la fase `reverifying`: **l'intera matrice**, non solo le voci corrette.
+4. Se resta anche un solo finding bloccante, si torna al punto 2 — senza
+   fermarsi a chiedere il tuo via libera ogni volta (invariante
+   `remediation_and_reverify_loop_is_autonomous_after_initial_confirmation`).
+   Il planner torna da te solo in due casi: il gate è pulito (conferma
+   finale, come per qualunque task) oppure sono già passati **tre** round di
+   `reverifying` ancora rosso (`three_reverify_rounds_still_red`) — a quel
+   punto si ferma, lascia il worktree aperto e ti spiega cosa resta rotto,
+   invece di continuare all'infinito.
+
+Se preferisci invece essere interpellato ad ogni round, dillo esplicitamente
+al planner quando confermi l'avvio: può ancora scegliere di fermarsi più
+spesso su tua richiesta esplicita per quel task specifico, anche se il
+comportamento di default del playbook è quello sopra.

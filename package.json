@@ -1,6 +1,6 @@
 {
   "name": "yano-orchestrator",
-  "version": "1.5.01",
+  "version": "1.5.02",
   "private": true,
   "type": "module",
   "engines": {

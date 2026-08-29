@@ -171,3 +171,11 @@ invariants:
       and fixes happen in a dedicated worktree/yano-maintenance boundary,
       never directly against the live catalog or a third-party project.
   - id: no_finalize_before_explicit_user_confirmation
+  - id: remediation_and_reverify_loop_is_autonomous_after_initial_confirmation
+    description: Once the user confirms the initial team/plan for this
+      qa-full-audit run, the planner opens remediation tickets and
+      repeats correction -> reverifying on its own, without asking for a
+      fresh confirmation before every round; it returns to the user only
+      when the gate is clean (final confirmation, like any task) or
+      after three reverify rounds still red (see
+      three_reverify_rounds_still_red), never in between.

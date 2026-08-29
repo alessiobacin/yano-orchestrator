@@ -92,6 +92,54 @@ Le fasi `fixing`, `testing`, `staging`, `awaiting_validation` e `production`
 non sono responsabilità del debugger: invia la diagnosi al planner, che decide
 se aprire un normale task e coinvolgere coder/reviewer/deployment-agent.
 
+## API REST (`yano debugger serve`)
+
+Il debugger è pensato come un'unica istanza logica che gestisce molti
+progetti (esattamente come il registro `debugger_projects` già fa per la
+CLI): `yano debugger serve` espone lo stesso registro su HTTP, per chi vuole
+integrare il debugger da uno strumento diverso dalla shell (Postman, uno
+script, un altro servizio). Gli handler REST richiamano le stesse funzioni
+della CLI (`reportBug`, `transitionBug`, `ensureProject`, `launchHerdrWorker`,
+...), quindi i due canali non possono divergere nel comportamento.
+
+```bash
+yano debugger serve --port 4177          # default 127.0.0.1:4177
+yano config set YANO_DEBUGGER_API_PORT 4177     # oppure fisso via config
+yano config set YANO_DEBUGGER_API_TOKEN --stdin # opzionale: richiede Bearer token
+```
+
+Il bind di default è solo su `127.0.0.1`: senza token configurato l'API non
+richiede autenticazione, per questo resta bene esporla solo in loopback (usa
+`--host` solo se sai cosa stai facendo, e in quel caso imposta sempre un
+token).
+
+| Metodo | Path                              | Equivalente CLI                              |
+|--------|------------------------------------|-----------------------------------------------|
+| GET    | `/health`                          | —                                               |
+| GET    | `/projects`                        | (elenco con id, non disponibile in CLI)        |
+| POST   | `/projects`                        | `yano debugger init`                           |
+| GET    | `/projects/:id`                    | —                                               |
+| GET    | `/projects/:id/bugs`               | `yano debugger status --project-root <dir>`    |
+| POST   | `/projects/:id/bugs`               | `yano debugger report`                         |
+| POST   | `/projects/:id/start`              | `yano debugger start`                          |
+| POST   | `/projects/:id/pause`              | `yano debugger pause`                          |
+| POST   | `/projects/:id/resume`             | `yano debugger resume`                         |
+| GET    | `/bugs/:bugId`                     | `yano debugger status --bug-id <id>`           |
+| POST   | `/bugs/:bugId/claim`               | `yano debugger claim`                          |
+| POST   | `/bugs/:bugId/transition`          | `yano debugger transition`                     |
+
+`:id` è il `project_key` restituito da `POST /projects` o da `GET /projects`
+(lo stesso valore che la CLI calcola internamente da `--project-root`, es.
+`workspace-a1b2c3d4e5f6`). Le stesse regole di validazione della CLI si
+applicano identiche: severità/source non validi, transizioni di stato non
+consentite, bug duplicati (fingerprint) e il divieto di usare stati non
+diagnostici (`fixing`, `testing`, `staging`, `awaiting_validation`,
+`production`) restituiscono lo stesso errore che vedresti da shell, solo come
+JSON con lo status HTTP appropriato (400/401/404/409).
+
+Collection Postman pronta all'uso in `postman/yano-debugger.postman_collection.json`
+(più l'environment `postman/yano-debugger.postman_environment.json`).
+
 ## Integrazione con trace e planner
 
 Il prompt `prompts/debugger.md` obbliga l'agente a leggere il contesto minimo

@@ -1,0 +1,164 @@
+{
+  "info": {
+    "name": "Yano Debugger API",
+    "description": "API REST di `yano debugger serve` — un'unica istanza che gestisce molti progetti registrati (ognuno con un project_key/id deterministico). Avvia il server con `yano debugger serve --port 4177` (o imposta YANO_DEBUGGER_API_PORT/YANO_DEBUGGER_API_TOKEN con `yano config set`), poi usa questa collection per registrare progetti, segnalare bug e seguirne il ciclo di vita diagnostico senza passare dalla CLI. Ogni richiesta qui corrisponde a un sottocomando `yano debugger <...>` — vedi `docs/yano-debugger.md` per i confini di sicurezza (il debugger è sola diagnosi: non corregge, non deploya, non promuove codice).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }]
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://127.0.0.1:4177", "type": "string" },
+    { "key": "token", "value": "", "type": "string", "description": "Lascia vuoto se non hai impostato YANO_DEBUGGER_API_TOKEN — il server allora non richiede autenticazione." },
+    { "key": "projectId", "value": "", "type": "string", "description": "project_key restituito da 'Init/Register a project' o da 'List projects'." },
+    { "key": "bugId", "value": "", "type": "string", "description": "bug_id restituito da 'Report a bug'." }
+  ],
+  "item": [
+    {
+      "name": "Meta",
+      "item": [
+        {
+          "name": "Health",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/health", "host": ["{{baseUrl}}"], "path": ["health"] } }
+        },
+        {
+          "name": "API root (elenco endpoint)",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/", "host": ["{{baseUrl}}"], "path": [""] } }
+        }
+      ]
+    },
+    {
+      "name": "Projects",
+      "item": [
+        {
+          "name": "List projects (con id)",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/projects", "host": ["{{baseUrl}}"], "path": ["projects"] } }
+        },
+        {
+          "name": "Init/Register a project",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  const body = pm.response.json();",
+                  "  pm.collectionVariables.set('projectId', body.project.project_key);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/projects", "host": ["{{baseUrl}}"], "path": ["projects"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"project_root\": \"/path/assoluto/di/llmproxy\",\n  \"base_port\": 3055\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Equivalente a `yano debugger init --project-root <dir> --base-port 3055`. project_root deve esistere sulla macchina dove gira `yano debugger serve`. Salva automaticamente projectId dalla risposta (script 'Tests')."
+          }
+        },
+        {
+          "name": "Get project detail",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/projects/{{projectId}}", "host": ["{{baseUrl}}"], "path": ["projects", "{{projectId}}"] } }
+        }
+      ]
+    },
+    {
+      "name": "Bugs",
+      "item": [
+        {
+          "name": "List bugs for a project",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/projects/{{projectId}}/bugs", "host": ["{{baseUrl}}"], "path": ["projects", "{{projectId}}", "bugs"] } }
+        },
+        {
+          "name": "Report a bug",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "  const body = pm.response.json();",
+                  "  pm.collectionVariables.set('bugId', body.bug_id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/projects/{{projectId}}/bugs", "host": ["{{baseUrl}}"], "path": ["projects", "{{projectId}}", "bugs"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Titolo breve\",\n  \"description\": \"Cosa succede\",\n  \"severity\": \"high\",\n  \"source\": \"user\",\n  \"expected\": \"comportamento atteso\",\n  \"actual\": \"comportamento osservato\",\n  \"steps\": [\"passo 1\", \"passo 2\"]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Equivalente a `yano debugger report`. severity: low|medium|high|critical. source: user|system|cli|watcher. Segnalazioni equivalenti vengono deduplicate (fingerprint) — risposta con duplicate:true e HTTP 200 invece di 201. Salva automaticamente bugId dalla risposta."
+          }
+        },
+        {
+          "name": "Get bug status",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/bugs/{{bugId}}", "host": ["{{baseUrl}}"], "path": ["bugs", "{{bugId}}"] } }
+        },
+        {
+          "name": "Claim a bug",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/bugs/{{bugId}}/claim", "host": ["{{baseUrl}}"], "path": ["bugs", "{{bugId}}", "claim"] },
+            "body": { "mode": "raw", "raw": "{\n  \"actor\": \"debugger-app\"\n}", "options": { "raw": { "language": "json" } } },
+            "description": "Equivalente a `yano debugger claim --bug-id <id> --actor <nome>`. 409 se già assegnato a un altro actor."
+          }
+        },
+        {
+          "name": "Transition bug state",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/bugs/{{bugId}}/transition", "host": ["{{baseUrl}}"], "path": ["bugs", "{{bugId}}", "transition"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"to\": \"triaged\",\n  \"actor\": \"debugger-app\",\n  \"note\": \"opzionale\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Equivalente a `yano debugger transition --bug-id <id> --to <stato>`. Stati diagnostici validi: reported, triaged, reproducing, not_reproducible, blocked, rejected, duplicate — le transizioni ammesse dipendono dallo stato corrente (400 con l'elenco se non consentita). Stati come fixing/testing/staging/production sono rifiutati: non appartengono al debugger."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Worker (Herdr)",
+      "item": [
+        {
+          "name": "Start worker",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/projects/{{projectId}}/start", "host": ["{{baseUrl}}"], "path": ["projects", "{{projectId}}", "start"] },
+            "body": { "mode": "raw", "raw": "{\n  \"once\": false,\n  \"dry_run\": false,\n  \"foreground\": false\n}", "options": { "raw": { "language": "json" } } },
+            "description": "Equivalente a `yano debugger start --project-root <dir>`. Richiede Herdr raggiungibile sulla macchina dove gira `yano debugger serve` (a meno di 'once': true, che esegue solo una preflight read-only senza aprire nessuna tab)."
+          }
+        },
+        {
+          "name": "Pause worker",
+          "request": { "method": "POST", "url": { "raw": "{{baseUrl}}/projects/{{projectId}}/pause", "host": ["{{baseUrl}}"], "path": ["projects", "{{projectId}}", "pause"] } }
+        },
+        {
+          "name": "Resume worker",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/projects/{{projectId}}/resume", "host": ["{{baseUrl}}"], "path": ["projects", "{{projectId}}", "resume"] },
+            "body": { "mode": "raw", "raw": "{}", "options": { "raw": { "language": "json" } } }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -70,5 +70,55 @@ yano trace context --json
 yano trace search --query "BUG-..." --json
 ```
 
+## API REST (per chi non usa la shell)
+
+`yano debugger` è un'unica istanza che gestisce molti progetti registrati
+(esattamente come in CLI: ogni progetto ha un id deterministico, il
+`project_key`). Per aggiungere o consultare bug senza CLI, avvia l'API REST
+locale:
+
+```bash
+yano debugger serve --port 4177
+```
+
+Di default resta in ascolto solo su `127.0.0.1`. Per configurare porta e un
+token opzionale in modo permanente:
+
+```bash
+yano config set YANO_DEBUGGER_API_PORT 4177
+yano config set YANO_DEBUGGER_API_TOKEN --stdin   # opzionale: richiede
+                                                    # 'Authorization: Bearer <token>'
+```
+
+Endpoint principali (uno per ogni sottocomando CLI sopra):
+
+```text
+GET  /projects                     elenca i progetti registrati con il loro id
+POST /projects                     registra un progetto — { project_root, base_port? }
+GET  /projects/:id/bugs            elenca i bug del progetto
+POST /projects/:id/bugs            segnala un bug — { title, description, severity, ... }
+GET  /bugs/:bugId                  stato di un bug
+POST /bugs/:bugId/claim            assegna il bug — { actor }
+POST /bugs/:bugId/transition       avanza lo stato — { to, actor? }
+POST /projects/:id/start|pause|resume   gestisce il worker Herdr
+```
+
+Esempio, per registrare llmproxy e segnalare un bug:
+
+```bash
+curl -s -X POST http://127.0.0.1:4177/projects \
+  -H 'Content-Type: application/json' \
+  -d '{"project_root": "/path/assoluto/di/llmproxy"}'
+# -> restituisce project.project_key, es. "workspace-a1b2c3d4e5f6": usalo come :id
+
+curl -s -X POST http://127.0.0.1:4177/projects/workspace-a1b2c3d4e5f6/bugs \
+  -H 'Content-Type: application/json' \
+  -d '{"title": "Login rotto", "description": "401 dopo login corretto", "severity": "high", "expected": "200", "actual": "401"}'
+```
+
+Una collection Postman pronta all'uso (con variabili `baseUrl`/`token` e
+salvataggio automatico di `projectId`/`bugId` dalle risposte) è in
+`postman/yano-debugger.postman_collection.json` (+ `postman/yano-debugger.postman_environment.json`).
+
 Per l'implementazione completa e i confini di sicurezza, vedere
 [Yano Debugger](../yano-debugger.md).

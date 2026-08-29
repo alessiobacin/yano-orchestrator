@@ -61,6 +61,14 @@ yano config set TELEGRAM_DESTINATION_CHAT_ID 5228139669
 yano config set YANO_EMBEDDING_MODEL nomic-embed-text
 ```
 
+Porta e token dell'API REST del debugger (`yano debugger serve`, vedi
+[guida rapida del debugger](./12-yano-debugger.md)):
+
+```bash
+yano config set YANO_DEBUGGER_API_PORT 4177
+printf '%s' "$YANO_DEBUGGER_API_TOKEN" | yano config set YANO_DEBUGGER_API_TOKEN --stdin
+```
+
 Segreti: usare stdin per evitare che il valore finisca nella cronologia della
 shell:
 

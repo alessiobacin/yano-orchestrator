@@ -248,6 +248,7 @@ yano debugger report --project-root <dir> --title <text> ...
 yano debugger claim --project-root <dir> --bug-id <id>
 yano debugger transition --project-root <dir> --bug-id <id> --to <state>
 yano debugger pause|resume --project-root <dir>
+yano debugger serve [--port <port>] [--host <host>] [--json]  # REST API — see docs/yano-debugger.md#api-rest-yano-debugger-serve
 
 yano auto-improve init --project-root <dir> --interval 5d --notify auto
 yano auto-improve start|run --project-root <dir> [--dry-run] [--once]

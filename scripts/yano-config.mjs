@@ -13,6 +13,8 @@ export const CONFIG_SPECS = Object.freeze([
 	{ key: "YANO_DATA_DIR", description: "directory globale per trace, snapshot e indice" },
 	{ key: "YANO_TEMP_DIR", description: "alias legacy della directory globale Yano" },
 	{ key: "YANO_TRACE_MODE", description: "modalità trace predefinita: off|events|standard|full" },
+	{ key: "YANO_DEBUGGER_API_PORT", description: "porta HTTP per l'API REST del debugger (yano debugger serve; default 4177)" },
+	{ key: "YANO_DEBUGGER_API_TOKEN", secret: true, description: "token Bearer opzionale per proteggere l'API REST del debugger" },
 	{ key: "YANO_OLLAMA_URL", description: "endpoint Ollama per gli embeddings" },
 	{ key: "OLLAMA_HOST", description: "endpoint Ollama legacy/compatibilità" },
 	{ key: "YANO_EMBEDDING_MODEL", description: "modello Ollama per gli embeddings" },

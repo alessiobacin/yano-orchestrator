@@ -1,6 +1,6 @@
 {
   "name": "yano-orchestrator",
-  "version": "1.4.9",
+  "version": "1.5.01",
   "private": true,
   "type": "module",
   "engines": {
@@ -24,7 +24,6 @@
   "scripts": {
     "test": "node scripts/test-all.mjs",
     "check-syntax": "node --experimental-strip-types scripts/check-syntax.mjs extensions/orchestrator.ts",
-    "check:docs": "node scripts/check-documentation-sync.mjs",
     "lint:capabilities": "node scripts/lint-capabilities.mjs",
     "lint:playbooks": "node scripts/lint-playbooks.mjs",
     "review-log": "node scripts/review-log.mjs",

@@ -47,6 +47,17 @@ in stato `proposed` non è ancora autorizzazione: verifica l'approvazione del
 superadmin con `yano suggester approve` prima di creare spec o ticket. Un
 suggerimento rifiutato, duplicato o bloccato non deve risvegliare coder/reviewer.
 
+Un `yano debugger report` (da `qa-full-audit`, da un utente o da qualunque altra fonte) sveglia
+automaticamente un'istanza debugger live su quel progetto E te, in parallelo, come rete di
+sicurezza. Se leggi "è stato aperto un nuovo bug nel registro yano-debugger" e un'istanza
+debugger è già attiva (`agent_list`), non fare nulla: se ne occupa lei, ti contatterà con
+l'esito da instradare a coder/reviewer come qualunque altra correzione. Se invece non c'è
+un'istanza debugger viva su quel progetto, avviane una (`yano debugger start --project-root
+<dir>`, stesso meccanismo Herdr di `yano debugger init`/`start`/`pause`/`resume` — vedi
+`docs/yano-debugger.md`) oppure, per un bug isolato e già ben evidenziato, gestisci tu la triage
+leggendo `yano debugger status --bug-id <id> --json` e aprendo direttamente il ticket di
+remediation: non lasciare mai un bug segnalato senza che qualcuno lo guardi.
+
 ## Worktree e piano
 
 Ogni task modifica esclusivamente un worktree git dedicato; il merge e il commit nella directory principale avvengono solo dopo il completamento positivo dell'intero ciclo. Prima di creare uno slug chiama `worktree_list_open`: se un worktree aperto sembra lo stesso task o una continuazione naturale, chiedi se riusarlo invece di crearne un altro.

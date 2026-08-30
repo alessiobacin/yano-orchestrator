@@ -22,6 +22,8 @@ import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { appendRawTraceRecord, projectKey, readTraceRecords, resolveTraceProject, traceRoot } from "./yano-trace-storage.mjs";
+import mqtt from "mqtt";
+import { resolveYanoConfig } from "./yano-config.mjs";
 
 const require = createRequire(import.meta.url);
 const VALID_SEVERITIES = new Set(["low", "medium", "high", "critical"]);
@@ -380,6 +382,63 @@ function reportBug(db, opts) {
 	return { bug, duplicate: false };
 }
 
+// Closes the "who actually looks at a newly reported bug" gap: reporting a
+// bug (CLI or REST, any source — qa-full-audit, a user, the watcher) used to
+// be a pure INSERT with nobody told about it, so it sat in `reported` until
+// a human happened to remember to run/message a debugger instance. This
+// mirrors how `agent_send`/the watchdog already wake a live agent from a
+// bare script (extensions/orchestrator.ts's CommandEnvelope over MQTT, topic
+// pi/<project>/roles/<role>/tasks — delivered to every live instance of that
+// role, no specific instance id needed): a fresh, non-duplicate bug wakes
+// any live `debugger` instance for that project to claim/diagnose it per
+// its own protocol (prompts/debugger.md), and — as a safety net, since a
+// project may have no debugger worker running at all, the exact same gap
+// `yano watcher` had — also pings a live `planner`, who can start one
+// (`yano debugger start`) or route it directly. Best-effort and
+// fire-and-forget in spirit: MQTT unreachable or nobody listening is not an
+// error, the bug is still durably in the registry either way and shows up
+// on the next `yano debugger status`.
+async function notifyBugReported(db, result) {
+	if (result.duplicate || !result.bug) return; // do not re-wake on every rediscovery of the same fingerprint
+	const bug = result.bug;
+	const config = resolveYanoConfig({});
+	const brokerUrl = config.PI_ORCH_BROKER_URL || process.env.PI_ORCH_BROKER_URL || "mqtt://127.0.0.1:1883";
+	let client = null;
+	try {
+		client = mqtt.connect(brokerUrl, { connectTimeout: 2000 });
+		await new Promise((resolve, reject) => {
+			const timeout = setTimeout(() => reject(new Error("timeout connessione broker")), 2000);
+			client.once("connect", () => { clearTimeout(timeout); resolve(); });
+			client.once("error", (error) => { clearTimeout(timeout); reject(error); });
+		});
+		const project = bug.project_name;
+		const statusCmd = `yano debugger status --project-root ${bug.root} --bug-id ${bug.bug_id} --json`;
+		const publishRole = async (targetRole, prompt) => {
+			const env = {
+				type: "command",
+				assignment_id: crypto.randomUUID(),
+				sender_instance: "yano-debugger-cli",
+				sender_role: "system",
+				target_role: targetRole,
+				project,
+				prompt,
+				reply_to: "",
+				hops: 0,
+				timestamp: now(),
+				response_schema: null,
+			};
+			await client.publishAsync(`pi/${project}/roles/${targetRole}/tasks`, JSON.stringify(env), { qos: 1 });
+		};
+		await publishRole("debugger", `Nuovo bug segnalato nel registro yano-debugger: ${bug.bug_id} — "${bug.title}" (severità: ${bug.severity}, fonte: ${bug.source}). Prendilo in carico con \`yano debugger claim --bug-id ${bug.bug_id} --actor <tua-istanza>\`, leggilo con \`${statusCmd}\` e segui il tuo protocollo diagnostico (claim → riproduzione → evidenza → stato → notifica al planner).`);
+		await publishRole("planner", `È stato aperto un nuovo bug (${bug.bug_id}, severità ${bug.severity}) nel registro yano-debugger per questo progetto: "${bug.title}". Se non hai già un'istanza debugger attiva su questo progetto, valuta se avviarne una (\`yano debugger start --project-root ${bug.root}\`) o gestire tu la triage; altrimenti lascialo al debugger, che ti contatterà con l'esito.`);
+	} catch {
+		// best effort: MQTT unreachable or nobody subscribed is not an error —
+		// the bug is still durably registered and visible via `yano debugger status`.
+	} finally {
+		try { client?.end(true); } catch { /* ignore */ }
+	}
+}
+
 function transitionBug(db, opts) {
 	const bug = getBugOrThrow(db, opts.bugId);
 	if (!STATES.includes(opts.to)) throw new Error(`yano debugger transition: stato non valido "${opts.to}"`);
@@ -534,6 +593,7 @@ async function routeApiRequest(db, req, res) {
 			const body = await readJsonBody(req);
 			const opts = { projectRoot: row.root, project: row.name, mode: row.mode, title: body.title, description: body.description, severity: body.severity || "medium", source: body.source || "cli", reporter: body.reporter || null, expected: body.expected || "", actual: body.actual || "", steps: body.steps, environment: body.environment ?? {}, actor: body.actor || "api" };
 			const result = reportBug(db, opts);
+			await notifyBugReported(db, result);
 			return sendJson(res, result.duplicate ? 200 : 201, { bug_id: result.bug.bug_id, status: result.bug.status, duplicate: result.duplicate, project: result.bug.project_name, bug: result.bug });
 		}
 		if (parts[2] === "start" && method === "POST" && parts.length === 3) {
@@ -625,6 +685,7 @@ export async function runYanoDebugger({ argv = [] } = {}) {
 		}
 		if (opts.sub === "report") {
 			const result = reportBug(db, opts);
+			await notifyBugReported(db, result);
 			print({ bug_id: result.bug.bug_id, status: result.bug.status, duplicate: result.duplicate, project: result.bug.project_name }, opts.json);
 			return result;
 		}

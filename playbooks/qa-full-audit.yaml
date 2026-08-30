@@ -178,19 +178,26 @@ invariants:
       Every finding qa-functional-verifier records — blocking, non-blocking
       and BLOCKED alike — is also registered as a bug in the cross-project
       yano-debugger registry (`yano debugger report`, one call per finding,
-      mode `project` unless the reference project is Yano itself). This is
-      purely for durable, deduplicated tracking of what QA found and what
-      happened to it — the debugger stays diagnostic-only and never fixes
+      mode `project` unless the reference project is Yano itself), with the
+      reproduction evidence (command, exit code, expected/actual) included so
+      the debugger can confirm quickly instead of starting from zero. A
+      successful `yano debugger report` automatically wakes a live debugger
+      instance for that project (and the planner, as a fallback if none is
+      running) — qa-functional-verifier reports and stops there; it never
+      decides or sets the diagnostic state itself. The debugger owns that
+      decision, purely for durable, deduplicated tracking of what QA found
+      and what happened to it — it stays diagnostic-only and never fixes
       anything itself. Actual remediation is unchanged — it always goes
       through the normal open_remediation -> remediation loop
       (coder/reviewer or frontend-developer/frontend-reviewer) driven by the
-      planner. A finding confirmed as a real, reproducible defect is
-      transitioned to the debugger's `triaged` state once remediation for it
-      opens; a BLOCKED item (missing credentials/infra, out of scope) is
-      transitioned to `blocked`; a false positive is transitioned to
-      `not_reproducible` or `rejected`. The debugger has no fixed/closed
-      state by design — the project's own ticket engine remains the record
-      of the actual fix and its reverification.
+      planner, independently of when/whether the debugger has finished
+      confirming a given finding. A finding the debugger confirms as a real,
+      reproducible defect is transitioned to `triaged`; a BLOCKED item
+      (missing credentials/infra, out of scope) to `blocked`; a false
+      positive to `not_reproducible` or `rejected`. The debugger has no
+      fixed/closed state by design — the project's own ticket engine remains
+      the record of the actual fix, and the full matrix re-run remains the
+      proof of it.
   - id: blocked_and_missing_items_presented_to_user
     description: >-
       Before gate_clean, the planner's report to the user lists every

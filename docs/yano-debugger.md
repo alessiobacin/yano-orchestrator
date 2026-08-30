@@ -78,6 +78,22 @@ yano debugger report \
 Il fingerprint rende idempotente la segnalazione: una segnalazione uguale
 restituisce il bug esistente invece di crearne uno duplicato.
 
+### Chi guarda il bug appena aperto
+
+Una segnalazione nuova (non duplicata) sveglia in automatico, via MQTT, ogni
+istanza `debugger` live su quel progetto (`pi/<project>/roles/debugger/tasks`
+— stesso meccanismo di `agent_send`, nessun bisogno di conoscere l'id esatto
+dell'istanza) e, come rete di sicurezza, anche un'istanza `planner` live: se
+non c'è ancora un debugger avviato per il progetto, il planner sa che può
+avviarne uno con `yano debugger start` o gestire la triage direttamente. È
+best-effort (broker MQTT irraggiungibile o nessuno online non è un errore: il
+bug resta comunque nel registro, visibile con `yano debugger status`), ma
+chiude il buco per cui un bug segnalato — da `qa-full-audit`, da un utente, da
+qualunque fonte — restava silenzioso finché qualcuno non ricordava di
+controllarlo a mano. La decisione di stato diagnostico resta sempre del
+debugger, mai di chi ha aperto il ticket, anche quando la segnalazione arriva
+già con evidenza riproducibile pronta (comando, exit code, expected/actual).
+
 Il debugger prende in carico e avanza solo gli stati diagnostici con evidenza:
 
 ```bash

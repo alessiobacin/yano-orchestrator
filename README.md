@@ -176,6 +176,8 @@ yano gantt --links             # tutti i link Gantt persistenti registrati
 yano watch --once              # one stalled-ticket scan
 # yano watch also escalates high-confidence Yano faults to .scratch/optimize-orchestrator/issues
 # and Telegram; global-only installs use `yano config`, development checkouts may use .env.
+yano watcher start --project-root "$PWD"   # persistent registry: Herdr-supervised yano watch --away
+yano watcher status --json                 # checks + self-heals a dead watcher pane (see docs/quick_guides/10-watcher-falle-yano.md)
 yano config path                 # percorso della configurazione globale utente
 yano config list --all           # variabili configurabili, segreti oscurati
 yano config set YANO_ORCHESTRATOR_REPO /path/to/yano-orchestrator

@@ -70,6 +70,7 @@ import { runGantt } from "../scripts/gantt-server.mjs";
 import { runWatch } from "../scripts/watch-stalls.mjs";
 import { runTrace } from "../scripts/yano-trace.mjs";
 import { runYanoDebugger } from "../scripts/yano-debugger.mjs";
+import { runYanoWatcherRegistry } from "../scripts/yano-watcher-registry.mjs";
 import { runYanoAutoImprove } from "../scripts/yano-auto-improver.mjs";
 import { runYanoSuggester } from "../scripts/yano-suggester.mjs";
 import { runYanoArchitect } from "../scripts/yano-architect.mjs";
@@ -253,12 +254,16 @@ async function main() {
 		return;
 	}
 	if (sub === "watcher") {
-		if (rest[0] !== "projects" && !rest.includes("--projects")) {
-			console.error("Uso: yano watcher projects [--all] [--json] [--project-root <dir>]");
-			process.exit(1);
+		if (rest[0] === "projects" || rest.includes("--projects")) {
+			await runExternalStatus({ role: "watcher", argv: rest });
+			return;
 		}
-		await runExternalStatus({ role: "watcher", argv: rest });
-		return;
+		if (["init", "start", "status", "pause", "resume"].includes(rest[0])) {
+			await runYanoWatcherRegistry({ argv: rest });
+			return;
+		}
+		console.error("Uso: yano watcher <init|start|status|pause|resume> [opzioni] | yano watcher projects [--all] [--json] [--project-root <dir>]");
+		process.exit(1);
 	}
 	if (sub === "playbook" || sub === "agent") {
 		await runYanoCatalog({ kind: sub, argv: rest });

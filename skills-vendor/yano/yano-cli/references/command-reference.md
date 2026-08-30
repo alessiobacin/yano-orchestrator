@@ -26,6 +26,7 @@ yano repair [options]
 yano config [subcommand] [options]
 yano data [subcommand] [options]
 yano architect [subcommand] [options]
+yano watcher init|start|status|pause|resume [options]  # persistent registry — see docs/quick_guides/10-watcher-falle-yano.md
 yano watcher projects [options]
 yano debugger [subcommand] [options]
 yano auto-improve [subcommand] [options]
@@ -117,6 +118,10 @@ Unmanaged or modified duplicate directories are left in place and reported.
 yano watch --project-root <dir> [--project <name>] [--once]
 yano watch --project-root <dir> --lookback-ms <ms> --interval-ms <ms> [--away]
 yano watch --project-root <dir> --validation-run <id> --playbook-proposal <id> --once
+yano watcher init --project-root <dir> [--interval-ms <ms>] [--lookback-ms <ms>]
+yano watcher start --project-root <dir> [--dry-run] [--once] [--foreground]
+yano watcher status [--project-root <dir>] [--no-heal] [--json]  # cross-checks + self-heals a dead pane
+yano watcher pause|resume --project-root <dir>
 yano watcher projects [--all] [--project-root <dir>] [--json]
 yano architect projects [--all] [--project-root <dir>] [--json]
 yano debugger projects [--all] [--project-root <dir>] [--json]

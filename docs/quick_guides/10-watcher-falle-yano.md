@@ -91,6 +91,46 @@ yano trace events \
 L'evento `yano_watcher_round_ok` non conta tutti i polling: indica soltanto una
 validazione bounded positiva associata a `--validation-run`.
 
+## Watcher persistente su un progetto esistente (registro)
+
+`yano watch --interval-ms 600000 --away` lanciato a mano in un terminale o in
+una tab Herdr qualsiasi **non sopravvive** a un riavvio: se il terminale si
+chiude, il Mac va in sleep o la tab/pane muore, il polling si ferma senza che
+nulla lo segnali — `yano watcher projects` mostra solo presenza Herdr/Pi già
+esistente (incluso il flusso ephemeral dell'Architect legato a una proposta,
+sotto), non "dovrebbe essere attivo ma non lo è più".
+
+`yano watcher init|start|status|pause|resume` chiude questo buco con un
+piccolo registro persistente (stessa logica già in uso per
+`yano debugger init|start|pause|resume`, vedi `docs/yano-debugger.md`):
+
+~~~bash
+yano watcher init --project-root /path/progetto --interval-ms 600000 --lookback-ms 3600000
+yano watcher start --project-root /path/progetto
+~~~
+
+`start` (e `resume`) aprono/riusano una tab nel workspace Herdr condiviso
+`yano-watcher` (tab `watcher-<nome-progetto>` — la stessa convenzione usata
+dal flusso Architect qui sotto, così un progetto ha sempre e solo una tab)
+e ci lanciano lo stesso comando bounded/zero-token già documentato sopra:
+nessun agente LLM viene avviato solo per il polling.
+
+Il punto centrale è `status`:
+
+~~~bash
+yano watcher status --json              # tutti i progetti registrati
+yano watcher status --project-root /path/progetto --json
+~~~
+
+Confronta lo stato registrato con quello reale in Herdr e, salvo
+`--no-heal`, **rilancia da solo** un pane che risulta morto, annotando un
+evento `watcher_worker_recovered` nel trace del progetto osservato. È il
+comando da ripetere periodicamente (dopo ogni risveglio del Mac, o da un
+cron/launchd dell'utente) per essere certi che il watcher sia ancora vivo,
+invece di scoprirlo solo quando manca un ticket segnalato. `pause`/`resume`
+sospendono/riattivano senza perdere la registrazione; una pausa esplicita
+non viene mai "recuperata" automaticamente da `status`.
+
 ## Watcher LLM per un playbook ephemeral
 
 Quando l'Architect prepara un nuovo playbook, il watcher non deve essere

@@ -187,5 +187,21 @@ yano trace events \
   --json
 ```
 
+Ogni ticket markdown appena creato (non un duplicato) viene anche instradato,
+in modo additivo, nel registro `yano-debugger` in modalità `yano-maintenance`
+(scoped al repository yano-orchestrator, mai al progetto osservato):
+
+```bash
+yano debugger status --project-root "$YANO_ORCHESTRATOR_REPO" --mode yano-maintenance --json
+```
+
+Questo dà al difetto "Yano su Yano" lo stesso ciclo di vita, la stessa
+deduplicazione e lo stesso risveglio automatico di un debugger/planner live
+(vedi "Chi guarda il bug appena aperto" in `docs/yano-debugger.md`) che ha
+qualunque altro bug — senza sostituire il file markdown, che resta il
+meccanismo primario. Un fallimento nell'instradamento (registro non
+raggiungibile, sqlite non disponibile) non blocca mai la creazione del
+ticket markdown.
+
 Il watcher non corregge, non chiude ticket e non modifica il codice: segnala e
 prepara il contesto per il futuro `yano-debugger` o per un LLM incaricato.

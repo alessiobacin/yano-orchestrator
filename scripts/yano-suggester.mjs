@@ -3,9 +3,14 @@
 // User-suggestion observer. It owns intake, durable state, bounded evidence,
 // approval gates and planner notification. The project under observation is
 // never edited by this process or by the yano-suggester worker.
+//
+// `yano suggester serve` exposes the same registry over a local-only REST
+// API (127.0.0.1 by default). The REST handlers call the exact same
+// functions as the CLI switch below, so the two surfaces cannot drift apart.
 
 import crypto from "node:crypto";
 import fs from "node:fs";
+import http from "node:http";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
@@ -24,6 +29,22 @@ const VALID_CATEGORIES = new Set(["bug", "feature", "improvement", "ux", "out_of
 const VALID_PRIORITIES = new Set(["low", "medium", "high", "critical"]);
 const VALID_SOURCES = new Set(["user", "cli", "system", "debugger", "watcher", "auto-improver"]);
 const VALID_NOTIFY = new Set(["auto", "none", "telegram", "whatsapp", "email"]);
+const API_DEFAULT_PORT = 4179;
+const ENDPOINTS = [
+	{ method: "GET", path: "/health", description: "liveness" },
+	{ method: "GET", path: "/projects", description: "elenca i progetti registrati con il loro id (project_key)" },
+	{ method: "POST", path: "/projects", description: "registra/inizializza un progetto — body: { project_root, project?, notify? } (equivalente a `yano suggester init`)" },
+	{ method: "GET", path: "/projects/:id", description: "dettaglio progetto" },
+	{ method: "GET", path: "/projects/:id/suggestions", description: "elenca i suggerimenti del progetto (equivalente a `yano suggester status`)" },
+	{ method: "GET", path: "/projects/:id/reports", description: "elenca i report globali del progetto (equivalente a `yano suggester reports`)" },
+	{ method: "POST", path: "/projects/:id/suggestions", description: "invia un nuovo suggerimento — body: { title, description, source?, user_id?, priority?, route?, app_version?, queue_only?, once? } (equivalente a `yano suggester submit`)" },
+	{ method: "POST", path: "/projects/:id/pause", description: "mette in pausa il worker (equivalente a `yano suggester pause`)" },
+	{ method: "POST", path: "/projects/:id/resume", description: "riprende/processa la prossima proposta pendente (equivalente a `yano suggester resume`/`start`)" },
+	{ method: "POST", path: "/projects/:id/stop", description: "ferma il worker (equivalente a `yano suggester stop`)" },
+	{ method: "POST", path: "/suggestions/:suggestionId/complete", description: "registra la proposta dell'agente — body per opzioni (equivalente a `yano suggester complete`)" },
+	{ method: "POST", path: "/suggestions/:suggestionId/approve", description: "approva la proposta — body: { actor, yes: true } (equivalente a `yano suggester approve`)" },
+	{ method: "POST", path: "/suggestions/:suggestionId/reject", description: "rifiuta la proposta — body: { actor, reason, yes: true } (equivalente a `yano suggester reject`)" },
+];
 
 function now() { return new Date().toISOString(); }
 function value(argv, flag) { const index = argv.indexOf(flag); return index >= 0 ? argv[index + 1] : null; }
@@ -137,6 +158,8 @@ function ensureProject(db, info, notify = null) {
 	db.prepare("INSERT INTO suggester_projects(project_key,name,root,notify,created_at,updated_at) VALUES(?,?,?,?,?,?)").run(info.key, info.name, info.root, notify || "auto", timestamp, timestamp);
 	return db.prepare("SELECT * FROM suggester_projects WHERE project_key = ?").get(info.key);
 }
+
+function infoFromRow(row) { return { root: row.root, name: row.name, key: row.project_key }; }
 
 function event(db, info, suggestionId, type, payload = {}) {
 	db.prepare("INSERT INTO suggester_events(event_id,project_key,suggestion_id,type,payload_json,created_at) VALUES(?,?,?,?,?,?)").run(`suggest-event-${crypto.randomUUID()}`, info.key, suggestionId, type, JSON.stringify(payload), now());
@@ -329,15 +352,202 @@ async function completeSuggestion(db, opts) {
 function parseOptions(argv) {
 	const notify = value(argv, "--notify") || "auto";
 	if (notify.split(",").some((item) => !VALID_NOTIFY.has(item.trim()))) throw new Error("yano suggester: --notify non valido");
-	return { sub: argv[0], projectRoot: value(argv, "--project-root") || process.cwd(), project: value(argv, "--project"), notify: value(argv, "--notify"), title: value(argv, "--title"), description: value(argv, "--description"), source: value(argv, "--source") || "user", userId: value(argv, "--user-id"), priority: value(argv, "--priority") || "medium", route: value(argv, "--route"), appVersion: value(argv, "--app-version"), suggestionId: value(argv, "--suggestion-id"), reportFile: value(argv, "--report-file"), category: value(argv, "--category"), summary: value(argv, "--summary"), value: value(argv, "--value"), complexity: value(argv, "--complexity"), risk: value(argv, "--risk"), confidence: value(argv, "--confidence"), duplicateOf: value(argv, "--duplicate-of"), actor: value(argv, "--actor"), reason: value(argv, "--reason"), json: has(argv, "--json"), dryRun: has(argv, "--dry-run"), once: has(argv, "--once"), queueOnly: has(argv, "--queue-only"), yes: has(argv, "--yes") };
+	return { sub: argv[0], projectRoot: value(argv, "--project-root") || process.cwd(), project: value(argv, "--project"), notify: value(argv, "--notify"), title: value(argv, "--title"), description: value(argv, "--description"), source: value(argv, "--source") || "user", userId: value(argv, "--user-id"), priority: value(argv, "--priority") || "medium", route: value(argv, "--route"), appVersion: value(argv, "--app-version"), suggestionId: value(argv, "--suggestion-id"), reportFile: value(argv, "--report-file"), category: value(argv, "--category"), summary: value(argv, "--summary"), value: value(argv, "--value"), complexity: value(argv, "--complexity"), risk: value(argv, "--risk"), confidence: value(argv, "--confidence"), duplicateOf: value(argv, "--duplicate-of"), actor: value(argv, "--actor"), reason: value(argv, "--reason"), port: value(argv, "--port") ? Number(value(argv, "--port")) : null, host: value(argv, "--host") || null, json: has(argv, "--json"), dryRun: has(argv, "--dry-run"), once: has(argv, "--once"), queueOnly: has(argv, "--queue-only"), yes: has(argv, "--yes") };
 }
 
 function print(result) { console.log(JSON.stringify(result, null, 2)); }
-function usage() { return ["Uso: yano suggester <init|start|submit|status|reports|complete|approve|reject|pause|resume|stop>", "", "  init --project-root <dir> [--notify auto]", "  submit --project-root <dir> --title <titolo> --description <testo> [--queue-only] [--once]", "  start --project-root <dir> [--dry-run] [--once]     processa una sola proposta senza scheduler", "  complete --suggestion-id <id> --report-file <temp-file> --category <bug|feature|improvement|ux>", "  approve --suggestion-id <id> --actor <superadmin> --yes", "  reject --suggestion-id <id> --actor <superadmin> --reason <motivo> --yes", "  status|reports|pause|resume|stop --project-root <dir>", "", "Il worker è read-only; il planner viene notificato soltanto dopo approve. I dati vivono in <YANO_DATA_DIR>/suggester/."] .join("\n"); }
+function usage() { return ["Uso: yano suggester <init|start|submit|status|reports|complete|approve|reject|pause|resume|stop|serve>", "", "  init --project-root <dir> [--notify auto]", "  submit --project-root <dir> --title <titolo> --description <testo> [--queue-only] [--once]", "  start --project-root <dir> [--dry-run] [--once]     processa una sola proposta senza scheduler", "  complete --suggestion-id <id> --report-file <temp-file> --category <bug|feature|improvement|ux>", "  approve --suggestion-id <id> --actor <superadmin> --yes", "  reject --suggestion-id <id> --actor <superadmin> --reason <motivo> --yes", "  status|reports|pause|resume|stop --project-root <dir>", "  serve [--port <porta>] [--host <host>] [--json]     avvia l'API REST del suggester (un'unica istanza per", "                                                        tutti i progetti registrati; default 127.0.0.1:4179,", "                                                        override con YANO_SUGGESTER_API_PORT / --port; imposta", "                                                        YANO_SUGGESTER_API_TOKEN per richiedere 'Authorization:", "                                                        Bearer <token>')", "", "Il worker è read-only; il planner viene notificato soltanto dopo approve. I dati vivono in <YANO_DATA_DIR>/suggester/."] .join("\n"); }
+
+// --- shared operations: CLI switch cases and the REST API below both call
+// these, so the two surfaces cannot behave differently. ---
+
+function doInit(project, info) {
+	return { project, db_path: dbPath(), data_root: projectDataRoot(info.key), read_only: true };
+}
+
+function doStatus(db, project, info) {
+	const suggestions = db.prepare("SELECT * FROM suggestions WHERE project_key = ? ORDER BY created_at DESC LIMIT 50").all(info.key);
+	const analyses = db.prepare("SELECT * FROM suggestion_analyses WHERE suggestion_id IN (SELECT suggestion_id FROM suggestions WHERE project_key = ?) ORDER BY created_at DESC LIMIT 50").all(info.key);
+	return { project, suggestions, analyses, db_path: dbPath(), data_root: projectDataRoot(info.key), read_only: true };
+}
+
+function doReports(db, info) {
+	return db.prepare("SELECT s.suggestion_id,s.status,s.title,s.created_at,a.report_path,a.category,a.summary FROM suggestions s LEFT JOIN suggestion_analyses a ON a.suggestion_id = s.suggestion_id WHERE s.project_key = ? ORDER BY s.created_at DESC").all(info.key);
+}
+
+function doPauseOrStop(db, info, mode) {
+	const workerStatus = mode === "pause" ? "paused" : "stopped";
+	db.prepare("UPDATE suggester_projects SET worker_status = ?, updated_at = ? WHERE project_key = ?").run(workerStatus, now(), info.key);
+	return { project: info.name, worker_status: workerStatus, note: "stato logico; nessun file del progetto o tab Herdr viene cancellato" };
+}
+
+function doResumeOrStart(db, info, project, opts = {}) {
+	db.prepare("UPDATE suggester_projects SET worker_status = 'idle', updated_at = ? WHERE project_key = ?").run(now(), info.key);
+	return { once: opts.once, ...dispatchNext(db, info, { ...project, worker_status: "idle" }, opts.dryRun) };
+}
+
+function doSubmit(db, info, project, opts) {
+	if (!opts.title || !opts.description) throw new Error("yano suggester: submit richiede --title e --description");
+	if (!VALID_SOURCES.has(opts.source)) throw new Error(`yano suggester: --source deve essere ${[...VALID_SOURCES].join(", ")}`);
+	if (!VALID_PRIORITIES.has(opts.priority)) throw new Error(`yano suggester: --priority deve essere ${[...VALID_PRIORITIES].join(", ")}`);
+	const title = redact(opts.title).trim();
+	const description = redact(opts.description).trim();
+	const fp = fingerprint(title, description, opts.route);
+	const duplicate = db.prepare("SELECT suggestion_id,status FROM suggestions WHERE project_key = ? AND fingerprint = ?").get(info.key, fp);
+	if (duplicate) return { duplicate: true, suggestion_id: duplicate.suggestion_id, status: duplicate.status, read_only: true };
+	const suggestionId = `SUG-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+	const timestamp = now();
+	db.prepare("INSERT INTO suggestions(suggestion_id,project_key,title,description,source,user_id,priority,route,app_version,status,fingerprint,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)").run(suggestionId, info.key, title, description, opts.source, redact(opts.userId), opts.priority, redact(opts.route), redact(opts.appVersion), "received", fp, timestamp, timestamp);
+	event(db, info, suggestionId, "suggestion_received", { source: opts.source, priority: opts.priority, read_only: true });
+	try { appendRawTraceRecord({ cwd: info.root, project: info.name, record: { type: "suggestion_received", record_type: "feedback", source: "yano-suggester", suggestion_id: suggestionId, priority: opts.priority, read_only: true } }); } catch { /* best effort */ }
+	const dispatched = opts.queueOnly ? { skipped: true, reason: "queue_only" } : dispatchNext(db, info, { ...project, worker_status: project.worker_status === "planned" ? "idle" : project.worker_status }, opts.dryRun);
+	return { suggestion_id: suggestionId, status: dispatched.suggestion ? "analyzing" : "received", once: opts.once, dispatched, read_only: true, db_path: dbPath() };
+}
+
+async function doApproveOrReject(db, info, opts) {
+	if (!opts.yes) throw new Error(`yano suggester: ${opts.mode} richiede --yes per confermare il gate umano`);
+	if (!opts.actor) throw new Error("yano suggester: serve --actor per auditare l'approvazione");
+	const suggestion = db.prepare("SELECT s.*,p.name,p.root,p.notify FROM suggestions s JOIN suggester_projects p ON p.project_key=s.project_key WHERE s.suggestion_id=?").get(opts.suggestionId);
+	if (!suggestion) throw new Error(`yano suggester: suggerimento non trovato: ${opts.suggestionId}`);
+	if (opts.mode === "approve" && suggestion.status !== "awaiting_approval") throw new Error(`yano suggester: solo una proposta in stato awaiting_approval può essere approvata (stato attuale: ${suggestion.status})`);
+	const timestamp = now();
+	const nextStatus = opts.mode === "approve" ? "accepted" : "rejected";
+	db.prepare("UPDATE suggestions SET status=?,approved_by=?,approved_at=?,rejected_reason=?,updated_at=? WHERE suggestion_id=?").run(nextStatus, opts.mode === "approve" ? opts.actor : null, opts.mode === "approve" ? timestamp : null, opts.mode === "reject" ? redact(opts.reason || "rifiutato dal superadmin") : null, timestamp, suggestion.suggestion_id);
+	event(db, info, suggestion.suggestion_id, opts.mode === "approve" ? "suggestion_approved" : "suggestion_rejected", { actor: opts.actor, reason: redact(opts.reason), read_only: true });
+	if (opts.mode === "reject") return { suggestion_id: suggestion.suggestion_id, status: nextStatus, planner_notified: false, read_only: true };
+	const analysis = db.prepare("SELECT * FROM suggestion_analyses WHERE suggestion_id=? ORDER BY created_at DESC LIMIT 1").get(suggestion.suggestion_id);
+	const planner = await notifyPlanner({ root: suggestion.root, name: suggestion.name, key: suggestion.project_key }, suggestion, analysis || { report_path: "" });
+	const notifications = await notifyChannels(`✅ Yano suggester: proposta approvata\nProgetto: ${suggestion.name}\nSuggerimento: ${suggestion.suggestion_id}\n${suggestion.title}\nPlanner notificati: ${planner.delivered}`, suggestion.notify);
+	return { suggestion_id: suggestion.suggestion_id, status: nextStatus, planner, notifications, read_only: true };
+}
+
+// --- REST API (`yano suggester serve`) ---
+
+function sendJson(res, status, body) {
+	const text = JSON.stringify(body, null, 2);
+	res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Content-Length": Buffer.byteLength(text) });
+	res.end(text);
+}
+
+async function readJsonBody(req) {
+	const chunks = [];
+	let size = 0;
+	for await (const chunk of req) {
+		size += chunk.length;
+		if (size > 1_000_000) throw new Error("body troppo grande (max 1MB)");
+		chunks.push(chunk);
+	}
+	if (!chunks.length) return {};
+	try { return JSON.parse(Buffer.concat(chunks).toString("utf8")); }
+	catch { throw new Error("body JSON non valido"); }
+}
+
+function checkAuth(req, token) {
+	if (!token) return true;
+	const header = req.headers.authorization || "";
+	const match = header.match(/^Bearer\s+(.+)$/i);
+	return Boolean(match && match[1] === token);
+}
+
+async function routeApiRequest(db, req, res) {
+	const url = new URL(req.url, "http://localhost");
+	const parts = url.pathname.split("/").filter(Boolean);
+	const method = req.method;
+
+	if (method === "GET" && parts.length === 0) return sendJson(res, 200, { ok: true, service: "yano-suggester", endpoints: ENDPOINTS });
+	if (method === "GET" && parts[0] === "health") return sendJson(res, 200, { ok: true });
+
+	if (parts[0] === "projects") {
+		if (method === "GET" && parts.length === 1) {
+			const rows = db.prepare("SELECT * FROM suggester_projects ORDER BY created_at DESC").all();
+			return sendJson(res, 200, { projects: rows });
+		}
+		if (method === "POST" && parts.length === 1) {
+			const body = await readJsonBody(req);
+			if (!body.project_root) return sendJson(res, 400, { error: "project_root è obbligatorio" });
+			const info = projectInfo(body.project_root, body.project || null);
+			const project = ensureProject(db, info, body.notify || null);
+			return sendJson(res, 201, doInit(project, info));
+		}
+		const key = parts[1];
+		if (!key) return sendJson(res, 404, { error: "not found" });
+		const row = db.prepare("SELECT * FROM suggester_projects WHERE project_key = ?").get(key);
+		if (!row) return sendJson(res, 404, { error: `progetto non trovato: ${key}` });
+		const info = infoFromRow(row);
+
+		if (method === "GET" && parts.length === 2) return sendJson(res, 200, row);
+
+		if (parts[2] === "suggestions" && method === "GET" && parts.length === 3) return sendJson(res, 200, doStatus(db, row, info));
+		if (parts[2] === "reports" && method === "GET" && parts.length === 3) return sendJson(res, 200, { project: row, reports: doReports(db, info) });
+		if (parts[2] === "suggestions" && method === "POST" && parts.length === 3) {
+			const body = await readJsonBody(req);
+			const opts = { title: body.title, description: body.description, source: body.source || "user", priority: body.priority || "medium", route: body.route || null, userId: body.user_id || null, appVersion: body.app_version || null, queueOnly: Boolean(body.queue_only), once: Boolean(body.once), dryRun: false };
+			const result = doSubmit(db, info, row, opts);
+			return sendJson(res, result.duplicate ? 200 : 201, result);
+		}
+		if (parts[2] === "pause" && method === "POST" && parts.length === 3) return sendJson(res, 200, doPauseOrStop(db, info, "pause"));
+		if (parts[2] === "stop" && method === "POST" && parts.length === 3) return sendJson(res, 200, doPauseOrStop(db, info, "stop"));
+		if (parts[2] === "resume" && method === "POST" && parts.length === 3) {
+			const body = await readJsonBody(req).catch(() => ({}));
+			return sendJson(res, 200, doResumeOrStart(db, info, row, { dryRun: Boolean(body.dry_run) }));
+		}
+		return sendJson(res, 404, { error: "not found" });
+	}
+
+	if (parts[0] === "suggestions" && parts[1]) {
+		const suggestionId = parts[1];
+		if (parts[2] === "complete" && method === "POST") {
+			const body = await readJsonBody(req);
+			const result = await completeSuggestion(db, { suggestionId, reportFile: body.report_file, category: body.category, summary: body.summary, value: body.value, complexity: body.complexity, risk: body.risk, confidence: body.confidence, duplicateOf: body.duplicate_of });
+			return sendJson(res, 200, result);
+		}
+		if ((parts[2] === "approve" || parts[2] === "reject") && method === "POST") {
+			const body = await readJsonBody(req);
+			if (body.yes !== true) return sendJson(res, 400, { error: `${parts[2]} richiede { yes: true } per confermare il gate umano` });
+			const suggestionRow = db.prepare("SELECT s.suggestion_id, p.project_key, p.root, p.name FROM suggestions s JOIN suggester_projects p ON p.project_key = s.project_key WHERE s.suggestion_id = ?").get(suggestionId);
+			if (!suggestionRow) return sendJson(res, 404, { error: `suggerimento non trovato: ${suggestionId}` });
+			const info = { root: suggestionRow.root, name: suggestionRow.name, key: suggestionRow.project_key };
+			const result = await doApproveOrReject(db, info, { mode: parts[2], actor: body.actor, yes: true, suggestionId, reason: body.reason || null });
+			return sendJson(res, 200, result);
+		}
+	}
+	return sendJson(res, 404, { error: "not found" });
+}
+
+async function handleApiRequest(db, req, res, token) {
+	try {
+		if (!checkAuth(req, token)) return sendJson(res, 401, { error: "unauthorized: header 'Authorization: Bearer <token>' richiesto o non valido" });
+		await routeApiRequest(db, req, res);
+	} catch (error) {
+		if (!res.headersSent) sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) });
+	}
+}
+
+async function runServe(db, opts) {
+	const port = opts.port || Number(process.env.YANO_SUGGESTER_API_PORT) || API_DEFAULT_PORT;
+	const host = opts.host || "127.0.0.1";
+	const token = process.env.YANO_SUGGESTER_API_TOKEN || null;
+	const server = http.createServer((req, res) => { handleApiRequest(db, req, res, token); });
+	await new Promise((resolve, reject) => { server.once("error", reject); server.listen(port, host, resolve); });
+	const info = { ok: true, host, port, token_required: Boolean(token), db_path: dbPath(), endpoints: ENDPOINTS };
+	console.log(JSON.stringify(info, null, 2));
+	if (!opts.json) console.log(`yano suggester: API in ascolto su http://${host}:${port} — Ctrl+C per fermarla${token ? " (Authorization: Bearer <token> richiesto)" : " (nessun token configurato — YANO_SUGGESTER_API_TOKEN per proteggerla)"}`);
+	await new Promise((resolve) => {
+		let closing = false;
+		const shutdown = () => { if (closing) return; closing = true; server.close(() => resolve()); };
+		process.on("SIGINT", shutdown);
+		process.on("SIGTERM", shutdown);
+	});
+}
 
 export async function runYanoSuggester({ argv = [] } = {}) {
 	const opts = parseOptions(argv);
 	if (!opts.sub || opts.sub === "--help" || opts.sub === "-h") { console.log(usage()); return; }
+	if (opts.sub === "serve") {
+		const db = openDatabase();
+		try { await runServe(db, { port: opts.port, host: opts.host, json: opts.json }); } finally { db.close(); }
+		return;
+	}
 	if (opts.sub === "complete") {
 		const db = openDatabase();
 		try { const result = await completeSuggestion(db, opts); print(result); return result; } finally { db.close(); }
@@ -346,41 +556,13 @@ export async function runYanoSuggester({ argv = [] } = {}) {
 	try {
 		const info = projectInfo(opts.projectRoot, opts.project);
 		const project = ensureProject(db, info, opts.notify);
-		if (opts.sub === "init") { const result = { project, db_path: dbPath(), data_root: projectDataRoot(info.key), read_only: true }; print(result); return result; }
-		if (opts.sub === "status") { const suggestions = db.prepare("SELECT * FROM suggestions WHERE project_key = ? ORDER BY created_at DESC LIMIT 50").all(info.key); const analyses = db.prepare("SELECT * FROM suggestion_analyses WHERE suggestion_id IN (SELECT suggestion_id FROM suggestions WHERE project_key = ?) ORDER BY created_at DESC LIMIT 50").all(info.key); const result = { project, suggestions, analyses, db_path: dbPath(), data_root: projectDataRoot(info.key), read_only: true }; print(result); return result; }
-		if (opts.sub === "reports") { const reports = db.prepare("SELECT s.suggestion_id,s.status,s.title,s.created_at,a.report_path,a.category,a.summary FROM suggestions s LEFT JOIN suggestion_analyses a ON a.suggestion_id = s.suggestion_id WHERE s.project_key = ? ORDER BY s.created_at DESC").all(info.key); print(reports); return reports; }
-		if (opts.sub === "pause" || opts.sub === "stop") { const workerStatus = opts.sub === "pause" ? "paused" : "stopped"; db.prepare("UPDATE suggester_projects SET worker_status = ?, updated_at = ? WHERE project_key = ?").run(workerStatus, now(), info.key); const result = { project: info.name, worker_status: workerStatus, note: "stato logico; nessun file del progetto o tab Herdr viene cancellato" }; print(result); return result; }
-		if (opts.sub === "resume" || opts.sub === "start") { db.prepare("UPDATE suggester_projects SET worker_status = 'idle', updated_at = ? WHERE project_key = ?").run(now(), info.key); const result = { once: opts.once, ...dispatchNext(db, info, { ...project, worker_status: "idle" }, opts.dryRun) }; print(result); return result; }
-		if (opts.sub === "submit") {
-			if (!opts.title || !opts.description) throw new Error("yano suggester: submit richiede --title e --description");
-			if (!VALID_SOURCES.has(opts.source)) throw new Error(`yano suggester: --source deve essere ${[...VALID_SOURCES].join(", ")}`);
-			if (!VALID_PRIORITIES.has(opts.priority)) throw new Error(`yano suggester: --priority deve essere ${[...VALID_PRIORITIES].join(", ")}`);
-			const title = redact(opts.title).trim(); const description = redact(opts.description).trim(); const fp = fingerprint(title, description, opts.route);
-			const duplicate = db.prepare("SELECT suggestion_id,status FROM suggestions WHERE project_key = ? AND fingerprint = ?").get(info.key, fp);
-			if (duplicate) { const result = { duplicate: true, suggestion_id: duplicate.suggestion_id, status: duplicate.status, read_only: true }; print(result); return result; }
-			const suggestionId = `SUG-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
-			const timestamp = now();
-			db.prepare("INSERT INTO suggestions(suggestion_id,project_key,title,description,source,user_id,priority,route,app_version,status,fingerprint,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)").run(suggestionId, info.key, title, description, opts.source, redact(opts.userId), opts.priority, redact(opts.route), redact(opts.appVersion), "received", fp, timestamp, timestamp);
-			event(db, info, suggestionId, "suggestion_received", { source: opts.source, priority: opts.priority, read_only: true });
-			try { appendRawTraceRecord({ cwd: info.root, project: info.name, record: { type: "suggestion_received", record_type: "feedback", source: "yano-suggester", suggestion_id: suggestionId, priority: opts.priority, read_only: true } }); } catch { /* best effort */ }
-			const dispatched = opts.queueOnly ? { skipped: true, reason: "queue_only" } : dispatchNext(db, info, { ...project, worker_status: project.worker_status === "planned" ? "idle" : project.worker_status }, opts.dryRun);
-			const result = { suggestion_id: suggestionId, status: dispatched.suggestion ? "analyzing" : "received", once: opts.once, dispatched, read_only: true, db_path: dbPath() }; print(result); return result;
-		}
-		if (opts.sub === "approve" || opts.sub === "reject") {
-			if (!opts.yes) throw new Error(`yano suggester: ${opts.sub} richiede --yes per confermare il gate umano`);
-			if (!opts.actor) throw new Error("yano suggester: serve --actor per auditare l'approvazione");
-			const suggestion = db.prepare("SELECT s.*,p.name,p.root,p.notify FROM suggestions s JOIN suggester_projects p ON p.project_key=s.project_key WHERE s.suggestion_id=?").get(opts.suggestionId);
-			if (!suggestion) throw new Error(`yano suggester: suggerimento non trovato: ${opts.suggestionId}`);
-			if (opts.sub === "approve" && suggestion.status !== "awaiting_approval") throw new Error(`yano suggester: solo una proposta in stato awaiting_approval può essere approvata (stato attuale: ${suggestion.status})`);
-			const timestamp = now(); const nextStatus = opts.sub === "approve" ? "accepted" : "rejected";
-			db.prepare("UPDATE suggestions SET status=?,approved_by=?,approved_at=?,rejected_reason=?,updated_at=? WHERE suggestion_id=?").run(nextStatus, opts.sub === "approve" ? opts.actor : null, opts.sub === "approve" ? timestamp : null, opts.sub === "reject" ? redact(opts.reason || "rifiutato dal superadmin") : null, timestamp, suggestion.suggestion_id);
-			event(db, info, suggestion.suggestion_id, opts.sub === "approve" ? "suggestion_approved" : "suggestion_rejected", { actor: opts.actor, reason: redact(opts.reason), read_only: true });
-			if (opts.sub === "reject") { const result = { suggestion_id: suggestion.suggestion_id, status: nextStatus, planner_notified: false, read_only: true }; print(result); return result; }
-			const analysis = db.prepare("SELECT * FROM suggestion_analyses WHERE suggestion_id=? ORDER BY created_at DESC LIMIT 1").get(suggestion.suggestion_id);
-			const planner = await notifyPlanner({ root: suggestion.root, name: suggestion.name, key: suggestion.project_key }, suggestion, analysis || { report_path: "" });
-			const notifications = await notifyChannels(`✅ Yano suggester: proposta approvata\nProgetto: ${suggestion.name}\nSuggerimento: ${suggestion.suggestion_id}\n${suggestion.title}\nPlanner notificati: ${planner.delivered}`, suggestion.notify);
-			const result = { suggestion_id: suggestion.suggestion_id, status: nextStatus, planner, notifications, read_only: true }; print(result); return result;
-		}
+		if (opts.sub === "init") { const result = doInit(project, info); print(result); return result; }
+		if (opts.sub === "status") { const result = doStatus(db, project, info); print(result); return result; }
+		if (opts.sub === "reports") { const reports = doReports(db, info); print(reports); return reports; }
+		if (opts.sub === "pause" || opts.sub === "stop") { const result = doPauseOrStop(db, info, opts.sub); print(result); return result; }
+		if (opts.sub === "resume" || opts.sub === "start") { const result = doResumeOrStart(db, info, project, opts); print(result); return result; }
+		if (opts.sub === "submit") { const result = doSubmit(db, info, project, opts); print(result); return result; }
+		if (opts.sub === "approve" || opts.sub === "reject") { const result = await doApproveOrReject(db, info, { ...opts, mode: opts.sub }); print(result); return result; }
 		throw new Error(`yano suggester: comando sconosciuto "${opts.sub}".\n${usage()}`);
 	} finally { db.close(); }
 }

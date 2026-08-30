@@ -74,9 +74,9 @@ function requireSqlite() {
 	catch (error) { throw new Error(`yano debugger: node:sqlite non disponibile (${error instanceof Error ? error.message : String(error)}); serve Node >=22.5`); }
 }
 
-function dbPath() { return path.join(traceRoot(), "debugger", "debugger.sqlite"); }
+export function dbPath() { return path.join(traceRoot(), "debugger", "debugger.sqlite"); }
 
-function openDatabase() {
+export function openDatabase() {
 	fs.mkdirSync(path.dirname(dbPath()), { recursive: true, mode: 0o700 });
 	const { DatabaseSync } = requireSqlite();
 	const db = new DatabaseSync(dbPath());
@@ -149,7 +149,7 @@ function safeJson(value, depth = 0) {
 	return Object.fromEntries(Object.entries(value).slice(0, 80).map(([key, item]) => [key, secret.test(key) ? "[redacted]" : safeJson(item, depth + 1)]));
 }
 
-function projectInfo(projectRoot, explicitProject = null, mode = "project") {
+export function projectInfo(projectRoot, explicitProject = null, mode = "project") {
 	const root = path.resolve(projectRoot || process.cwd());
 	if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) throw new Error(`yano debugger: project root non valida: ${root}`);
 	const name = String(explicitProject || resolveTraceProject(root)).trim();
@@ -360,7 +360,7 @@ function launchHerdrWorker({ project, root, db, row, intervalMs, dryRun }) {
 	return { workspace_id: workspace.workspace_id, tab_id: tab.tab_id, pane_id: pane.pane_id, instance, command, dry_run: dryRun };
 }
 
-function reportBug(db, opts) {
+export function reportBug(db, opts) {
 	if (!opts.title?.trim()) throw new Error("yano debugger report: --title è obbligatorio");
 	if (!opts.description?.trim()) throw new Error("yano debugger report: --description è obbligatorio");
 	if (!VALID_SEVERITIES.has(opts.severity)) throw new Error(`yano debugger report: --severity deve essere uno tra ${[...VALID_SEVERITIES].join(", ")}`);
@@ -398,7 +398,7 @@ function reportBug(db, opts) {
 // fire-and-forget in spirit: MQTT unreachable or nobody listening is not an
 // error, the bug is still durably in the registry either way and shows up
 // on the next `yano debugger status`.
-async function notifyBugReported(db, result) {
+export async function notifyBugReported(db, result) {
 	if (result.duplicate || !result.bug) return; // do not re-wake on every rediscovery of the same fingerprint
 	const bug = result.bug;
 	const config = resolveYanoConfig({});

@@ -3,9 +3,14 @@
 // Scheduled, read-only project audits. The LLM worker runs in Herdr; this
 // module owns only durable scheduling, bounded evidence collection, report
 // storage and planner/notification handoff. It never writes to the project.
+//
+// `yano auto-improve serve` exposes the same registry over a local-only
+// REST API (127.0.0.1 by default). The REST handlers call the exact same
+// functions as the CLI switch below, so the two surfaces cannot drift apart.
 
 import crypto from "node:crypto";
 import fs from "node:fs";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
@@ -24,6 +29,20 @@ const MAX_OUTPUT = 12000;
 const MAX_TRACE_RECORDS = 120;
 const DEFAULT_INTERVAL_MS = 5 * 24 * 60 * 60 * 1000;
 const VALID_NOTIFY = new Set(["auto", "none", "telegram", "whatsapp", "email"]);
+const API_DEFAULT_PORT = 4178;
+const ENDPOINTS = [
+	{ method: "GET", path: "/health", description: "liveness" },
+	{ method: "GET", path: "/projects", description: "elenca i progetti registrati con il loro id (project_key)" },
+	{ method: "POST", path: "/projects", description: "registra/inizializza un progetto — body: { project_root, project?, interval_ms?, notify? } (equivalente a `yano auto-improve init`)" },
+	{ method: "GET", path: "/projects/:id", description: "dettaglio progetto" },
+	{ method: "GET", path: "/projects/:id/audits", description: "elenca gli audit del progetto (equivalente a `yano auto-improve status`)" },
+	{ method: "GET", path: "/projects/:id/reports", description: "elenca i report globali del progetto (equivalente a `yano auto-improve reports`)" },
+	{ method: "POST", path: "/projects/:id/run", description: "prepara/avvia un audit — body: { once?, dry_run?, force? } (equivalente a `yano auto-improve run`/`start`)" },
+	{ method: "POST", path: "/projects/:id/pause", description: "sospende la pianificazione (equivalente a `yano auto-improve pause`)" },
+	{ method: "POST", path: "/projects/:id/resume", description: "programma un audit immediato (equivalente a `yano auto-improve resume`)" },
+	{ method: "POST", path: "/projects/:id/stop", description: "disabilita il progetto senza cancellare dati (equivalente a `yano auto-improve stop`)" },
+	{ method: "POST", path: "/audits/:auditId/complete", description: "chiude un audit e notifica il planner — body: { report_file, summary_file?, summary? } (equivalente a `yano auto-improve complete`)" },
+];
 
 function now() { return new Date().toISOString(); }
 function value(argv, flag) { const index = argv.indexOf(flag); return index >= 0 ? argv[index + 1] : null; }
@@ -141,6 +160,7 @@ function ensureProject(db, info, { intervalMs, notify } = {}) {
 }
 
 function getProject(db, info) { return db.prepare("SELECT * FROM auto_projects WHERE project_key = ? OR root = ?").get(info.key, info.root); }
+function infoFromRow(row) { return { root: row.root, name: row.name, key: row.project_key }; }
 function safeJson(value, depth = 0) {
 	if (depth > 4) return "[truncated]";
 	if (value === null || value === undefined) return value;
@@ -422,13 +442,13 @@ async function completeAudit(db, opts) {
 function parseOptions(argv) {
 	const notifyRaw = value(argv, "--notify");
 	const intervalRaw = value(argv, "--interval") || value(argv, "--interval-ms");
-	return { sub: argv[0], projectRoot: value(argv, "--project-root") || process.cwd(), project: value(argv, "--project"), intervalMs: intervalRaw === null ? null : parseDuration(intervalRaw), notify: notifyRaw === null ? null : validateNotify(notifyRaw), auditId: value(argv, "--audit-id"), reportFile: value(argv, "--report-file"), summaryFile: value(argv, "--summary-file"), summary: value(argv, "--summary"), json: has(argv, "--json"), dryRun: has(argv, "--dry-run"), once: has(argv, "--once"), force: has(argv, "--force"), noDaemon: has(argv, "--no-daemon") };
+	return { sub: argv[0], projectRoot: value(argv, "--project-root") || process.cwd(), project: value(argv, "--project"), intervalMs: intervalRaw === null ? null : parseDuration(intervalRaw), notify: notifyRaw === null ? null : validateNotify(notifyRaw), auditId: value(argv, "--audit-id"), reportFile: value(argv, "--report-file"), summaryFile: value(argv, "--summary-file"), summary: value(argv, "--summary"), port: value(argv, "--port") ? Number(value(argv, "--port")) : null, host: value(argv, "--host") || null, json: has(argv, "--json"), dryRun: has(argv, "--dry-run"), once: has(argv, "--once"), force: has(argv, "--force"), noDaemon: has(argv, "--no-daemon") };
 }
 
 function print(valueToPrint, machine) { console.log(machine ? JSON.stringify(valueToPrint, null, 2) : JSON.stringify(valueToPrint, null, 2)); }
 function usage() {
 	return [
-		"Uso: yano auto-improve <init|start|run|status|reports|pause|resume|stop|complete> [opzioni]",
+		"Uso: yano auto-improve <init|start|run|status|reports|pause|resume|stop|complete|serve> [opzioni]",
 		"",
 		"  init --project-root <dir> --interval 5d --notify auto   registra il progetto",
 		"  start --project-root <dir> [--dry-run]                 crea/riusa tab Herdr e scheduler",
@@ -438,6 +458,12 @@ function usage() {
 		"  reports --project-root <dir>                           elenca report globali",
 		"  pause|resume|stop --project-root <dir>                 cambia stato senza toccare il progetto",
 		"  complete --audit-id <id> --report-file <temp-file>     chiude audit e notifica planner",
+		"  serve [--port <porta>] [--host <host>] [--json]        avvia l'API REST dell'auto-improver",
+		"                                                          (un'unica istanza per tutti i progetti registrati;",
+		"                                                          default 127.0.0.1:4178, override con",
+		"                                                          YANO_AUTO_IMPROVER_API_PORT / --port; imposta",
+		"                                                          YANO_AUTO_IMPROVER_API_TOKEN per richiedere",
+		"                                                          'Authorization: Bearer <token>').",
 		"",
 		"Nessun sottocomando modifica il progetto osservato. I dati vivono in <YANO_DATA_DIR>/auto-improver/.",
 	].join("\n");
@@ -477,24 +503,167 @@ async function daemonLoop() {
 	}
 }
 
+// --- shared operations: CLI switch cases and the REST API below both call
+// these, so the two surfaces cannot behave differently. ---
+
+function doInit(db, info, opts = {}) {
+	const row = ensureProject(db, info, { intervalMs: opts.intervalMs, notify: opts.notify });
+	return { project: row, db_path: dbPath(), data_root: projectDataRoot(info.key), read_only: true };
+}
+
+function doStatus(db, row) {
+	const audits = db.prepare("SELECT * FROM auto_audits WHERE project_key = ? ORDER BY started_at DESC LIMIT 20").all(row.project_key);
+	return { project: row, audits, db_path: dbPath(), data_root: projectDataRoot(row.project_key), read_only: true };
+}
+
+function doReports(db, row) {
+	return db.prepare("SELECT audit_id,status,started_at,completed_at,report_path,summary FROM auto_audits WHERE project_key = ? ORDER BY started_at DESC").all(row.project_key);
+}
+
+function doPauseOrStop(db, info, row, mode) {
+	const workerStatus = mode === "pause" ? "paused" : "stopped";
+	db.prepare("UPDATE auto_projects SET worker_status = ?, updated_at = ? WHERE project_key = ?").run(workerStatus, now(), row.project_key);
+	return { project: info.name, worker_status: workerStatus, note: "stato logico; nessuna tab Herdr o file del progetto viene cancellato" };
+}
+
+async function doResume(db, info, row, opts = {}) {
+	db.prepare("UPDATE auto_projects SET worker_status = ?, next_run_at = ?, updated_at = ? WHERE project_key = ?").run("scheduled", now(), now(), row.project_key);
+	return await runAudit(db, info, { ...row, worker_status: "scheduled", next_run_at: now() }, { dryRun: opts.dryRun, force: true });
+}
+
+async function doRunOrStart(db, info, row, opts = {}) {
+	const result = await runAudit(db, info, { ...row, worker_status: opts.force ? "scheduled" : row.worker_status }, { dryRun: opts.dryRun, force: opts.force || opts.isStart });
+	const scheduler = opts.once || opts.dryRun || opts.noDaemon ? { running: false, skipped: true, once: opts.once } : startDaemon();
+	return { ...result, once: opts.once, scheduler };
+}
+
+// --- REST API (`yano auto-improve serve`) ---
+
+function sendJson(res, status, body) {
+	const text = JSON.stringify(body, null, 2);
+	res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Content-Length": Buffer.byteLength(text) });
+	res.end(text);
+}
+
+async function readJsonBody(req) {
+	const chunks = [];
+	let size = 0;
+	for await (const chunk of req) {
+		size += chunk.length;
+		if (size > 1_000_000) throw new Error("body troppo grande (max 1MB)");
+		chunks.push(chunk);
+	}
+	if (!chunks.length) return {};
+	try { return JSON.parse(Buffer.concat(chunks).toString("utf8")); }
+	catch { throw new Error("body JSON non valido"); }
+}
+
+function checkAuth(req, token) {
+	if (!token) return true;
+	const header = req.headers.authorization || "";
+	const match = header.match(/^Bearer\s+(.+)$/i);
+	return Boolean(match && match[1] === token);
+}
+
+async function routeApiRequest(db, req, res) {
+	const url = new URL(req.url, "http://localhost");
+	const parts = url.pathname.split("/").filter(Boolean);
+	const method = req.method;
+
+	if (method === "GET" && parts.length === 0) return sendJson(res, 200, { ok: true, service: "yano-auto-improver", endpoints: ENDPOINTS });
+	if (method === "GET" && parts[0] === "health") return sendJson(res, 200, { ok: true });
+
+	if (parts[0] === "projects") {
+		if (method === "GET" && parts.length === 1) {
+			const rows = db.prepare("SELECT * FROM auto_projects ORDER BY created_at DESC").all();
+			return sendJson(res, 200, { projects: rows });
+		}
+		if (method === "POST" && parts.length === 1) {
+			const body = await readJsonBody(req);
+			if (!body.project_root) return sendJson(res, 400, { error: "project_root è obbligatorio" });
+			const info = projectInfo(body.project_root, body.project || null);
+			const result = doInit(db, info, { intervalMs: body.interval_ms, notify: body.notify });
+			return sendJson(res, 201, result);
+		}
+		const key = parts[1];
+		if (!key) return sendJson(res, 404, { error: "not found" });
+		const row = db.prepare("SELECT * FROM auto_projects WHERE project_key = ?").get(key);
+		if (!row) return sendJson(res, 404, { error: `progetto non trovato: ${key}` });
+		const info = infoFromRow(row);
+
+		if (method === "GET" && parts.length === 2) return sendJson(res, 200, row);
+
+		if (parts[2] === "audits" && method === "GET" && parts.length === 3) return sendJson(res, 200, doStatus(db, row));
+		if (parts[2] === "reports" && method === "GET" && parts.length === 3) return sendJson(res, 200, { project: row, reports: doReports(db, row) });
+		if (parts[2] === "run" && method === "POST" && parts.length === 3) {
+			const body = await readJsonBody(req).catch(() => ({}));
+			const result = await doRunOrStart(db, info, row, { dryRun: Boolean(body.dry_run), force: Boolean(body.force), once: Boolean(body.once) });
+			return sendJson(res, 200, result);
+		}
+		if (parts[2] === "pause" && method === "POST" && parts.length === 3) return sendJson(res, 200, doPauseOrStop(db, info, row, "pause"));
+		if (parts[2] === "stop" && method === "POST" && parts.length === 3) return sendJson(res, 200, doPauseOrStop(db, info, row, "stop"));
+		if (parts[2] === "resume" && method === "POST" && parts.length === 3) {
+			const body = await readJsonBody(req).catch(() => ({}));
+			const result = await doResume(db, info, row, { dryRun: Boolean(body.dry_run) });
+			return sendJson(res, 200, result);
+		}
+		return sendJson(res, 404, { error: "not found" });
+	}
+
+	if (parts[0] === "audits" && parts[1] && parts[2] === "complete" && method === "POST") {
+		const body = await readJsonBody(req);
+		const result = await completeAudit(db, { auditId: parts[1], reportFile: body.report_file, summaryFile: body.summary_file, summary: body.summary });
+		return sendJson(res, 200, result);
+	}
+	return sendJson(res, 404, { error: "not found" });
+}
+
+async function handleApiRequest(db, req, res, token) {
+	try {
+		if (!checkAuth(req, token)) return sendJson(res, 401, { error: "unauthorized: header 'Authorization: Bearer <token>' richiesto o non valido" });
+		await routeApiRequest(db, req, res);
+	} catch (error) {
+		if (!res.headersSent) sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) });
+	}
+}
+
+async function runServe(db, opts) {
+	const port = opts.port || Number(process.env.YANO_AUTO_IMPROVER_API_PORT) || API_DEFAULT_PORT;
+	const host = opts.host || "127.0.0.1";
+	const token = process.env.YANO_AUTO_IMPROVER_API_TOKEN || null;
+	const server = http.createServer((req, res) => { handleApiRequest(db, req, res, token); });
+	await new Promise((resolve, reject) => { server.once("error", reject); server.listen(port, host, resolve); });
+	const info = { ok: true, host, port, token_required: Boolean(token), db_path: dbPath(), endpoints: ENDPOINTS };
+	print(info, opts.json);
+	if (!opts.json) console.log(`yano auto-improve: API in ascolto su http://${host}:${port} — Ctrl+C per fermarla${token ? " (Authorization: Bearer <token> richiesto)" : " (nessun token configurato — YANO_AUTO_IMPROVER_API_TOKEN per proteggerla)"}`);
+	await new Promise((resolve) => {
+		let closing = false;
+		const shutdown = () => { if (closing) return; closing = true; server.close(() => resolve()); };
+		process.on("SIGINT", shutdown);
+		process.on("SIGTERM", shutdown);
+	});
+}
+
 export async function runYanoAutoImprove({ argv = [] } = {}) {
 	const opts = parseOptions(argv);
 	if (!opts.sub || opts.sub === "--help" || opts.sub === "-h") { console.log(usage()); return; }
 	if (opts.sub === "daemon") { await daemonLoop(); return; }
 	const db = openDatabase();
 	try {
+		if (opts.sub === "serve") {
+			await runServe(db, { port: opts.port, host: opts.host, json: opts.json });
+			return;
+		}
 		if (opts.sub === "complete") return await completeAudit(db, opts).then((result) => { print(result, opts.json); return result; });
 		const info = projectInfo(opts.projectRoot, opts.project);
-		if (opts.sub === "init") { const row = ensureProject(db, info, { intervalMs: opts.intervalMs, notify: opts.notify }); const result = { project: row, db_path: dbPath(), data_root: projectDataRoot(info.key), read_only: true }; print(result, opts.json); return result; }
+		if (opts.sub === "init") { const result = doInit(db, info, { intervalMs: opts.intervalMs, notify: opts.notify }); print(result, opts.json); return result; }
 		const row = ensureProject(db, info, { intervalMs: opts.intervalMs, notify: opts.notify });
-		if (opts.sub === "status") { const audits = db.prepare("SELECT * FROM auto_audits WHERE project_key = ? ORDER BY started_at DESC LIMIT 20").all(row.project_key); const result = { project: row, audits, db_path: dbPath(), data_root: projectDataRoot(info.key), read_only: true }; print(result, opts.json); return result; }
-		if (opts.sub === "reports") { const reports = db.prepare("SELECT audit_id,status,started_at,completed_at,report_path,summary FROM auto_audits WHERE project_key = ? ORDER BY started_at DESC").all(row.project_key); print(reports, opts.json); return reports; }
-		if (opts.sub === "pause" || opts.sub === "stop") { db.prepare("UPDATE auto_projects SET worker_status = ?, updated_at = ? WHERE project_key = ?").run(opts.sub === "pause" ? "paused" : "stopped", now(), row.project_key); const result = { project: info.name, worker_status: opts.sub === "pause" ? "paused" : "stopped", note: "stato logico; nessuna tab Herdr o file del progetto viene cancellato" }; print(result, opts.json); return result; }
-		if (opts.sub === "resume") { db.prepare("UPDATE auto_projects SET worker_status = ?, next_run_at = ?, updated_at = ? WHERE project_key = ?").run("scheduled", now(), now(), row.project_key); const result = await runAudit(db, info, { ...row, worker_status: "scheduled", next_run_at: now() }, { dryRun: opts.dryRun, force: true }); print(result, opts.json); return result; }
+		if (opts.sub === "status") { const result = doStatus(db, row); print(result, opts.json); return result; }
+		if (opts.sub === "reports") { const reports = doReports(db, row); print(reports, opts.json); return reports; }
+		if (opts.sub === "pause" || opts.sub === "stop") { const result = doPauseOrStop(db, info, row, opts.sub); print(result, opts.json); return result; }
+		if (opts.sub === "resume") { const result = await doResume(db, info, row, { dryRun: opts.dryRun }); print(result, opts.json); return result; }
 		if (opts.sub === "run" || opts.sub === "start") {
-			const result = await runAudit(db, info, { ...row, worker_status: opts.force ? "scheduled" : row.worker_status }, { dryRun: opts.dryRun, force: opts.force || opts.sub === "start" });
-			const scheduler = opts.once || opts.dryRun || opts.noDaemon ? { running: false, skipped: true, once: opts.once } : startDaemon();
-			const output = { ...result, once: opts.once, scheduler };
+			const output = await doRunOrStart(db, info, row, { dryRun: opts.dryRun, force: opts.force, once: opts.once, noDaemon: opts.noDaemon, isStart: opts.sub === "start" });
 			print(output, opts.json);
 			return output;
 		}

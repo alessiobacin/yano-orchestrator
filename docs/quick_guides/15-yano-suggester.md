@@ -31,6 +31,30 @@ yano suggester reject --suggestion-id SUG-... --actor superadmin \
   --reason "Non coerente con il prodotto" --yes
 ```
 
-Per i limiti, i percorsi globali e il futuro HTTP/FAB vedere
-[`docs/yano-suggester.md`](../yano-suggester.md) e la
+## API REST (per chi non usa la shell)
+
+`yano suggester` è un'unica istanza che gestisce molti progetti registrati
+(esattamente come in CLI: ogni progetto ha un `project_key` deterministico).
+Per inviare/consultare suggerimenti senza CLI, avvia l'API REST locale:
+
+```bash
+yano suggester serve --port 4179
+```
+
+Endpoint principali:
+
+```text
+GET  /projects                          elenca i progetti registrati con il loro id
+POST /projects                          registra un progetto — { project_root, notify? }
+GET  /projects/:id/suggestions          elenca i suggerimenti del progetto
+POST /projects/:id/suggestions          invia un suggerimento — { title, description, ... }
+POST /suggestions/:suggestionId/approve approva — { actor, yes: true }
+POST /suggestions/:suggestionId/reject  rifiuta — { actor, reason, yes: true }
+```
+
+`yes: true` è obbligatorio in `approve`/`reject`, esattamente come `--yes` da
+shell: senza, la richiesta viene rifiutata con `400`.
+
+Per i limiti, i percorsi globali, i dettagli dell'API REST e il futuro
+HTTP/FAB vedere [`docs/yano-suggester.md`](../yano-suggester.md) e la
 [roadmap degli agenti esterni](../agents/external-agents-roadmap.md).

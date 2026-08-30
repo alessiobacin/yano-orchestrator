@@ -259,6 +259,7 @@ yano auto-improve init --project-root <dir> --interval 5d --notify auto
 yano auto-improve start|run --project-root <dir> [--dry-run] [--once]
 yano auto-improve status|reports|pause|resume|stop --project-root <dir>
 yano auto-improve complete --audit-id <id> --report-file <temp-file>
+yano auto-improve serve [--port <port>] [--host <host>] [--json]  # REST API — see docs/yano-auto-improve.md#api-rest-yano-auto-improve-serve
 
 yano suggester init --project-root <dir> [--notify auto]
 yano suggester submit --project-root <dir> --title <text> --description <text> [--queue-only] [--once]
@@ -267,6 +268,7 @@ yano suggester status|reports|pause|resume|stop --project-root <dir>
 yano suggester complete --suggestion-id <id> --report-file <temp-file> --category <bug|feature|improvement|ux>
 yano suggester approve --suggestion-id <id> --actor <superadmin> --yes
 yano suggester reject --suggestion-id <id> --actor <superadmin> --reason <text> --yes
+yano suggester serve [--port <port>] [--host <host>] [--json]  # REST API — see docs/yano-suggester.md#api-rest-yano-suggester-serve
 ```
 
 All three external agents have read-only contracts against the reference

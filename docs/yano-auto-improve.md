@@ -73,3 +73,44 @@ configurazione globale disponibile.
 Il planner non considera automaticamente una raccomandazione come approvata:
 valuta le evidenze, chiede conferma quando l'impatto è concettuale e, se
 accetta, usa `to-spec → to-tickets` e il normale ciclo coder/reviewer.
+
+## API REST (`yano auto-improve serve`)
+
+L'auto-improver, come il debugger, è pensato come un'unica istanza logica
+che gestisce molti progetti (lo stesso registro `auto_projects` usato dalla
+CLI): `yano auto-improve serve` espone questo registro su HTTP, per chi vuole
+avviare/consultare audit da uno strumento diverso dalla shell (uno script, un
+altro servizio). Gli handler REST richiamano le stesse funzioni della CLI
+(`doInit`, `doRunOrStart`, `doPauseOrStop`, `completeAudit`, ...), quindi i
+due canali non possono divergere nel comportamento.
+
+```sh
+yano auto-improve serve --port 4178          # default 127.0.0.1:4178
+yano config set YANO_AUTO_IMPROVER_API_PORT 4178      # oppure fisso via config
+yano config set YANO_AUTO_IMPROVER_API_TOKEN --stdin  # opzionale: richiede Bearer token
+```
+
+Il bind di default è solo su `127.0.0.1`: senza token configurato l'API non
+richiede autenticazione, per questo resta bene esporla solo in loopback (usa
+`--host` solo se sai cosa stai facendo, e in quel caso imposta sempre un
+token).
+
+| Metodo | Path                         | Equivalente CLI                       |
+|--------|-------------------------------|-----------------------------------------|
+| GET    | `/health`                     | —                                        |
+| GET    | `/projects`                   | (elenco con id, non disponibile in CLI) |
+| POST   | `/projects`                   | `yano auto-improve init`                |
+| GET    | `/projects/:id`               | —                                        |
+| GET    | `/projects/:id/audits`        | `yano auto-improve status`              |
+| GET    | `/projects/:id/reports`       | `yano auto-improve reports`             |
+| POST   | `/projects/:id/run`           | `yano auto-improve run`/`start`         |
+| POST   | `/projects/:id/pause`         | `yano auto-improve pause`               |
+| POST   | `/projects/:id/resume`        | `yano auto-improve resume`              |
+| POST   | `/projects/:id/stop`          | `yano auto-improve stop`                |
+| POST   | `/audits/:auditId/complete`   | `yano auto-improve complete`            |
+
+`:id` è il `project_key` restituito da `POST /projects` o da `GET /projects`
+(lo stesso valore che la CLI calcola internamente da `--project-root`). Le
+stesse regole della CLI si applicano identiche: un `project_root` mancante o
+un audit inesistente restituiscono lo stesso errore che vedresti da shell,
+solo come JSON con lo status HTTP appropriato (400/404).

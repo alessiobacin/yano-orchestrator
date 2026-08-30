@@ -216,11 +216,13 @@ yano auto-improve status --project-root /path/progetto --json
 yano auto-improve pause --project-root /path/progetto
 yano auto-improve resume --project-root /path/progetto
 yano auto-improve stop --project-root /path/progetto
+yano auto-improve serve --port 4178 # API REST (un'unica istanza, molti progetti)
 yano suggester init --project-root /path/progetto --notify auto
 yano suggester start --project-root /path/progetto --once --dry-run
 yano suggester submit --project-root /path/progetto --title "..." --description "..."
 yano suggester status --project-root /path/progetto --json
 yano suggester approve --suggestion-id SUG-... --actor superadmin --yes
+yano suggester serve --port 4179 # API REST (un'unica istanza, molti progetti)
 ```
 
 A run (the ticket/DAG layer's top-level container for one objective — see "Layer ticket/DAG persistente" in `docs/development-notes.md`, Revisione 26) normally closes itself once every one of its tickets is marked done. `yano end` is for when that doesn't happen — a session ended before every ticket was formally completed, the goal changed, or you're simply satisfied with where things landed and want to declare it done. It never touches tickets, worktrees, or any file outside this project's own `orchestrator.db` — closing a run just changes its own status and records the change in its event history, visible later via `run_status` from inside a planner session.

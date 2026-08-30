@@ -11,6 +11,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { appendRawTraceRecord } from "./yano-trace-storage.mjs";
 import { resolveYanoConfig } from "./yano-config.mjs";
+import { notifyBugReported, openDatabase, reportBug } from "./yano-debugger.mjs";
 
 const SECRET_KEY = /token|password|secret|authorization|api[-_]?key|private[-_]?key|cookie/i;
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -275,6 +276,65 @@ export async function sendTelegramWatcherNotification({ yanoRepo, message, env =
 	}
 }
 
+// Additive, non-blocking bridge into the yano-debugger registry: the
+// markdown ticket in .scratch/optimize-orchestrator/issues/ remains the
+// primary, actively-used mechanism (89+ tickets, planner works through it
+// directly) and is never touched or replaced by this. Routing the SAME
+// finding into the debugger registry (mode: "yano-maintenance", scoped to
+// the yano-orchestrator repo itself) gives it the same lifecycle tracking,
+// dedup and auto-wake (notifyBugReported) that every other bug source
+// already gets — so a Yano-on-Yano defect is not a second-class citizen
+// just because it was found by the watcher instead of qa/a human/the CLI.
+// Failures here (no DB, sqlite unavailable, mode guard, etc.) must never
+// block or roll back the markdown ticket that was already written.
+async function routeYanoWatcherFindingToDebugger(finding, { yanoRepo, sourceProject, ticketPath }) {
+	if (!yanoRepo) return { routed: false, reason: "yano_repo_not_configured" };
+	let db = null;
+	try {
+		db = openDatabase();
+		const description = [
+			`Rilevato dal watcher automatico di Yano (loop di sola lettura, zero token) mentre osservava il progetto "${sourceProject.name}" (${sourceProject.root}).`,
+			"",
+			`Segnale: ${finding.signal}`,
+			`Categoria: ${finding.category}`,
+			`Severità: ${finding.severity}`,
+			"",
+			`Ticket markdown gemello (tracciamento storico in .scratch/optimize-orchestrator/issues/): ${ticketPath || "n/d"}`,
+			"",
+			"Aperto automaticamente in modalità yano-maintenance perché il watcher ha classificato l'evento come un difetto di Yano stesso, non del progetto osservato.",
+		].join("\n");
+		const result = reportBug(db, {
+			projectRoot: yanoRepo,
+			project: null,
+			mode: "yano-maintenance",
+			title: finding.summary,
+			description,
+			severity: finding.severity,
+			source: "watcher",
+			reporter: "yano-watcher",
+			expected: finding.expected || "",
+			actual: finding.actual || finding.summary,
+			steps: [`Vedi il ticket markdown gemello: ${ticketPath || "n/d"}`, `Progetto osservato: ${sourceProject.name} (${sourceProject.root})`],
+			environment: {
+				source_project: sourceProject.name,
+				source_project_root: sourceProject.root,
+				markdown_ticket_path: ticketPath || null,
+				fingerprint: finding.fingerprint,
+				record_id: finding.record_id || null,
+				run_id: finding.run_id || null,
+				instance: finding.instance || null,
+			},
+			actor: "yano-watcher",
+		});
+		await notifyBugReported(db, result);
+		return { routed: true, bug_id: result.bug.bug_id, duplicate: result.duplicate };
+	} catch (error) {
+		return { routed: false, reason: error instanceof Error ? error.message : String(error) };
+	} finally {
+		try { db?.close(); } catch { /* ignore */ }
+	}
+}
+
 function notificationText(result, sourceProject) {
 	const f = result.finding;
 	return `🚨 Yano watcher: rilevata una possibile falla di Yano\nProgetto: ${sourceProject.name}\nSeverità: ${f.severity}\nCategoria: ${f.category}\nSegnale: ${f.signal}\n${f.summary}\nTicket: ${result.path}\nIl ticket è stato scritto nel repository yano-orchestrator per l’analisi di un LLM.`;
@@ -288,14 +348,17 @@ export async function processYanoWatcherFindings({ records, projectRoot, project
 		const result = createYanoWatcherTicket({ finding, yanoRepo, projectRoot: sourceProject.root, project: sourceProject.name, ticketsDir });
 		let telegram = { ok: false, detail: notify ? "not_sent" : "planner_route" };
 		if (!result.skipped && result.created && notify) telegram = await sendTelegramWatcherNotification({ yanoRepo, message: notificationText(result, sourceProject), env });
+		let debuggerRouting = { routed: false, reason: "not_a_new_ticket" };
+		if (!result.skipped && result.created) debuggerRouting = await routeYanoWatcherFindingToDebugger(finding, { yanoRepo, sourceProject, ticketPath: result.path });
 		try {
 			if (traceContext?.cwd) appendRawTraceRecord({ cwd: traceContext.cwd, project: sourceProject.name, record: {
 				type: "yano_watcher_finding", record_type: "event", instance: "yano-watcher", fingerprint: finding.fingerprint,
 				signal: finding.signal, category: finding.category, severity: finding.severity, ticket_path: result.path || null,
-				ticket_created: result.created === true, telegram: { ok: telegram.ok, detail: telegram.detail }, source_record_id: finding.record_id || null,
+				ticket_created: result.created === true, telegram: { ok: telegram.ok, detail: telegram.detail },
+				debugger_routing: debuggerRouting, source_record_id: finding.record_id || null,
 			} });
 		} catch { /* ticketing must never stop the watcher */ }
-		results.push({ ...result, telegram });
+		results.push({ ...result, telegram, debuggerRouting });
 	}
 	return { findings, results, created: results.filter((item) => item.created).length, notified: results.filter((item) => item.telegram?.ok).length };
 }

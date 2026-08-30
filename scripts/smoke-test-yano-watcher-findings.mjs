@@ -5,6 +5,7 @@ import path from "node:path";
 import http from "node:http";
 import { createYanoWatcherTicket, detectYanoFindings, processYanoWatcherFindings, sendTelegramWatcherNotification } from "./yano-watcher-findings.mjs";
 import { readTraceRecords } from "./yano-trace-storage.mjs";
+import { openDatabase as openDebuggerDatabase } from "./yano-debugger.mjs";
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "yano-watcher-findings-"));
 const yanoRepo = path.join(root, "yano-orchestrator");
@@ -78,5 +79,36 @@ const withoutRepo = await processYanoWatcherFindings({
 });
 assert.equal(withoutRepo.results[0].skipped, true);
 assert.ok(readTraceRecords({ cwd: projectRoot, project: "no-yano-repo" }).some((record) => record.type === "yano_watcher_finding"), "anche senza checkout Yano il finding resta nel trace");
+assert.equal(withoutRepo.results[0].debuggerRouting.routed, false, "senza checkout Yano non può esserci instradamento nel registro debugger");
+
+// A genuinely new finding (distinct fingerprint) must, in addition to the
+// markdown ticket, also open a bug in the yano-debugger registry under
+// mode "yano-maintenance" — additively, without touching the markdown
+// mechanism verified above.
+const debuggerRoutingFailure = { type: "workspace_scope_mismatch", project: "focusboard-trace-test", project_key: "workspace-test", id: "event-yano-debugger-routing", ts: new Date().toISOString() };
+const routingResult = await processYanoWatcherFindings({
+	records: [debuggerRoutingFailure], projectRoot, project: "focusboard-trace-test", yanoRepo, notify: false,
+	traceContext: { cwd: projectRoot, project_key: "workspace-test" },
+});
+assert.equal(routingResult.created, 1, "un nuovo finding deve creare un nuovo ticket markdown");
+assert.equal(routingResult.results[0].debuggerRouting.routed, true, "il finding nuovo deve essere instradato anche nel registro debugger");
+assert.ok(routingResult.results[0].debuggerRouting.bug_id, "deve restituire il bug_id creato nel registro debugger");
+
+const debuggerDb = openDebuggerDatabase();
+const routedBug = debuggerDb.prepare("SELECT * FROM debugger_bugs WHERE bug_id = ?").get(routingResult.results[0].debuggerRouting.bug_id);
+assert.ok(routedBug, "il bug instradato deve esistere nel registro debugger");
+assert.equal(routedBug.source, "watcher");
+const routedProject = debuggerDb.prepare("SELECT * FROM debugger_projects WHERE project_key = ?").get(routedBug.project_key);
+assert.equal(routedProject.mode, "yano-maintenance", "il bug instradato dal watcher deve vivere nel progetto yano-maintenance, non nel progetto osservato");
+debuggerDb.close();
+
+// Ri-processare lo stesso finding non deve aprire un secondo bug (dedup per
+// fingerprint sia nel ticket markdown, sia nel registro debugger).
+const secondPass = await processYanoWatcherFindings({
+	records: [debuggerRoutingFailure], projectRoot, project: "focusboard-trace-test", yanoRepo, notify: false,
+	traceContext: { cwd: projectRoot, project_key: "workspace-test" },
+});
+assert.equal(secondPass.created, 0, "il secondo passaggio sullo stesso finding deve essere idempotente");
+assert.equal(secondPass.results[0].debuggerRouting.reason, "not_a_new_ticket", "senza un nuovo ticket markdown non si deve tentare un nuovo instradamento");
 
 console.log("smoke-test-yano-watcher-findings: ok");

@@ -66,6 +66,45 @@ la rifiuta; soltanto nel primo caso Yano invia al planner il report. Il planner
 decide se chiedere chiarimenti oppure eseguire il percorso
 `to-spec → to-tickets → coder → reviewer → docs-sync`.
 
+## API REST (`yano suggester serve`)
+
+Il suggester, come il debugger, è pensato come un'unica istanza logica che
+gestisce molti progetti (lo stesso registro `suggester_projects` usato dalla
+CLI): `yano suggester serve` espone questo registro su HTTP, per chi vuole
+integrare l'intake da uno strumento diverso dalla shell. Gli handler REST
+richiamano le stesse funzioni della CLI (`doSubmit`, `doApproveOrReject`,
+`completeSuggestion`, ...), quindi i due canali non possono divergere nel
+comportamento — incluso il gate umano: `approve`/`reject` via REST richiedono
+`{ actor, yes: true }` nel body esattamente come `--actor --yes` da shell, e
+senza `yes: true` la richiesta viene rifiutata con `400`.
+
+```bash
+yano suggester serve --port 4179          # default 127.0.0.1:4179
+yano config set YANO_SUGGESTER_API_PORT 4179      # oppure fisso via config
+yano config set YANO_SUGGESTER_API_TOKEN --stdin  # opzionale: richiede Bearer token
+```
+
+Il bind di default è solo su `127.0.0.1`: senza token configurato l'API non
+richiede autenticazione, per questo resta bene esporla solo in loopback.
+
+| Metodo | Path                                | Equivalente CLI                       |
+|--------|---------------------------------------|-----------------------------------------|
+| GET    | `/health`                             | —                                        |
+| GET    | `/projects`                           | (elenco con id, non disponibile in CLI) |
+| POST   | `/projects`                           | `yano suggester init`                   |
+| GET    | `/projects/:id`                       | —                                        |
+| GET    | `/projects/:id/suggestions`           | `yano suggester status`                 |
+| GET    | `/projects/:id/reports`               | `yano suggester reports`                |
+| POST   | `/projects/:id/suggestions`           | `yano suggester submit`                 |
+| POST   | `/projects/:id/pause`                 | `yano suggester pause`                  |
+| POST   | `/projects/:id/resume`                | `yano suggester resume`/`start`         |
+| POST   | `/projects/:id/stop`                  | `yano suggester stop`                   |
+| POST   | `/suggestions/:suggestionId/complete` | `yano suggester complete`               |
+| POST   | `/suggestions/:suggestionId/approve`  | `yano suggester approve`                |
+| POST   | `/suggestions/:suggestionId/reject`   | `yano suggester reject`                 |
+
+`:id` è il `project_key` restituito da `POST /projects` o da `GET /projects`.
+
 ## Sicurezza e limiti attuali
 
 Il testo è input non fidato: vengono redatti pattern comuni di segreti, le

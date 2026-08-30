@@ -94,6 +94,12 @@ controllarlo a mano. La decisione di stato diagnostico resta sempre del
 debugger, mai di chi ha aperto il ticket, anche quando la segnalazione arriva
 già con evidenza riproducibile pronta (comando, exit code, expected/actual).
 
+Anche i difetti "Yano su Yano" trovati da `yano watcher` finiscono qui: oltre
+al ticket markdown storico in `.scratch/optimize-orchestrator/issues/`, ogni
+finding nuovo viene instradato in modo additivo in questo registro con
+`--mode yano-maintenance` (vedi `docs/quick_guides/10-watcher-falle-yano.md`),
+ereditando lo stesso risveglio automatico descritto sopra.
+
 Il debugger prende in carico e avanza solo gli stati diagnostici con evidenza:
 
 ```bash

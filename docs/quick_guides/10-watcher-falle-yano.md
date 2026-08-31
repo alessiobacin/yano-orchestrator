@@ -62,6 +62,18 @@ yano watch --project-root /path/progetto --interval-ms 3600000
 indica l'intervallo tra le scansioni. Con `--once` viene eseguita una sola
 scansione e il processo termina.
 
+`yano watch --help` e `yano watcher <init|start|status|pause|resume> --help`
+sono sempre read-only: stampano l'uso senza aprire il broker, creare il registro
+o avviare un processo. Se il progetto è appena inizializzato e manca
+`orchestrator.db`, un watcher continuo ordinario resta vivo, registra la
+scansione come `waiting` con motivo `not_initialized` e ritenta al giro
+successivo senza notificare un errore. Questo è il percorso normale per una
+conversazione che non ha ancora bisogno di persistenza operativa. Solo una
+scansione avviata con contesto esplicito di validazione (`--validation-run`,
+`--playbook-proposal`, `--playbook-id` o round/checksum) usa `blocked` e la
+relativa escalation. Quando il Planner esegue `orchestrator_init`, le scansioni
+successive entrano nel normale controllo dei ticket.
+
 Per un Watcher persistente lanciato dall'Architect, la prima verifica è
 bounded e poi il processo resta in polling read-only ogni dieci minuti:
 
@@ -166,6 +178,20 @@ Se viene rilevato un problema e c'è un planner live, il watcher invia un
 comando MQTT direttamente alla sua tab. Se non c'è alcun planner live, invia
 Telegram all'utente. La semplice assenza di agenti, senza un problema rilevato,
 non genera notifiche.
+
+Nel playbook `conversation` il watcher controlla anche che l'eventuale
+`conversation-researcher` resti read-only: registra
+`yano_watcher_conversation_check`, accetta le sole letture e segnala come
+`conversation_policy_violation` tool di consegna, scritture shell o lanci
+falliti. La segnalazione viene deduplicata e inviata al planner live per il
+recupero; con nessun planner viene usato Telegram. Un `curl` o un `grep` di
+documentazione non è una violazione.
+
+Il watcher persistente mantiene anche la sottoscrizione MQTT agli eventi di
+fine turno (`planner_task_completed`) e di fine run (`run_completed`). Ricevuto
+uno di questi eventi, accoda una sola scansione finale immediata e avvisa il
+planner se trova un problema; poi riprende la cadenza configurata. Il trace
+contiene `yano_watcher_final_scan_requested` e lo scan finale con `once: true`.
 
 ## Dove leggere il risultato
 

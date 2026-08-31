@@ -90,6 +90,15 @@ try {
 	assert.equal(fs.readdirSync(issueDir).filter((file) => file.endsWith(".md")).length, 1);
 	assert.equal(requests.length, 1);
 
+	// Conversation mode may intentionally have no operational DB yet. An
+	// ordinary watcher pass waits quietly; it must not manufacture a validation
+	// error or page Telegram. Explicit validation is tested immediately below.
+	const conversationWaiting = await runWatch({ cwd: uninitializedProjectRoot, argv: ["--once", "--project", "uninitialized-project"], packageRoot: yanoRepo });
+	assert.equal(conversationWaiting.status, "waiting");
+	assert.equal(conversationWaiting.reason, "not_initialized");
+	assert.equal(conversationWaiting.route.route, "not_applicable");
+	assert.equal(requests.length, 1);
+
 	// A validation watcher must not silently exit when the project has no DB:
 	// it must escalate the blocked precondition to Telegram when no live planner
 	// is present. This is the exact Sales Companion failure mode.

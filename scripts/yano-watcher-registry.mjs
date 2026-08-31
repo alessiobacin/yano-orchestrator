@@ -303,6 +303,7 @@ function parseCommand(argv) {
 		foreground: has(argv, "--foreground"),
 		force: has(argv, "--force"),
 		noHeal: has(argv, "--no-heal"),
+		help: has(argv, "--help") || has(argv, "-h"),
 	};
 }
 
@@ -331,7 +332,7 @@ function usage() {
 
 export async function runYanoWatcherRegistry({ argv = [] } = {}) {
 	const opts = parseCommand(argv);
-	if (!opts.sub || opts.sub === "--help" || opts.sub === "-h") { console.log(usage()); return; }
+	if (!opts.sub || opts.sub === "--help" || opts.sub === "-h" || opts.help) { console.log(usage()); return { help: true }; }
 	const db = openDatabase();
 	try {
 		if (opts.sub === "init") {

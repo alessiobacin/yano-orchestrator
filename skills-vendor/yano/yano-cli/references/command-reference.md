@@ -7,7 +7,7 @@ surface implemented by the package. Always prefer the installed binary's
 ## Top-level commands
 
 ```text
-yano init [--name <name>] [--target <dir>] [--force] [--llmp] [--herdr]
+yano init [--name <name>] [--target <dir>] [--force] [--llmp] [--herdr] [--no-git]
 yano start --instance <id> [--role <role>] [--project <scope>] [--trace-mode <mode>]
 yano doctor [--json] [--network]
 yano update [--check|--reload] [--dry-run] [--yes] [--timeout <seconds>] [--force]
@@ -36,7 +36,9 @@ yano playbook [subcommand] [options]
 yano agent [subcommand] [options]
 ```
 
-`--help` is supported at the top level and by command groups. `--version`
+`--help` is supported at the top level, by command groups, and by each watcher
+subcommand. Help is read-only and does not open a broker, register a project,
+or start a worker. `--version`
 prints the installed package version.
 
 ## Initialization and launch
@@ -134,6 +136,12 @@ The scan history window is `--lookback-ms`; the recurring polling delay is
 `--interval-ms`. `--once` exits after one scan. Watcher findings are routed to
 live project planners when possible and are otherwise reported through the
 configured escalation path. A watcher does not edit the watched application.
+When an ordinary continuous watcher starts before `orchestrator.db` exists, it
+records a `waiting` scan with reason `not_initialized`, remains alive and does
+not notify an error until a later poll can inspect the newly initialized
+database. A watcher started with explicit validation context (for example
+`--validation-run` or `--playbook-proposal`) records `blocked` and uses the
+configured escalation path.
 
 ## Trace and semantic evidence
 

@@ -177,6 +177,17 @@ roles:
     mcp: []
     teams: [knowledge, research]
 
+  conversation-researcher:
+    activation: lazy
+    playbook: conversation
+    label: "Conversation Researcher"
+    brief: "Fornisci al planner un consulto read-only, circoscritto e verificabile durante una conversazione. Non creare worktree, run, ticket o artefatti di sviluppo e non modificare il progetto."
+    model: { provider: llmproxy, model: llmproxy }
+    skills: [documentation-lookup, yano-planner-trace-analysis, yano-cli]
+    cli: [yano]
+    mcp: []
+    teams: [conversation, research]
+
   seo-strategist:
     activation: lazy
     playbook: knowledge-authoring
@@ -221,12 +232,12 @@ roles:
     mcp: []
     teams: [knowledge, quality]
 
-  # ── Roster di agenti specialisti (nessun prompts/<role>.md dedicato: usano
+  # ── Roster di agenti specialisti (di norma nessun prompts/<role>.md dedicato:
   # prompts/specialist.md, un template generico che l'estensione riempie con
   # `label`/`brief` qui sotto — vedi loadRolePrompt() in orchestrator.ts e
   # Revisione 15 in docs/development-notes.md). Il planner li propone dinamicamente
-  # in base al task (mai tutti insieme) e li lancia solo dopo conferma
-  # dell'utente — non serve una voce in agents.yaml, basta --role al lancio.
+  # in base al task (mai tutti insieme) e li lancia secondo il contratto del
+  # playbook — non serve una voce in agents.yaml, basta --role al lancio.
   # Nessuno di questi chiama mai worktree_finalize: solo il planner lo fa.
 
   # Fase 1 — Testing & QA

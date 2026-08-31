@@ -52,6 +52,57 @@ import { projectDbPath } from "./yano-project.mjs";
 
 const yanoRequire = createRequire(import.meta.url);
 let missingYanoRepoWarned = false;
+const persistentWatcherRuntimes = new Map();
+
+function watcherRuntimeKey(cwd, project) {
+	return `${path.resolve(cwd)}\u0000${project}`;
+}
+
+function finalWatcherEvent(payload) {
+	try {
+		const event = JSON.parse(payload.toString());
+		const type = event?.type || event?.payload?.type;
+		return type === "run_completed" || type === "planner_task_completed";
+	} catch {
+		return false;
+	}
+}
+
+function installFinalEventMonitor({ client, cwd, project, argv, packageRoot, runtime }) {
+	if (!client || runtime.finalEventMonitorInstalled) return;
+	runtime.finalEventMonitorInstalled = true;
+	const topics = [`pi/${project}/runs/+/events`, `pi/${project}/agents/+/events`];
+	const onMessage = (topic, payload) => {
+		if (!finalWatcherEvent(payload)) return;
+		let event = {};
+		try { event = JSON.parse(payload.toString()); } catch { /* filtered above */ }
+		try {
+			appendRawTraceRecord({ cwd, project, record: {
+				type: "yano_watcher_final_scan_requested",
+				record_type: "event",
+				source: "yano-watcher",
+				instance: "yano-watcher",
+				project,
+				topic,
+				event_type: event.type || event.payload?.type,
+				run_id: event.run_id || null,
+				reason: "task_or_run_completed",
+			} });
+		} catch { /* tracing must never block the watcher */ }
+		if (runtime.finalScanTimer) return;
+		runtime.finalScanTimer = setTimeout(() => {
+			runtime.finalScanTimer = null;
+			const finalArgv = [...argv.filter((arg) => arg !== "--once"), "--once"];
+			runWatch({ cwd, argv: finalArgv, packageRoot }).catch((error) => {
+			console.warn(`yano watch: scansione finale non riuscita — ${error instanceof Error ? error.message : String(error)}`);
+			});
+		}, 0);
+	};
+	try {
+		client.on("message", onMessage);
+		client.subscribeAsync(topics, { qos: 0 }).catch(() => { /* best effort; cadence remains active */ });
+	} catch { /* best effort */ }
+}
 
 function parseArgs(argv) {
 	const o = { project: null, projectRoot: null, lookbackMs: 86_400_000, stallMs: 900000, intervalMs: 60000, once: false, away: false, validationRun: null, playbookProposal: null, playbookId: null, playbookChecksum: null, validationRound: null };
@@ -73,6 +124,142 @@ function parseArgs(argv) {
 	return o;
 }
 
+function hasValidationContext(opts) {
+	return Boolean(opts.validationRun || opts.playbookProposal || opts.playbookId || opts.playbookChecksum || opts.validationRound);
+}
+
+const CONVERSATION_FORBIDDEN_TOOLS = new Set([
+	"orchestrator_init",
+	"worktree_create",
+	"worktree_finalize",
+	"worktree_abandon",
+	"run_create",
+	"spec_create",
+	"ticket_create",
+	"plan_set",
+	"plan_advance",
+	"report_append",
+]);
+
+// The redirection branch deliberately requires a shell boundary/whitespace
+// before `>` or `<`; otherwise harmless quoted HTML selectors such as
+// `grep '<title>'` look like filesystem writes.
+const CONVERSATION_MUTATING_COMMAND = /(?:\b(?:git\s+(?:init|add|commit|checkout|switch|merge|worktree|branch\s+(?:-d|-D|--delete))|yano\s+init)\b|(?:^|[;&|]\s*)(?:rm|mv|cp|touch|mkdir|rmdir|install)\s+|(?:^|[;&|\s])\d*>>?\s*(?:[~./$A-Za-z_]))/i;
+
+function conversationFinding({ kind, record, instance, role, tool, command = null, expected, actual }) {
+	const identity = [kind, instance || "?", tool || "?", record.tool_call_id || record.id || "?", command || ""].join("|");
+	return {
+		signal: "conversation_policy_violation",
+		fingerprint: crypto.createHash("sha256").update(identity).digest("hex"),
+		severity: "high",
+		category: "conversation-policy",
+		summary: `Violazione del contratto conversation: ${actual}`,
+		expected,
+		actual,
+		instance: instance || null,
+		role: role || null,
+		tool: tool || null,
+		command: command || null,
+		record_id: record.tool_call_id || record.id || null,
+		ts: record.ts || null,
+	};
+}
+
+// Inspect the trace without an LLM. This is intentionally conservative: it
+// checks only explicit forbidden Yano tools and shell commands that mutate
+// Git/filesystem state. Ordinary reads (git status, curl GET, grep, yano
+// trace, agent_list) remain valid conversation evidence.
+export function inspectConversationPolicy(records = []) {
+	const roleByInstance = new Map();
+	const calls = new Map();
+	const findings = [];
+	let conversationEvidence = false;
+	for (const record of records) {
+		if (record.type === "session_start" && record.instance && record.role) roleByInstance.set(record.instance, record.role);
+		if (record.type === "agent_send_out" && /^conversation-researcher(?:-|$)/.test(String(record.target || ""))) conversationEvidence = true;
+		if (record.role === "conversation-researcher" || /^conversation-researcher(?:-|$)/.test(String(record.instance || ""))) conversationEvidence = true;
+		if (record.type === "tool_execution_start" || record.type === "tool_execution_start_payload") {
+			const id = record.tool_call_id;
+			if (id) calls.set(id, { ...(calls.get(id) || {}), tool: record.tool, command: record.args?.command || null, instance: record.instance, role: record.role });
+		}
+		if (record.type !== "tool_execution_end") continue;
+		const call = calls.get(record.tool_call_id) || {};
+		const instance = record.instance || call.instance;
+		const role = record.role || call.role || roleByInstance.get(instance);
+		const tool = record.tool || call.tool;
+		const command = call.command;
+		const isConversationAgent = role === "planner" || role === "conversation-researcher" || /^conversation-researcher(?:-|$)/.test(String(instance || ""));
+		if (!isConversationAgent) continue;
+		const forbiddenConversationTool = role === "conversation-researcher"
+			? CONVERSATION_FORBIDDEN_TOOLS.has(tool)
+			: role === "planner" && CONVERSATION_FORBIDDEN_TOOLS.has(tool) && tool !== "orchestrator_init";
+		if (forbiddenConversationTool) {
+			findings.push(conversationFinding({
+				kind: "forbidden-tool",
+				record,
+				instance,
+				role,
+				tool,
+				expected: "Il playbook conversation usa solo metadata Yano e consulti read-only; nessun tool di consegna o orchestrator_init dal researcher.",
+				actual: `${role} ha chiamato ${tool}`,
+			}));
+		}
+		if (role === "conversation-researcher" && tool === "bash" && command && CONVERSATION_MUTATING_COMMAND.test(command)) {
+			findings.push(conversationFinding({
+				kind: "mutating-shell",
+				record,
+				instance,
+				role,
+				tool,
+				command,
+				expected: "Il conversation-researcher deve restare read-only e non modificare Git o il filesystem del progetto.",
+				actual: `conversation-researcher ha eseguito un comando potenzialmente mutante: ${command.slice(0, 240)}`,
+			}));
+		}
+		if (record.ok === false && command && /\b(?:herdr\s+agent\s+start|yano\s+start)\b/i.test(command)) {
+			findings.push(conversationFinding({
+				kind: "launch-failure",
+				record,
+				instance,
+				role,
+				tool,
+				command,
+				expected: "Il lancio dello specialista deve riuscire senza errori di runtime.",
+				actual: `il lancio di un agente conversation ha fallito: ${command.slice(0, 240)}`,
+			}));
+		}
+	}
+	return { conversationEvidence, findings };
+}
+
+export function watchUsage() {
+	return [
+		"Uso: yano watch [opzioni]",
+		"",
+		"  --project <slug>                 nome del progetto osservato",
+		"  --project-root <dir>             root del progetto osservato",
+		"  --lookback-ms <ms>               finestra temporale della scansione",
+		"  --stall-ms <ms>                  soglia per un ticket stalled",
+		"  --interval-ms <ms>               intervallo del polling persistente",
+		"  --once                           esegue una sola scansione e termina",
+		"  --away                           nasconde gli heartbeat senza finding",
+		"  --help, -h                       mostra questo messaggio",
+	].join("\n");
+}
+
+function scheduleNextPass({ cwd, argv, packageRoot }) {
+	const intervalIndex = argv.indexOf("--interval-ms");
+	const intervalMs = intervalIndex >= 0 ? Number(argv[intervalIndex + 1]) : 60000;
+	if (argv.includes("--once") || !(intervalMs > 0)) return false;
+	setTimeout(() => {
+		runWatch({ cwd, argv, packageRoot }).catch((error) => {
+			console.error(`yano watch: errore nel polling — ${error instanceof Error ? error.message : String(error)}`);
+			process.exitCode = 1;
+		});
+	}, intervalMs);
+	return true;
+}
+
 function appendWatcherScan({ cwd, project, opts, startedAt, status, reason = null, stalls = 0, findings = 0, liveAgents = 0, livePlanners = 0 }) {
 	const completedAtMs = Date.now();
 	const completedAt = new Date(completedAtMs).toISOString();
@@ -86,7 +273,7 @@ function appendWatcherScan({ cwd, project, opts, startedAt, status, reason = nul
 		started_at: startedAt,
 		completed_at: completedAt,
 		duration_ms: Math.max(0, completedAtMs - new Date(startedAt).getTime()),
-		mode: opts.validationRun ? "validation" : "continuous",
+		mode: hasValidationContext(opts) ? "validation" : "continuous",
 		once: opts.once,
 		interval_ms: opts.intervalMs,
 		lookback_ms: opts.lookbackMs,
@@ -120,6 +307,10 @@ function resolveProject(cwd) {
 }
 
 export async function runWatch({ cwd, argv, packageRoot = null }) {
+	if (argv.includes("--help") || argv.includes("-h")) {
+		console.log(watchUsage());
+		return { help: true };
+	}
 	// `argv` is already the post-slice argument vector (script/import callers
 	// pass process.argv.slice(2) or `--once --project ...`); parseArgs iterates
 	// it directly, matching runEndProject's convention.
@@ -137,29 +328,56 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 
 	const dbPath = projectDbPath(watchCwd, project);
 	const brokerUrl = config.PI_ORCH_BROKER_URL || process.env.PI_ORCH_BROKER_URL || "mqtt://127.0.0.1:1883";
+	const persistent = !opts.once && opts.intervalMs > 0;
+	const runtimeKey = watcherRuntimeKey(watchCwd, project);
+	let runtime = persistentWatcherRuntimes.get(runtimeKey) || null;
 
-	let client = null;
-	try {
-		client = mqtt.connect(brokerUrl);
-		await new Promise((res, rej) => {
-			const timeout = setTimeout(() => rej(new Error("timeout connessione broker")), 2_000);
-			client.once("connect", () => { clearTimeout(timeout); res(); });
-			client.once("error", (error) => { clearTimeout(timeout); rej(error); });
-		});
-	} catch (err) {
-		try { client?.end(true); } catch { /* best effort */ }
-		client = null;
-		console.warn(`yano watch: broker ${brokerUrl} non raggiungibile (${err instanceof Error ? err.message : String(err)}) — solo report locale.`);
+	let client = runtime?.client || null;
+	if (!client || (!client.connected && !client.reconnecting && runtime?.brokerUrl !== brokerUrl)) {
+		try {
+			client = mqtt.connect(brokerUrl);
+			await new Promise((res, rej) => {
+				const timeout = setTimeout(() => rej(new Error("timeout connessione broker")), 2_000);
+				client.once("connect", () => { clearTimeout(timeout); res(); });
+				client.once("error", (error) => { clearTimeout(timeout); rej(error); });
+			});
+		} catch (err) {
+			try { client?.end(true); } catch { /* best effort */ }
+			client = null;
+			runtime = null;
+			persistentWatcherRuntimes.delete(runtimeKey);
+			console.warn(`yano watch: broker ${brokerUrl} non raggiungibile (${err instanceof Error ? err.message : String(err)}) — solo report locale.`);
+		}
 	}
+	if (client && persistent) {
+		runtime ||= { client, brokerUrl, finalEventMonitorInstalled: false, finalScanTimer: null };
+		runtime.client = client;
+		runtime.brokerUrl = brokerUrl;
+		persistentWatcherRuntimes.set(runtimeKey, runtime);
+		installFinalEventMonitor({ client, cwd: watchCwd, project, argv, packageRoot: effectivePackageRoot, runtime });
+	}
+	const sharedPersistentClient = Boolean(runtime && runtime.client === client);
 	const liveAgents = await discoverLiveAgents(client, project);
 	const livePlanners = liveAgents.filter((agent) => agent.role === "planner");
 
-	// A validation watcher must report a blocked precondition just as it reports
-	// a stall. Previously the missing-DB branch exited before connecting to
-	// MQTT, so a live Planner never received the result and no Telegram fallback
-	// happened. Do not call process.exit: runWatch is imported by tests and by
-	// the Architect control plane.
+	// A normal persistent watcher is also used by conversation mode, where the
+	// Planner may intentionally not have initialized the operational database.
+	// That is a pending precondition, not a validation failure: stay alive and
+	// retry without creating noise or sending a Telegram alert. Only an
+	// explicitly supplied validation context is allowed to enter the blocked
+	// route below.
 	if (!existsSync(dbPath)) {
+		if (!hasValidationContext(opts)) {
+			appendWatcherScan({ cwd: watchCwd, project, opts, startedAt, status: "waiting", reason: "not_initialized", liveAgents: liveAgents.length, livePlanners: livePlanners.length });
+			console.log(`yano watch: in attesa — nessun orchestrator.db per questo progetto (${dbPath}); nessuna validazione da segnalare.`);
+			if (client && !sharedPersistentClient) { try { await new Promise((resolve) => setTimeout(resolve, 120)); client.end(false); } catch { /* best effort */ } }
+			scheduleNextPass({ cwd, argv, packageRoot });
+			return { status: "waiting", reason: "not_initialized", route: { route: "not_applicable", delivered: 0 }, project, db_path: dbPath };
+		}
+
+		// An explicit validation watcher must report a blocked precondition just
+		// as it reports a stall. Do not call process.exit: runWatch is imported
+		// by tests and by the Architect control plane.
 		const details = {
 			project,
 			project_root: watchCwd,
@@ -210,7 +428,8 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 		}
 		appendWatcherScan({ cwd: watchCwd, project, opts, startedAt, status: "blocked", reason: "not_initialized", liveAgents: liveAgents.length, livePlanners: livePlanners.length });
 		console.log(`yano watch: validation blocked — nessun orchestrator.db per questo progetto (${dbPath})${previous ? " (notifica già inviata)" : ""}.`);
-		if (client) { try { await new Promise((resolve) => setTimeout(resolve, 120)); client.end(false); } catch { /* best effort */ } }
+		if (client && !sharedPersistentClient) { try { await new Promise((resolve) => setTimeout(resolve, 120)); client.end(false); } catch { /* best effort */ } }
+		scheduleNextPass({ cwd, argv, packageRoot });
 		return { status: "blocked", reason: "not_initialized", route, project, db_path: dbPath };
 	}
 
@@ -321,7 +540,7 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 						sender_role: "yano-watcher",
 						target_instance: planner.instance,
 						project,
-						prompt: `[yano-watcher] ${summary}\n\nSegnale: ${signal}\n${JSON.stringify(details)}\nVerifica il trace e decidi come procedere; non considerare il watcher autorizzato a modificare ticket o codice.`,
+						prompt: `[yano-watcher] ${summary}\n\nSegnale: ${signal}\n${JSON.stringify(details)}\nVerifica il trace. Se il segnale riguarda un processo o una delega fallita, ripara il percorso e rilancia il processo necessario; poi verifica nuovamente l'esito. Non considerare il watcher autorizzato a modificare ticket o codice.`,
 						reply_to: `pi/${project}/agents/yano-watcher/responses`,
 						hops: 0,
 						timestamp: new Date().toISOString(),
@@ -356,8 +575,37 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 	// conservative: generic project failures stay in the project trace and do
 	// not create maintenance tickets in the Yano repository.
 	let validationFindings = [];
+	let conversationFindings = [];
 	try {
 		const traceRecords = readTraceRecords({ cwd: watchCwd, project, since: new Date(Date.now() - Math.max(0, opts.lookbackMs)), limit: 100000 });
+		const conversationCheck = inspectConversationPolicy(traceRecords);
+		if (conversationCheck.conversationEvidence) {
+			conversationFindings = conversationCheck.findings;
+			const previousViolationFingerprints = new Set(traceRecords
+				.filter((record) => record.type === "yano_watcher_conversation_violation")
+				.map((record) => record.fingerprint)
+				.filter(Boolean));
+			for (const finding of conversationFindings) {
+				if (previousViolationFingerprints.has(finding.fingerprint)) continue;
+				try { appendRawTraceRecord({ cwd: watchCwd, project, record: { type: "yano_watcher_conversation_violation", record_type: "event", source: "yano-watcher", instance: "yano-watcher", project, ...finding } }); } catch { /* best effort */ }
+				previousViolationFingerprints.add(finding.fingerprint);
+			}
+			try {
+				appendRawTraceRecord({ cwd: watchCwd, project, record: {
+					type: "yano_watcher_conversation_check",
+					record_type: "event",
+					source: "yano-watcher",
+					instance: "yano-watcher",
+					project,
+					status: conversationFindings.length ? "violation" : "healthy",
+					checked_at: new Date().toISOString(),
+					violations: conversationFindings.length,
+					message: conversationFindings.length
+						? "Il trace della conversazione contiene una violazione o un errore di runtime da correggere."
+						: "Regole conversation verificate: consulto read-only e nessuna operazione di consegna rilevata.",
+				} });
+			} catch { /* tracing must never block the watcher */ }
+		}
 		const routedFindingKeys = new Set(traceRecords
 			.filter((record) => record.type === "yano_watcher_notification_route")
 			.flatMap((record) => [record.fingerprint, record.ticket_path].filter(Boolean)));
@@ -385,6 +633,25 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 			await routeNotice({ summary: result.finding.summary, signal: result.finding.signal, details: { fingerprint: result.finding.fingerprint || null, ticket_path: result.path || null, severity: result.finding.severity } });
 			if (findingKey) routedFindingKeys.add(findingKey);
 		}
+		const routedConversationKeys = new Set(traceRecords
+			.filter((record) => record.type === "yano_watcher_notification_route" && record.signal === "conversation_policy_violation")
+			.map((record) => record.fingerprint)
+			.filter(Boolean));
+		for (const finding of conversationFindings) {
+			if (routedConversationKeys.has(finding.fingerprint)) continue;
+			try {
+				await routeNotice({
+					summary: finding.summary,
+					signal: finding.signal,
+					details: { fingerprint: finding.fingerprint, instance: finding.instance, role: finding.role, tool: finding.tool, expected: finding.expected, actual: finding.actual },
+				});
+			} catch (error) {
+				// A missing external notification channel must not hide the local
+				// policy finding or crash the zero-token watcher.
+				try { appendRawTraceRecord({ cwd: watchCwd, project, record: { type: "yano_watcher_notification_route", record_type: "event", instance: "yano-watcher", route: "local", delivered: 0, planner_instances: livePlanners.map((agent) => agent.instance), signal: finding.signal, fingerprint: finding.fingerprint, notification_error: error instanceof Error ? error.message : String(error) } }); } catch { /* best effort */ }
+			}
+			routedConversationKeys.add(finding.fingerprint);
+		}
 	} catch (error) {
 		if (error?.code === "YANO_CONFIG_MISSING") throw error;
 		console.warn(`yano watch: escalation Yano non riuscita — ${error instanceof Error ? error.message : String(error)}`);
@@ -393,6 +660,8 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 	// A clean validation pass is positive evidence only for the architect's
 	// bounded proposal. It is never sent to Telegram as an alert and never
 	// promotes anything by itself; the planner still collects user feedback.
+	validationFindings = [...validationFindings, ...conversationFindings];
+
 	if (opts.validationRun && marker.length === 0 && validationFindings.length === 0) {
 		const healthy = {
 			ts: new Date().toISOString(),
@@ -446,7 +715,7 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 	});
 
 	try { db.close(); } catch { /* ignore */ }
-	if (client) {
+	if (client && !sharedPersistentClient) {
 		// Graceful close: force:false lets already-published (QoS0 in-flight)
 		// messages flush before the connection drops — force:true here would
 		// discard the ticket_stalled events we just published.
@@ -457,9 +726,7 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 	// Real watcher loop: after this pass, wait intervalMs then run again.
 	// Env-gated away mode is honored on every pass, so `--away` can be implied
 	// by PI_ORCH_AWAY=1 even if the process was launched without the flag.
-	setTimeout(() => {
-		runWatch({ cwd, argv, packageRoot }).catch((e) => { console.error(e); process.exit(1); });
-	}, opts.intervalMs);
+	scheduleNextPass({ cwd, argv, packageRoot });
 	return { status: scanStatus, scan };
 }
 
@@ -497,8 +764,11 @@ async function discoverLiveAgents(client, project) {
 // importing runWatch can still run assertions after a --once pass.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
 	const invokedOnce = async () => {
-		await runWatch({ cwd: process.cwd(), argv: process.argv.slice(2) });
-		process.exit(0); // explicit --once or defaults to single pass by this exit
+		const argv = process.argv.slice(2);
+		const result = await runWatch({ cwd: process.cwd(), argv });
+		const intervalIndex = argv.indexOf("--interval-ms");
+		const intervalMs = intervalIndex >= 0 ? Number(argv[intervalIndex + 1]) : 60000;
+		if (result?.help || argv.includes("--once") || !(intervalMs > 0)) process.exit(0);
 	};
 	invokedOnce().catch((err) => {
 		console.error(`yano watch: errore — ${err instanceof Error ? err.stack || err.message : String(err)}`);

@@ -47,6 +47,11 @@ cd mio-progetto
 yano init --name "Mio Progetto"
 ```
 
+Per un progetto usato solo come conversation test, senza repository Git o
+worktree di sviluppo, puoi usare `yano init --name "Conversation Test" --no-git`.
+Il database operativo verrà comunque creato più avanti da `orchestrator_init`
+se il planner avvia un consulto specialistico.
+
 Per aprire automaticamente Herdr, creare un workspace con il nome della
 cartella corrente ed eseguire subito il planner nello stesso terminale:
 
@@ -185,6 +190,17 @@ Codex, card MQTT retained o pane stale/offline; se `herdr_reachable` è falso il
 totale è ignoto. I comandi `yano watcher projects`, `yano architect projects`
 e simili rispondono invece alla domanda più specifica sui soli worker esterni
 di quel ruolo.
+
+Per vedere l'uso senza effetti collaterali:
+
+```bash
+yano watch --help
+yano watcher start --help
+```
+
+Questi comandi non aprono il broker e non modificano il registro. Un watcher
+continuo può partire prima del primo `orchestrator_init`: registra il preflight
+come `blocked`, resta vivo e ritenta al polling successivo.
 
 Per sapere su quali progetti sono attivi i worker esterni, senza interrogare
 manualmente Herdr:

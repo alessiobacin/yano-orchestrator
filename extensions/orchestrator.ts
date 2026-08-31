@@ -378,6 +378,7 @@ function topics(project: string) {
 		agentCommands: (id: string) => `pi/${project}/agents/${id}/commands`,
 		agentResponses: (id: string) => `pi/${project}/agents/${id}/responses`,
 		agentStatus: (id: string) => `pi/${project}/agents/${id}/status`,
+		agentEvents: (id: string) => `pi/${project}/agents/${id}/events`,
 		agentStatusWildcard: () => `pi/${project}/agents/+/status`,
 		roleTasks: (role: string) => `pi/${project}/roles/${role}/tasks`,
 		teamEvents: (team: string) => `pi/${project}/teams/${team}/events`,
@@ -3430,6 +3431,13 @@ export default function (pi: ExtensionAPI) {
 	async function yanoPublishEvent(runId: string, type: string, payload: unknown): Promise<void> {
 		try {
 			if (client && T) await client.publishAsync(T.runEvents(runId), JSON.stringify({ type, run_id: runId, payload, timestamp: nowIso() }), { qos: 0 });
+		} catch {
+			// best-effort
+		}
+	}
+	async function yanoPublishAgentEvent(type: string, payload: unknown): Promise<void> {
+		try {
+			if (client && T && identity) await client.publishAsync(T.agentEvents(identity.instance), JSON.stringify({ type, instance: identity.instance, project: identity.project, payload, timestamp: nowIso() }), { qos: 0 });
 		} catch {
 			// best-effort
 		}
@@ -6556,6 +6564,9 @@ export default function (pi: ExtensionAPI) {
 					branch: ctx.sessionManager.getBranch(),
 				}, "full");
 			}
+		}
+		if (identity.role === "planner") {
+			await yanoPublishAgentEvent("planner_task_completed", { assignment_id: inbound?.assignment_id ?? null });
 		}
 		if (!inbound || !client) return;
 

@@ -268,6 +268,10 @@ async function main() {
 			await runExternalStatus({ role: "watcher", argv: rest });
 			return;
 		}
+		if (rest.includes("--help") || rest.includes("-h")) {
+			await runYanoWatcherRegistry({ argv: ["--help"] });
+			return;
+		}
 		if (["init", "start", "status", "pause", "resume"].includes(rest[0])) {
 			await runYanoWatcherRegistry({ argv: rest });
 			return;

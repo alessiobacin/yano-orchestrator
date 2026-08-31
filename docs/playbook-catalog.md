@@ -11,7 +11,7 @@ workflow instead of launching every specialist.
 | Playbook | Roles | Required evidence |
 |---|---|---|
 | `default.yaml` (`default-orchestration`) | planner | objective, approved `to-tickets` breakdown, team/phase plan, approvals, final evidence |
-| `conversation` | planner only (no additional role) | objective classified as open discussion/no delivery intent yet; on crystallization, the recommended delivery playbook presented to the user and confirmed or declined before a brand-new run starts — this run never rebinds its own `playbook_bind` |
+| `conversation` | planner, optionally one `conversation-researcher` | objective classified as open discussion/no delivery intent yet; when needed, one bounded read-only consultation may initialize the Yano DB but never creates worktree/run/plan/ticket/repository state; on crystallization, the recommended delivery playbook is presented and confirmed or declined before a brand-new run starts — this run never rebinds its own `playbook_bind` |
 | `debate` | debater (2+ instances, planner as moderator) | topic framed, roster+model proposal confirmed by user, every opening argument independent, every rebuttal collected, synthesis naming agreement/disagreement per debater/model |
 | `get-the-best-from` | repo-benchmarker (2 instances) | reference repo URL confirmed, both analyses independent with file/line citations, side-by-side comparison presented, concrete import candidates with license/attribution flagged when relevant |
 | `backend-change` | coder, reviewer | tests, isolated diff, separate Spec/Standards review, classified findings |

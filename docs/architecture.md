@@ -149,6 +149,10 @@ visibile in `architect_proposals`, non in `external_workers`.
 Il database locale non viene creato per il solo fatto che la directory sia
 stata inizializzata. Il Planner lo crea chiamando `orchestrator_init`, così un
 progetto appena scaffoldato può legittimamente avere `orchestrator.db` assente.
+In conversation mode questo stato è valido: il watcher ordinario registra
+`waiting/not_initialized` senza escalation e continua a riprovare. Solo il
+Watcher di una validazione esplicita usa `blocked` e notifica il precondition
+failure.
 Se serve preparare la struttura prima del primo run:
 
 ```text
@@ -275,11 +279,26 @@ is considered idle and does not page the user.
 
 The external Watcher created for a playbook performs one bounded validation pass
 and then keeps a zero-token `yano watch` process alive with a ten-minute
-interval. The continuous pass detects liveness, stalled tickets and explicit
+interval. If `orchestrator.db` is not present yet, an ordinary watcher records
+`waiting/not_initialized` without escalation and keeps polling; a pass with
+explicit validation context records `blocked`. It does not exit and leave a
+dead Herdr pane. The continuous pass detects liveness, stalled tickets and explicit
 high-confidence Yano signals. It is not an LLM semantic review of every line
 of every conversation: deeper interpretation requires a bounded prompt to the
 Watcher, with evidence in the trace. A tab labelled `watcher-<project-name>`
 without a live Pi process is not an active Watcher.
+
+Conversation consultations add one deterministic, zero-token check: when a
+planner delegates to `conversation-researcher`, the watcher audits the trace
+for forbidden delivery tools, mutating shell commands, and failed specialist
+launches. It emits `yano_watcher_conversation_check`, records deduplicated
+`conversation_policy_violation` events, and routes corrective context to a
+live planner or Telegram. Read-only documentation queries remain valid.
+
+The persistent watcher also subscribes to planner and run completion events.
+`planner_task_completed` and `run_completed` enqueue one immediate final scan,
+recorded as `yano_watcher_final_scan_requested` plus a `once: true` scan; the
+configured polling cadence remains active after that pass.
 
 ### Global `yano-debugger`
 

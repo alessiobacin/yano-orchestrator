@@ -17,6 +17,8 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { parse as parseYaml } from "yaml";
+import { inspectConversationPolicy } from "./watch-stalls.mjs";
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "yano-conversation-playbook-"));
 const projectRoot = path.join(root, "project");
@@ -28,6 +30,11 @@ const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 const cli = path.join(packageRoot, "bin", "yano.mjs");
 const env = { ...process.env, YANO_DATA_DIR: dataDir };
 
+const roles = parseYaml(fs.readFileSync(path.join(packageRoot, "agents", "roles.yaml"), "utf8"))?.roles || {};
+const conversationResearcher = roles["conversation-researcher"];
+const researcherPrompt = fs.readFileSync(path.join(packageRoot, "prompts", "conversation-researcher.md"), "utf8");
+const conversationPlaybook = fs.readFileSync(path.join(packageRoot, "playbooks", "conversation.yaml"), "utf8");
+
 function runCli(args) {
 	const result = spawnSync(process.execPath, [cli, ...args], { cwd: projectRoot, env, encoding: "utf8", maxBuffer: 20_000_000 });
 	assert.equal(result.status, 0, `${args.join(" ")} failed:\n${result.stderr}\n${result.stdout}`);
@@ -36,6 +43,51 @@ function runCli(args) {
 }
 
 try {
+	// (0) The assisted conversation contract is deliberately narrower than a
+	// delivery team: Yano may initialize its metadata DB, but the consultant
+	// must not create development state in the project.
+	assert.equal(conversationResearcher?.playbook, "conversation");
+	assert.deepEqual(conversationResearcher?.teams, ["conversation", "research"]);
+	assert.deepEqual(conversationResearcher?.cli, ["yano"]);
+	assert.match(conversationResearcher?.brief || "", /read-only/i);
+	assert.match(researcherPrompt, /esclusivamente read-only/i);
+	for (const forbidden of ["worktree_create", "worktree_finalize", "run_create", "spec_create", "ticket_create", "plan_set", "report_append"]) {
+		assert.match(researcherPrompt, new RegExp("`" + forbidden + "`"), `researcher prompt must forbid ${forbidden}`);
+	}
+	assert.match(conversationPlaybook, /id: consulting/);
+	assert.match(conversationPlaybook, /id: start_consultation/);
+	assert.match(conversationPlaybook, /id: receive_consultation/);
+	assert.match(conversationPlaybook, /conversation-researcher via agent_send\/agent_await/);
+	const plannerPrompt = fs.readFileSync(path.join(packageRoot, "prompts", "planner.md"), "utf8");
+	const watcherSource = fs.readFileSync(path.join(packageRoot, "scripts", "watch-stalls.mjs"), "utf8");
+	assert.match(plannerPrompt, /orchestrator_init/);
+	assert.match(plannerPrompt, /conversation-researcher-01/);
+	assert.match(plannerPrompt, /agent_send.*senza `slug`.*agent_await/s);
+	assert.match(watcherSource, /planner_task_completed/);
+	assert.match(watcherSource, /run_completed/);
+	assert.match(watcherSource, /yano_watcher_final_scan_requested/);
+	const cleanTrace = inspectConversationPolicy([
+		{ type: "session_start", instance: "planner-01", role: "planner" },
+		{ type: "session_start", instance: "conversation-researcher-01", role: "conversation-researcher" },
+		{ type: "agent_send_out", target: "conversation-researcher-01" },
+		{ type: "tool_execution_start", tool_call_id: "init-1", tool: "orchestrator_init", instance: "planner-01", role: "planner" },
+		{ type: "tool_execution_end", tool_call_id: "init-1", tool: "orchestrator_init", ok: true, instance: "planner-01", role: "planner" },
+		{ type: "tool_execution_start", tool_call_id: "read-1", tool: "bash", instance: "conversation-researcher-01", role: "conversation-researcher" },
+		{ type: "tool_execution_start_payload", tool_call_id: "read-1", args: { command: "curl -sL https://example.test/docs | grep -i transaction" } },
+		{ type: "tool_execution_end", tool_call_id: "read-1", tool: "bash", ok: true, instance: "conversation-researcher-01", role: "conversation-researcher" },
+	]);
+	assert.equal(cleanTrace.conversationEvidence, true);
+	assert.deepEqual(cleanTrace.findings, [], "watcher accepts a read-only conversation consultation");
+	const badTrace = inspectConversationPolicy([
+		{ type: "session_start", instance: "planner-01", role: "planner" },
+		{ type: "agent_send_out", target: "conversation-researcher-01" },
+		{ type: "tool_execution_start", tool_call_id: "launch-1", tool: "bash", instance: "planner-01", role: "planner" },
+		{ type: "tool_execution_start_payload", tool_call_id: "launch-1", args: { command: "herdr agent start bad-name --kind pi" } },
+		{ type: "tool_execution_end", tool_call_id: "launch-1", tool: "bash", ok: false, instance: "planner-01", role: "planner" },
+	]);
+	assert.equal(badTrace.findings.length, 1, "watcher detects a failed conversation specialist launch");
+	assert.equal(badTrace.findings[0].signal, "conversation_policy_violation");
+
 	// (a) Ambiguous / purely conversational tasks — question, opinion request,
 	// options comparison, "help me understand" — must NOT be assumed to be
 	// coding work. They fall to the new `conversation` default.

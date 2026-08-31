@@ -86,6 +86,7 @@ function parseArgs(argv) {
 	let force = false;
 	let llmp = false;
 	let herdr = false;
+	let noGit = false;
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i];
 		if (a === "--name") name = argv[++i];
@@ -93,6 +94,7 @@ function parseArgs(argv) {
 		else if (a === "--force") force = true;
 		else if (a === "--llmp") llmp = true;
 		else if (a === "--herdr") herdr = true;
+		else if (a === "--no-git") noGit = true;
 		else if (a === "--help" || a === "-h") {
 			printUsage();
 			process.exit(0);
@@ -101,14 +103,14 @@ function parseArgs(argv) {
 			process.exit(1);
 		}
 	}
-	return { name, target, force, llmp, herdr };
+	return { name, target, force, llmp, herdr, noGit };
 }
 
 function printUsage() {
 	console.log(
 		[
-			'Uso: yano init --name "<Nome Progetto>" [--target <dir>] [--force] [--llmp] [--herdr]',
-			'     (in locale, senza npm install -g: node scripts/create-project.mjs --name "<Nome Progetto>" [--target <dir>] [--force] [--llmp] [--herdr])',
+			'Uso: yano init --name "<Nome Progetto>" [--target <dir>] [--force] [--llmp] [--herdr] [--no-git]',
+			'     (in locale, senza npm install -g: node scripts/create-project.mjs --name "<Nome Progetto>" [--target <dir>] [--force] [--llmp] [--herdr] [--no-git])',
 			"",
 			'  --name    Nome del progetto (obbligatorio) — per un progetto esistente viene scritto solo nella',
 			"            configurazione Yano: il package.json applicativo già presente non viene mai sovrascritto.",
@@ -124,6 +126,8 @@ function printUsage() {
 			"  --herdr   Crea/riusa e porta in primo piano un workspace Herdr con il nome della cartella",
 			"            corrente, avvia lì `yano init` seguito dal planner-01 e apre/aggancia il client Herdr",
 			"            se il comando parte da un terminale normale. Richiede init in place: non usare --target.",
+			"  --no-git  Non inizializza un repository Git se la directory non ne contiene già uno; utile per",
+			"            conversation mode, che può usare il DB Yano senza worktree o repository di sviluppo.",
 			"",
 			"Progetto esistente: yano init aggiunge solo file Yano mancanti, preserva codice, package.json,",
 			"configurazioni e .env.example; se root agents/ è già dell'applicazione, usa .pi/agents/ per il roster Yano.",
@@ -278,7 +282,7 @@ export async function runCreateProject({ packageRoot, cwd, argv, preflightTools 
 		ensureEmbeddings = ensureEmbeddingPrerequisites,
 		doctor = runDoctor,
 	} = preflightTools;
-	const { name, target, force, llmp, herdr } = parseArgs(argv);
+	const { name, target, force, llmp, herdr, noGit } = parseArgs(argv);
 	if (!name) {
 		console.error("create-project: --name è obbligatorio (vedi --help).");
 		process.exit(1);
@@ -520,13 +524,14 @@ export async function runCreateProject({ packageRoot, cwd, argv, preflightTools 
 
 	// 4. .gitignore minimo (worktree/node_modules), git init se non è già un
 	//    repo — richiesto per l'isolamento in worktree (docs/development-notes.md,
-	//    Revisioni 13/14).
+	//    Revisioni 13/14). Conversation mode può optare per --no-git perché non
+	//    deve creare worktree o repository per un consulto.
 	// .pi/ qui è la workspace runtime dell'estensione nel progetto scaffoldato
 	// (SQLite, config, specs, report e trace locali), non codice applicativo.
 	// In un progetto esistente le regole mancanti vengono aggiunte in coda,
 	// senza sostituire il .gitignore del progetto.
 	ensureGitignore(targetDir);
-	if (!fs.existsSync(path.join(targetDir, ".git"))) {
+	if (!noGit && !fs.existsSync(path.join(targetDir, ".git"))) {
 		try {
 			execFileSync("git", ["init"], { cwd: targetDir, stdio: "ignore" });
 			console.log("create-project: repo git inizializzato.");
@@ -534,6 +539,7 @@ export async function runCreateProject({ packageRoot, cwd, argv, preflightTools 
 			console.warn(`create-project: \`git init\` non riuscito (${err instanceof Error ? err.message : String(err)}) — inizializzalo tu a mano, serve per l'isolamento in worktree.`);
 		}
 	}
+	if (noGit && !fs.existsSync(path.join(targetDir, ".git"))) console.log("create-project: --no-git — nessun repository Git inizializzato.");
 
 	// Auto-discovery del sistema operativo (Revisione 32, richiesto
 	// dall'operatore): il comando di copia e le opzioni broker suggerite

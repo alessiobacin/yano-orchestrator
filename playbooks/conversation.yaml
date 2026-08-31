@@ -4,11 +4,13 @@ label: Conversazione e chiarimento aperti
 description: >-
   Contratto minimo, non di consegna, per un messaggio che è una domanda, una
   richiesta di opinione, un confronto tra opzioni o una discussione aperta
-  senza ancora un deliverable concreto. Il planner risponde direttamente,
-  senza worktree, senza conferma del team e senza ceremony di consegna: se lo
-  scambio rivela un intento concreto e realizzabile, questo run si chiude e
-  ne parte uno nuovo sul playbook di consegna raccomandato — questo playbook
-  non tenta mai di ri-legarsi a un playbook diverso a run in corso.
+  senza ancora un deliverable concreto. Il planner risponde direttamente e,
+  solo quando gli serve una verifica specialistica, può inizializzare il
+  database Yano e consultare un conversation-researcher read-only. Non si
+  creano worktree, run, ticket o artefatti di sviluppo. Se lo scambio rivela
+  un intento concreto e realizzabile, questo run si chiude e ne parte uno
+  nuovo sul playbook di consegna raccomandato — questo playbook non tenta mai
+  di ri-legarsi a un playbook diverso a run in corso.
 catalog:
   scope: global
   reusable: true
@@ -40,16 +42,20 @@ catalog:
 enforcement:
   status: partial
   note: This playbook is intentionally lightweight — the runtime does not
-    auto-detect when a conversation has crystallized into a concrete
-    delivery intent; the planner classifies each turn and, on
-    crystallization, proposes the recommended delivery playbook and lets
-    the current run complete rather than mutating its own binding.
+    auto-detect when a conversation has crystallized into a concrete delivery
+    intent. The planner classifies each turn, may perform one bounded
+    read-only consultation through conversation-researcher, and, on
+    crystallization, proposes the recommended delivery playbook and lets the
+    current run complete rather than mutating its own binding.
 states:
   - id: received
     owner: planner
     terminal: false
   - id: responding
     owner: planner
+    terminal: false
+  - id: consulting
+    owner: conversation-researcher
     terminal: false
   - id: crystallizing
     owner: planner
@@ -70,6 +76,19 @@ transitions:
     actor: planner
     requires:
       - conversation_concluded_without_delivery_intent
+  - id: start_consultation
+    from: responding
+    to: consulting
+    actor: planner
+    requires:
+      - specialist_needed_for_reliable_answer
+      - read_only_consultation
+  - id: receive_consultation
+    from: consulting
+    to: responding
+    actor: planner
+    requires:
+      - consultation_received_or_timed_out
   - id: detect_crystallization
     from: responding
     to: crystallizing
@@ -87,8 +106,8 @@ failure_routes: []
 invariants:
   - id: no_worktree_created_for_pure_conversation
     description: The state machine has no transition capable of calling
-      worktree_create; received/responding/crystallizing/completed never
-      touch a worktree.
+      worktree_create; received/responding/consulting/crystallizing/completed
+      never touch a worktree.
   - id: no_delivery_ceremony_without_crystallized_intent
     description: No plan_set, no team-confirmation hold and no final-checks
       style transition exists while the run is in received or responding;
@@ -101,11 +120,12 @@ invariants:
       created (new worktree, new plan, new playbook_bind) only after the
       user confirms the handoff.
   - id: planner_holds_the_conversation_directly
-    description: No new role is spun up to hold this kind of conversation;
-      the planner itself answers, discusses and asks clarifying questions.
-      It may use read-only tools (file reads, yano trace, web search) to
-      inform its answers, but never worktree_create, plan_set or
-      agent_send to assemble a delivery team while responding.
+    description: The planner owns the conversation and normally answers,
+      discusses and asks clarifying questions itself. If a reliable answer
+      needs a distinct bounded check, it may initialize Yano and consult one
+      conversation-researcher via agent_send/agent_await. The consultant is
+      read-only and never creates a worktree, run, plan, ticket, repository,
+      commit or deployment; this is not a delivery team.
   - id: no_finalize_without_explicit_conclusion
     description: completed is reached either because the conversation ended
       on its own or because the handoff was presented and the user

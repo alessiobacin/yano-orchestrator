@@ -58,6 +58,11 @@ esempio `agent_send_no_live_target`, un errore di un tool interno o una
 discordanza tra workspace e progetto. Gli errori generici dell'applicazione
 (come `npm test` fallito) non vengono classificati come difetti di Yano.
 
+L'assenza di `orchestrator.db` non è di per sé un errore: un watcher ordinario
+scrive `yano_watcher_scan` con `status: waiting` e `reason: not_initialized` e
+continua il polling senza escalation. Il valore `blocked` è riservato alle
+passate con contesto esplicito di validazione.
+
 Per ogni segnale nuovo viene creato un ticket Markdown deduplicato nel checkout
 del repository Yano:
 
@@ -102,6 +107,21 @@ anomalie. L'evento contiene `started_at`, `completed_at`, `duration_ms`,
 `status`, `findings`, `stalls`, `interval_ms` e `lookback_ms`; `ts` è l'orario
 di completamento. `yano_watcher_round_ok` resta invece riservato alle passate
 positive di validazione bounded con `--validation-run`.
+
+Per i flussi conversation il watcher verifica anche il contratto operativo
+senza usare un LLM. Quando il trace mostra una consultazione del
+`conversation-researcher`, aggiunge `yano_watcher_conversation_check` con
+`status: healthy` oppure `violation`. Un `conversation_policy_violation`
+segnala solo tool Yano di consegna vietati, comandi shell mutanti o un lancio
+fallito dello specialista; i comandi di lettura (`curl`, `grep`, `git status`,
+`yano trace`) non sono errori. Le violazioni sono deduplicate e instradate al
+planner live, oppure a Telegram se non c'è un planner.
+
+Il watcher persistente ascolta inoltre `run_completed` e
+`planner_task_completed` sul broker. Ogni evento accoda una sola passata
+finale immediata, registrando prima `yano_watcher_final_scan_requested` e poi
+un normale `yano_watcher_scan` con `once: true`; il polling configurato non
+viene sostituito né fermato.
 
 Per elencare gli scan con data e ora di inizio/fine:
 

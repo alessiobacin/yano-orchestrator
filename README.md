@@ -70,6 +70,9 @@ mkdir url-shortener; cd url-shortener
 yano init --name "URL Shortener"
 cp .env.example .env   # optional: WhatsApp, Telegram, and email notifications
 
+# conversation test senza repository Git o worktree di sviluppo:
+# yano init --name "Conversation Test" --no-git
+
 # MQTT broker — either works:
 docker compose -f mqtt/compose.yaml up -d   # with Docker Desktop
 # or, without Docker Desktop, native Mosquitto for Windows:
@@ -175,6 +178,9 @@ yano gantt --persistent --open # dashboard live persistente, con link recuperabi
 yano gantt --link              # link persistente del progetto corrente
 yano gantt --links             # tutti i link Gantt persistenti registrati
 yano watch --once              # one stalled-ticket scan
+# yano watch --help and yano watcher <subcommand> --help are read-only
+# senza orchestrator.db un watcher ordinario resta in attesa senza errore;
+# solo una validazione esplicita usa lo stato blocked e l'escalation
 # yano watch also escalates high-confidence Yano faults to .scratch/optimize-orchestrator/issues
 # and Telegram; global-only installs use `yano config`, development checkouts may use .env.
 yano watcher start --project-root "$PWD"   # persistent registry: Herdr-supervised yano watch --away

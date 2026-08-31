@@ -10,6 +10,7 @@ import { runCreateProject } from "./create-project.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const project = fs.mkdtempSync(path.join(os.tmpdir(), "yano-init-existing-"));
+const noGitProject = fs.mkdtempSync(path.join(os.tmpdir(), "yano-init-no-git-"));
 const packageJson = {
 	name: "existing-application",
 	private: true,
@@ -25,16 +26,17 @@ fs.writeFileSync(path.join(project, ".env.example"), "APP_ENV=test\n");
 fs.writeFileSync(path.join(project, ".gitignore"), "dist/\n");
 
 try {
+	const preflightTools = {
+		ensurePlaywright: () => ({ ok: true }),
+		ensureCore: () => ({ ok: true, skills: [], mcp: {} }),
+		ensureEmbeddings: async () => ({ ok: true }),
+		doctor: async () => ({ ok: true }),
+	};
 	await runCreateProject({
 		packageRoot: root,
 		cwd: project,
 		argv: ["--name", "Existing Application"],
-		preflightTools: {
-			ensurePlaywright: () => ({ ok: true }),
-			ensureCore: () => ({ ok: true, skills: [], mcp: {} }),
-			ensureEmbeddings: async () => ({ ok: true }),
-			doctor: async () => ({ ok: true }),
-		},
+		preflightTools,
 	});
 
 	assert.deepEqual(JSON.parse(fs.readFileSync(path.join(project, "package.json"), "utf8")), packageJson, "existing package.json is preserved byte-for-byte semantically");
@@ -47,8 +49,12 @@ try {
 	assert.match(gitignore, /dist\//, "existing .gitignore entry is preserved");
 	assert.match(gitignore, /\.pi\//, "Yano runtime is ignored");
 	assert.ok(fs.existsSync(path.join(project, "mqtt", "compose.yaml")), "missing Yano MQTT infrastructure is added");
+
+	await runCreateProject({ packageRoot: root, cwd: noGitProject, argv: ["--name", "Conversation Test", "--no-git"], preflightTools });
+	assert.equal(fs.existsSync(path.join(noGitProject, ".git")), false, "--no-git leaves a conversation test without a Git repository");
+	assert.ok(fs.existsSync(path.join(noGitProject, ".pi", "extensions", "yano-orchestrator", "config", "project.json")), "--no-git still scaffolds Yano config");
 	console.log("YANO INIT EXISTING PROJECT SMOKE TEST PASSED (non-destructive adoption)");
 } finally {
 	fs.rmSync(project, { recursive: true, force: true });
+	fs.rmSync(noGitProject, { recursive: true, force: true });
 }
-

@@ -50,7 +50,7 @@ Use the smallest command that answers the request. Typical translations are:
 | Open the Gantt for this project | `yano gantt --project-root "$PWD" --persistent --open` | URL and automatically selected free port in `10000-19999` |
 | Recover the current or all persistent Gantt links | `yano gantt --link --json` or `yano gantt --links --json` | registered URL, project root and live/stopped status |
 | Is Yano ready? | `yano doctor --network` and `yano deps --json` | broker, Git, Pi, CLI, credentials and capability checks |
-| Initialize a new or existing repository | `yano init --name "<name>"` | Existing application files are preserved; only missing Yano infrastructure is added |
+| Initialize a new or existing repository | `yano init --name "<name>"` (or `--no-git` for a conversation-only folder) | Existing application files are preserved; only missing Yano infrastructure is added |
 | Initialize and open Herdr with planner | `yano init --name "<name>" --herdr` | Herdr workspace, root pane, and `planner-01` launch |
 | Start an agent | `yano start --instance <id> --role <role>` | composed Pi command, role, trace mode, project scope |
 | Check or change trace capture | `yano trace status`, `yano trace enable --mode full` | global per-user data root and effective mode |
@@ -174,6 +174,9 @@ yano start --instance planner-01 --role planner
 Use `yano init --herdr` when the user wants the workspace and planner opened
 automatically. `--target` is for scaffolding another directory; in-place
 initialization is the normal path for a non-empty existing repository.
+For a conversation-only test folder, use `yano init --name "conversation-test"
+--no-git`: Yano configuration is scaffolded, but no Git repository is created;
+this mode must not be used for a later worktree-based delivery.
 
 ### Diagnose a worker or routing problem
 
@@ -196,6 +199,16 @@ prepare it, `yano repair --yes --init-db` is idempotent and non-destructive.
 polling interval. `--interval-ms` controls repeated scans. `--once` performs
 one bounded scan and exits; it is the preferred test mode.
 
+`--help` is read-only for `yano watch` and for every `yano watcher` registry
+subcommand: it prints usage before opening the broker or changing the registry.
+On a freshly scaffolded project without `orchestrator.db`, an ordinary
+continuous watcher records a `waiting` scan with reason `not_initialized` and
+stays alive for the next polling interval without raising a validation error.
+An explicit validation context (`--validation-run`, `--playbook-proposal`,
+`--playbook-id`, round or checksum) records `blocked` and follows the
+validation escalation path. Neither mode should be mistaken for a dead Herdr
+worker.
+
 ```text
 yano watch --project-root <dir> --lookback-ms 3600000 --once
 yano watch --project-root <dir> --lookback-ms 3600000 --interval-ms 600000 --away
@@ -205,6 +218,20 @@ yano trace events --project <name> --instance yano-watcher --type yano_watcher_s
 The `yano_watcher_scan` event records start/end timestamps, duration, status,
 lookback, interval, findings, stalls, and live-agent counts. A quiet scan is
 not evidence that the worker tab is absent; inspect the event and Herdr status.
+
+When a conversation trace contains a planner consultation with
+`conversation-researcher`, the watcher also performs a deterministic policy
+check. It records `yano_watcher_conversation_check` with `status: healthy` or
+`violation`, flags forbidden delivery tools, mutating shell commands, and
+failed specialist launches as `conversation_policy_violation`, then routes a
+deduplicated corrective notice to a live planner (or Telegram). Read-only
+commands such as `curl`, `grep`, `git status`, and `yano trace` are accepted.
+
+In persistent mode the watcher keeps its MQTT subscription open in addition to
+polling at `--interval-ms`. A `run_completed` event or a planner's completed
+turn triggers one extra `--once` scan immediately; this final scan is recorded
+as a normal `yano_watcher_scan` with `once: true`, while the regular cadence
+continues afterward.
 
 ### Trace investigation
 

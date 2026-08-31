@@ -114,6 +114,12 @@ yano watch --project-root "/path/progetto" \
   --lookback-ms 3600000 --interval-ms 600000 --away
 ```
 
+Se manca `orchestrator.db`, il watcher continuo ordinario registra
+`status: waiting` e `reason: not_initialized`, senza errore o notifica: è un
+caso normale per conversation mode prima di `orchestrator_init`. Solo i
+comandi con contesto esplicito di validazione registrano `blocked` e attivano
+l'escalation.
+
 ## Errori e operazioni che cambiano stato
 
 Quando manca una credenziale, Yano indica la variabile e il comando da usare:

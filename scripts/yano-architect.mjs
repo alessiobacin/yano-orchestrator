@@ -244,7 +244,15 @@ function candidateForTask(task) {
 	if (/controllo qualit|quality gate|self-?check|audit (completo|funzionale)|verifica funzionale|command.?(matrix|audit)|tutti i comandi funzion|tutte le funzionalit|funziona(no)? come dovrebbe|capability audit|full regression audit|command and feature inventory/.test(text)) return { playbook: "qa-full-audit", roles: ["qa-inventory-analyst", "qa-functional-verifier"], primaryRole: "qa-inventory-analyst", catalog_alternatives: ["qa-hardening"], reason: "functional quality gate / full command-and-requirement self-check intent" };
 	if (/test|qa|tdd|regression|fuzz|mutation/.test(text)) return { playbook: "qa-hardening", roles: ["tdd-agent", "reviewer"], catalog_alternatives: ["qa-full-audit"], reason: "quality/testing intent" };
 	if (/refactor|refactoring|architettura|modular|cleanup|manutenibil/.test(text)) return { playbook: "backend-change", roles: ["refactoring-specialist", "reviewer"], reason: "refactoring/backend intent" };
-	return { playbook: "backend-change", roles: ["coder", "reviewer"], reason: "general implementation fallback" };
+	// Fallback: nothing more specific matched. A clear delivery/action verb
+	// (implementa, crea, scrivi codice, correggi, ...) still means real work
+	// is being requested even though no more specific regex fired, so it
+	// keeps the previous "assume coding work" behavior. Genuinely open text
+	// (a question, an opinion request, a comparison, a discussion) has no
+	// such verb and now defaults to the lightweight conversation playbook
+	// instead of silently starting a worktree/team delivery cycle.
+	if (/\b(implementa(?:re)?|crea(?:re)?|costrui(?:sci|re)|sviluppa(?:re)?|scrivi(?:ere)?|aggiungi(?:ere)?|correggi(?:ere)?|corregger[ei]|fix(?:a|are)?|risolvi(?:ere)?|elimina(?:re)?|rimuovi(?:ere)?|aggiorna(?:re)?|integra(?:re)?|migra(?:re)?|ottimizza(?:re)?|implement|build|add|create|write)\b/.test(text)) return { playbook: "backend-change", roles: ["coder", "reviewer"], reason: "general implementation fallback" };
+	return { playbook: "conversation", roles: [], reason: "no clear delivery/execution intent detected — default to open discussion" };
 }
 
 function aggregateCapabilities(roles, configs, declared = {}) {

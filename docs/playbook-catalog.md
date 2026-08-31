@@ -11,6 +11,7 @@ workflow instead of launching every specialist.
 | Playbook | Roles | Required evidence |
 |---|---|---|
 | `default.yaml` (`default-orchestration`) | planner | objective, approved `to-tickets` breakdown, team/phase plan, approvals, final evidence |
+| `conversation` | planner only (no additional role) | objective classified as open discussion/no delivery intent yet; on crystallization, the recommended delivery playbook presented to the user and confirmed or declined before a brand-new run starts — this run never rebinds its own `playbook_bind` |
 | `backend-change` | coder, reviewer, refactoring-specialist | tests, isolated diff, separate Spec/Standards review, classified findings |
 | `frontend-browser` | frontend-developer, frontend-reviewer, e2e-simulator, a11y-tester, design-to-code | separate UI Spec/Standards review, Playwright run, browser snapshot/trace, console/network checks |
 | `qa-hardening` | tdd-agent, mutation-tester | baseline tests, mutation/E2E result, reproducible findings |

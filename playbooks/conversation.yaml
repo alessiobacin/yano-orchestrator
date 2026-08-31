@@ -1,0 +1,112 @@
+schema_version: 1
+id: conversation
+label: Conversazione e chiarimento aperti
+description: >-
+  Contratto minimo, non di consegna, per un messaggio che è una domanda, una
+  richiesta di opinione, un confronto tra opzioni o una discussione aperta
+  senza ancora un deliverable concreto. Il planner risponde direttamente,
+  senza worktree, senza conferma del team e senza ceremony di consegna: se lo
+  scambio rivela un intento concreto e realizzabile, questo run si chiude e
+  ne parte uno nuovo sul playbook di consegna raccomandato — questo playbook
+  non tenta mai di ri-legarsi a un playbook diverso a run in corso.
+catalog:
+  scope: global
+  reusable: true
+  intents:
+    - general discussion
+    - discussione generale
+    - opinion
+    - opinione
+    - explanation
+    - spiegazione
+    - spiegami
+    - brainstorming
+    - comparing options
+    - confronto tra opzioni
+    - cosa ne pensi
+    - aiutami a capire
+    - open question
+    - domanda aperta
+    - chiarimento
+    - clarification
+  exclusions:
+    - concrete deliverable already agreed
+    - code change execution
+    - deployment execution
+    - audit execution
+  parameters:
+    - project_name
+    - project_root
+enforcement:
+  status: partial
+  note: This playbook is intentionally lightweight — the runtime does not
+    auto-detect when a conversation has crystallized into a concrete
+    delivery intent; the planner classifies each turn and, on
+    crystallization, proposes the recommended delivery playbook and lets
+    the current run complete rather than mutating its own binding.
+states:
+  - id: received
+    owner: planner
+    terminal: false
+  - id: responding
+    owner: planner
+    terminal: false
+  - id: crystallizing
+    owner: planner
+    terminal: false
+  - id: completed
+    owner: planner
+    terminal: true
+transitions:
+  - id: start_responding
+    from: received
+    to: responding
+    actor: planner
+    requires:
+      - objective_received
+  - id: conclude_conversation
+    from: responding
+    to: completed
+    actor: planner
+    requires:
+      - conversation_concluded_without_delivery_intent
+  - id: detect_crystallization
+    from: responding
+    to: crystallizing
+    actor: planner
+    requires:
+      - concrete_delivery_intent_detected
+  - id: handoff_or_decline
+    from: crystallizing
+    to: completed
+    actor: planner
+    requires:
+      - recommended_playbook_presented_to_user
+      - user_confirmed_or_declined_handoff
+failure_routes: []
+invariants:
+  - id: no_worktree_created_for_pure_conversation
+    description: The state machine has no transition capable of calling
+      worktree_create; received/responding/crystallizing/completed never
+      touch a worktree.
+  - id: no_delivery_ceremony_without_crystallized_intent
+    description: No plan_set, no team-confirmation hold and no final-checks
+      style transition exists while the run is in received or responding;
+      the planner engages directly with its own read-only tools only.
+  - id: handoff_creates_new_run_never_rebinds_playbook
+    description: playbook_bind is immutable for the life of a run everywhere
+      in this codebase; crystallizing never attempts to swap this run's
+      bound playbook for the recommended delivery playbook. It transitions
+      to completed with a handoff_target recorded, and a brand-new run is
+      created (new worktree, new plan, new playbook_bind) only after the
+      user confirms the handoff.
+  - id: planner_holds_the_conversation_directly
+    description: No new role is spun up to hold this kind of conversation;
+      the planner itself answers, discusses and asks clarifying questions.
+      It may use read-only tools (file reads, yano trace, web search) to
+      inform its answers, but never worktree_create, plan_set or
+      agent_send to assemble a delivery team while responding.
+  - id: no_finalize_without_explicit_conclusion
+    description: completed is reached either because the conversation ended
+      on its own or because the handoff was presented and the user
+      confirmed or explicitly declined it; it is never reached mid-answer.

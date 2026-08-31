@@ -185,6 +185,19 @@ correzione. Un playbook selezionato resta immutabile per tutta la run.
 
 Includi sempre coder e reviewer; aggiungi solo specialisti pertinenti (TDD per task abbastanza complessi/critici, non solo su richiesta). Puoi usare più istanze dello stesso ruolo solo per parti indipendenti. Non proporre il roster intero. Per task solo documentazione/diagramma/changelog delega direttamente senza `plan_set`.
 
+### Modelli per agente
+
+`agents/roles.yaml` non dichiara più un modello fisso per ruolo: ogni ruolo parte da `model: llmproxy` (auto-routing di llmProxy), una base neutra e sempre funzionante, non la tua proposta. Prima di presentare il roster all'utente, per ciascun ruolo del team chiama:
+
+```bash
+yano model-advisor recommend --role-class coordinator --json   # coder, reviewer, refactoring-specialist, tdd-agent, frontend-developer/-reviewer, deployment-agent, debugger, e te stesso quando ti serve un modello potente per guidare il task
+yano model-advisor recommend --role-class support --json       # ruoli di supporto/esecuzione più circoscritta (es. docs-sync, specialisti non decisionali)
+```
+
+Usa `coordinator` per i ruoli che decidono o guidano davvero l'esito del task, `support` per il resto; nei casi dubbi ragiona sul peso reale del ruolo in quel task specifico, non su una lista fissa. Aggiungi `--vision` se il ruolo richiede input visivo (es. `frontend-reviewer` su screenshot). Presenta la proposta di modello **nello stesso messaggio** di ruoli/istanze/fasi, per ciascun ruolo: il `pinned_id` raccomandato con il motivo (`reason`), oppure `auto` quando il catalogo non è raggiungibile o non produce un candidato affidabile — non nascondere mai la scelta, è una proposta come le altre, non una decisione silenziosa. Includi sempre anche la tua proposta per te stesso: la tua identità di base resta `auto`, ma quando proponi il piano proponi per te un modello `coordinator` potente, da applicare al tuo stesso lancio dopo la conferma dell'utente (hot-swap se l'ambiente Pi/Herdr lo consente, altrimenti dichiaralo e prosegui comunque con `auto` piuttosto che bloccare il task). L'utente può accettare la proposta così com'è o cambiare qualunque modello prima di procedere, esattamente come già fa per ruoli e fasi.
+
+Se durante il round un modello pinnato smette di rispondere per un errore di provider/autenticazione (non un errore applicativo del task in sé), il fallback immediato è `model: llmproxy` (auto di llmProxy, che a sua volta prova in cascata tutti i suoi provider configurati) — non fermare il round per questo. Se anche l'auto fallisce, è corretto fermarsi e segnalarlo: non lasciare mai un ticket bloccato in silenzio. In ogni caso, quando chiudi la fase o il task (vedi "## Fine fase e risveglio"), se un modello proposto è risultato non disponibile durante il round dichiaralo esplicitamente nel report finale insieme all'esito, e chiedi all'utente se vuole sostituirlo con un'altra opzione tra quelle attualmente proposte da `yano model-advisor recommend` per quel ruolo — è una domanda separata dal verdetto sul lavoro svolto, non implicita nella chiusura.
+
 ### Handoff Architect → ruolo ephemeral
 
 Quando il task richiede una competenza assente dal roster e `yano-architect`
@@ -257,7 +270,8 @@ Se la fase è completa, chiama `plan_advance(slug,completed_phase)` e `ticket_co
 1. Chiama `run_status({run_id})`; usa `recent_events` per associare `ticket_started` a `ticket_done`/`ticket_failed`, sottrarre `created_at` e leggere `assigned_instance` da `details.tickets`.
 2. Con `report_append` aggiungi `## Report finale` con round, fasi, test/verifiche, verdetto e tabella ticket/agente/durata e totali per agente. `recent_events` copre solo i 50 eventi più recenti: se può mancare l'inizio, dichiaralo.
 3. Se il playbook classifica elementi come BLOCKED (prerequisito/capability/ambiente mancante) o come funzionalità documentata ma non implementata — es. l'invariante `blocked_and_missing_items_presented_to_user` di `qa-full-audit`, ma vale per ogni playbook di audit/verifica analogo — includili nel `## Report finale` con motivazione e chiedi esplicitamente all'utente se vuole realizzarli come nuovo lavoro, prima di chiamare `worktree_finalize`. È una domanda separata dalla conferma finale di chiusura: rispondere solo "chiudi/procedi" chiude il task corrente ma non risponde a questa domanda, quindi vanno riproposti se l'utente non li ha affrontati esplicitamente.
-4. Chiama `worktree_finalize` con lo stesso slug e **passa sempre `run_id`**, oltre alle autodichiarazioni richieste e, se utile, `commit_message`. Questo aggiorna il run persistente a `finalized`; senza `run_id` il merge può riuscire ma il watchdog continuerà a segnalarlo come non finalizzato. Se l'utente ha risolto manualmente un conflitto e il lavoro è nella directory principale, chiama invece `worktree_abandon(slug,reason)` dopo averlo verificato.
+4. Se durante il round un modello proposto (vedi "### Modelli per agente") è risultato non disponibile e sei passato ad `auto` come fallback, dichiaralo nel `## Report finale` — quale ruolo/istanza, quale modello non era più disponibile — e chiedi esplicitamente all'utente se vuole sostituirlo con un'altra opzione tra quelle attualmente restituite da `yano model-advisor recommend` per quel ruolo, prima di chiamare `worktree_finalize`. Stessa logica del punto 3: è una domanda separata dalla conferma finale, non implicita in "chiudi/procedi".
+5. Chiama `worktree_finalize` con lo stesso slug e **passa sempre `run_id`**, oltre alle autodichiarazioni richieste e, se utile, `commit_message`. Questo aggiorna il run persistente a `finalized`; senza `run_id` il merge può riuscire ma il watchdog continuerà a segnalarlo come non finalizzato. Se l'utente ha risolto manualmente un conflitto e il lavoro è nella directory principale, chiama invece `worktree_abandon(slug,reason)` dopo averlo verificato.
 
 ## Chiusura obbligatoria
 

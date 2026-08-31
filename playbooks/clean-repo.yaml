@@ -7,11 +7,14 @@ description: >-
   left behind by any proposed removal or relocation, audits documentation
   completeness against a canonical set of documentation categories, and
   creates the missing documentation files with real content drawn from the
-  repository it just audited. Nothing is ever deleted or moved on the
-  auditing role's own judgment: every candidate removal and relocation is
-  presented as an itemized, individually justified list and only the items
-  the user explicitly approves — the whole list, a subset, or none — are
-  ever executed.
+  repository it just audited. Before touching a single file — whether by
+  deleting/moving it or by creating/updating a documentation file —
+  repo-curator and docs-sync write one unified change-plan report (what
+  would be removed, what would be relocated, what documentation would be
+  created or updated, each justified) and the user must explicitly confirm
+  it. Nothing is ever deleted, moved, created or updated on the auditing
+  role's own judgment: only the items the user approves — the whole plan,
+  a subset, or none — are ever executed.
 catalog:
   scope: global
   reusable: true
@@ -47,11 +50,13 @@ catalog:
     - has_backend
 enforcement:
   status: partial
-  note: The itemized-approval gate before any deletion/relocation, the
-    dangling-reference scan and the canonical documentation categories are
-    contractual; the runtime does not auto-detect unused files, backend
-    presence or documentation gaps — repo-curator and docs-sync do, and the
-    planner enforces the approval gate before applying_cleanup.
+  note: The unified change-plan proposal (cleanup + documentation) and its
+    explicit-approval gate before any deletion, relocation or documentation
+    write, the dangling-reference scan and the canonical documentation
+    categories are contractual; the runtime does not auto-detect unused
+    files, backend presence or documentation gaps — repo-curator and
+    docs-sync do, and the planner enforces the approval gate before
+    applying_cleanup and before documenting.
 states:
   - id: received
     owner: planner
@@ -62,7 +67,7 @@ states:
   - id: auditing
     owner: repo-curator
     terminal: false
-  - id: awaiting_cleanup_confirmation
+  - id: awaiting_change_plan_confirmation
     owner: planner_and_human
     terminal: false
   - id: applying_cleanup
@@ -95,9 +100,9 @@ transitions:
     requires:
       - required_cli_skill_mcp_checked
       - phase_unlocked
-  - id: present_cleanup_proposal
+  - id: present_change_plan
     from: auditing
-    to: awaiting_cleanup_confirmation
+    to: awaiting_change_plan_confirmation
     actor: repo-curator
     requires:
       - candidate_removal_list_justified_per_file
@@ -105,18 +110,20 @@ transitions:
       - dangling_reference_scan_completed_before_proposal
       - documentation_gap_report_against_canonical_categories
       - backend_detected_for_postman_requirement_or_explicitly_not_applicable
-  - id: confirm_cleanup
-    from: awaiting_cleanup_confirmation
+  - id: confirm_change_plan
+    from: awaiting_change_plan_confirmation
     to: applying_cleanup
     actor: planner
     requires:
       - user_approved_or_edited_removal_and_relocation_list
-  - id: skip_cleanup_no_approved_items
-    from: awaiting_cleanup_confirmation
+      - user_approved_documentation_plan
+  - id: skip_cleanup_confirm_documentation_only
+    from: awaiting_change_plan_confirmation
     to: documenting
     actor: planner
     requires:
       - user_declined_all_removal_and_relocation_items
+      - user_approved_documentation_plan
   - id: apply_and_reverify
     from: applying_cleanup
     to: documenting
@@ -149,7 +156,7 @@ transitions:
       - concrete_findings
       - report_updated
   - id: block
-    from: [auditing, awaiting_cleanup_confirmation, applying_cleanup, documenting]
+    from: [auditing, awaiting_change_plan_confirmation, applying_cleanup, documenting]
     to: blocked
     actor: planner_and_human
     requires:
@@ -162,6 +169,9 @@ failure_routes:
   - condition: user_declines_specific_item_in_proposal
     action: remove_item_from_approved_list_and_continue_with_the_rest
     terminal: false
+  - condition: user_requests_documentation_plan_revision
+    action: revise_documentation_plan_and_represent_for_confirmation
+    terminal: false
   - condition: ambiguous_whether_file_is_still_needed
     action: ask_user_instead_of_guessing
     terminal: false
@@ -172,14 +182,24 @@ invariants:
   - id: isolated_worktree
     description: Same as backend-change/refactor — all work happens in an
       isolated worktree, never directly against the main checkout.
-  - id: no_deletion_or_move_without_explicit_itemized_user_approval
-    description: repo-curator never deletes or relocates a single file
-      during auditing; every candidate removal and relocation is presented
-      as an itemized list with a concrete per-file justification in
-      awaiting_cleanup_confirmation, and only the items the user explicitly
-      approves — the whole list, a subset, or none — are executed in
-      applying_cleanup. An item the user did not explicitly approve is left
-      untouched; silence never counts as approval.
+  - id: change_plan_proposed_and_confirmed_before_any_modification
+    description: >-
+      repo-curator and docs-sync never delete, relocate, create or update
+      a single file during auditing. present_change_plan produces ONE
+      unified report — the itemized removal/relocation list (each item
+      justified) AND the documentation gap report against the canonical
+      categories — and awaiting_change_plan_confirmation is the single
+      gate the user confirms before any of it is executed: the whole
+      plan, a subset, or none. confirm_change_plan requires explicit
+      approval of both the cleanup list and the documentation plan, and
+      skip_cleanup_confirm_documentation_only (chosen when the user
+      declines every removal/relocation item) still requires explicit
+      approval of the documentation plan before documenting begins — docs
+      creation is never assumed pre-approved just because cleanup was
+      declined or approved. Silence never counts as approval, and the
+      user may request a revision instead (see
+      user_requests_documentation_plan_revision and
+      user_declines_specific_item_in_proposal).
   - id: dangling_reference_scan_before_and_after
     description: repo-curator scans for references (imports, doc links,
       config paths, CI workflow paths) to every candidate removal or

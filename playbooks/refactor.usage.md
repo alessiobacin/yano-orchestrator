@@ -90,36 +90,48 @@ turno.
    tratta né di una feature nuova né della correzione di un bug non
    collegato (`no_new_feature_or_bugfix_confirmed_with_user`) prima di
    aprire il worktree isolato.
-2. **Baseline (`preflight` → `baseline` → `refactoring`)** — prima di
-   toccare una sola riga di codice, `refactoring-specialist` esegue
-   **l'intera suite di test esistente** (non solo i file che verranno
-   toccati) e ne registra il risultato nel report
-   (`full_test_suite_run_before_any_change`,
+2. **Piano proposto e confermato (`preflight` → `awaiting_plan_confirmation`
+   → `baseline`)** — prima ancora di eseguire la baseline dei test,
+   `refactoring-specialist` scrive un piano concreto del refactoring:
+   quali file/moduli tocca, quale approccio di ristrutturazione userà, e
+   cosa esplicitamente NON cambierà. Il planner lo presenta all'utente in
+   `awaiting_plan_confirmation` e nessuna transizione verso `baseline` è
+   possibile senza `user_approved_refactor_plan` — la conferma di
+   perimetro del punto 1 non basta da sola. L'utente può approvare così
+   com'è o chiedere una revisione (`user_requests_plan_revision`), e il
+   planner ripresenta il piano rivisto invece di procedere. Vedi
+   l'invariante `refactor_plan_proposed_and_confirmed_before_any_change`.
+3. **Baseline (`baseline` → `refactoring`)** — solo dopo la conferma del
+   piano, e prima di toccare una sola riga di codice,
+   `refactoring-specialist` esegue **l'intera suite di test esistente**
+   (non solo i file che verranno toccati) e ne registra il risultato nel
+   report (`full_test_suite_run_before_any_change`,
    `baseline_results_recorded_in_report`). Questo è il momento che
    `backend-change` non ha: lì i test vengono eseguiti solo *dopo* la
    modifica, qui c'è uno stato dedicato a fotografare lo stato "prima".
-3. **Refactoring (`refactoring` → `verifying`)** — la ristrutturazione
-   vera e propria avviene nel worktree isolato. Se durante il lavoro
-   emerge una feature nuova genuinamente utile, viene esplicitamente
-   scorporata come task separato invece di essere infilata in questo
-   round (invariante `no_new_features`, failure route
+4. **Refactoring (`refactoring` → `verifying`)** — la ristrutturazione
+   vera e propria avviene nel worktree isolato, secondo il piano
+   confermato al punto 2. Se durante il lavoro emerge una feature nuova
+   genuinamente utile, viene esplicitamente scorporata come task separato
+   invece di essere infilata in questo round (invariante
+   `no_new_features`, failure route
    `new_feature_or_behavior_change_detected_mid_round`) — mai introdotta
    silenziosamente, e i test non vengono modificati per nascondere un
    fallimento (`tests_not_modified_to_hide_failure`).
-4. **Verifica (`verifying` → `review`)** — la stessa suite completa viene
+5. **Verifica (`verifying` → `review`)** — la stessa suite completa viene
    ri-eseguita per intero (`full_test_suite_rerun_after_change`) e il suo
-   esito confrontato con la baseline registrata al punto 2: o combacia, o
+   esito confrontato con la baseline registrata al punto 3: o combacia, o
    ogni deviazione viene spiegata esplicitamente
    (`post_change_results_match_baseline_or_deviation_explained`), mai
    passata sotto silenzio. L'evidenza before/after viene registrata nel
    report (`non_regression_evidence_recorded`).
-5. **Review (`review`)** — il reviewer approva solo dopo aver verificato
+6. **Review (`review`)** — il reviewer approva solo dopo aver verificato
    che il round rispetti il contratto: nessuna feature nuova, nessun
    cambio di comportamento osservabile, evidenza before/after reale nel
    report — non una semplice riga "tests pass". Un round che introduce
    comportamento nuovo o omette l'evidenza baseline viene respinto
    (`reject`) con `concrete_findings`, non approvato con riserva.
-6. **Completamento (`review` → `completed`)** — il planner chiude solo con
+7. **Completamento (`review` → `completed`)** — il planner chiude solo con
    `reviewer_approved`, `non_regression_evidence_in_final_report` nel
    report finale, e conferma esplicita dell'utente
    (`no_finalize_before_explicit_user_confirmation`), esattamente come
@@ -135,6 +147,10 @@ eredita — non è un playbook "leggero" come `conversation` o `debate`.
 
 Quello che aggiunge, come contratto e non come convenzione informale:
 
+- Un piano di refactoring proposto per iscritto e confermato esplicitamente
+  dall'utente in uno stato dedicato (`awaiting_plan_confirmation`) prima
+  che una sola riga di codice venga toccata — `backend-change` non ha
+  questo gate, si affida solo alla proposta generica di team/fasi.
 - Uno stato `baseline` dedicato (`backend-change` non ne ha uno: lì i
   test girano solo dopo l'implementazione, dentro `submit_review`).
 - La suite di test **completa** ri-eseguita dopo la modifica — non solo i

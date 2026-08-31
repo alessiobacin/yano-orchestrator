@@ -32,12 +32,18 @@ elenco puntuale di candidati alla rimozione e alla rilocazione, ciascuno
 con una motivazione concreta e — prima ancora di proporlo — la scansione
 di ogni riferimento (import, link di documentazione, path in config/CI)
 che punterebbe a quel file, per sapere in anticipo cosa si romperebbe. Lo
-stato `awaiting_cleanup_confirmation` è un gate esplicito, non un
-promemoria nel `brief` del ruolo: nessuna transizione verso
-`applying_cleanup` è possibile senza `user_approved_or_edited_removal_and_
-relocation_list`, e l'utente può approvare tutto, un sottoinsieme o
-niente. Vedi l'invariante
-`no_deletion_or_move_without_explicit_itemized_user_approval` in
+stato `awaiting_change_plan_confirmation` è un gate esplicito, non un
+promemoria nel `brief` del ruolo: **copre un'unica relazione di modifiche
+unificata**, non solo la rimozione/rilocazione ma anche il piano
+documentale (sezione 4) — nessuna transizione verso `applying_cleanup` è
+possibile senza `user_approved_or_edited_removal_and_relocation_list` **e**
+`user_approved_documentation_plan` insieme, e l'utente può approvare
+tutto, un sottoinsieme o niente per la parte di cleanup. Anche quando
+rifiuta tutta la rimozione/rilocazione, la creazione dei file
+documentali resta comunque condizionata alla sua approvazione esplicita
+del piano documentale — non è mai data per scontata solo perché il
+cleanup è stato rifiutato o approvato. Vedi l'invariante
+`change_plan_proposed_and_confirmed_before_any_modification` in
 `playbooks/clean-repo.yaml`.
 
 Il secondo motivo per cui esiste è l'audit di completezza documentale:
@@ -138,18 +144,28 @@ riformulazione.
    categoria `postman/` si applica o va dichiarata esplicitamente non
    applicabile (`backend_detected_for_postman_requirement_or_explicitly_
    not_applicable`).
-3. **Gate di conferma (`auditing` → `awaiting_cleanup_confirmation`)** —
-   il planner presenta all'utente l'elenco puntuale, completo di
-   motivazione per riga e di destinazione per ogni spostamento. Questo è
-   il cuore del playbook: **nessuna cancellazione o spostamento avviene
-   prima di questo punto**, e la decisione dell'utente può essere "tutto",
-   "solo alcune voci" o "niente" — il silenzio non vale mai come
-   approvazione.
-   - Se l'utente approva (in tutto o in parte) → `applying_cleanup`.
-   - Se l'utente rifiuta tutte le voci → si salta direttamente a
-     `documenting` (`skip_cleanup_no_approved_items`): l'audit
-     documentale procede comunque, solo la fase di rimozione/spostamento
-     viene saltata.
+3. **Gate di conferma (`auditing` → `awaiting_change_plan_confirmation`)**
+   — il planner presenta all'utente **una relazione di modifiche unica**:
+   l'elenco puntuale di rimozione/rilocazione, completo di motivazione
+   per riga e di destinazione per ogni spostamento, **insieme** al piano
+   documentale (quali file mancanti nelle categorie canoniche verranno
+   creati, quali esistenti verranno aggiornati). Questo è il cuore del
+   playbook: **nessuna cancellazione, spostamento, creazione o
+   aggiornamento di file avviene prima di questo punto**. La decisione
+   dell'utente sulla parte di cleanup può essere "tutto", "solo alcune
+   voci" o "niente" — il silenzio non vale mai come approvazione — e la
+   parte documentale richiede comunque la sua approvazione esplicita
+   (`user_approved_documentation_plan`) prima che `docs-sync` scriva
+   qualunque cosa.
+   - Se l'utente approva il cleanup (in tutto o in parte) e il piano
+     documentale → `applying_cleanup` (`confirm_change_plan`).
+   - Se l'utente rifiuta tutte le voci di cleanup ma approva il piano
+     documentale → si salta direttamente a `documenting`
+     (`skip_cleanup_confirm_documentation_only`): l'audit documentale
+     procede, solo la fase di rimozione/spostamento viene saltata.
+   - Se l'utente chiede di rivedere il piano documentale invece di
+     approvarlo, il planner lo ripresenta rivisto invece di procedere
+     (failure route `user_requests_documentation_plan_revision`).
 4. **Applicazione (`applying_cleanup` → `documenting`)** — `repo-curator`
    esegue **solo** le voci esplicitamente approvate
    (`only_approved_items_executed`, `no_unapproved_deletion_or_move`) e

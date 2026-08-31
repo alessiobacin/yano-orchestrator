@@ -9,7 +9,11 @@ description: >-
   a full test-suite run is recorded as a baseline before any change, the
   same full suite (not only the touched files) is rerun after the change,
   and the closing report carries explicit before/after non-regression
-  evidence rather than a bare "tests pass". Still real code-change work —
+  evidence rather than a bare "tests pass". Before any code is touched,
+  refactoring-specialist writes a concrete plan — target files/modules,
+  the restructuring approach, and what will explicitly NOT change — and
+  the user must confirm it; nothing proceeds to baseline on the strength
+  of the initial scope confirmation alone. Still real code-change work —
   isolated worktree, reviewer approval and finalization confirmation all
   apply exactly as in `backend-change`.
 catalog:
@@ -42,15 +46,19 @@ enforcement:
   status: partial
   note: Runtime gates plan phases, tickets, evidence and finalization the
     same way backend-change does; the baseline-before/full-rerun-after
-    test discipline and the no-new-feature boundary are contractual, not
-    auto-enforced — the planner and refactoring-specialist honor them, and
-    reviewer checks for violations before approving.
+    test discipline, the no-new-feature boundary and the refactor-plan
+    confirmation gate before baseline are contractual, not auto-enforced —
+    the planner and refactoring-specialist honor them, and reviewer checks
+    for violations before approving.
 states:
   - id: received
     owner: planner
     terminal: false
   - id: preflight
     owner: planner
+    terminal: false
+  - id: awaiting_plan_confirmation
+    owner: planner_and_human
     terminal: false
   - id: baseline
     owner: refactoring-specialist
@@ -79,13 +87,20 @@ transitions:
       - objective_received
       - refactor_scope_confirmed
       - no_new_feature_or_bugfix_confirmed_with_user
-  - id: start_baseline
+  - id: propose_refactor_plan
     from: preflight
-    to: baseline
-    actor: planner
+    to: awaiting_plan_confirmation
+    actor: refactoring-specialist
     requires:
       - required_cli_skill_mcp_checked
       - phase_unlocked
+      - refactor_plan_written_with_target_files_and_approach
+  - id: confirm_refactor_plan
+    from: awaiting_plan_confirmation
+    to: baseline
+    actor: planner
+    requires:
+      - user_approved_refactor_plan
   - id: begin_refactoring
     from: baseline
     to: refactoring
@@ -124,6 +139,9 @@ transitions:
       - concrete_findings
       - report_updated
 failure_routes:
+  - condition: user_requests_plan_revision
+    action: revise_plan_and_represent_for_confirmation
+    terminal: false
   - condition: post_change_test_result_differs_from_baseline_without_explanation
     action: return_to_refactoring_with_baseline_diff
     terminal: false
@@ -137,6 +155,17 @@ invariants:
   - id: isolated_worktree
     description: Same as backend-change — all work happens in an isolated
       worktree, never directly against the main checkout.
+  - id: refactor_plan_proposed_and_confirmed_before_any_change
+    description: Before baseline — and therefore before any code is
+      touched — refactoring-specialist writes a concrete plan of the
+      intended refactor (target files/modules, the specific restructuring
+      approach, and what will explicitly NOT change) and presents it to
+      the user in awaiting_plan_confirmation. Only after explicit user
+      approval (confirm_refactor_plan) does the run proceed to baseline;
+      the initial scope confirmation on the received->preflight
+      transition is not sufficient on its own, and the user may request a
+      revision instead of approving (see the user_requests_plan_revision
+      failure route).
   - id: no_new_features
     description: A refactor never introduces new functionality. If new,
       genuinely useful behavior is discovered mid-round, it is scoped out

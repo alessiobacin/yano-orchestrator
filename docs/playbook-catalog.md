@@ -13,7 +13,8 @@ workflow instead of launching every specialist.
 | `default.yaml` (`default-orchestration`) | planner | objective, approved `to-tickets` breakdown, team/phase plan, approvals, final evidence |
 | `conversation` | planner only (no additional role) | objective classified as open discussion/no delivery intent yet; on crystallization, the recommended delivery playbook presented to the user and confirmed or declined before a brand-new run starts — this run never rebinds its own `playbook_bind` |
 | `debate` | debater (2+ instances, planner as moderator) | topic framed, roster+model proposal confirmed by user, every opening argument independent, every rebuttal collected, synthesis naming agreement/disagreement per debater/model |
-| `backend-change` | coder, reviewer, refactoring-specialist | tests, isolated diff, separate Spec/Standards review, classified findings |
+| `backend-change` | coder, reviewer | tests, isolated diff, separate Spec/Standards review, classified findings |
+| `refactor` | refactoring-specialist, reviewer | baseline full test-suite run before any change, no new feature/behavior change, full test-suite rerun after (not only touched files), reviewer approval, explicit before/after non-regression evidence in report |
 | `frontend-browser` | frontend-developer, frontend-reviewer, e2e-simulator, a11y-tester, design-to-code | separate UI Spec/Standards review, Playwright run, browser snapshot/trace, console/network checks |
 | `qa-hardening` | tdd-agent, mutation-tester | baseline tests, mutation/E2E result, reproducible findings |
 | `platform-delivery` | dockerizer, k8s-orchestrator, cicd-architect, cost-optimizer | build/manifest/pipeline validation and explicit environment evidence |

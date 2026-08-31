@@ -1,0 +1,162 @@
+schema_version: 1
+id: refactor
+label: Pure refactoring — no behavior change
+description: >-
+  Dedicated contract for refactoring-only work: restructuring existing code
+  for readability, modularity or maintainability without adding a feature,
+  fixing an unrelated bug, or changing any observable behavior. Stricter
+  than `backend-change` on exactly the one thing that defines a refactor —
+  a full test-suite run is recorded as a baseline before any change, the
+  same full suite (not only the touched files) is rerun after the change,
+  and the closing report carries explicit before/after non-regression
+  evidence rather than a bare "tests pass". Still real code-change work —
+  isolated worktree, reviewer approval and finalization confirmation all
+  apply exactly as in `backend-change`.
+catalog:
+  scope: global
+  reusable: true
+  intents:
+    - refactor
+    - refactoring
+    - ristruttura il codice
+    - ristrutturazione
+    - migliora la manutenibilità
+    - semplifica il codice
+    - modularizza
+    - extract method
+    - extract class
+    - remove duplication
+    - elimina duplicazione
+    - improve code structure
+    - migliora la struttura del codice
+  exclusions:
+    - new feature implementation
+    - bug fix unrelated to the refactor
+    - behavior change of any kind
+    - repository-wide file reorganization or documentation cleanup
+  parameters:
+    - project_name
+    - project_root
+    - scope
+enforcement:
+  status: partial
+  note: Runtime gates plan phases, tickets, evidence and finalization the
+    same way backend-change does; the baseline-before/full-rerun-after
+    test discipline and the no-new-feature boundary are contractual, not
+    auto-enforced — the planner and refactoring-specialist honor them, and
+    reviewer checks for violations before approving.
+states:
+  - id: received
+    owner: planner
+    terminal: false
+  - id: preflight
+    owner: planner
+    terminal: false
+  - id: baseline
+    owner: refactoring-specialist
+    terminal: false
+  - id: refactoring
+    owner: refactoring-specialist
+    terminal: false
+  - id: verifying
+    owner: refactoring-specialist
+    terminal: false
+  - id: review
+    owner: reviewer
+    terminal: false
+  - id: completed
+    owner: planner
+    terminal: true
+  - id: blocked
+    owner: planner_and_human
+    terminal: true
+transitions:
+  - id: scope
+    from: received
+    to: preflight
+    actor: planner
+    requires:
+      - objective_received
+      - refactor_scope_confirmed
+      - no_new_feature_or_bugfix_confirmed_with_user
+  - id: start_baseline
+    from: preflight
+    to: baseline
+    actor: planner
+    requires:
+      - required_cli_skill_mcp_checked
+      - phase_unlocked
+  - id: begin_refactoring
+    from: baseline
+    to: refactoring
+    actor: refactoring-specialist
+    requires:
+      - full_test_suite_run_before_any_change
+      - baseline_results_recorded_in_report
+  - id: submit_for_verification
+    from: refactoring
+    to: verifying
+    actor: refactoring-specialist
+    requires:
+      - no_new_feature_or_behavior_change_introduced
+      - tests_not_modified_to_hide_failure
+  - id: submit_review
+    from: verifying
+    to: review
+    actor: refactoring-specialist
+    requires:
+      - full_test_suite_rerun_after_change
+      - post_change_results_match_baseline_or_deviation_explained
+      - non_regression_evidence_recorded
+  - id: accept
+    from: review
+    to: completed
+    actor: planner
+    requires:
+      - reviewer_approved
+      - non_regression_evidence_in_final_report
+      - docs_synced_or_skipped_with_reason
+  - id: reject
+    from: review
+    to: blocked
+    actor: reviewer
+    requires:
+      - concrete_findings
+      - report_updated
+failure_routes:
+  - condition: post_change_test_result_differs_from_baseline_without_explanation
+    action: return_to_refactoring_with_baseline_diff
+    terminal: false
+  - condition: new_feature_or_behavior_change_detected_mid_round
+    action: return_to_refactoring_and_scope_it_out_as_a_separate_task
+    terminal: false
+  - condition: retry_budget_exhausted
+    action: stop_and_escalate
+    terminal: true
+invariants:
+  - id: isolated_worktree
+    description: Same as backend-change — all work happens in an isolated
+      worktree, never directly against the main checkout.
+  - id: no_new_features
+    description: A refactor never introduces new functionality. If new,
+      genuinely useful behavior is discovered mid-round, it is scoped out
+      as a separate ticket/task rather than folded into this refactor.
+  - id: identical_observable_behavior_before_and_after
+    description: Public API responses, CLI output and every other
+      externally observable behavior must be identical before and after
+      the refactor, except for a deliberately removed dead code path or
+      similar exception the user explicitly confirmed in advance — an
+      exception like that is called out by name in the report, never
+      silently swept into "refactor".
+  - id: full_test_suite_green_before_and_after
+    description: The complete existing test suite (not only files the
+      refactor touches) is run and its result recorded before any change
+      (baseline) and again after the change (verifying) — a partial or
+      touched-files-only rerun does not satisfy this invariant.
+  - id: non_regression_evidence_in_final_report
+    description: The closing report includes the actual before/after test
+      results side by side (or references them precisely), not a bare
+      "tests pass" — the user can see exactly what ran before and after
+      and that nothing regressed.
+  - id: reviewer_required_for_code
+  - id: no_finalize_before_explicit_user_confirmation

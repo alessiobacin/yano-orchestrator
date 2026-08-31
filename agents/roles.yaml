@@ -412,7 +412,7 @@ roles:
 
   refactoring-specialist:
     activation: lazy
-    playbook: backend-change
+    playbook: refactor
     label: "Refactoring Specialist"
     brief: "Lavori solo su codice già approvato dal reviewer in un round precedente: proponi (o applichi, se il task te lo chiede esplicitamente) estrazione di classi/funzioni, semplificazione di condizioni complesse, o pattern (Strategy, Factory, ecc.) per migliorare la manutenibilità — SENZA MAI alterare il comportamento osservabile né rompere i test esistenti (rieseguili per verificarlo prima di appendere il tuo round)."
     model: { provider: llmproxy, model: llmproxy }

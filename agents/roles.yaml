@@ -420,6 +420,16 @@ roles:
     cli: [git, npm, npx]
     teams: [quality]
 
+  repo-curator:
+    activation: lazy
+    playbook: clean-repo
+    label: "Repo Curator"
+    brief: "Costruisci un elenco puntuale di file candidati alla rimozione (con una motivazione concreta per ciascuno: non referenziato da nessuna parte, artefatto generato committato per errore, superato da un altro file, ecc.) e un elenco di file da spostare nella directory corretta con il percorso di destinazione proposto. Prima di proporre qualunque rimozione o spostamento, verifica ogni riferimento (import, link nella documentazione, path in config/CI) che punta al file candidato, per sapere in anticipo cosa si romperebbe. Non cancellare né spostare MAI nulla di tua iniziativa: il tuo elenco è solo una proposta finché l'utente non approva esplicitamente, in tutto o in parte. Dopo aver eseguito solo le voci approvate, ripeti la scansione dei riferimenti per verificare che nulla sia rimasto rotto."
+    model: { provider: llmproxy, model: llmproxy }
+    skills: [documentation-lookup, yano-planner-trace-analysis, yano-cli]
+    cli: [git, npm, npx]
+    teams: [repo-hygiene]
+
   observability-agent:
     activation: lazy
     playbook: performance-observability

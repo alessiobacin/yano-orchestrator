@@ -1,0 +1,218 @@
+schema_version: 1
+id: clean-repo
+label: Repository cleanup, reorganization and documentation completeness
+description: >-
+  Cleans a repository of files that are no longer needed, moves misplaced
+  files into their proper directories, checks for now-dangling references
+  left behind by any proposed removal or relocation, audits documentation
+  completeness against a canonical set of documentation categories, and
+  creates the missing documentation files with real content drawn from the
+  repository it just audited. Nothing is ever deleted or moved on the
+  auditing role's own judgment: every candidate removal and relocation is
+  presented as an itemized, individually justified list and only the items
+  the user explicitly approves — the whole list, a subset, or none — are
+  ever executed.
+catalog:
+  scope: global
+  reusable: true
+  intents:
+    - clean-repo
+    - pulisci la repo
+    - pulizia della repository
+    - ripulisci la repo
+    - riorganizza i file
+    - riordina la repo
+    - reorganize the repository
+    - clean up the repository
+    - remove unused files
+    - rimuovi i file inutilizzati
+    - file che non servono più
+    - dangling reference
+    - riferimenti non più esistenti
+    - broken reference
+    - documentazione mancante
+    - missing documentation
+    - documentazione non aggiornata
+    - crea la documentazione mancante
+    - repository hygiene
+  exclusions:
+    - single code refactor with no file reorganization
+    - new feature implementation
+    - comparison against another repository
+    - new-content authoring unrelated to structural completeness
+  parameters:
+    - project_name
+    - project_root
+    - scope
+    - has_backend
+enforcement:
+  status: partial
+  note: The itemized-approval gate before any deletion/relocation, the
+    dangling-reference scan and the canonical documentation categories are
+    contractual; the runtime does not auto-detect unused files, backend
+    presence or documentation gaps — repo-curator and docs-sync do, and the
+    planner enforces the approval gate before applying_cleanup.
+states:
+  - id: received
+    owner: planner
+    terminal: false
+  - id: preflight
+    owner: planner
+    terminal: false
+  - id: auditing
+    owner: repo-curator
+    terminal: false
+  - id: awaiting_cleanup_confirmation
+    owner: planner_and_human
+    terminal: false
+  - id: applying_cleanup
+    owner: repo-curator
+    terminal: false
+  - id: documenting
+    owner: docs-sync
+    terminal: false
+  - id: review
+    owner: reviewer
+    terminal: false
+  - id: completed
+    owner: planner
+    terminal: true
+  - id: blocked
+    owner: planner_and_human
+    terminal: true
+transitions:
+  - id: scope
+    from: received
+    to: preflight
+    actor: planner
+    requires:
+      - objective_received
+      - cleanup_scope_confirmed
+  - id: start_audit
+    from: preflight
+    to: auditing
+    actor: planner
+    requires:
+      - required_cli_skill_mcp_checked
+      - phase_unlocked
+  - id: present_cleanup_proposal
+    from: auditing
+    to: awaiting_cleanup_confirmation
+    actor: repo-curator
+    requires:
+      - candidate_removal_list_justified_per_file
+      - candidate_relocation_list_with_target_paths
+      - dangling_reference_scan_completed_before_proposal
+      - documentation_gap_report_against_canonical_categories
+      - backend_detected_for_postman_requirement_or_explicitly_not_applicable
+  - id: confirm_cleanup
+    from: awaiting_cleanup_confirmation
+    to: applying_cleanup
+    actor: planner
+    requires:
+      - user_approved_or_edited_removal_and_relocation_list
+  - id: skip_cleanup_no_approved_items
+    from: awaiting_cleanup_confirmation
+    to: documenting
+    actor: planner
+    requires:
+      - user_declined_all_removal_and_relocation_items
+  - id: apply_and_reverify
+    from: applying_cleanup
+    to: documenting
+    actor: repo-curator
+    requires:
+      - only_approved_items_executed
+      - post_cleanup_reference_scan_clean_or_fixed
+      - no_unapproved_deletion_or_move
+  - id: submit_review
+    from: documenting
+    to: review
+    actor: docs-sync
+    requires:
+      - missing_docs_created_in_canonical_categories
+      - existing_docs_reconciled_with_current_repo_state
+      - postman_collection_present_or_explicitly_not_applicable
+  - id: accept
+    from: review
+    to: completed
+    actor: planner
+    requires:
+      - reviewer_approved
+      - cleanup_and_documentation_summary_in_final_report
+      - docs_synced_or_skipped_with_reason
+  - id: reject
+    from: review
+    to: blocked
+    actor: reviewer
+    requires:
+      - concrete_findings
+      - report_updated
+  - id: block
+    from: [auditing, awaiting_cleanup_confirmation, applying_cleanup, documenting]
+    to: blocked
+    actor: planner_and_human
+    requires:
+      - unresolved_blocker_or_ambiguous_deletion_target
+      - report_updated
+failure_routes:
+  - condition: reference_broken_after_approved_move_or_deletion
+    action: fix_reference_or_revert_the_specific_item_and_report
+    terminal: false
+  - condition: user_declines_specific_item_in_proposal
+    action: remove_item_from_approved_list_and_continue_with_the_rest
+    terminal: false
+  - condition: ambiguous_whether_file_is_still_needed
+    action: ask_user_instead_of_guessing
+    terminal: false
+  - condition: retry_budget_exhausted
+    action: stop_and_escalate
+    terminal: true
+invariants:
+  - id: isolated_worktree
+    description: Same as backend-change/refactor — all work happens in an
+      isolated worktree, never directly against the main checkout.
+  - id: no_deletion_or_move_without_explicit_itemized_user_approval
+    description: repo-curator never deletes or relocates a single file
+      during auditing; every candidate removal and relocation is presented
+      as an itemized list with a concrete per-file justification in
+      awaiting_cleanup_confirmation, and only the items the user explicitly
+      approves — the whole list, a subset, or none — are executed in
+      applying_cleanup. An item the user did not explicitly approve is left
+      untouched; silence never counts as approval.
+  - id: dangling_reference_scan_before_and_after
+    description: repo-curator scans for references (imports, doc links,
+      config paths, CI workflow paths) to every candidate removal or
+      relocation target BEFORE proposing it, to know in advance what would
+      break, and AGAIN after applying the approved changes, to catch
+      anything the pre-scan missed. A reference found broken after
+      application is fixed or the specific change is reverted — never left
+      dangling and never discovered only by the user later.
+  - id: canonical_documentation_categories
+    description: >-
+      The documentation-completeness audit checks for these categories,
+      recognizing an existing equivalent directory the project already
+      uses under a different name or location (e.g. `docs/quick_guides`
+      for quick-guides, `docs/diagramma` for diagram) before proposing a
+      new one — it never creates a duplicate parallel directory for a
+      category that already has a home: architecture/ (architecture
+      documents), guides/ (development guides), quick-guides/ (quick
+      guides with complete flows/examples of commands and options for the
+      user), adr/ (Architecture Decision Records), notes/ (technical and
+      working notes), postman/ (Postman collection — only if the project
+      is detected to have a backend; otherwise explicitly declared not
+      applicable, never silently skipped), cheat-sheet (command list),
+      diagram (mermaid diagram of the logical flow).
+  - id: missing_docs_are_real_not_placeholders
+    description: A documentation file docs-sync creates to fill a gap
+      reflects the actual current repository — real commands, real
+      endpoints, a real mermaid diagram of the real flow — never a
+      templated stub with TODOs standing in for content docs-sync could
+      have written directly from the repo it just audited.
+  - id: reviewer_required_for_code
+  - id: no_finalize_before_explicit_user_confirmation
+  - id: cleanup_and_documentation_summary_in_final_report
+    description: The closing report lists what was actually removed, what
+      was relocated (old path -> new path), what documentation files were
+      created or updated, and any proposed item the user declined — a
+      complete accounting, never just "cleanup done".

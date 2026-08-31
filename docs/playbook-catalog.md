@@ -15,6 +15,7 @@ workflow instead of launching every specialist.
 | `debate` | debater (2+ instances, planner as moderator) | topic framed, roster+model proposal confirmed by user, every opening argument independent, every rebuttal collected, synthesis naming agreement/disagreement per debater/model |
 | `backend-change` | coder, reviewer | tests, isolated diff, separate Spec/Standards review, classified findings |
 | `refactor` | refactoring-specialist, reviewer | baseline full test-suite run before any change, no new feature/behavior change, full test-suite rerun after (not only touched files), reviewer approval, explicit before/after non-regression evidence in report |
+| `clean-repo` | repo-curator, docs-sync, reviewer | itemized removal/relocation list justified per file, dangling-reference scan before and after, user approval before any deletion/move, missing docs created in the canonical categories with real content, reviewer approval |
 | `frontend-browser` | frontend-developer, frontend-reviewer, e2e-simulator, a11y-tester, design-to-code | separate UI Spec/Standards review, Playwright run, browser snapshot/trace, console/network checks |
 | `qa-hardening` | tdd-agent, mutation-tester | baseline tests, mutation/E2E result, reproducible findings |
 | `platform-delivery` | dockerizer, k8s-orchestrator, cicd-architect, cost-optimizer | build/manifest/pipeline validation and explicit environment evidence |

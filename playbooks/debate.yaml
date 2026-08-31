@@ -1,0 +1,177 @@
+schema_version: 1
+id: debate
+label: Multi-agent, multi-model structured debate
+description: >-
+  Structured debate on a topic given by the user, argued by several debater
+  instances the planner deliberately pins to different llmProxy models (via
+  `yano model-advisor`) so the diversity of opinion is real model diversity,
+  not just prompt variation. The planner acts as a neutral moderator — it
+  frames the topic and assigns stances/models, but never argues a position
+  itself. An independent opening round (no debater sees another's opening
+  argument) is followed by a rebuttal round (each debater reacts to the
+  others' opening arguments) and a synthesis that names where the debaters
+  actually agreed and where they genuinely diverged. No worktree, no team
+  confirmation, no delivery ceremony — like `conversation`, unless the
+  debate's conclusion crystallizes into a concrete deliverable, in which
+  case this run completes with a handoff_target and a brand-new run starts
+  on the recommended delivery playbook, exactly as `conversation` does.
+catalog:
+  scope: global
+  reusable: true
+  intents:
+    - debate
+    - dibattito
+    - multi-model discussion
+    - discussione multi-modello
+    - second opinion
+    - seconda opinione
+    - confronta prospettive
+    - pro e contro
+    - pros and cons
+    - quale approccio è meglio
+    - which approach is better
+    - opinioni diverse tra modelli
+  exclusions:
+    - single-model open discussion
+    - concrete deliverable already agreed
+    - code change execution
+  parameters:
+    - project_name
+    - project_root
+    - topic
+    - debater_count
+enforcement:
+  status: partial
+  note: The independent-opening-round rule, the model-diversity requirement
+    and the synthesis format are contractual; the runtime does not
+    auto-enforce them — the planner and the invariants below do.
+states:
+  - id: received
+    owner: planner
+    terminal: false
+  - id: framing
+    owner: planner
+    terminal: false
+  - id: opening_round
+    owner: debater
+    terminal: false
+  - id: rebuttal_round
+    owner: debater
+    terminal: false
+  - id: synthesizing
+    owner: planner
+    terminal: false
+  - id: completed
+    owner: planner
+    terminal: true
+  - id: blocked
+    owner: planner_and_human
+    terminal: true
+transitions:
+  - id: start_framing
+    from: received
+    to: framing
+    actor: planner
+    requires:
+      - objective_received
+  - id: launch_debate
+    from: framing
+    to: opening_round
+    actor: planner
+    requires:
+      - debate_topic_and_stances_confirmed
+      - debater_roster_and_models_proposed
+      - distinct_models_across_debaters_or_degradation_declared
+      - user_confirmed_roster_and_models
+  - id: open_rebuttal
+    from: opening_round
+    to: rebuttal_round
+    actor: planner
+    requires:
+      - every_debater_opening_argument_collected
+      - opening_arguments_shared_with_all_debaters_only_after_all_collected
+  - id: synthesize
+    from: rebuttal_round
+    to: synthesizing
+    actor: planner
+    requires:
+      - every_debater_rebuttal_collected
+  - id: conclude_debate
+    from: synthesizing
+    to: completed
+    actor: planner
+    requires:
+      - synthesis_names_agreement_and_disagreement
+      - any_model_fallback_disclosed_to_user
+  - id: block
+    from: [framing, opening_round, rebuttal_round]
+    to: blocked
+    actor: planner_and_human
+    requires:
+      - unresolved_blocker_or_insufficient_debaters
+      - report_updated
+failure_routes:
+  - condition: debater_pinned_model_becomes_unavailable_mid_round
+    action: fallback_to_llmproxy_auto_and_continue_round
+    terminal: false
+  - condition: fewer_than_two_debaters_can_be_launched
+    action: report_gap_and_ask_user_how_to_proceed
+    terminal: true
+  - condition: debater_refuses_assigned_stance_or_produces_no_argument
+    action: reassign_or_drop_debater_and_note_in_synthesis
+    terminal: false
+invariants:
+  - id: no_worktree_created_for_debate
+    description: The state machine has no transition capable of calling
+      worktree_create; received/framing/opening_round/rebuttal_round/
+      synthesizing/completed never touch a worktree.
+  - id: no_delivery_ceremony_without_crystallized_intent
+    description: No plan_set, no final-checks style transition and no
+      team-confirmation hold exists anywhere in this playbook; debater
+      instances are launched directly once the roster/model proposal is
+      confirmed, the same way conversation.yaml keeps the planner itself
+      free of delivery ceremony.
+  - id: planner_acts_as_moderator_never_a_debater
+    description: The planner frames the topic, assigns stances and models,
+      collects arguments and writes the synthesis, but never submits an
+      opening argument or a rebuttal as one of the debate's own positions —
+      it stays neutral so the synthesis is not the moderator's own view
+      dressed up as a summary.
+  - id: opening_arguments_are_independent
+    description: During opening_round the planner does not forward any
+      debater's argument to another debater until every debater assigned
+      to this round has submitted theirs; anchoring one debater on another's
+      opening framing defeats the reason for a parallel independent round.
+  - id: model_diversity_is_the_point
+    description: When proposing the debater roster (see "### Modelli per
+      agente" in prompts/planner.md), the planner assigns at least two
+      distinct pinned models across the debater instances whenever the live
+      `yano model-advisor` catalog offers at least two viable
+      `coordinator`-class options. If the catalog is unreachable or offers
+      fewer than two viable options, the planner declares this degradation
+      explicitly in the roster proposal instead of silently running every
+      debater on the same model without saying so.
+  - id: same_fallback_contract_as_model_advisor
+    description: A debater's pinned model that stops responding mid-round
+      for a provider/auth error follows the exact fallback chain already
+      defined in prompts/planner.md's "### Modelli per agente" — pinned
+      model -> `llmproxy` auto -> real error only if auto also fails — and
+      is disclosed in the closing synthesis (see
+      any_model_fallback_disclosed_to_user on conclude_debate), never
+      silently dropped.
+  - id: handoff_creates_new_run_never_rebinds_playbook
+    description: playbook_bind is immutable for the life of a run
+      everywhere in this codebase; if the debate's synthesis reveals a
+      concrete, agreed-on deliverable, this run transitions to completed
+      with a handoff_target recorded and a brand-new run (new worktree,
+      new plan, new playbook_bind) is created only after the user confirms
+      the handoff — this run never tries to swap its own bound playbook.
+  - id: synthesis_names_agreement_and_disagreement
+    description: The closing synthesis explicitly attributes each notable
+      position to which debater/model held it and names where the debaters
+      actually converged versus where they genuinely diverged, instead of
+      collapsing the debate into a single blended answer that hides the
+      disagreement.
+  - id: no_finalize_without_synthesis_presented
+    description: completed is only reached after the synthesis has been
+      presented to the user in synthesizing; it is never reached mid-round.

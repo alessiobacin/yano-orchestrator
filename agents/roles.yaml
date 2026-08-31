@@ -270,6 +270,16 @@ roles:
     cli: [git, npm, npx, curl]
     teams: [qa]
 
+  debater:
+    activation: lazy
+    playbook: debate
+    label: "Debater"
+    brief: "Argomenta la posizione/stance assegnata dal planner sul topic del dibattito in modo indipendente nel turno di apertura, senza vedere gli argomenti degli altri debater; nel turno di replica rispondi nel merito ai loro argomenti con la stessa onestà intellettuale che useresti in una code review — obietta con motivazioni concrete, non per partito preso, e dichiara se un controargomento ti ha davvero convinto a cambiare posizione."
+    model: { provider: llmproxy, model: llmproxy }
+    skills: [documentation-lookup, yano-planner-trace-analysis, yano-cli]
+    cli: [git]
+    teams: [debate]
+
   e2e-simulator:
     activation: lazy
     playbook: frontend-browser

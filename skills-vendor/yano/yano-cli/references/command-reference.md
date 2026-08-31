@@ -31,6 +31,7 @@ yano watcher projects [options]
 yano debugger [subcommand] [options]
 yano auto-improve [subcommand] [options]
 yano suggester [subcommand] [options]
+yano model-advisor [subcommand] [options]
 yano playbook [subcommand] [options]
 yano agent [subcommand] [options]
 ```
@@ -269,6 +270,10 @@ yano suggester complete --suggestion-id <id> --report-file <temp-file> --categor
 yano suggester approve --suggestion-id <id> --actor <superadmin> --yes
 yano suggester reject --suggestion-id <id> --actor <superadmin> --reason <text> --yes
 yano suggester serve [--port <port>] [--host <host>] [--json]  # REST API — see docs/yano-suggester.md#api-rest-yano-suggester-serve
+
+yano model-advisor catalog [--json]                             # catalogo llmProxy normalizzato
+yano model-advisor recommend --role-class coordinator|support [--vision] [--json]  # provider:model pinnato migliore per la role-class
+yano model-advisor explain --role-class coordinator|support [--vision] [--json]    # come recommend, ma con l'intera classifica motivata — see docs/yano-model-advisor.md
 ```
 
 All three external agents have read-only contracts against the reference

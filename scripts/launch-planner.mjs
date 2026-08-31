@@ -249,7 +249,7 @@ function ephemeralRoleManifest({ proposalId, role, cwd }) {
 			activation: "lazy",
 			playbook: manifest.playbook_id,
 			playbook_path: playbookPath,
-			model: { provider: "llmproxy", model: "reasoning-model" },
+			model: { provider: "llmproxy", model: "llmproxy" },
 			skills: capabilities.skills || [],
 			cli: capabilities.cli || [],
 			mcp: capabilities.mcp || [],

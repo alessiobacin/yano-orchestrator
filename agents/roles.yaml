@@ -7,7 +7,7 @@ roles:
     playbook: default
     model:
       provider: llmproxy
-      model: reasoning-model
+      model: llmproxy
     skills:
       - task-decomposition
       - wayfinder
@@ -25,7 +25,7 @@ roles:
     playbook: backend-change
     model:
       provider: llmproxy
-      model: coding-model
+      model: llmproxy
     skills:
       - tdd-development
       - yano-planner-trace-analysis
@@ -43,7 +43,7 @@ roles:
     playbook: backend-change
     model:
       provider: llmproxy
-      model: reasoning-model
+      model: llmproxy
     skills:
       - code-review
       - yano-code-review
@@ -63,7 +63,7 @@ roles:
     brief: "Gestisci bug applicativi in modo esclusivamente diagnostico: raccogli il contesto trace, riproduci senza modificare il progetto, redigi evidenze e inoltra la diagnosi al planner. Non correggere codice, test o configurazioni e non fare deploy."
     model:
       provider: llmproxy
-      model: coding-model
+      model: llmproxy
     skills:
       - yano-observer
       - yano-planner-trace-analysis
@@ -81,7 +81,7 @@ roles:
     brief: "Esegui audit periodici read-only del progetto: correlando codice, test, documentazione, trace, bug e feedback produci raccomandazioni prioritizzate e inviale al planner. Non modificare mai il progetto, non creare ticket operativi autonomamente e non eseguire deploy."
     model:
       provider: llmproxy
-      model: reasoning-model
+      model: llmproxy
     skills:
       - yano-observer
       - yano-auto-improvement
@@ -100,7 +100,7 @@ roles:
     brief: "Raccogli e analizza suggerimenti utenti in modo esclusivamente read-only: deduplica, valuta valore/rischio/complessità, redigi una proposta e attendi l'approvazione del superadmin prima di notificare il planner. Non modificare il progetto, non creare ticket operativi e non fare deploy."
     model:
       provider: llmproxy
-      model: reasoning-model
+      model: llmproxy
     skills:
       - yano-observer
       - yano-suggester
@@ -119,7 +119,7 @@ roles:
     brief: "Osserva un progetto e il round di validazione di un playbook in modo esclusivamente read-only. Usa yano watch e il trace per rilevare stall, target offline, errori di routing o capability non rispettate; comunica evidenze al planner e non modificare mai codice, test, configurazioni, dati, ticket operativi o deployment del progetto osservato."
     model:
       provider: llmproxy
-      model: reasoning-model
+      model: llmproxy
     skills:
       - yano-observer
       - yano-planner-trace-analysis
@@ -137,7 +137,7 @@ roles:
     brief: "Esegui il percorso controllato development → staging → production: verifica lo stack reale, assegna e conserva la matrice di porte Yano, lascia development sul codice sorgente, dockerizza staging e production, valida healthcheck/smoke test, conserva digest e rollback checkpoint e non promuove production senza approvazione esplicita."
     model:
       provider: llmproxy
-      model: reasoning-model
+      model: llmproxy
     skills:
       - yano-deployment
       - yano-planner-trace-analysis
@@ -155,7 +155,7 @@ roles:
     brief: "Progetta e prepara playbook e ruoli specialistici nel catalogo globale Yano. Verifica e, quando autorizzato, provvisiona skill, CLI e MCP; non modificare mai il progetto di riferimento. Un playbook resta non operativo finché tutte le capability richieste non risultano verificate. Gestisci revisioni ephemeral e promozione persistente solo dopo validazione del watcher e feedback positivo del planner/utente."
     model:
       provider: llmproxy
-      model: reasoning-model
+      model: llmproxy
     skills:
       - yano-architect
       - yano-planner-trace-analysis
@@ -171,7 +171,7 @@ roles:
     playbook: knowledge-authoring
     label: "Market Researcher"
     brief: "Ricerca mercato, audience, competitor e fonti per un playbook globale di knowledge authoring. Produce solo report intermedi e non modifica i documenti finali."
-    model: { provider: llmproxy, model: reasoning-model }
+    model: { provider: llmproxy, model: llmproxy }
     skills: [research, documentation-lookup, yano-planner-trace-analysis, yano-cli]
     cli: [git, npx]
     mcp: []
@@ -182,7 +182,7 @@ roles:
     playbook: knowledge-authoring
     label: "SEO Strategist"
     brief: "Definisci search intent, keyword, opportunità SEO e information architecture. Scrivi solo gli artefatti SEO intermedi assegnati."
-    model: { provider: llmproxy, model: reasoning-model }
+    model: { provider: llmproxy, model: llmproxy }
     skills: [research, documentation-lookup, copywriting, yano-planner-trace-analysis, yano-cli]
     cli: [git, npx]
     mcp: []
@@ -193,7 +193,7 @@ roles:
     playbook: knowledge-authoring
     label: "Website Content Strategist"
     brief: "Trasforma ricerca e SEO in posizionamento, messaging, struttura del sito e content brief senza scrivere il deliverable finale."
-    model: { provider: llmproxy, model: reasoning-model }
+    model: { provider: llmproxy, model: llmproxy }
     skills: [copywriting, documentation-writer, yano-planner-trace-analysis, yano-cli]
     cli: [git, npx]
     mcp: []
@@ -204,7 +204,7 @@ roles:
     playbook: knowledge-authoring
     label: "Business Docs Author"
     brief: "Sintetizza gli input approvati in documenti Markdown business completi e strutturati. È l'unico ruolo autorizzato a scrivere i documenti finali in docs/."
-    model: { provider: llmproxy, model: reasoning-model }
+    model: { provider: llmproxy, model: llmproxy }
     skills: [documentation-writer, documentation-lookup, copywriting, yano-planner-trace-analysis, yano-cli]
     cli: [git, npx]
     mcp: []
@@ -215,7 +215,7 @@ roles:
     playbook: knowledge-authoring
     label: "Business Docs Reviewer"
     brief: "Revisiona tracciabilità delle fonti, coerenza, duplicazioni, completezza e rispetto del template senza modificare direttamente i deliverable finali."
-    model: { provider: llmproxy, model: reasoning-model }
+    model: { provider: llmproxy, model: llmproxy }
     skills: [documentation-writer, documentation-lookup, yano-planner-trace-analysis, yano-cli]
     cli: [git, npx]
     mcp: []
@@ -235,7 +235,7 @@ roles:
     playbook: qa-hardening
     label: "TDD Agent (Test Generator)"
     brief: "Scrivi i test (unit e integration) PRIMA che il coder implementi, basandoti sulla specifica nel file di report — poi lavora a stretto contatto col coder finché la copertura dei casi che hai previsto non è soddisfatta."
-    model: { provider: llmproxy, model: coding-model }
+    model: { provider: llmproxy, model: llmproxy }
     skills: [tdd-development, yano-planner-trace-analysis, yano-cli]
     cli: [git, npm, npx]
     teams: [core]
@@ -245,7 +245,7 @@ roles:
     playbook: qa-hardening
     label: "Mutation Tester / Fuzzer"
     brief: "Non ti limiti a eseguire i test del coder: modifichi leggermente il codice (mutation testing) o inietti input casuali/limite (fuzzing) per verificare che i test siano davvero robusti e non diano un falso senso di sicurezza — se un test continua a passare con una mutazione che ne rompe la logica, segnalalo come test debole da rinforzare."
-    model: { provider: llmproxy, model: coding-model }
+    model: { provider: llmproxy, model: llmproxy }
     skills: [mutation-testing, yano-planner-trace-analysis, yano-cli]
     cli: [git, npm, npx]
     teams: [qa]
@@ -255,7 +255,7 @@ roles:
     playbook: qa-full-audit
     label: "QA Inventory Analyst"
     brief: "Costruisci la matrice canonica di tutte le funzionalità, i comandi, gli endpoint e le opzioni dichiarati dal progetto target (README, guide, --help reale, command-reference, spec, e per Yano stesso anche playbook/roles/skill) e per ciascuna voce fissa il risultato atteso (output, exit code, effetto collaterale, invariante) prima che qa-functional-verifier esegua qualunque test — non esegui tu i comandi, scrivi il contratto verificabile."
-    model: { provider: llmproxy, model: reasoning-model }
+    model: { provider: llmproxy, model: llmproxy }
     skills: [documentation-lookup, yano-planner-trace-analysis, yano-cli]
     cli: [git, npm, npx]
     teams: [qa]
@@ -265,7 +265,7 @@ roles:
     playbook: qa-full-audit
     label: "QA Functional Verifier"
     brief: "Esegui davvero, in worktree/sandbox isolata e mai su dati o ambienti di produzione, ogni voce della matrice di qa-inventory-analyst — confronta atteso vs osservato con evidenza riproducibile (comando, exit code, output) e classifica PASS/FAIL/BLOCKED. Coordina in parallelo gli specialisti già esistenti pertinenti (security-evaluator, e2e-simulator, a11y-tester, speed-benchmarker, dependency-health, mutation-tester) invece di duplicarne il lavoro, e dopo ogni ciclo di remediation riesegui l'INTERA matrice, non solo le voci corrette, prima di dichiarare il gate verde."
-    model: { provider: llmproxy, model: coding-model }
+    model: { provider: llmproxy, model: llmproxy }
     skills: [tdd-development, yano-planner-trace-analysis, yano-cli]
     cli: [git, npm, npx, curl]
     teams: [qa]
@@ -275,7 +275,7 @@ roles:
     playbook: frontend-browser
     label: "E2E User Simulator"
     brief: "Scrivi e mantieni test end-to-end (es. Playwright/Cypress) che simulano il flusso reale di un utente sul frontend, coordinandoti con frontend-developer per i selettori/flussi UI da coprire."
-    model: { provider: llmproxy, model: coding-model }
+    model: { provider: llmproxy, model: llmproxy }
     skills: [e2e-testing, playwright-best-practices, playwright-cli, yano-planner-trace-analysis, yano-cli]
     cli: [git, npm, npx, playwright-cli]
     mcp: [chrome-devtools]
@@ -287,7 +287,7 @@ roles:
     playbook: platform-delivery
     label: "Dockerizer"
     brief: "Scrivi/aggiorna Dockerfile e docker-compose per il progetto, ottimizzando layer e caching (multi-stage build, minimizzazione della dimensione dell'immagine)."
-    model: { provider: llmproxy, model: coding-model }
+    model: { provider: llmproxy, model: llmproxy }
     skills: [containerization, yano-planner-trace-analysis, yano-cli]
     cli: [git, docker, docker-compose]
     teams: [platform]
@@ -297,7 +297,7 @@ roles:
     playbook: platform-delivery
     label: "Kubernetes Orchestrator / Helmizer"
     brief: "Scrivi/aggiorna i manifest Kubernetes (deployment.yaml, service.yaml, ingress.yaml) e gli chart Helm — usi quello che dockerizer ha preparato, non lo rifai."
-    model: { provider: llmproxy, model: coding-model }
+    model: { provider: llmproxy, model: llmproxy }
     skills: [kubernetes, yano-planner-trace-analysis, yano-cli]
     cli: [git, kubectl, helm]
     teams: [platform]
@@ -307,7 +307,7 @@ roles:
     playbook: platform-delivery
     label: "CI/CD Pipeline Architect"
     brief: "Crei/aggiorni i file di configurazione della pipeline (GitHub Actions, GitLab CI, o Jenkins secondo cosa già usa il progetto), decidendo su quali branch far girare i test, come impostare il build caching, e la strategia di rollout (es. blue/green) se rilevante."
-    model: { provider: llmproxy, model: coding-model }
+    model: { provider: llmproxy, model: llmproxy }
     skills: [ci-cd, yano-planner-trace-analysis, yano-cli]
     cli: [git, gh, npm]
     mcp: [github]
@@ -318,7 +318,7 @@ roles:
     playbook: platform-delivery
     label: "Cloud Cost Estimator / Optimizer"
     brief: "Analizzi le risorse CPU/RAM richieste dai manifest/config del progetto e suggerisci istanze AWS/Azure/GCP più economiche o l'uso di spot instance dove ha senso — sei consultivo, documenti la stima nel report, non applichi cambi infra da solo senza che coder/k8s-orchestrator li rivedano."
-    model: { provider: llmproxy, model: reasoning-model }
+    model: { provider: llmproxy, model: llmproxy }
     skills: [cost-analysis, yano-planner-trace-analysis, yano-cli]
     cli: [git, npx]
     teams: [platform]
@@ -329,7 +329,7 @@ roles:
     playbook: data-api-contract
     label: "Schema Migrator / ORM Optimizer"
     brief: "Gestisci le migrazioni del database (es. Alembic, Flyway) per lo schema toccato dal task; inoltre analizzi le query scritte dal coder e suggerisci indici specifici o riscrivi query N+1 per abbattere i tempi di risposta."
-    model: { provider: llmproxy, model: coding-model }
+    model: { provider: llmproxy, model: llmproxy }
     skills: [database-migration, yano-planner-trace-analysis, yano-cli]
     cli: [git, npm, npx, mongosh]
     mcp: [mongodb]
@@ -340,7 +340,7 @@ roles:
     playbook: data-api-contract
     label: "Data Seeder / Mock Builder"
     brief: "Popoli il database di sviluppo nel worktree con dati fittizi realistici (e compliant, niente dati reali/PII) utili per il test manuale e per frontend-developer."
-    model: { provider: llmproxy, model: coding-model }
+    model: { provider: llmproxy, model: llmproxy }
     skills: [data-seeding, yano-planner-trace-analysis, yano-cli]
     cli: [git, npm, npx, mongosh]
     mcp: [mongodb]
@@ -352,7 +352,7 @@ roles:
     playbook: data-api-contract
     label: "OpenAPI / AsyncAPI Spec Writer"
     brief: "Mantieni sincronizzato openapi.json/swagger.yaml (o l'equivalente AsyncAPI) con gli endpoint reali del codice nel worktree, e se il progetto lo prevede genera/aggiorna la documentazione interattiva (es. SwaggerUI) e gli SDK client per frontend-developer."
-    model: { provider: llmproxy, model: coding-model }
+    model: { provider: llmproxy, model: llmproxy }
     skills: [api-documentation, yano-planner-trace-analysis, yano-cli]
     cli: [git, npx, postman]
     mcp: [github]
@@ -363,7 +363,7 @@ roles:
     playbook: documentation-release
     label: "Architecture Diagrammer"
     brief: "Leggi il codice e i file di infrastruttura nel worktree e genera/aggiorna diagrammi d'architettura in **Mermaid** (stile C4: system context, container, component secondo cosa è cambiato), salvandoli come blocchi ```mermaid``` dentro un file markdown (es. docs/architecture-diagram.md) così si rendono automaticamente in GitHub e in qualunque viewer markdown, senza bisogno di generare immagini a parte. Aggiorna sempre anche .pi/extensions/yano-orchestrator/diagrams/architecture.mmd (Revisione 28) con la stessa vista, ma come sorgente Mermaid pura (senza il markdown/```mermaid``` attorno), rappresentante lo stato CORRENTE COMPLETO del progetto (non solo la feature di questo task) — è il file che ogni altro agente legge PRIMA di esplorare il codice da zero (risparmio di token), quindi deve restare sempre allineato, non solo il diagramma pubblicato in docs/. Non confonderlo con docs/architecture.mmd del pacchetto yano-orchestrator stesso (quello documenta il flusso interno dell'estensione, non il progetto che stai costruendo)."
-    model: { provider: llmproxy, model: reasoning-model }
+    model: { provider: llmproxy, model: llmproxy }
     skills: [architecture-documentation, yano-planner-trace-analysis, yano-cli]
     cli: [git]
     teams: [core]
@@ -373,7 +373,7 @@ roles:
     playbook: documentation-release
     label: "Release Notes & Changelog Generator"
     brief: "Confronti i commit tra due release (o tra l'inizio e la fine di questo task) e scrivi un changelog comprensibile per il cliente, categorizzando le voci in features/fix/breaking changes."
-    model: { provider: llmproxy, model: reasoning-model }
+    model: { provider: llmproxy, model: llmproxy }
     skills: [changelog-writing, yano-planner-trace-analysis, yano-cli]
     cli: [git, gh]
     mcp: [github]
@@ -384,7 +384,7 @@ roles:
     playbook: documentation-release
     label: "Documentation Sync Agent"
     brief: "Sei SEMPRE l'ultima fase di ogni piano (Revisione 24 — plan_set lo impone). Per task di sviluppo: verifichi che README, i doc di progetto (es. docs/*.md) e le spec API (se openapi-writer le mantiene) siano coerenti con lo stato REALE del codice nel worktree — funzioni pubbliche, endpoint, flag CLI, tool registrati — e che copra almeno cos'è il progetto, come installarlo, cosa è stato fatto in QUESTO task, come usarlo. Per task che non toccano codice (analisi, migrazioni infra, task una tantum) scrivi comunque documentazione, ma mirata a cosa è stato effettivamente fatto — non serve una sezione di installazione se non è pertinente, usa il buon senso sul task. Se trovi disallineamenti li correggi tu direttamente (è un task di documentazione, non serve passare dal coder) e registri tutto nel file di report."
-    model: { provider: llmproxy, model: reasoning-model }
+    model: { provider: llmproxy, model: llmproxy }
     skills: [documentation-review, yano-planner-trace-analysis, yano-cli]
     cli: [git, npx]
     teams: [core, documentation]
@@ -395,7 +395,7 @@ roles:
     playbook: security-review
     label: "Dependency Health Agent"
     brief: "Verifichi le dipendenze del progetto per versioni obsolete o vulnerabili; a differenza di un bot automatico, controlli anche il breaking-changelog delle versioni nuove e suggerisci al coder le modifiche di codice necessarie per adattarsi, invece di limitarti ad alzare un numero di versione."
-    model: { provider: llmproxy, model: reasoning-model }
+    model: { provider: llmproxy, model: llmproxy }
     skills: [dependency-management, yano-planner-trace-analysis, yano-cli]
     cli: [git, npm]
     teams: [quality]
@@ -405,7 +405,7 @@ roles:
     playbook: backend-change
     label: "Refactoring Specialist"
     brief: "Lavori solo su codice già approvato dal reviewer in un round precedente: proponi (o applichi, se il task te lo chiede esplicitamente) estrazione di classi/funzioni, semplificazione di condizioni complesse, o pattern (Strategy, Factory, ecc.) per migliorare la manutenibilità — SENZA MAI alterare il comportamento osservabile né rompere i test esistenti (rieseguili per verificarlo prima di appendere il tuo round)."
-    model: { provider: llmproxy, model: reasoning-model }
+    model: { provider: llmproxy, model: llmproxy }
     skills: [refactoring, yano-planner-trace-analysis, yano-cli]
     cli: [git, npm, npx]
     teams: [quality]
@@ -415,7 +415,7 @@ roles:
     playbook: performance-observability
     label: "Observability / Logger Agent"
     brief: "Inietti logging strutturato (JSON) e metriche chiave (es. durata delle chiamate DB, conteggio errori) nel codice del worktree, in modo che il software sia pronto per il monitoring (stile Prometheus/OpenTelemetry) senza cambiare la logica applicativa."
-    model: { provider: llmproxy, model: coding-model }
+    model: { provider: llmproxy, model: llmproxy }
     skills: [observability, yano-planner-trace-analysis, yano-cli]
     cli: [git]
     teams: [quality, platform]
@@ -425,7 +425,7 @@ roles:
     playbook: security-review
     label: "Security Evaluator"
     brief: "Analizzi il codice e le dipendenze nel worktree per vulnerabilità note (SAST, CVE nelle dipendenze), verifichi la gestione di secrets/input validation/autenticazione, e segnali al coder (con target_role: \"coder\") ogni problema concreto trovato, con file/riga e comportamento atteso. Nota (Revisione 20): i controlli di igiene HTTP generici (limite dimensione body, niente leak di errori interni) sono già nella checklist standard di reviewer — concentrati su ciò che richiede davvero competenza specialistica (autenticazione, injection, CVE nelle dipendenze, gestione secrets), non ripetere quei due controlli generici a meno che tu non trovi qualcosa che reviewer ha comunque lasciato passare."
-    model: { provider: llmproxy, model: premium-reasoning-model }
+    model: { provider: llmproxy, model: llmproxy }
     skills: [security-review, yano-planner-trace-analysis, yano-cli]
     cli: [git, semgrep]
     mcp: [github]
@@ -437,7 +437,7 @@ roles:
     playbook: frontend-browser
     label: "Frontend Developer"
     brief: "Implementi/aggiorni i componenti UI nel worktree secondo la specifica del task, integrandoti con le API già esposte dal coder backend (o segnalando a coder cosa manca lato API)."
-    model: { provider: llmproxy, model: coding-model }
+    model: { provider: llmproxy, model: llmproxy }
     skills: [frontend-development, playwright-cli, chrome-devtools, code-review, yano-planner-trace-analysis, yano-cli]
     cli: [git, npm, npx, playwright-cli]
     mcp: [chrome-devtools]
@@ -448,7 +448,7 @@ roles:
     playbook: frontend-browser
     label: "Frontend Reviewer"
     brief: "Rivedi esclusivamente il lavoro UI del frontend-developer: usa playwright-cli per aprire e verificare il flusso reale nel browser, chrome-devtools per console/rete/screenshot e la checklist code-review per qualità, regressioni e test. Rimanda le correzioni al frontend-developer e informa il planner solo dopo un'approvazione verificata."
-    model: { provider: llmproxy, model: reasoning-model }
+    model: { provider: llmproxy, model: llmproxy }
     skills: [code-review, yano-code-review, playwright-cli, chrome-devtools, yano-planner-trace-analysis, yano-cli]
     cli: [git, npm, npx, playwright-cli]
     mcp: [chrome-devtools]
@@ -459,7 +459,7 @@ roles:
     playbook: frontend-browser
     label: "Responsiveness & A11y Tester"
     brief: "Testi il lavoro di frontend-developer su più viewport, verifichi i contrasti colore, gli attributi ARIA e la navigazione da tastiera — se trovi problemi di accessibilità o responsività, li segnali a frontend-developer con dettagli concreti (elemento, viewport, cosa non funziona)."
-    model: { provider: llmproxy, model: reasoning-model }
+    model: { provider: llmproxy, model: llmproxy }
     skills: [accessibility-testing, playwright-best-practices, playwright-cli, yano-planner-trace-analysis, yano-cli]
     cli: [git, npm, npx, playwright-cli]
     mcp: [chrome-devtools]
@@ -470,7 +470,7 @@ roles:
     playbook: frontend-browser
     label: "Design-to-Code Transformer"
     brief: "Se il planner ha ricevuto un riferimento a un design (es. Figma), converti quel layout in codice (CSS/Tailwind o componenti React/Vue secondo lo stack del progetto) che frontend-developer poi integra con la logica di stato — non implementi tu la logica applicativa, solo la trasposizione visuale."
-    model: { provider: llmproxy, model: coding-model }
+    model: { provider: llmproxy, model: llmproxy }
     skills: [design-to-code, yano-planner-trace-analysis, yano-cli]
     cli: [git, npm, npx]
     teams: [frontend]
@@ -480,7 +480,7 @@ roles:
     playbook: performance-observability
     label: "Speed Benchmarker"
     brief: "Esegui benchmark di performance reali (tempo di risposta, throughput) sulle funzioni/endpoint toccati dal task, confrontando il risultato con il round precedente se esiste nel report — segnali regressioni concrete, non stime teoriche."
-    model: { provider: llmproxy, model: coding-model }
+    model: { provider: llmproxy, model: llmproxy }
     skills: [performance-benchmarking, playwright-best-practices, yano-planner-trace-analysis, yano-cli]
     cli: [git, npm, npx, playwright-cli]
     mcp: [chrome-devtools]

@@ -40,6 +40,10 @@
 //   yano debugger           registra e gestisce bug applicativi con un worker Herdr esterno
 //   yano auto-improve       esegue audit periodici read-only e inoltra report al planner
 //   yano suggester          raccoglie proposte utenti read-only e le inoltra dopo approvazione
+//   yano model-advisor     propone un provider:model pinnato per role-class
+//                        in base ai dati live di llmProxy (costo/coding/
+//                        latenza) — delega a scripts/yano-model-advisor.mjs
+//                        (runYanoModelAdvisor()).
 //   yano architect          crea, prepara e promuove playbook/ruoli globali
 //   yano playbook|agent     consulta il catalogo globale di playbook e ruoli
 //
@@ -73,6 +77,7 @@ import { runYanoDebugger } from "../scripts/yano-debugger.mjs";
 import { runYanoWatcherRegistry } from "../scripts/yano-watcher-registry.mjs";
 import { runYanoAutoImprove } from "../scripts/yano-auto-improver.mjs";
 import { runYanoSuggester } from "../scripts/yano-suggester.mjs";
+import { runYanoModelAdvisor } from "../scripts/yano-model-advisor.mjs";
 import { runYanoArchitect } from "../scripts/yano-architect.mjs";
 import { runYanoCatalog } from "../scripts/yano-catalog.mjs";
 import { runYanoData } from "../scripts/yano-data.mjs";
@@ -122,6 +127,7 @@ function printTopUsage() {
 			"  debugger [opzioni] Gestisce bug applicativi e worker esterni — `yano debugger --help`",
 			"  auto-improve [opzioni] Audit periodici read-only e report al planner — `yano auto-improve --help`",
 			"  suggester [opzioni]  Suggerimenti utenti read-only e gate superadmin — `yano suggester --help`",
+			"  model-advisor [opzioni] Propone un provider:model pinnato da llmProxy per role-class — `yano model-advisor --help`",
 			"  architect [opzioni]  Progetta/provisiona playbook e ruoli globali — `yano architect --help`",
 			"  playbook|agent [opzioni] Catalogo read-only di playbook, ruoli e capability",
 			"  config [opzioni] Gestisce la configurazione globale utente — `yano config --help`",
@@ -243,6 +249,10 @@ async function main() {
 			return;
 		}
 		await runYanoSuggester({ argv: rest });
+		return;
+	}
+	if (sub === "model-advisor") {
+		await runYanoModelAdvisor({ argv: rest });
 		return;
 	}
 	if (sub === "architect") {

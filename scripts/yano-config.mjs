@@ -19,6 +19,8 @@ export const CONFIG_SPECS = Object.freeze([
 	{ key: "YANO_AUTO_IMPROVER_API_TOKEN", secret: true, description: "token Bearer opzionale per proteggere l'API REST di auto-improver" },
 	{ key: "YANO_SUGGESTER_API_PORT", description: "porta HTTP per l'API REST di suggester (yano suggester serve; default 4179)" },
 	{ key: "YANO_SUGGESTER_API_TOKEN", secret: true, description: "token Bearer opzionale per proteggere l'API REST di suggester" },
+	{ key: "YANO_LLMPROXY_URL", description: "base URL del servizio llmProxy usato dal model-advisor (default http://127.0.0.1:7045)" },
+	{ key: "YANO_LLMPROXY_API_KEY", secret: true, description: "API key opzionale per l'API REST di llmProxy (Authorization: Bearer), se il gate è attivo" },
 	{ key: "YANO_OLLAMA_URL", description: "endpoint Ollama per gli embeddings" },
 	{ key: "OLLAMA_HOST", description: "endpoint Ollama legacy/compatibilità" },
 	{ key: "YANO_EMBEDDING_MODEL", description: "modello Ollama per gli embeddings" },

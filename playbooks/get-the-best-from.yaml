@@ -1,0 +1,165 @@
+schema_version: 1
+id: get-the-best-from
+label: Comparative repository benchmarking — what to import from another repo
+description: >-
+  Compares the current project against another repository given as a
+  GitHub link to identify where each is genuinely stronger and what
+  concrete logic, pattern or approach could be imported into the current
+  project. The planner frames the comparison (scope, focus areas, the
+  reference repository's URL), launches two independent repo-benchmarker
+  instances — one analyzing only the current project, one analyzing only
+  the reference repository, each blind to the other's findings until both
+  are done — then synthesizes a side-by-side comparison and a concrete,
+  citation-backed list of what could be imported. Strictly read-only on
+  both repositories: no worktree, no delivery ceremony, nothing is ever
+  written to the reference repository and the current project's real code
+  is never touched during the comparison itself. If the conclusion is to
+  actually import something, this run completes with a handoff_target and
+  a brand-new run starts on the appropriate delivery playbook, exactly as
+  `conversation`/`debate` already do — it never rebinds its own
+  playbook_bind.
+catalog:
+  scope: global
+  reusable: true
+  intents:
+    - get-the-best-from
+    - confronta il repository con
+    - confronta il progetto con
+    - compare our repository with
+    - compare our project with
+    - qualcosa da importare da un altro progetto
+    - possiamo prendere qualcosa da un altro progetto
+    - benchmark against another repository
+    - confronto con un'altra repository
+    - fa meglio questo altro progetto
+    - analizza questo repository github e confronta
+    - learn from another repository
+    - ispirati a un altro progetto github
+  exclusions:
+    - single-repo self-audit with no external reference repository
+    - actually implementing an imported pattern (handled by a delivery
+      playbook after an explicit handoff)
+    - abstract debate between options with no concrete reference repository
+  parameters:
+    - project_name
+    - project_root
+    - reference_repo_url
+    - focus_areas
+enforcement:
+  status: partial
+  note: The independent-analysis-before-comparison rule, the
+    read-only-on-both-repositories rule and the citation requirement are
+    contractual; the runtime does not auto-enforce them — the planner and
+    the invariants below do.
+states:
+  - id: received
+    owner: planner
+    terminal: false
+  - id: framing
+    owner: planner
+    terminal: false
+  - id: analyzing
+    owner: repo-benchmarker
+    terminal: false
+  - id: comparing
+    owner: planner
+    terminal: false
+  - id: completed
+    owner: planner
+    terminal: true
+  - id: blocked
+    owner: planner_and_human
+    terminal: true
+transitions:
+  - id: start_framing
+    from: received
+    to: framing
+    actor: planner
+    requires:
+      - objective_received
+  - id: launch_benchmark
+    from: framing
+    to: analyzing
+    actor: planner
+    requires:
+      - reference_repository_url_confirmed
+      - focus_areas_confirmed_or_defaulted_to_full_comparison
+      - both_repositories_confirmed_readable
+  - id: collect_and_compare
+    from: analyzing
+    to: comparing
+    actor: planner
+    requires:
+      - both_analyses_completed_independently
+      - analyses_not_shared_between_instances_until_both_done
+      - evidence_has_file_and_line_references
+  - id: present_comparison
+    from: comparing
+    to: completed
+    actor: planner
+    requires:
+      - side_by_side_strengths_and_weaknesses_presented
+      - concrete_import_candidates_listed_with_citations
+      - user_informed_of_handoff_option
+  - id: block
+    from: [framing, analyzing, comparing]
+    to: blocked
+    actor: planner_and_human
+    requires:
+      - unresolved_blocker_or_repository_unreachable
+      - report_updated
+failure_routes:
+  - condition: reference_repository_unreachable_or_private_without_access
+    action: report_gap_and_ask_user_for_access_or_alternative
+    terminal: true
+  - condition: reference_repository_too_large_or_out_of_scope
+    action: narrow_scope_with_user_focus_areas
+    terminal: false
+  - condition: retry_budget_exhausted
+    action: stop_and_escalate
+    terminal: true
+invariants:
+  - id: read_only_on_both_repositories
+    description: repo-benchmarker never writes to the reference repository
+      (no push, no fork, no PR) and never modifies the current project's
+      real files during analyzing/comparing; the reference repository is
+      only cloned or fetched into an isolated temporary location, never
+      into the current project's own worktree.
+  - id: independent_analysis_before_comparison
+    description: Mirrors debate.yaml's opening_arguments_are_independent —
+      each repo-benchmarker instance analyzes only its assigned repository
+      and does not see the other instance's findings until both are
+      complete, so the comparison is not anchored by whichever analysis
+      finished first.
+  - id: evidence_has_file_and_line_references
+    description: Every claimed strength/weakness and every "this could be
+      imported" recommendation cites a concrete file (and line or function
+      where practical) in the relevant repository — never a vague
+      impression with nothing to check it against.
+  - id: planner_acts_as_synthesizer_never_a_benchmarker
+    description: Same neutrality principle as debate.yaml's
+      planner_acts_as_moderator_never_a_debater — the planner frames and
+      synthesizes but never substitutes its own untested claim for either
+      benchmarker's cited findings.
+  - id: no_code_imported_without_explicit_handoff
+    description: This playbook only ever proposes what could be imported;
+      it never modifies the current project's code itself. Actually
+      implementing an import is out of scope for this run.
+  - id: handoff_creates_new_run_never_rebinds_playbook
+    description: playbook_bind is immutable for the life of a run
+      everywhere in this codebase; if the comparison concludes the user
+      wants to actually import something, this run transitions to
+      completed with a handoff_target recorded and a brand-new run (new
+      worktree, new plan, new playbook_bind) is created only after the
+      user confirms the handoff — this run never tries to swap its own
+      bound playbook.
+  - id: license_and_attribution_flagged_when_relevant
+    description: When a concrete recommendation is to reuse a nontrivial
+      piece of logic (not just "the general pattern of doing X"), the
+      comparison report flags the reference repository's license and any
+      attribution requirement, so the user makes the copy-vs-reimplement
+      decision explicitly instead of it sliding by silently.
+  - id: no_finalize_without_comparison_presented
+    description: completed is only reached after the side-by-side
+      comparison and import candidates have been presented to the user in
+      comparing; it is never reached mid-analysis.

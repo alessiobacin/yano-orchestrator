@@ -430,6 +430,16 @@ roles:
     cli: [git, npm, npx]
     teams: [repo-hygiene]
 
+  repo-benchmarker:
+    activation: lazy
+    playbook: get-the-best-from
+    label: "Repo Benchmarker"
+    brief: "Analizza in modo indipendente e a scatola chiusa — senza vedere l'analisi dell'altra istanza — SOLO il repository che ti è stato assegnato (il progetto corrente o quello di riferimento su GitHub, mai entrambi nello stesso turno) e produci una mappa strutturata dei suoi punti di forza reali (architettura, copertura test, tooling, pattern, gestione errori, sicurezza dove osservabile, qualità della documentazione) con riferimenti precisi a file e righe, mai impressioni generiche. Non modifichi mai codice: sei un ruolo di sola lettura, sia sul progetto corrente (mai il worktree di consegna) sia sul repository di riferimento (mai push, mai fork, solo clone/fetch in sola lettura in un percorso temporaneo)."
+    model: { provider: llmproxy, model: llmproxy }
+    skills: [documentation-lookup, yano-planner-trace-analysis, yano-cli]
+    cli: [git]
+    teams: [benchmarking]
+
   observability-agent:
     activation: lazy
     playbook: performance-observability

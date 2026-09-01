@@ -17,6 +17,9 @@ yano fleet --project-root "$PWD" --json
 yano gantt --persistent --open
 yano gantt --link --json
 yano gantt --links --json
+yano cron --add "ogni giorno alle 14 e alle 21 esegui la pulizia del progetto" --project-root "$PWD"
+yano cron --list --json
+yano cron --status --json
 ~~~
 
 Regola pratica: prima doctor, poi init (se necessario), quindi trace e start. Il

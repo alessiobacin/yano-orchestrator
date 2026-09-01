@@ -89,6 +89,7 @@ for (const command of [
 	"yano init", "yano start", "yano doctor", "yano update", "yano end", "yano projects",
 	"yano gantt", "yano watch", "yano trace", "yano repair", "yano config", "yano data",
 	"yano architect", "yano debugger", "yano auto-improve", "yano suggester", "yano playbook", "yano agent",
+	"yano cron",
 ]) if (!commandReference.includes(command)) failures.push(`command-reference.md: manca ${command}`);
 
 if (process.env.YANO_DOCS_ENFORCE_DIFF === "1" && fs.existsSync(path.join(root, ".git"))) {

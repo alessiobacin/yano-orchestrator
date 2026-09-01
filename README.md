@@ -196,6 +196,8 @@ yano watcher start --project-root "$PWD"   # persistent registry: Herdr-supervis
 yano watcher cron install                  # installa manualmente il self-heal ogni minuto
 yano watcher status --json                 # self-heal watcher + planner dei run incompleti
 yano leave --yes                            # dalla root: rimuove definitivamente solo il watcher del progetto
+yano cron --add "ogni giorno alle 14 e alle 21 esegui la pulizia del progetto" --project-root "$PWD"
+yano cron --list --json                     # job persistenti; il supervisore riapre yano-scheduler ogni minuto
 yano config path                 # percorso della configurazione globale utente
 yano config list --all           # variabili configurabili, segreti oscurati
 yano config set YANO_ORCHESTRATOR_REPO /path/to/yano-orchestrator

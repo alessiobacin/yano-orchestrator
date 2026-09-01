@@ -26,6 +26,16 @@ esiste un backend, `postman` è l'unica categoria che può essere non applicabil
 la decisione e l'evidenza vanno riportate. Gli altri percorsi devono essere
 creati quando assenti e aggiornati quando il task rende il contenuto obsoleto.
 
+## Job ricorrenti
+
+`yano cron` è il CRUD persistente per job ricorrenti: `--add` accetta una
+frase naturale, mentre `--list`, `--remove <id>`, `--enable <id>`,
+`--disable <id>` e `--run <id>` gestiscono il registro. Il cron di sistema
+esegue ogni minuto `yano cron --supervise`: avvia le scadenze e ricrea
+`yano-scheduler` se la tab Herdr è stata chiusa. Il registro è nel data-root
+globale e sopravvive a riavvii; l'uninstall di Yano rimuove soltanto le sue
+righe cron marcate.
+
 ## Matrice obbligatoria
 
 | Modifica | Superfici da verificare |

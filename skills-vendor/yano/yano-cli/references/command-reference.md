@@ -25,6 +25,8 @@ yano pause|resume|recovery [subcommand] [options]
 yano repair [options]
 yano config [subcommand] [options]
 yano data [subcommand] [options]
+yano cron --add <natural request> [--project-root <dir>]
+yano cron --list|--remove <id>|--enable <id>|--disable <id>|--run <id>|--supervise
 yano architect [subcommand] [options]
 yano watcher init|start|status|pause|resume|leave [options]  # persistent registry — see docs/quick_guides/10-watcher-falle-yano.md
 yano leave [--project-root <dir>] --yes                # permanently removes only watcher supervision

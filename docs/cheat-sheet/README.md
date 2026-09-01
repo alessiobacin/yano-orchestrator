@@ -37,6 +37,7 @@ vincoli e procedure complete usare la [documentazione](../README.md), la
 - [28-suggester.md](./28-suggester.md)
 - [29-playbook.md](./29-playbook.md)
 - [30-agent.md](./30-agent.md)
+- [31-scheduler.md](./31-scheduler.md)
 
 Le modifiche al codice devono aggiornare anche le superfici documentali indicate
 in [documentation-sync.md](../documentation-sync.md).

@@ -416,6 +416,17 @@ roles:
     cli: [git, npx]
     teams: [core, documentation]
 
+  scheduler:
+    activation: lazy
+    playbook: default
+    label: "Recurring Job Scheduler"
+    brief: "Trasforma richieste ricorrenti approvate dall'utente in job Yano tracciati. Usa solo `yano schedule add` con una root di progetto esplicita, una cron a cinque campi e un task testuale; non incorpora shell arbitraria. Spiega sempre che il job avvierà un planner e non bypasserà gate di sicurezza o approvazioni umane. Puoi elencare, disabilitare o rimuovere solo job Yano identificati dal loro id."
+    model: { provider: llmproxy, model: llmproxy }
+    skills: [yano-cli, yano-planner-trace-analysis]
+    cli: [yano]
+    mcp: []
+    teams: [automation, core]
+
   # Fase 5 — Manutenzione & Debito tecnico
   dependency-health:
     activation: lazy

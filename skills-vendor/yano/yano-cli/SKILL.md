@@ -61,6 +61,7 @@ Use the smallest command that answers the request. Typical translations are:
 | Find or inspect a playbook | `yano playbook list`, `show`, `candidates`, `agent show` | catalog source, requirements, roles and missing credentials |
 | Configure a missing requirement | `yano config set <KEY> <value>` or `... --stdin` | global per-user config path, never application `.env` for global installs |
 | Check/install this skill in local harnesses | `yano skills status --json`, then `yano skills install` | Claude Code/Codex/Pi catalogs and Pi's shared discovery roots |
+| Create a recurring job in natural language | `yano cron --add "ogni giorno alle 14 e alle 21 esegui …" --project-root "$PWD"` | cron expression, durable job id and project root |
 
 When the agent is already running from the project directory, the shorter
 equivalent is `yano gantt --persistent --open`. The explicit
@@ -387,3 +388,14 @@ To permanently remove one project from the watcher registry use `yano leave
 This is deliberately separate from `yano end`: it removes supervision but does
 not modify project files or finalize a run. To edit the cron entry use
 `crontab -e`; `cron` itself is the system daemon and is not an interactive CLI.
+
+### Recurring jobs
+
+Use `yano cron --add` for an approved recurring request. It accepts the
+Italian forms `ogni giorno alle 14 e alle 21 esegui <task>` and `ogni settimana
+di lunedì alle 13:00 fai partire <task>`, stores the resulting cron and task in
+the global Yano data-root, and returns a job id. Manage it with `yano cron
+--list`, `--disable <id>`, `--enable <id>`, `--run <id>` or `--remove <id>`.
+The global one-minute supervisor restores the `yano-scheduler` Herdr agent
+after a reboot or closed tab, then dispatches due jobs to a planner in the
+job's project. A scheduled task never bypasses playbook approval gates.

@@ -31,6 +31,8 @@ import os from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
+import { schedulerCronRemove } from "./yano-scheduler.mjs";
+import { runYanoWatcherRegistry } from "./yano-watcher-registry.mjs";
 
 function commandExists(cmd) {
 	const result = spawnSync(cmd, ["--version"], { stdio: "ignore", shell: process.platform === "win32" });
@@ -102,6 +104,11 @@ export async function runUninstall({ packageRoot, argv }) {
 			return;
 		}
 	}
+
+	// These marked entries are owned by Yano, unlike user-created crontab
+	// lines. Remove them before npm removes the executable they invoke.
+	try { schedulerCronRemove(); } catch (error) { console.warn(`yano uninstall: impossibile rimuovere il cron scheduler — ${error.message}`); }
+	try { await runYanoWatcherRegistry({ argv: ["cron", "remove", "--json"] }); } catch (error) { console.warn(`yano uninstall: impossibile rimuovere il cron watcher — ${error.message}`); }
 
 	console.log(`\npo uninstall: eseguo npm uninstall -g ${packageName} ...\n`);
 	try {

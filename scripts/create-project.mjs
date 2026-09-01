@@ -76,7 +76,7 @@ import { createInterface } from "node:readline/promises";
 import * as fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { runDoctor, ensurePlaywrightPrerequisites, ensureCorePrerequisites, ensureEmbeddingPrerequisites, isSupportedNodeRuntime } from "./doctor.mjs";
+import { runDoctor, ensurePlaywrightPrerequisites, ensureCorePrerequisites, ensureEmbeddingPrerequisites, ensureCodeMemPrerequisite, isSupportedNodeRuntime } from "./doctor.mjs";
 import { runHerdrInit } from "./init-herdr.mjs";
 import { installYanoCliSkill } from "./install-yano-cli.mjs";
 
@@ -149,6 +149,15 @@ function slugify(s) {
 
 function nowIso() {
 	return new Date().toISOString();
+}
+
+function initializeCodeMemProject(targetDir) {
+	try {
+		execFileSync("cm", ["init", "pi"], { cwd: targetDir, stdio: "inherit", timeout: 120_000 });
+		return { ok: true };
+	} catch (error) {
+		return { ok: false, detail: error instanceof Error ? error.message : String(error) };
+	}
 }
 
 function copyDirMissing(src, dest) {
@@ -314,6 +323,8 @@ export async function runCreateProject({ packageRoot, cwd, argv, preflightTools 
 		ensureCore = ensureCorePrerequisites,
 		ensureEmbeddings = ensureEmbeddingPrerequisites,
 		doctor = runDoctor,
+		ensureCodeMem = ensureCodeMemPrerequisite,
+		initializeCodeMem = initializeCodeMemProject,
 	} = preflightTools;
 	const { name, target, force, llmp, herdr, noGit } = parseArgs(argv);
 	if (!name) {
@@ -365,6 +376,12 @@ export async function runCreateProject({ packageRoot, cwd, argv, preflightTools 
 		process.exitCode = 1;
 		return;
 	}
+	const codeMem = ensureCodeMem();
+	if (!codeMem.ok) {
+		console.error(`yano init: Code Mem è un prerequisito obbligatorio — ${codeMem.hint}. Nessun file di scaffold è stato scritto.`);
+		process.exitCode = 1;
+		return;
+	}
 	const playwright = ensurePlaywright({ install: true });
 	if (!playwright.ok) {
 		console.error("yano init: prerequisiti Playwright non installabili — nessun file di scaffold è stato scritto.");
@@ -410,6 +427,12 @@ export async function runCreateProject({ packageRoot, cwd, argv, preflightTools 
 		return;
 	}
 	fs.mkdirSync(targetDir, { recursive: true });
+	const codeMemInit = initializeCodeMem(targetDir);
+	if (!codeMemInit.ok) {
+		console.error(`yano init: cm init pi non riuscito — ${codeMemInit.detail ?? "verifica l'installazione di Code Mem"}. Nessun file di configurazione Yano è stato scritto.`);
+		process.exitCode = 1;
+		return;
+	}
 
 	const adoptingExistingProject = inPlace && fs.readdirSync(targetDir).some((entry) => entry !== ".git");
 	console.log(`create-project: ${adoptingExistingProject ? "inizializzo il progetto esistente" : "creo il progetto"} "${name}" in ${targetDir}${inPlace ? " (in place)" : ""}`);

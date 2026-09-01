@@ -70,7 +70,7 @@
 // dell'operatore (cwd), altrimenti caricherebbe l'orchestrator.ts sbagliato
 // (quello del pacchetto, non quello del progetto).
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -99,6 +99,13 @@ const YANO_PLANNER_SKILL = "yano-planner-trace-analysis";
 // skill proprie di Yano vivono sotto skills-vendor/yano/; l'installer globale
 // la espone poi come ~/.<harness>/skills/yano-cli.
 const YANO_CLI_SKILL = "yano-cli";
+// Memory protocol shared by every Yano role. The project-local `cm init pi`
+// integration captures context; this skill tells agents how to retrieve and
+// record it safely and consistently.
+const YANO_CODE_MEM_SKILL = "yano-code-mem";
+// Preview read-only condivisa: ogni ruolo deve poter proporre una simulazione
+// sicura di auto-improver, suggester o Architect senza creare lavoro reale.
+const YANO_OBSERVER_DRY_RUN_SKILL = "yano-observer-dry-run";
 
 // Adapter Yano della skill /code-review di Matt Pocock: il reviewer riceve il
 // metodo Spec/Standards, ma non il workflow originale con fixed point chiesto
@@ -155,6 +162,14 @@ function resolveYanoPlannerSkillPath(packageRoot) {
 
 function resolveYanoCliSkillPath(packageRoot) {
 	return resolveVendoredSkillPaths(packageRoot, "yano", [YANO_CLI_SKILL])[0];
+}
+
+function resolveYanoCodeMemSkillPath(packageRoot) {
+	return resolveVendoredSkillPaths(packageRoot, "yano", [YANO_CODE_MEM_SKILL])[0];
+}
+
+function resolveYanoObserverDryRunSkillPath(packageRoot) {
+	return resolveVendoredSkillPaths(packageRoot, "yano", [YANO_OBSERVER_DRY_RUN_SKILL])[0];
 }
 
 function resolveYanoReviewSkillPath(packageRoot) {
@@ -308,6 +323,7 @@ function parseArgs(argv) {
 	let traceMode;
 	let proposalId;
 	let llmproxyPin;
+	let herdr;
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i];
 		if (a === "--print-only") {
@@ -316,6 +332,10 @@ function parseArgs(argv) {
 		}
 		if (a === "--json") {
 			json = true;
+			continue;
+		}
+		if (a === "--herdr") {
+			herdr = true;
 			continue;
 		}
 		if (a === "--role") {
@@ -354,7 +374,7 @@ function parseArgs(argv) {
 		}
 		passthrough.push(a);
 	}
-	return { passthrough, printOnly, json, role: role ?? "planner", traceMode, proposalId, llmproxyPin };
+	return { passthrough, printOnly, json, role: role ?? "planner", traceMode, proposalId, llmproxyPin, herdr };
 }
 
 // runLaunchPlanner({ packageRoot, cwd, argv }) — packageRoot risolve le
@@ -383,7 +403,7 @@ function parseArgs(argv) {
 // `yano init` scrive sempre: agents/roles.yaml oppure
 // .pi/extensions/yano-orchestrator/config/project.json.
 export function runLaunchPlanner({ packageRoot, cwd, argv }) {
-	const { passthrough, printOnly, json, role, traceMode, proposalId, llmproxyPin } = parseArgs(argv);
+	const { passthrough, printOnly, json, role, traceMode, proposalId, llmproxyPin, herdr } = parseArgs(argv);
 	const ephemeralRole = ephemeralRoleManifest({ proposalId, role, cwd });
 	if (!isSupportedNodeRuntime()) {
 		console.error(`launch-planner: Node.js ${process.version} non supportato — serve Node 22.5.0 o superiore.`);
@@ -530,7 +550,9 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 		: [];
 	const yanoTraceSkillFlags = ["--skill", resolveYanoPlannerSkillPath(packageRoot)];
 	const yanoCliSkillFlags = ["--skill", resolveYanoCliSkillPath(packageRoot)];
-	const allSkillFlags = [...mattPocockSkillFlags, ...yanoTraceSkillFlags, ...yanoCliSkillFlags, ...chromeDevToolsSkillFlags, ...yanoReviewSkillFlags, ...yanoDeploymentSkillFlags, ...yanoObserverSkillFlags, ...yanoAutoImprovementSkillFlags, ...yanoSuggesterSkillFlags, ...yanoArchitectSkillFlags, ...generatedSkillFlags];
+	const yanoCodeMemSkillFlags = ["--skill", resolveYanoCodeMemSkillPath(packageRoot)];
+	const yanoObserverDryRunSkillFlags = ["--skill", resolveYanoObserverDryRunSkillPath(packageRoot)];
+	const allSkillFlags = [...mattPocockSkillFlags, ...yanoTraceSkillFlags, ...yanoCliSkillFlags, ...yanoCodeMemSkillFlags, ...yanoObserverDryRunSkillFlags, ...chromeDevToolsSkillFlags, ...yanoReviewSkillFlags, ...yanoDeploymentSkillFlags, ...yanoObserverSkillFlags, ...yanoAutoImprovementSkillFlags, ...yanoSuggesterSkillFlags, ...yanoArchitectSkillFlags, ...generatedSkillFlags];
 	const skillFlags = [...new Set(allSkillFlags.filter((_, index) => index % 2 === 1))].flatMap((skillPath) => ["--skill", skillPath]);
 	// -e esplicito SOLO in sviluppo del pacchetto stesso (looksLikePackageRepo)
 	// — mai per una copia locale residua in un progetto scaffoldato, anche se
@@ -557,11 +579,45 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 	const piArgs = [...extensionFlags, ...normalizedPassthrough, ...projectScopeFlags, ...legacyConfigDirFlags, ...generatedConfigFlags, ...llmproxyFlags, "--role", role, ...skillFlags];
 
 	const printable = ["pi", ...piArgs].map((a) => (a.includes(" ") ? `"${a}"` : a)).join(" ");
-	if (json) console.log(JSON.stringify({ command: "pi", args: piArgs, cwd, trace_mode: traceConfig.mode, project: traceProject, proposal_id: proposalId || null, llmproxy_pin: llmproxyPin || null, playbook_path: generatedRole?.playbookPath || null, role_source: ephemeralRole ? "architect-ephemeral" : (generatedRole ? "architect-catalog" : "project") }));
+	if (json) console.log(JSON.stringify({ command: herdr ? "herdr agent start" : "pi", args: piArgs, cwd, trace_mode: traceConfig.mode, project: traceProject, proposal_id: proposalId || null, llmproxy_pin: llmproxyPin || null, playbook_path: generatedRole?.playbookPath || null, role_source: ephemeralRole ? "architect-ephemeral" : (generatedRole ? "architect-catalog" : "project") }));
 	else console.log(`launch-planner: comando composto (cwd ${cwd}, trace ${traceConfig.mode}, progetto ${traceProject}):\n  ${printable}\n`);
 
 	if (printOnly) {
 		process.exit(0);
+	}
+
+	if (herdr) {
+		const instance = normalizedPassthrough[normalizedPassthrough.indexOf("--instance") + 1];
+		if (!instance) {
+			console.error("launch-planner: --herdr richiede --instance <nome>.");
+			process.exit(1);
+		}
+		const snapshotResult = spawnSync("herdr", ["api", "snapshot"], { encoding: "utf8", maxBuffer: 4_000_000 });
+		let snapshot;
+		try { snapshot = JSON.parse(snapshotResult.stdout || "")?.result?.snapshot; } catch { /* handled below */ }
+		let declaredProjectName = null;
+		try { declaredProjectName = JSON.parse(readFileSync(path.join(cwd, ".pi", "extensions", "yano-orchestrator", "config", "project.json"), "utf8")).project || null; } catch { /* legacy/new scaffold fallback below */ }
+		const expectedLabels = new Set([traceProject, path.basename(cwd), declaredProjectName].filter(Boolean));
+		const workspace = snapshot?.workspaces?.find((item) => expectedLabels.has(item.label) && snapshot.panes?.some((pane) => pane.workspace_id === item.workspace_id && path.resolve(pane.cwd || "") === path.resolve(cwd)));
+		if (!workspace?.workspace_id) {
+			console.error(`launch-planner: nessun workspace Herdr verificato per ${cwd}; rifiuto di creare ${instance} nel workspace UI corrente.`);
+			process.exit(1);
+		}
+		const tabResult = spawnSync("herdr", ["tab", "create", "--workspace", workspace.workspace_id, "--cwd", cwd, "--label", instance, "--no-focus"], { encoding: "utf8", maxBuffer: 1_000_000 });
+		let paneId;
+		try { paneId = JSON.parse(tabResult.stdout || "")?.result?.root_pane?.pane_id; } catch { /* handled below */ }
+		if (tabResult.status !== 0 || !paneId) {
+			console.error(`launch-planner: Herdr non ha creato una tab isolata per ${instance}: ${(tabResult.stderr || "risposta senza pane").trim()}`);
+			process.exit(1);
+		}
+		const agentName = `${slugify(instance)}-${slugify(traceProject)}`.slice(0, 32);
+		const started = spawnSync("herdr", ["agent", "start", agentName, "--kind", "pi", "--pane", paneId, "--", ...piArgs], { cwd, encoding: "utf8", maxBuffer: 4_000_000 });
+		if (started.status !== 0) {
+			console.error(`launch-planner: Herdr non ha avviato ${instance}: ${(started.stderr || "errore sconosciuto").trim()}`);
+			process.exit(1);
+		}
+		console.log(`launch-planner: ${instance} avviato nel workspace verificato ${workspace.workspace_id}, pane ${paneId}.`);
+		return;
 	}
 
 	// stdio: "inherit" — planner è una sessione interattiva, deve ereditare

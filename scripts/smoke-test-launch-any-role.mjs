@@ -72,7 +72,13 @@ function main() {
 	ok(!coderOut.includes(path.join(PACKAGE_ROOT, "skills-vendor", "mattpocock")), "coder: receives no planner-only mattpocock skills");
 ok(!coderOut.includes("-e extensions/orchestrator.ts"), "coder: no stale -e flag (modern scaffold, relies on global install)");
 
-	console.log("\n=== TEST 1a — a human project name cannot fork the MQTT scope ===");
+	console.log("\n=== TEST 1a — --herdr is a launcher-owned, scoped mode ===");
+	const herdrOut = run(dir, ["--herdr", "--instance", "coder-01", "--role", "coder", "--print-only", "--json"]);
+	const herdrPlan = JSON.parse(herdrOut.trim());
+	ok(herdrPlan.command === "herdr agent start", "--herdr selects the scoped Herdr launcher instead of a raw Pi process");
+	ok(herdrPlan.args.includes("--project") && herdrPlan.args.includes("any-role-test-project"), "--herdr preserves the derived project scope for the child agent");
+
+	console.log("\n=== TEST 1b — a human project name cannot fork the MQTT scope ===");
 	const namedDir = scratchDir("yano-display-name-scope");
 	fs.mkdirSync(path.join(namedDir, ".pi", "extensions", "yano-orchestrator", "config"), { recursive: true });
 	fs.writeFileSync(path.join(namedDir, "package.json"), JSON.stringify({ name: "display-name-scope-test" }, null, 2));

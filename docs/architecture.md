@@ -36,7 +36,10 @@ Every instance has an `instance`, `role`, `project` and `team` identity. MQTT to
 ## Main flow
 
 1. `yano init` validates Node, Pi-facing prerequisites, MCP configuration and broker availability before writing a scaffold. In-place initialization of an existing project is non-destructive: it preserves application files and merges only missing Yano infrastructure; if root `agents/` belongs to the application, the Yano roster uses `.pi/agents/`. With `--herdr`, the CLI first creates or reuses and explicitly focuses a Herdr workspace rooted at the current directory, runs the scaffold command in its root pane, then starts `planner-01` in that same terminal; when invoked outside Herdr it opens/attaches the Herdr client, while an invocation already inside Herdr avoids nesting another client. Older projects whose roster is still under `.pi/agents/` remain launchable; the launcher selects that directory explicitly instead of assuming the modern root `agents/` layout.
-2. `yano start` launches any configured role. The shared `yano-cli` and
+2. `yano start` launches any configured role. For a worker tab, `yano start --herdr`
+   verifies both the Herdr workspace label and a pane rooted at the current
+   project before creating the tab; it refuses to fall back to whichever
+   workspace is focused in the UI. The shared `yano-cli` and
    trace-analysis skill are attached to every worker, so every Pi agent can
    interpret and report the complete Yano CLI consistently. Planner-only vendor
    skills remain restricted to the planner, and browser skills remain
@@ -200,6 +203,14 @@ The workspace lives under `.pi/extensions/yano-orchestrator/`:
 
 The database is intentionally local to a project. MQTT provides fast coordination, while SQLite is the durable source for recovery, status, evidence and outbox state.
 
+Code Mem is a separate required local-memory layer: `yano init` first verifies
+`cm`, then runs `cm init pi` in the project root. This creates `memory/` and a
+project-local Pi skill/hook. The hook recalls contextual memory at session
+start and captures completed agent responses on a best-effort basis; it cannot
+block a Yano/Pi session. Yano also injects `yano-code-mem` into every launched
+role so agents retrieve and save memory with the same evidence and secrecy
+rules.
+
 When upgrading from a pre-platform-data release, `yano data migrate --dry-run`
 previews and `yano data migrate --yes` copies the old package `temp/` into the
 new per-user data root without deleting the source.
@@ -309,10 +320,23 @@ The global Yano npm installation installs a user crontab entry that runs
 repaired manually with `yano watcher cron install`. The supervisor serializes checks with a lock,
 cross-checks every registry row against Herdr, and self-heals dead watcher
 panes; explicit `paused` rows are never restarted.
+It also restores global worker intent: installed Architect proposals are resumed
+through their project-scoped ephemeral phase and, after promotion, their global
+phase; `running` debugger workers are resumed when their exact instance is
+absent; pending Suggester analyses are dispatched again; and an enabled
+auto-improver restores both its scheduler and its persisted idle tab without
+starting a premature audit.
 The same reconciliation checks project-local SQLite runs: non-finalized runs
 trigger recreation of the project workspace and `planner-01` with a recovery
-prompt grounded in trace, tickets and worktrees. Once every run is finalized,
-the project's watcher tab is closed automatically.
+prompt grounded in trace, tickets and worktrees. Recovery selects only the
+Herdr workspace explicitly labelled for that project: specialist panes with
+the same working directory in a shared workspace can never receive another
+project's recovery prompt. A planner that exists but has made no durable run
+progress for 15 minutes (unless it is waiting on a decision hold) is treated as
+stalled and is restarted with a cooldown to prevent loops. Once every run is
+finalized, or a registered project remains uninitialized/without runs beyond
+the grace period, the project's watcher tab and durable registry state are
+closed automatically.
 
 The external Watcher created for a playbook performs one bounded validation pass
 and then keeps a zero-token `yano watch` process alive with a ten-minute

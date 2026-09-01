@@ -110,11 +110,12 @@ function printTopUsage() {
 			"",
 			"Comandi:",
 			'  init [opzioni]   Scaffolda yano-orchestrator nella directory corrente (default) — `yano init --help`',
-			"  start [opzioni]  Lancia planner-01 con le skill vendorizzate mattpocock — `yano start --help`",
+			"  start [opzioni]  Lancia un ruolo; `--herdr` crea una tab nel solo workspace verificato del progetto — `yano start --help`",
 			"  doctor [--json]  Verifica prerequisiti; --json restituisce un risultato machine-readable",
 			"  update [--check|--reload] Aggiorna Yano; --reload pausa/salva/riavvia le istanze Herdr del progetto corrente",
 			"  uninstall [--yes] Rimuove l'installazione globale",
 			'  end [opzioni]    Chiude i run "active" del progetto nella directory corrente — `yano end --help`',
+			'  leave [--project-root <dir>] --yes Rimuove definitivamente il progetto corrente dal registro watcher',
 			"  copy-prompts     Copia prompts/ dal pacchetto installato nel progetto corrente, per personalizzarli",
 			"  status|logs|fleet|mcp          Viste read-only del progetto e della flotta",
 			"  projects [--json]             Conta i progetti Yano con agenti live in Herdr",
@@ -278,12 +279,17 @@ async function main() {
 			await runYanoWatcherRegistry({ argv: ["--help"] });
 			return;
 		}
-		if (["init", "start", "status", "pause", "resume", "supervise", "cron"].includes(rest[0])) {
+		if (["init", "start", "status", "pause", "resume", "leave", "supervise", "cron"].includes(rest[0])) {
 			await runYanoWatcherRegistry({ argv: rest });
 			return;
 		}
-		console.error("Uso: yano watcher <init|start|status|pause|resume|supervise|cron> [opzioni] | yano watcher projects [--all] [--json] [--project-root <dir>]");
+		console.error("Uso: yano watcher <init|start|status|pause|resume|leave|supervise|cron> [opzioni] | yano watcher projects [--all] [--json] [--project-root <dir>]");
 		process.exit(1);
+	}
+	if (sub === "leave") {
+		const leaveArgs = rest.includes("--project-root") ? rest : ["--project-root", cwd, ...rest];
+		await runYanoWatcherRegistry({ argv: ["leave", ...leaveArgs] });
+		return;
 	}
 	if (sub === "playbook" || sub === "agent") {
 		await runYanoCatalog({ kind: sub, argv: rest });

@@ -1,0 +1,15 @@
+{
+  "skill_name": "yano-code-mem",
+  "evals": [
+    {
+      "id": "recall-before-recovery",
+      "prompt": "Riprendi un progetto Yano dopo un crash del planner.",
+      "expected": "Runs cm recall from the project root, then verifies current Yano state before acting."
+    },
+    {
+      "id": "durable-issue-memory",
+      "prompt": "Abbiamo trovato una causa verificata di un bug ricorrente.",
+      "expected": "Stores a concise issue memory with evidence and avoids secrets or unsupported claims."
+    }
+  ]
+}

@@ -13,7 +13,7 @@ codice, test, configurazioni, dipendenze, dati, ticket operativi o deployment.
 2. Esegui, quando indicato nel messaggio di avvio, una scansione bounded con
    `yano watch --once` usando la root e gli identificativi della proposta; se
    il messaggio richiede il controllo continuo, lascia poi attivo `yano watch`
-   con `--interval-ms` (default operativo: 600000, dieci minuti) e `--away`.
+   con `--interval-ms` (default operativo: 300000, cinque minuti) e `--away`.
 3. Controlla presenza/heartbeat degli agenti, ordine dei round, ticket stalled,
    risposte mancanti, capability dichiarate ma non usate e deviazioni dal
    playbook.

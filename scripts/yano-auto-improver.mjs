@@ -386,12 +386,20 @@ function launchWorker(info, row, auditId, evidencePath, reportPath, dryRun = fal
 	const workspaceRoot = path.join(dataRoot(), "agent-workspaces");
 	fs.mkdirSync(workspaceRoot, { recursive: true, mode: 0o700 });
 	const instance = row.worker_instance || `auto-improver-${info.name}`;
-	const prompt = `Esegui l'audit auto-improve ${auditId} in modo esclusivamente read-only e con valutazione a 360 gradi. Leggi evidence pack ${evidencePath} e analizza direttamente ${info.root} senza modificarlo. Oltre a codice, test, performance, sicurezza, documentazione e UX, identifica la missione/capability principale del progetto e confrontala con almeno 3 software o servizi comparabili. Usa auto_improve_web_search per trovare candidati e auto_improve_web_fetch per verificare solo fonti ufficiali HTTPS: repository, documentazione o package registry. Per ogni confronto valuta feature, qualità del retrieval/risultato, esperienza utente, esperienza LLM/agent, tool/API, MCP, connettori, plugin/estensioni, integrazioni, privacy, deployment, performance, test, maturità e licenza. Produci una gap matrix tra progetto attuale e alternative e proposte concrete di feature, correzioni, tool, connettori e plugin mancanti, ciascuna con valore, complessità, rischio, confidenza e requires_human_decision. Distingui sempre evidenza verificata, inferenza e limite non verificabile; non inventare fonti o feature. Se il web non è disponibile, documenta le query e il limite invece di fingere il confronto. Completa il report globale ${reportPath} usando il tool auto_improve_complete, che è l'unico write autorizzato e scrive solo nel data-root globale. Non usare bash, edit, write, git, build, worktree o comandi equivalenti. Invia il risultato al planner.`;
+	const serviceOnly = !auditId;
+	const prompt = serviceOnly
+		? `Il servizio auto-improver per ${info.name} è stato ripristinato dopo una perdita di Herdr. Non avviare un audit: l'ultimo audit è completato e il prossimo è pianificato per ${row.next_run_at || "la prossima scadenza"}. Rimani inattivo e read-only; non modificare il progetto. Se ricevi un audit esplicito, usa esclusivamente gli strumenti consentiti e completa soltanto il report globale.`
+		: `Esegui l'audit auto-improve ${auditId} in modo esclusivamente read-only e con valutazione a 360 gradi. Leggi evidence pack ${evidencePath} e analizza direttamente ${info.root} senza modificarlo. Oltre a codice, test, performance, sicurezza, documentazione e UX, identifica la missione/capability principale del progetto e confrontala con almeno 3 software o servizi comparabili. Usa auto_improve_web_search per trovare candidati e auto_improve_web_fetch per verificare solo fonti ufficiali HTTPS: repository, documentazione o package registry. Per ogni confronto valuta feature, qualità del retrieval/risultato, esperienza utente, esperienza LLM/agent, tool/API, MCP, connettori, plugin/estensioni, integrazioni, privacy, deployment, performance, test, maturità e licenza. Produci una gap matrix tra progetto attuale e alternative e proposte concrete di feature, correzioni, tool, connettori e plugin mancanti, ciascuna con valore, complessità, rischio, confidenza e requires_human_decision. Distingui sempre evidenza verificata, inferenza e limite non verificabile; non inventare fonti o feature. Se il web non è disponibile, documenta le query e il limite invece di fingere il confronto. Completa il report globale ${reportPath} usando il tool auto_improve_complete, che è l'unico write autorizzato e scrive solo nel data-root globale. Non usare bash, edit, write, git, build, worktree o comandi equivalenti. Invia il risultato al planner.`;
 	// Never resume an old Pi transcript: an auto-improve audit is a fresh,
 	// bounded read-only inspection. The Herdr tab/instance may be reused, but
 	// `--continue` could resurrect stale implementation context and commands.
 	const readOnlyTools = "read,grep,find,ls,auto_improve_web_search,auto_improve_web_fetch,agent_list,agent_get,agent_send,agent_await,auto_improve_complete";
-	const commandLine = `yano start --instance ${shellQuote(instance)} --role auto-improver --project ${shellQuote(info.name)} --tools ${shellQuote(readOnlyTools)} ${shellQuote(prompt)}`;
+	// A restored idle service must remain an interactive Pi instance. Supplying a
+	// one-shot recovery prompt makes Pi complete it and exit, which would create
+	// an unnecessary restart loop on the next supervisor pass.
+	const commandLine = serviceOnly
+		? `yano start --instance ${shellQuote(instance)} --role auto-improver --project ${shellQuote(info.name)} --tools ${shellQuote(readOnlyTools)}`
+		: `yano start --instance ${shellQuote(instance)} --role auto-improver --project ${shellQuote(info.name)} --tools ${shellQuote(readOnlyTools)} ${shellQuote(prompt)}`;
 	if (dryRun) return { workspace_id: row.workspace_id, tab_id: row.worker_tab_id, pane_id: row.worker_pane_id, instance, command: commandLine, dry_run: true };
 	const snapshot = herdrSnapshot();
 	if (!snapshot) throw new Error("yano auto-improve: Herdr non raggiungibile; avvia Herdr e riprova");
@@ -414,6 +422,32 @@ function launchWorker(info, row, auditId, evidencePath, reportPath, dryRun = fal
 		pane = tab && refreshed.panes?.find((item) => item.tab_id === tab.tab_id);
 	}
 	if (!tab || !pane) throw new Error(`yano auto-improve: tab/pane non trovati per ${tabLabel}`);
+	if (serviceOnly) {
+		const stale = herdrSnapshot()?.panes?.find((item) => item.pane_id === pane.pane_id);
+		if (stale && ["done", "unknown", "offline", "completed"].includes(String(stale.agent_status || "").toLowerCase())) {
+			const closed = spawnSync("herdr", ["tab", "close", tab.tab_id], { encoding: "utf8" });
+			if (closed.status !== 0) throw new Error(`yano auto-improve: impossibile chiudere la tab idle conclusa${closed.stderr ? `: ${closed.stderr.trim()}` : ""}`);
+			const created = spawnSync("herdr", ["tab", "create", "--workspace", workspace.workspace_id, "--cwd", info.root, "--label", tabLabel, "--no-focus"], { encoding: "utf8" });
+			if (created.status !== 0) throw new Error(`yano auto-improve: impossibile ricreare la tab idle${created.stderr ? `: ${created.stderr.trim()}` : ""}`);
+			refreshed = herdrSnapshot() || refreshed;
+			tab = refreshed.tabs?.find((item) => item.workspace_id === workspace.workspace_id && item.label === tabLabel);
+			pane = tab && refreshed.panes?.find((item) => item.tab_id === tab.tab_id);
+			if (!tab || !pane) throw new Error(`yano auto-improve: tab idle ricreata ma pane non trovato per ${tabLabel}`);
+		}
+		// Herdr retains a completed agent name, so a recovered idle service needs
+		// a fresh, scoped identity even when it reuses the same tab/pane.
+		const recoveredInstance = `${slug(instance)}-r-${Date.now().toString(36)}`.slice(0, 32);
+		const launcher = path.join(PACKAGE_ROOT, "scripts", "launch-planner.mjs");
+		const composed = spawnSync(process.execPath, [launcher, "--instance", recoveredInstance, "--role", "auto-improver", "--project", info.name, "--print-only", "--json"], { cwd: info.root, encoding: "utf8", maxBuffer: 2_000_000 });
+		if (composed.status !== 0) throw new Error(`yano auto-improve: composizione del worker idle fallita${composed.stderr ? `: ${composed.stderr.trim()}` : ""}`);
+		const line = String(composed.stdout || "").trim().split("\n").reverse().find((candidate) => candidate.trim().startsWith("{"));
+		let piArgs = null;
+		try { piArgs = JSON.parse(line || "").args; } catch { /* validated below */ }
+		if (!Array.isArray(piArgs)) throw new Error("yano auto-improve: launch-planner non ha restituito argomenti Pi validi per il worker idle");
+		const started = spawnSync("herdr", ["agent", "start", recoveredInstance, "--kind", "pi", "--pane", pane.pane_id, "--", ...piArgs], { cwd: info.root, encoding: "utf8", maxBuffer: 2_000_000 });
+		if (started.status !== 0) throw new Error(`yano auto-improve: avvio agente idle fallito${started.stderr ? `: ${started.stderr.trim()}` : (started.stdout ? `: ${started.stdout.trim()}` : "")}`);
+		return { workspace_id: workspace.workspace_id, tab_id: tab.tab_id, pane_id: pane.pane_id, instance: recoveredInstance, command: `pi ${piArgs.map(shellQuote).join(" ")}`, dry_run: false };
+	}
 	const launched = spawnSync("herdr", ["pane", "run", pane.pane_id, `exec ${commandLine}`], { cwd: info.root, encoding: "utf8" });
 	if (launched.status !== 0) throw new Error(`yano auto-improve: avvio agente fallito${launched.stderr ? `: ${launched.stderr.trim()}` : ""}`);
 	return { workspace_id: workspace.workspace_id, tab_id: tab.tab_id, pane_id: pane.pane_id, instance, command: commandLine, dry_run: false };
@@ -507,6 +541,11 @@ async function completeAudit(db, opts) {
 	}
 	const timestamp = now();
 	db.prepare("UPDATE auto_audits SET status = ?, completed_at = ?, report_path = ?, summary = ? WHERE audit_id = ?").run("completed", timestamp, reportPath, summary, audit.audit_id);
+	// A later successful audit proves that earlier interrupted attempts are no
+	// longer actionable. Keep them for auditability but never let them revive a
+	// stale worker after a restart.
+	db.prepare("UPDATE auto_audits SET status = ?, completed_at = COALESCE(completed_at, ?) WHERE project_key = ? AND audit_id <> ? AND status IN ('awaiting_agent','running')")
+		.run("superseded", timestamp, audit.project_key, audit.audit_id);
 	db.prepare("UPDATE auto_projects SET worker_status = ?, last_completed_at = ?, updated_at = ? WHERE project_key = ?").run("idle", timestamp, timestamp, audit.project_key);
 	db.prepare("INSERT INTO auto_events(event_id,project_key,audit_id,type,payload_json,created_at) VALUES(?,?,?,?,?,?)").run(`auto-event-${crypto.randomUUID()}`, audit.project_key, audit.audit_id, "audit_completed", JSON.stringify({ report_path: reportPath, summary: summary.slice(0, 1000), read_only: true }), timestamp);
 	const info = { root: audit.root, name: audit.name, key: audit.project_key };
@@ -525,7 +564,7 @@ function parseOptions(argv) {
 function print(valueToPrint, machine) { console.log(machine ? JSON.stringify(valueToPrint, null, 2) : JSON.stringify(valueToPrint, null, 2)); }
 function usage() {
 	return [
-		"Uso: yano auto-improve <init|start|run|status|reports|pause|resume|stop|complete|serve> [opzioni]",
+		"Uso: yano auto-improve <init|start|run|status|reports|pause|resume|stop|complete|serve|supervise> [opzioni]",
 		"",
 		"  init --project-root <dir> --interval 5d --notify auto   registra il progetto",
 		"  start --project-root <dir> [--dry-run]                 crea/riusa tab Herdr e scheduler",
@@ -536,6 +575,7 @@ function usage() {
 		"  pause|resume|stop --project-root <dir>                 cambia stato senza toccare il progetto",
 		"  complete --audit-id <id> --report-file <temp-file>     chiude audit e notifica planner",
 		"  serve [--port <porta>] [--host <host>] [--json]        avvia l'API REST dell'auto-improver",
+		"  supervise [--json]                                     riavvia solo lo scheduler globale, senza creare audit",
 		"                                                          (un'unica istanza per tutti i progetti registrati;",
 		"                                                          default 127.0.0.1:4178, override con",
 		"                                                          YANO_AUTO_IMPROVER_API_PORT / --port; imposta",
@@ -612,6 +652,32 @@ async function doRunOrStart(db, info, row, opts = {}) {
 	const result = await runAudit(db, info, { ...row, worker_status: opts.force ? "scheduled" : row.worker_status }, { dryRun: opts.dryRun, force: opts.force || opts.isStart });
 	const scheduler = opts.once || opts.dryRun || opts.noDaemon ? { running: false, skipped: true, once: opts.once } : startDaemon();
 	return { ...result, once: opts.once, scheduler };
+}
+
+function doRestoreIdleWorker(db, info, row, { dryRun = false } = {}) {
+	const launched = launchWorker(info, row, null, null, null, dryRun);
+	if (!dryRun) db.prepare("UPDATE auto_projects SET workspace_id = ?, worker_tab_id = ?, worker_pane_id = ?, worker_instance = ?, worker_status = 'idle', updated_at = ? WHERE project_key = ?")
+		.run(launched.workspace_id, launched.tab_id, launched.pane_id, launched.instance, now(), info.key);
+	return { project: info.name, worker_status: "idle", restored: !dryRun, ...launched };
+}
+
+function liveWorker(snapshot, instance) {
+	return Boolean(instance && snapshot?.agents?.some((agent) => agent.agent === "pi" && agent.name === instance && !["done", "offline", "unknown"].includes(agent.agent_status)));
+}
+
+function superviseAutoImprover(db, { dryRun = false } = {}) {
+	const rows = db.prepare("SELECT * FROM auto_projects WHERE worker_status NOT IN ('paused','stopped') ORDER BY updated_at DESC").all();
+	const snapshot = herdrSnapshot();
+	const restored = [];
+	for (const row of rows) {
+		const laterCompletion = db.prepare("SELECT completed_at FROM auto_audits WHERE project_key = ? AND status = 'completed' ORDER BY completed_at DESC LIMIT 1").get(row.project_key);
+		if (!dryRun && laterCompletion?.completed_at) db.prepare("UPDATE auto_audits SET status = 'superseded', completed_at = COALESCE(completed_at, ?) WHERE project_key = ? AND status IN ('awaiting_agent','running') AND started_at < ?")
+			.run(laterCompletion.completed_at, row.project_key, laterCompletion.completed_at);
+		if (row.worker_status !== "idle" || liveWorker(snapshot, row.worker_instance)) continue;
+		try { restored.push(doRestoreIdleWorker(db, infoFromRow(row), row, { dryRun })); }
+		catch (error) { restored.push({ project: row.name, restored: false, error: error instanceof Error ? error.message : String(error) }); }
+	}
+	return { projects: rows.length, scheduler: rows.length ? startDaemon() : { running: false, skipped: true, reason: "no_enabled_projects" }, restored, db_path: dbPath() };
 }
 
 // --- REST API (`yano auto-improve serve`) ---
@@ -727,6 +793,11 @@ export async function runYanoAutoImprove({ argv = [] } = {}) {
 	if (opts.sub === "daemon") { await daemonLoop(); return; }
 	const db = openDatabase();
 	try {
+		if (opts.sub === "supervise") {
+			const result = superviseAutoImprover(db, { dryRun: opts.dryRun });
+			print(result, opts.json);
+			return result;
+		}
 		if (opts.sub === "serve") {
 			await runServe(db, { port: opts.port, host: opts.host, json: opts.json });
 			return;

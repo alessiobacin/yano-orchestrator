@@ -50,9 +50,9 @@ Use the smallest command that answers the request. Typical translations are:
 | Open the Gantt for this project | `yano gantt --project-root "$PWD" --persistent --open` | URL and automatically selected free port in `10000-19999` |
 | Recover the current or all persistent Gantt links | `yano gantt --link --json` or `yano gantt --links --json` | registered URL, project root and live/stopped status |
 | Is Yano ready? | `yano doctor --network` and `yano deps --json` | broker, Git, Pi, CLI, credentials and capability checks |
-| Initialize a new or existing repository | `yano init --name "<name>"` (or `--no-git` for a conversation-only folder) | Existing application files are preserved; only missing Yano infrastructure is added |
+| Initialize a new or existing repository | `yano init --name "<name>"` (or `--no-git` for a conversation-only folder) | Requires `cm`; initializes Code Mem with `cm init pi`, then preserves application files while adding missing Yano infrastructure |
 | Initialize and open Herdr with planner | `yano init --name "<name>" --herdr` | Herdr workspace, root pane, and `planner-01` launch |
-| Start an agent | `yano start --instance <id> --role <role>` | composed Pi command, role, trace mode, project scope |
+| Start an agent in Herdr | `yano start --herdr --instance <id> --role <role>` | verifies workspace label + project root before tab creation |
 | Check or change trace capture | `yano trace status`, `yano trace enable --mode full` | global per-user data root and effective mode |
 | Investigate a specific failure | `yano trace context ... --json`, then `yano trace search ... --mode hybrid --json` | filtered evidence before broad history |
 | Pause and resume work | `yano pause ... --yes`, then `yano resume ... --yes` | checkpoint, assignments, missing agents; never use `end` as pause |
@@ -109,6 +109,16 @@ Use `yano skills status --json` to inspect the plan. `yano skills install
 --dry-run --json` previews it. Identical duplicate copies in a Pi-discovered
 root are moved to the Yano data-root backup; unmanaged or locally modified
 copies are reported as conflicts and are never removed automatically.
+
+## Required Code Mem project memory
+
+`cm` is a Yano prerequisite. `yano doctor` reports whether it is available;
+`yano init` refuses to scaffold when it is absent. After all other preflight
+checks pass, init runs `cm init pi` from the project root, creating `memory/`,
+the project-local Pi skill, and its best-effort recall/capture hook. Every
+Yano-launched role also receives the bundled `yano-code-mem` skill. Query
+memory with `cm recall "<goal>" --level 2 --mode hybrid` from the project root
+and never record secrets in it.
 
 ## External worker status
 
@@ -211,7 +221,7 @@ worker.
 
 ```text
 yano watch --project-root <dir> --lookback-ms 3600000 --once
-yano watch --project-root <dir> --lookback-ms 3600000 --interval-ms 600000 --away --context-compact-ratio 0.82
+yano watch --project-root <dir> --lookback-ms 3600000 --interval-ms 300000 --away --context-compact-ratio 0.82
 yano trace events --project <name> --instance yano-watcher --type yano_watcher_scan --limit 20 --json
 ```
 
@@ -371,3 +381,9 @@ The watcher supervisor also reconciles registered project SQLite runs. After a
 Herdr/process loss it recreates the workspace and `planner-01` for every
 non-finalized run, then sends a recovery prompt with trace, ticket and worktree
 context. Once all runs are finalized it closes that project's watcher tab.
+
+To permanently remove one project from the watcher registry use `yano leave
+--yes` in that project root, or `yano leave --project-root <dir> --yes`.
+This is deliberately separate from `yano end`: it removes supervision but does
+not modify project files or finalize a run. To edit the cron entry use
+`crontab -e`; `cron` itself is the system daemon and is not an interactive CLI.

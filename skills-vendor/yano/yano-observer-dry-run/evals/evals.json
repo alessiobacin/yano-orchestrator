@@ -1,0 +1,23 @@
+{
+  "skill_name": "yano-observer-dry-run",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Fammi vedere senza modifiche cosa suggerirebbe l'auto-improver per questo repository.",
+      "expected_output": "Usa yano auto-improve start --once --dry-run e dichiara l'assenza di side effect.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Simula la risposta a questa richiesta feature, senza registrarla davvero.",
+      "expected_output": "Usa solo un percorso suggester completamente dry-run oppure segnala il limite della CLI.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Quale playbook nuovo proporrebbe Architect per questa richiesta non coperta? Non crearlo.",
+      "expected_output": "Esegue assess e propose dry-run, senza provision o promote.",
+      "files": []
+    }
+  ]
+}

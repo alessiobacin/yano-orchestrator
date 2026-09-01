@@ -26,7 +26,8 @@ yano repair [options]
 yano config [subcommand] [options]
 yano data [subcommand] [options]
 yano architect [subcommand] [options]
-yano watcher init|start|status|pause|resume [options]  # persistent registry — see docs/quick_guides/10-watcher-falle-yano.md
+yano watcher init|start|status|pause|resume|leave [options]  # persistent registry — see docs/quick_guides/10-watcher-falle-yano.md
+yano leave [--project-root <dir>] --yes                # permanently removes only watcher supervision
 yano watcher projects [options]
 yano debugger [subcommand] [options]
 yano auto-improve [subcommand] [options]
@@ -43,6 +44,17 @@ prints the installed package version.
 
 ## Initialization and launch
 
+For a project agent that needs a new Herdr tab, use:
+
+```text
+yano start --herdr --instance <instance> --role <role>
+```
+
+The launcher verifies that a Herdr workspace with the project label also has a
+pane rooted at the current project. It refuses to create a tab in the currently
+focused workspace when that verification fails. Do not substitute raw `herdr
+tab create` / `herdr agent start` for Yano agents.
+
 ```text
 yano init --name "Project Name"
 yano init --name "Project Name" --herdr
@@ -53,11 +65,14 @@ yano start --instance reviewer-01 --role reviewer
 yano start --instance <id> --role <generated-role> --proposal-id <proposal-id>
 ```
 
-`init` merges missing Yano infrastructure in place and preserves existing
-application files. `--force` is needed when `--target` points to a non-empty
-directory. `start` loads role skills, passes the derived project scope and
-uses Herdr as the supported workspace runtime. It does not perform a live
-in-process reload.
+`init` requires the `cm` Code Mem executable. After its deterministic
+preflight passes, it runs `cm init pi` in the project root, creating `memory/`,
+the local Pi skill and non-blocking memory hook, then merges missing Yano
+infrastructure in place while preserving application files. `--force` is
+needed when `--target` points to a non-empty directory. `start` loads role
+skills (including the shared `yano-code-mem` protocol), passes the derived
+project scope and uses Herdr as the supported workspace runtime. It does not
+perform a live in-process reload.
 
 ## Diagnostics and project views
 
@@ -138,6 +153,7 @@ yano watcher init --project-root <dir> [--interval-ms <ms>] [--lookback-ms <ms>]
 yano watcher start --project-root <dir> [--dry-run] [--once] [--foreground]
 yano watcher status [--project-root <dir>] [--no-heal] [--json]  # self-heal watcher + planner dei run incompleti
 yano watcher pause|resume --project-root <dir>
+yano watcher leave --project-root <dir> --yes
 yano watcher projects [--all] [--project-root <dir>] [--json]
 yano architect projects [--all] [--project-root <dir>] [--json]
 yano debugger projects [--all] [--project-root <dir>] [--json]

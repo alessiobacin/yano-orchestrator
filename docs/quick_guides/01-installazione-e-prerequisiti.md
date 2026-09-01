@@ -9,6 +9,7 @@ Servono:
 - Node.js 22.5 o superiore;
 - Git;
 - 'pi';
+- Code Mem, disponibile come comando 'cm' (`cm version` deve riuscire);
 - Herdr, se vuoi gestire le istanze nelle sue tab;
 - Docker Desktop oppure un broker MQTT già disponibile;
 - Ollama con il modello 'nomic-embed-text' per l'indicizzazione semantica.
@@ -37,7 +38,7 @@ yano --version
 yano doctor
 ~~~
 
-Il doctor controlla runtime Node, Git, Pi, broker, Ollama, modello di
+Il doctor controlla runtime Node, Git, Pi, Code Mem, broker, Ollama, modello di
 embedding e prerequisiti browser/MCP. Se qualcosa manca, stampa il comando
 consigliato per il sistema operativo in uso.
 
@@ -54,6 +55,10 @@ verifica il modello:
 ollama pull nomic-embed-text
 yano doctor
 ~~~
+
+Quando il doctor trova `cm`, `yano init` esegue automaticamente `cm init pi`
+nella root: inizializza `memory/` e l'hook/skill locale di Pi. L'hook è
+best-effort e non blocca l'avvio di un agente.
 
 ## Avviare il broker incluso
 

@@ -13,3 +13,6 @@ node_modules/
 .pi/
 temp/
 .DS_Store
+
+# Project memory
+memory/

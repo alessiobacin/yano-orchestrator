@@ -261,12 +261,26 @@ async function pauseRun({ cwd, project, dbPath, workspaceDir, run, broker, yes, 
 			}), { qos: 1 });
 		}
 	}
+	// MQTT presence can be absent/stale while a Pi process is still visible in
+	// Herdr. A pause must actually stop that process too; otherwise a paused
+	// run keeps consuming work and can continue spawning agents. Restrict this
+	// fallback to panes whose cwd is exactly this project root, never merely a
+	// tab with a matching label.
+	const herdrStopped = [];
+	if (yes && terminateAgents && commandExists("herdr")) {
+		const liveHerdr = herdrJson(["api", "snapshot"]);
+		const herdrAgents = liveHerdr?.agents || liveHerdr?.panes || [];
+		for (const pane of herdrAgents.filter((item) => item.agent === "pi" && path.resolve(item.cwd || "") === path.resolve(cwd))) {
+			const result = spawnSync("herdr", ["pane", "send-keys", pane.pane_id, "ctrl-c", "ctrl-d"], { encoding: "utf8" });
+			if (result.status === 0) herdrStopped.push(pane.pane_id);
+		}
+	}
 	if (client) await client.endAsync();
 	db.close();
 	console.log(`yano pause: run ${run.id} salvato in ${directory}`);
 	console.log(`   agent osservati: ${presence.filter((item) => item.status !== "offline").map((item) => item.instance).join(", ") || "nessuno"}`);
-	console.log(`   ${yes && terminateAgents ? "terminate graceful inviati" : "nessun processo fermato"}; stato SQLite preservato.`);
-	return { pauseId, directory, manifest };
+	console.log(`   ${yes && terminateAgents ? "terminate graceful inviati" : "nessun processo fermato"}; fallback Herdr: ${herdrStopped.join(", ") || "nessuna pane"}; stato SQLite preservato.`);
+	return { pauseId, directory, manifest, herdrStopped };
 }
 
 function latestSnapshots(project, runId) {
@@ -336,12 +350,14 @@ function herdrInventory(snapshot) {
 
 function herdrHasProjectWorkspace(snapshot, cwd, project) {
 	if (!snapshot) return false;
-	return (snapshot.workspaces || []).some((workspace) => workspace.label === project || (snapshot.panes || []).some((pane) => pane.workspace_id === workspace.workspace_id && path.resolve(pane.cwd || "") === path.resolve(cwd)));
+	return (snapshot.workspaces || []).some((workspace) => workspace.label === project);
 }
 
 function herdrLaunch({ cwd, project, instance, args }) {
 	const snapshot = herdrJson(["api", "snapshot"]);
-	const workspace = snapshot?.workspaces?.find((item) => item.label === project || snapshot.panes?.some((pane) => pane.workspace_id === item.workspace_id && path.resolve(pane.cwd || "") === path.resolve(cwd)));
+	// The cwd can appear in a shared workspace hosting a specialist for this
+	// project. Recovery must use only the explicitly named project workspace.
+	const workspace = snapshot?.workspaces?.find((item) => item.label === project);
 	if (!workspace) return { instance, launched: false, error: `workspace Herdr "${project}" non trovato` };
 	let current = snapshot.tabs?.find((tab) => tab.workspace_id === workspace.workspace_id && tab.label === instance);
 	let pane = current && snapshot.panes?.find((item) => item.tab_id === current.tab_id);

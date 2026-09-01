@@ -75,6 +75,15 @@ const LAZY_CLI_INSTALLERS = {
 export const OLLAMA_DEFAULT_URL = "http://127.0.0.1:11434";
 export const DEFAULT_EMBEDDING_MODEL = "nomic-embed-text";
 
+export function ensureCodeMemPrerequisite() {
+	const ok = commandExists("cm", ["version"]);
+	return {
+		ok,
+		name: "Code Mem",
+		hint: ok ? "trovato" : "non trovato sul PATH — installa Code Mem e verifica con: cm version",
+	};
+}
+
 export function resolveEmbeddingModel() {
 	return process.env.YANO_EMBEDDING_MODEL?.trim() || DEFAULT_EMBEDDING_MODEL;
 }
@@ -547,6 +556,10 @@ export async function runDoctor({ cwd = process.cwd(), json = false, autoStartBr
 			: "non trovato sul PATH — questo pacchetto non gestisce l'installazione di `pi` stesso: installalo secondo la documentazione della tua distribuzione di pi.",
 	]);
 	if (!hasPi) ok = false;
+
+	const codeMem = ensureCodeMemPrerequisite();
+	rows.push([codeMem.name, codeMem.ok, codeMem.hint]);
+	if (!codeMem.ok) ok = false;
 
 	const playwright = ensurePlaywrightPrerequisites({ install: false });
 	rows.push(["playwright-cli", playwright.cli.ok, playwright.cli.ok ? "trovato" : `non trovato — ${playwright.cli.hint}`]);

@@ -18,8 +18,8 @@ async function call(sub, ...args) {
 }
 
 try {
-	const initialized = await call("init", "--project", "llmproxy", "--interval-ms", "600000", "--lookback-ms", "3600000", "--json");
-	assert.equal(initialized.project.interval_ms, 600000);
+	const initialized = await call("init", "--project", "llmproxy", "--lookback-ms", "3600000", "--json");
+	assert.equal(initialized.project.interval_ms, 300000, "un watcher senza override usa cinque minuti");
 	assert.equal(initialized.project.lookback_ms, 3600000);
 	assert.equal(initialized.project.worker_status, "stopped");
 
@@ -32,7 +32,7 @@ try {
 	assert.equal(started.worker_status, "running");
 	assert.equal(started.supervisor, "foreground");
 	assert.match(started.command, /yano watch --project-root/);
-	assert.match(started.command, /--interval-ms 600000/);
+	assert.match(started.command, /--interval-ms 300000/);
 	assert.match(started.command, /--away/);
 
 	// running, but launched --foreground (no Herdr pane): nothing this check

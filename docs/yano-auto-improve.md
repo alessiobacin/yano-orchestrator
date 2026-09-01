@@ -47,6 +47,13 @@ scheduler detached. La tab/istanza può essere riusata, ma gli audit non
 riprendono transcript precedenti, così il confine read-only resta verificabile. Per
 verificare il comando senza Herdr:
 
+Il supervisore globale esegue anche `yano auto-improve supervise`: dopo un
+riavvio ricrea la tab persistente di un worker `idle` e lo scheduler, senza
+creare un nuovo audit prima della scadenza. Un audit precedente in
+`awaiting_agent`/`running` viene segnato `superseded` se esiste un audit più
+recente già completato per lo stesso progetto: resta tracciabile ma non può
+riaprire un lavoro obsoleto.
+
 Il worker reale riceve una allow-list di tool (`read`, `grep`, `find`, `ls`,
 `auto_improve_web_search`, `auto_improve_web_fetch`, coordinamento MQTT e
 `auto_improve_complete`); `bash`, `edit` e `write` non sono disponibili. I due

@@ -11,6 +11,7 @@ import YAML from "yaml";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const skillRoot = path.join(repoRoot, "skills-vendor", "yano", "yano-cli");
+const codeMemSkillRoot = path.join(repoRoot, "skills-vendor", "yano", "yano-code-mem");
 const skill = readFileSync(path.join(skillRoot, "SKILL.md"), "utf8");
 const reference = readFileSync(path.join(skillRoot, "references", "command-reference.md"), "utf8");
 const packageJson = JSON.parse(readFileSync(path.join(repoRoot, "package.json"), "utf8"));
@@ -21,6 +22,8 @@ assert.ok(/^name: yano-cli$/m.test(skill), "la skill deve avere il nome corretto
 assert.match(skill, /natural-language|richieste semantiche|richieste naturali/i, "la skill deve dichiarare l'uso semantico");
 assert.ok(existsSync(path.join(skillRoot, "references", "command-reference.md")), "la reference CLI deve esistere");
 assert.ok(existsSync(path.join(skillRoot, "evals", "evals.json")), "le eval della skill devono esistere");
+assert.ok(existsSync(path.join(codeMemSkillRoot, "SKILL.md")), "la skill Yano Code Mem deve esistere");
+assert.ok(existsSync(path.join(codeMemSkillRoot, "evals", "evals.json")), "la skill Yano Code Mem deve avere eval");
 assert.ok(packageJson.files.includes("skills-vendor"), "le skill Yano devono essere incluse nel pacchetto npm");
 assert.match(packageJson.scripts.postinstall, /node scripts\/install-yano-cli\.mjs --if-global --quiet/, "l'installazione globale deve usare lo script deterministico");
 assert.match(packageJson.scripts.postinstall, /node scripts\/install-yano-watcher-cron\.mjs --if-global --quiet/, "l'installazione globale deve installare anche il supervisore watcher");
@@ -54,5 +57,7 @@ const planner = composed(["--instance", "cli-skill-smoke-planner"]);
 const coder = composed(["--instance", "cli-skill-smoke-coder", "--role", "coder"]);
 assert.ok(planner.includes(skillRoot), "planner deve ricevere la skill CLI dalla root del pacchetto");
 assert.ok(coder.includes(skillRoot), "coder deve ricevere la skill CLI dalla root del pacchetto");
+assert.ok(planner.includes(codeMemSkillRoot), "planner deve ricevere la skill Code Mem dalla root del pacchetto");
+assert.ok(coder.includes(codeMemSkillRoot), "coder deve ricevere la skill Code Mem dalla root del pacchetto");
 
 console.log("smoke-test-yano-cli: ok");

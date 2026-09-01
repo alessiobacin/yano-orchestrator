@@ -17,8 +17,9 @@ git init
 yano init --name "Mio Progetto"
 ~~~
 
-'yano init' crea solo l'infrastruttura Yano mancante. Non sovrascrive il codice
-dell'applicazione.
+'yano init' crea solo l'infrastruttura Yano mancante e inizializza anche Code
+Mem con `cm init pi` (`memory/`, skill e hook Pi locale). Non sovrascrive il
+codice dell'applicazione; `cm` deve essere disponibile prima di iniziare.
 
 ## 3. Avviare il broker e il trace
 

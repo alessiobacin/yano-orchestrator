@@ -106,7 +106,7 @@ bounded e poi il processo resta in polling read-only ogni dieci minuti:
 
 ~~~bash
 yano watch --project-root /path/progetto \
-  --lookback-ms 3600000 --interval-ms 600000 --away
+  --lookback-ms 3600000 --interval-ms 300000 --away
 ~~~
 
 Il polling zero-token controlla stall, heartbeat e segnali Yano ad alta
@@ -132,19 +132,19 @@ validazione bounded positiva associata a `--validation-run`.
 
 ## Watcher persistente su un progetto esistente (registro)
 
-`yano watch --interval-ms 600000 --away` lanciato a mano in un terminale o in
+`yano watch --interval-ms 300000 --away` lanciato a mano in un terminale o in
 una tab Herdr qualsiasi **non sopravvive** a un riavvio: se il terminale si
 chiude, il Mac va in sleep o la tab/pane muore, il polling si ferma senza che
 nulla lo segnali — `yano watcher projects` mostra solo presenza Herdr/Pi già
 esistente (incluso il flusso ephemeral dell'Architect legato a una proposta,
 sotto), non "dovrebbe essere attivo ma non lo è più".
 
-`yano watcher init|start|status|pause|resume` chiude questo buco con un
+`yano watcher init|start|status|pause|resume|leave` chiude questo buco con un
 piccolo registro persistente (stessa logica già in uso per
 `yano debugger init|start|pause|resume`, vedi `docs/yano-debugger.md`):
 
 ~~~bash
-yano watcher init --project-root /path/progetto --interval-ms 600000 --lookback-ms 3600000
+yano watcher init --project-root /path/progetto --interval-ms 300000 --lookback-ms 3600000
 yano watcher start --project-root /path/progetto
 ~~~
 
@@ -169,15 +169,27 @@ controllo che il cron utente esegue ogni minuto. Installalo una volta:
 ~~~bash
 yano watcher cron install
 yano watcher cron status
+# per modificare il crontab si usa `crontab -e`, non `cron -e`
 ~~~
 
 Il cron esegue `yano watcher supervise`, che controlla tutti i watcher
-registrati come attivi e rilancia quelli il cui pane Herdr è morto. Il job viene
-installato automaticamente solo dal lifecycle di un'installazione globale di
-Yano, non da `yano start`; un lock
-impedisce recovery concorrenti. `pause`/`resume` sospendono/riattivano senza
+registrati come attivi e rilancia quelli il cui pane Herdr è morto. Verifica
+anche i run SQLite: se un planner non ha prodotto attività durevole per 15
+minuti e non attende una decisione dell'utente, lo ripristina esclusivamente
+nel workspace Herdr con l'etichetta del progetto (mai in un workspace condiviso
+di uno specialista). I progetti completati, oppure privi di run oltre il breve
+periodo di grazia iniziale, vengono fermati e la loro tab watcher viene chiusa.
+Il job viene installato automaticamente solo dal lifecycle di un'installazione
+globale di Yano, non da `yano start`; un lock impedisce recovery concorrenti.
+`pause`/`resume` sospendono/riattivano senza
 perdere la registrazione; una pausa esplicita non viene mai recuperata.
 Per rimuovere solo questo job: `yano watcher cron remove`.
+
+Per smettere definitivamente di controllare un solo progetto (e impedire che
+venga riaperto dopo un riavvio), usare `yano leave --yes` dalla sua root, oppure
+`yano leave --project-root /path/progetto --yes`. È l'alias di
+`yano watcher leave`: rimuove solo la registrazione watcher, non cancella il
+progetto né chiude un run con `yano end`.
 
 Ad ogni passata il supervisore riconcilia anche i run SQLite dei progetti
 registrati. Se un run è ancora `active`, oppure è `completed` ma non ha ancora
@@ -185,7 +197,12 @@ registrati. Se un run è ancora `active`, oppure è `completed` ma non ha ancora
 workspace e di `planner-01`; il planner riceve un prompt di recovery con trace,
 ticket e worktree da verificare. Quando tutti i run risultano finalizzati, la
 tab `watcher-<project>` viene chiusa automaticamente. Una pausa esplicita
-resta rispettata.
+resta rispettata. Nella stessa passata il supervisore ripristina anche i worker
+globali con intento durevole: proposte Architect installate, anche nella fase
+`ready_ephemeral`, debugger `running`, analisi Suggester pendenti e lo
+scheduler dell'auto-improver. Per un auto-improver `idle` ricrea anche la sua
+tab persistente senza avviare un audit prima della scadenza; il Suggester resta
+senza tab finché non esiste una proposta pendente.
 
 ## Watcher LLM per un playbook ephemeral
 

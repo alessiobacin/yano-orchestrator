@@ -41,7 +41,7 @@ allow-list runtime che esclude `bash`, `edit` e `write` dal worker.
 - **Controlled deployment agent** — `deployment-agent` uses the `deployment-delivery` Playbook and `yano-deployment` skill to keep development source-based, dockerize staging/production, preserve paired ports and require rollback evidence plus explicit production approval
 - **Shared trace-analysis skill** for planner, coder, reviewer and specialists — workers can inspect the filtered origin of a mismatch, while the planner records cross-project opinions and systemic interventions
 - **Shared `yano-cli`** for every Pi/Yano role — agents can translate requests such as “is watcher active?” or “initialize this repository?” into scoped, observable CLI commands, with the complete reference under `skills-vendor/yano/yano-cli/`
-- **Local embeddings prerequisite** — `yano doctor` verifies Ollama, the `nomic-embed-text` model and a real `/api/embed` probe; `yano init` installs/pulls them when missing (no extra npm embedding library is required)
+- **Local embeddings + memory prerequisites** — `yano doctor` verifies Ollama, the `nomic-embed-text` model, a real `/api/embed` probe, and the `cm` Code Mem CLI. Every `yano init` runs `cm init pi`: the project gets its local `memory/` store, Pi skill, and non-blocking recall/capture hook.
 - **Semantic trace index** — `yano trace index` incrementally stores local Ollama vectors in SQLite and `yano trace search` retrieves only the most relevant observable evidence with project/run/round filters
 - **Project Gantt dashboards** — each project gets a free port in `10000-19999`; `--persistent` registers a live link, while `--link` and `--links` recover it later without scanning Herdr manually
 - **Consolidated trace memory** — `yano trace consolidate` derives provenance-preserving summaries, failures, opinions and recurring cross-project patterns; `yano trace plan` selects the smallest useful context within a token budget
@@ -88,7 +88,7 @@ docker compose -f mqtt/compose.yaml up -d   # with Docker Desktop
 yano start --instance planner-01
 ```
 
-`yano init` detects your OS automatically and prints the right commands either way. It also verifies Ollama plus the local `nomic-embed-text` model, pulling them when possible, and finishes by running `yano doctor` for you — a quick check that git, `pi`, embeddings, and an MQTT broker are all available, with OS-specific install hints for anything that's missing. Run it again any time with `yano doctor`.
+`yano init` detects your OS automatically and prints the right commands either way. It also requires Code Mem (`cm`): after the deterministic preflight it runs `cm init pi`, creating `memory/`, the project-local Pi skill and the best-effort Pi recall/capture hook before adding Yano's own configuration. It also verifies Ollama plus the local `nomic-embed-text` model, pulling them when possible, and finishes by running `yano doctor` for you — a quick check that git, `pi`, `cm`, embeddings, and an MQTT broker are all available, with OS-specific install hints for anything that's missing. Run it again any time with `yano doctor`.
 
 Yano uses Ollama's local HTTP API for embeddings. The default endpoint is
 `http://127.0.0.1:11434`; override it with `YANO_OLLAMA_URL` if needed. The
@@ -195,6 +195,7 @@ yano watch --once --context-compact-ratio 0.82
 yano watcher start --project-root "$PWD"   # persistent registry: Herdr-supervised yano watch --away
 yano watcher cron install                  # installa manualmente il self-heal ogni minuto
 yano watcher status --json                 # self-heal watcher + planner dei run incompleti
+yano leave --yes                            # dalla root: rimuove definitivamente solo il watcher del progetto
 yano config path                 # percorso della configurazione globale utente
 yano config list --all           # variabili configurabili, segreti oscurati
 yano config set YANO_ORCHESTRATOR_REPO /path/to/yano-orchestrator
@@ -340,7 +341,7 @@ Other roles (coder, reviewer, and any specialist) are launched the same way, dir
 pi --instance coder-01 --role coder
 ```
 
-`yano start` also works for any role now (`yano start --instance coder-01 --role coder`), not just planner — it composes the exact same command, and is what the planner itself now uses when it launches new team members (see Features below).
+`yano start` also works for any role now. When the role must receive its own Herdr tab, use `yano start --herdr --instance coder-01 --role coder`: it verifies the project workspace label and root before creating anything, so a focused tab from another project cannot receive the new agent. The planner uses this form for team members.
 
 ## Configuration
 
@@ -401,8 +402,9 @@ bin/yano.mjs                        the `yano` CLI (init/start/doctor/update/uni
 scripts/                          CLI internals, dev tooling, and CI checks
 skills-vendor/mattpocock/         vendored planner-only skills (wayfinder, to-spec, to-tickets, and their own
                                    dependencies) — see VERSION.md
-skills-vendor/yano/               bundled trace-analysis skill plus the reviewer code-review adapter
+skills-vendor/yano/               bundled trace-analysis, Code Mem protocol, and reviewer code-review skills
 skills-vendor/yano/yano-cli/      shared semantic CLI skill and complete command reference for every agent
+skills-vendor/yano/yano-code-mem/ required project-memory protocol injected into every Yano agent
 skills-vendor/awesome-copilot/    vendored chrome-devtools skill, reviewer/frontend-developer only —
                                    see VERSION.md
 mqtt/                             local Mosquitto broker config for development

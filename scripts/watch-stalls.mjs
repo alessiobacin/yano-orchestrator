@@ -24,7 +24,7 @@
 // Uso:
 //   yano watch [--project <slug>] [--project-root <dir>]
 //              [--lookback-ms 86400000] [--stall-ms 900000]
-//              [--interval-ms 60000] [--once] [--away]
+//              [--interval-ms 300000] [--once] [--away]
 //              [--context-compact-ratio 0.82]
 //              [--validation-run <id>] [--playbook-proposal <id>]
 //   (in locale: node scripts/watch-stalls.mjs [stesse opzioni])
@@ -125,7 +125,10 @@ function shellQuote(value) {
 // pane; reusing a dead shell is the exact failure this path is meant to heal.
 function spawnPlannerForFallback({ cwd, project }) {
 	const snapshot = herdrSnapshot();
-	let workspace = snapshot?.workspaces?.find((item) => item.label === project || (snapshot.panes || []).some((pane) => pane.workspace_id === item.workspace_id && path.resolve(pane.cwd || "") === path.resolve(cwd)));
+	// A project can have an agent pane in a different/shared workspace. Never
+	// use cwd as a workspace selector: it would inject this project's recovery
+	// planner into whichever workspace happens to contain that specialist.
+	let workspace = snapshot?.workspaces?.find((item) => item.label === project);
 	if (!workspace) {
 		const created = spawnSync("herdr", ["workspace", "create", "--cwd", cwd, "--label", project, "--no-focus"], { encoding: "utf8", maxBuffer: 1_000_000 });
 		if (created.status === 0) workspace = herdrSnapshot()?.workspaces?.find((item) => item.label === project);
@@ -227,7 +230,7 @@ function installAgentFallbackMonitor({ client, cwd, project, packageRoot, runtim
 }
 
 function parseArgs(argv) {
-	const o = { project: null, projectRoot: null, lookbackMs: 86_400_000, stallMs: 900000, intervalMs: 60000, once: false, away: false, contextCompactRatio: Number(process.env.YANO_WATCH_CONTEXT_COMPACT_RATIO) || 0.82, validationRun: null, playbookProposal: null, playbookId: null, playbookChecksum: null, validationRound: null };
+	const o = { project: null, projectRoot: null, lookbackMs: 86_400_000, stallMs: 900000, intervalMs: 300000, once: false, away: false, contextCompactRatio: Number(process.env.YANO_WATCH_CONTEXT_COMPACT_RATIO) || 0.82, validationRun: null, playbookProposal: null, playbookId: null, playbookChecksum: null, validationRound: null };
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i];
 		if (a === "--project") o.project = argv[++i];
@@ -715,7 +718,7 @@ export function watchUsage() {
 
 function scheduleNextPass({ cwd, argv, packageRoot }) {
 	const intervalIndex = argv.indexOf("--interval-ms");
-	const intervalMs = intervalIndex >= 0 ? Number(argv[intervalIndex + 1]) : 60000;
+	const intervalMs = intervalIndex >= 0 ? Number(argv[intervalIndex + 1]) : 300000;
 	if (argv.includes("--once") || !(intervalMs > 0)) return false;
 	setTimeout(() => {
 		runWatch({ cwd, argv, packageRoot }).catch((error) => {
@@ -1523,7 +1526,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 		const argv = process.argv.slice(2);
 		const result = await runWatch({ cwd: process.cwd(), argv });
 		const intervalIndex = argv.indexOf("--interval-ms");
-		const intervalMs = intervalIndex >= 0 ? Number(argv[intervalIndex + 1]) : 60000;
+		const intervalMs = intervalIndex >= 0 ? Number(argv[intervalIndex + 1]) : 300000;
 		if (result?.help || argv.includes("--once") || !(intervalMs > 0)) process.exit(0);
 	};
 	invokedOnce().catch((err) => {

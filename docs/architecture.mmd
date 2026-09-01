@@ -13,6 +13,8 @@ flowchart TD
     CLI --> REPAIR_ALL["repair --all-projects\nsequential global sweep"]
     CLI --> GLOBAL_CONFIG["Global config.env\nmanaged by `yano config`\ncredentials + runtime defaults"]
     CLI --> CLI_SKILL["yano-cli\nshared Pi-agent command contract\nsemantic intent → scoped CLI"]
+    INIT --> CODE_MEM_INIT["cm init pi\nrequired local-memory bootstrap"]
+    CLI --> CODE_MEM_SKILL["yano-code-mem\nshared retrieval + safe-recording protocol"]
     INIT --> PLANNER["pi planner\nrole + instance identity"]
     HERDR_INIT --> PLANNER
 
@@ -31,6 +33,9 @@ flowchart TD
     PLANNER --> TO_TICKETS
     CLI_SKILL --> PLANNER
     CLI_SKILL --> WORKERS
+    CODE_MEM_INIT --> CODE_MEM_STORE
+    CODE_MEM_SKILL --> PLANNER
+    CODE_MEM_SKILL --> WORKERS
     REVIEWER --> REVIEW_SKILL
     FRONTEND_REVIEWER --> REVIEW_SKILL
     PLANNER --> MCP
@@ -73,6 +78,7 @@ flowchart TD
 
     subgraph STORAGE["Durable project workspace"]
         SQLITE["SQLite orchestrator.db\nruns / specs / tickets / DAG\nPlaybooks / holds / evidence / outbox"]
+        CODE_MEM_STORE["memory/\nCode Mem SQLite + generated projections\nPi start/capture hook (best effort)"]
         WORKTREES[".worktrees/<slug>\nGit isolated branches"]
         REPORTS[".pi/.../reports\nround evidence"]
     end

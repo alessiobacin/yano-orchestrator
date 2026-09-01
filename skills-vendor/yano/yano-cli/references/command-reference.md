@@ -261,6 +261,11 @@ external-worker registrations; inspect its dry-run before applying it. `--all`
 or `--all-projects` broadens scope and therefore needs extra care. `--force`
 can interrupt an uncooperative process.
 
+For a development installation made with `npm link`, `yano update` detects the
+global symlink and never invokes `npm install -g` on it. It fast-forwards the
+linked Git checkout only when clean; with local changes it skips the pull and
+reports that the linked code already remains active.
+
 ## Configuration and data root
 
 ```text

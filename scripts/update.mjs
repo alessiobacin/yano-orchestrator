@@ -53,7 +53,7 @@
 // nuovo resta il modo più sicuro per farlo aggiornare.
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -70,6 +70,48 @@ function readVersion(pkgJsonPath) {
 		return JSON.parse(readFileSync(pkgJsonPath, "utf-8")).version;
 	} catch {
 		return null;
+	}
+}
+
+function canonicalPath(value) {
+	try { return realpathSync(value); }
+	catch { return path.resolve(value); }
+}
+
+// `npm link` is deliberately a symlink in npm's global node_modules. Calling
+// `npm install -g` on it makes npm rename the link as though it were a normal
+// directory; npm then fails with ENOTDIR. Detect this before mutating anything.
+export function inspectGlobalLinkedInstall({ packageRoot, packageName = "yano-orchestrator", npmRoot } = {}) {
+	const resolvedNpmRoot = npmRoot ?? (() => {
+		const result = spawnSync("npm", ["root", "-g"], { encoding: "utf-8", shell: process.platform === "win32" });
+		return result.status === 0 ? result.stdout.trim() : null;
+	})();
+	if (!resolvedNpmRoot) return { found: false, linked: false, matches_running_package: false, path: null };
+	const installedPath = path.join(resolvedNpmRoot, packageName);
+	if (!existsSync(installedPath)) return { found: false, linked: false, matches_running_package: false, path: installedPath };
+	let linked = false;
+	try { linked = lstatSync(installedPath).isSymbolicLink(); } catch { /* absent/unreadable is not a link */ }
+	return {
+		found: true,
+		linked,
+		matches_running_package: linked && canonicalPath(installedPath) === canonicalPath(packageRoot),
+		path: installedPath,
+		target: linked ? canonicalPath(installedPath) : null,
+	};
+}
+
+function updateLinkedCheckout(packageRoot) {
+	if (!existsSync(path.join(packageRoot, ".git"))) {
+		return { ok: true, skipped: true, reason: "linked-non-git" };
+	}
+	const dirty = spawnSync("git", ["-C", packageRoot, "status", "--porcelain"], { encoding: "utf-8" });
+	if (dirty.status !== 0) return { ok: false, skipped: true, reason: "git-status-failed" };
+	if (dirty.stdout.trim()) return { ok: true, skipped: true, reason: "dirty" };
+	try {
+		execFileSync("git", ["-C", packageRoot, "pull", "--ff-only"], { stdio: "inherit" });
+		return { ok: true, skipped: false, reason: "pulled" };
+	} catch (error) {
+		return { ok: false, skipped: false, reason: error instanceof Error ? error.message : String(error) };
 	}
 }
 
@@ -142,6 +184,7 @@ async function performUpdate({ packageRoot, argv }) {
 
 	const gitDir = piExtensionGitDir(repoUrl);
 	const hasGitClone = gitDir ? existsSync(gitDir) : false;
+	const linkedInstall = inspectGlobalLinkedInstall({ packageRoot, packageName: pkg.name || "yano-orchestrator" });
 
 	console.log(`yano update: versione installata attualmente (pacchetto npm): ${currentVersion}`);
 	console.log(`yano update: repo sorgente: ${repoUrl}`);
@@ -184,20 +227,38 @@ async function performUpdate({ packageRoot, argv }) {
 		return { checkOnly: true, currentVersion, remoteVersion };
 	}
 
-	console.log("\nyano update: 1/2 — reinstallo il pacchetto npm globale da GitHub (npm install -g ...)...\n");
-	try {
-		execFileSync("npm", ["install", "-g", repoUrl], { stdio: "inherit", shell: process.platform === "win32" });
-	} catch (err) {
-		console.error(`\nyano update: "npm install -g ${repoUrl}" fallito (${err instanceof Error ? err.message : String(err)}).`);
-		console.error(
-			"Su alcuni sistemi npm install -g richiede permessi elevati (sudo su macOS/Linux, un terminale da Amministratore su Windows) — riprova con quelli se l'errore riguarda i permessi.",
-		);
-		process.exit(1);
+	if (linkedInstall.matches_running_package) {
+		console.log(`\nyano update: 1/2 — installazione npm collegata con \`npm link\` (${linkedInstall.path} → ${linkedInstall.target}).`);
+		const linkedResult = updateLinkedCheckout(packageRoot);
+		if (!linkedResult.ok) {
+			console.error(`yano update: non riesco ad aggiornare il checkout collegato (${linkedResult.reason}).`);
+			process.exit(1);
+		}
+		if (linkedResult.reason === "dirty") {
+			console.log("yano update: il checkout collegato ha modifiche locali; salto `git pull` per non sovrascriverle. Il comando e le modifiche già presenti restano immediatamente attivi.");
+		} else if (linkedResult.reason === "linked-non-git") {
+			console.log("yano update: il target di npm link non è un checkout Git; salto il reinstall npm senza toccare il collegamento.");
+		} else {
+			console.log("yano update: checkout collegato aggiornato con git pull --ff-only; nessun npm install necessario.");
+		}
+	} else {
+		console.log("\nyano update: 1/2 — reinstallo il pacchetto npm globale da GitHub (npm install -g ...)...\n");
+		try {
+			execFileSync("npm", ["install", "-g", repoUrl], { stdio: "inherit", shell: process.platform === "win32" });
+		} catch (err) {
+			console.error(`\nyano update: "npm install -g ${repoUrl}" fallito (${err instanceof Error ? err.message : String(err)}).`);
+			console.error(
+				"Su alcuni sistemi npm install -g richiede permessi elevati (sudo su macOS/Linux, un terminale da Amministratore su Windows) — riprova con quelli se l'errore riguarda i permessi.",
+			);
+			process.exit(1);
+		}
 	}
 
 	const newVersion = readVersion(pkgJsonPath);
 	console.log("");
-	if (newVersion && newVersion !== currentVersion) {
+	if (linkedInstall.matches_running_package) {
+		console.log(`yano update: checkout npm link attivo (versione locale: ${newVersion || currentVersion}); nessuna reinstallazione npm eseguita.`);
+	} else if (newVersion && newVersion !== currentVersion) {
 		console.log(`yano update: pacchetto npm aggiornato ${currentVersion} → ${newVersion}.`);
 	} else if (newVersion === currentVersion) {
 		console.log(`yano update: pacchetto npm reinstallato (versione invariata: ${currentVersion} — probabilmente eri già aggiornato).`);

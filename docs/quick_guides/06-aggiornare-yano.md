@@ -19,6 +19,11 @@ Questo comando non riavvia le istanze Pi già aperte. I processi attivi
 continuano a usare il codice caricato in memoria; applica il nuovo codice al
 prossimo avvio.
 
+Se Yano è stato installato in sviluppo con `npm link`, il comando rileva il
+symlink e non esegue `npm install -g` (npm non può rinominarlo). Con checkout
+Git pulito usa `git pull --ff-only`; con modifiche locali salta il pull per non
+sovrascriverle, ma mantiene il collegamento già attivo.
+
 ## Aggiornare e ricaricare il team attivo
 
 Dalla root del progetto interessato:

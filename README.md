@@ -184,6 +184,7 @@ yano gantt --persistent --open # dashboard live persistente, con link recuperabi
 yano gantt --link              # link persistente del progetto corrente
 yano gantt --links             # tutti i link Gantt persistenti registrati
 yano watch --once              # one stalled-ticket scan
+# when an agent target is offline, agent_send escalates to planner or watcher
 # context telemetry is written per agent; watcher can request native Pi compaction
 yano watch --once --context-compact-ratio 0.82
 # yano watch --help and yano watcher <subcommand> --help are read-only
@@ -192,13 +193,17 @@ yano watch --once --context-compact-ratio 0.82
 # yano watch also escalates high-confidence Yano faults to .scratch/optimize-orchestrator/issues
 # and Telegram; global-only installs use `yano config`, development checkouts may use .env.
 yano watcher start --project-root "$PWD"   # persistent registry: Herdr-supervised yano watch --away
-yano watcher status --json                 # checks + self-heals a dead watcher pane (see docs/quick_guides/10-watcher-falle-yano.md)
+yano watcher cron install                  # installa manualmente il self-heal ogni minuto
+yano watcher status --json                 # self-heal watcher + planner dei run incompleti
 yano config path                 # percorso della configurazione globale utente
 yano config list --all           # variabili configurabili, segreti oscurati
 yano config set YANO_ORCHESTRATOR_REPO /path/to/yano-orchestrator
 yano config set TELEGRAM_DESTINATION_CHAT_ID CHAT_ID
 # printf '%s' "$TELEGRAM_BOT_TOKEN" | yano config set TELEGRAM_BOT_TOKEN --stdin
 yano config set SERVICE_API_KEY --stdin # credenziale richiesta da un playbook importato
+yano rule --add --global "Tutti i progetti devono avere un diagramma di flusso della logica in <root progetto>/docs/diagram"
+yano rule --add --project-root "$PWD" "Regola specifica per questo progetto"
+yano rule --list --project-root "$PWD" --json
 yano playbook candidates --task "<obiettivo>" --project-root "$PWD" --json
 yano playbook export knowledge-authoring --out ./knowledge-authoring.yano-playbook.json
 yano playbook import ./knowledge-authoring.yano-playbook.json
@@ -228,6 +233,7 @@ yano debugger init --base-port 3055  # registra il progetto e le porte dev/stagi
 yano debugger start             # avvia/riusa il worker nel workspace Herdr yano-debugger
 yano debugger start --once --json # preflight read-only senza Herdr
 yano debugger status --json     # stato del worker e dei bug del progetto
+yano debugger status --bug-id BUG-... --json # dettaglio bug + eventi diagnostici
 yano debugger serve --port 4177 # API REST (un'unica istanza, molti progetti — postman/yano-debugger.postman_collection.json)
 yano auto-improve init --project-root /path/progetto --interval 5d --notify auto
 yano auto-improve start --project-root /path/progetto

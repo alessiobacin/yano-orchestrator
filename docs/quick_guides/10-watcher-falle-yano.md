@@ -164,11 +164,28 @@ yano watcher status --project-root /path/progetto --json
 Confronta lo stato registrato con quello reale in Herdr e, salvo
 `--no-heal`, **rilancia da solo** un pane che risulta morto, annotando un
 evento `watcher_worker_recovered` nel trace del progetto osservato. È il
-comando da ripetere periodicamente (dopo ogni risveglio del Mac, o da un
-cron/launchd dell'utente) per essere certi che il watcher sia ancora vivo,
-invece di scoprirlo solo quando manca un ticket segnalato. `pause`/`resume`
-sospendono/riattivano senza perdere la registrazione; una pausa esplicita
-non viene mai "recuperata" automaticamente da `status`.
+controllo che il cron utente esegue ogni minuto. Installalo una volta:
+
+~~~bash
+yano watcher cron install
+yano watcher cron status
+~~~
+
+Il cron esegue `yano watcher supervise`, che controlla tutti i watcher
+registrati come attivi e rilancia quelli il cui pane Herdr è morto. Il job viene
+installato automaticamente solo dal lifecycle di un'installazione globale di
+Yano, non da `yano start`; un lock
+impedisce recovery concorrenti. `pause`/`resume` sospendono/riattivano senza
+perdere la registrazione; una pausa esplicita non viene mai recuperata.
+Per rimuovere solo questo job: `yano watcher cron remove`.
+
+Ad ogni passata il supervisore riconcilia anche i run SQLite dei progetti
+registrati. Se un run è ancora `active`, oppure è `completed` ma non ha ancora
+`finalization_status=finalized`, la perdita di Herdr provoca la ricreazione del
+workspace e di `planner-01`; il planner riceve un prompt di recovery con trace,
+ticket e worktree da verificare. Quando tutti i run risultano finalizzati, la
+tab `watcher-<project>` viene chiusa automaticamente. Una pausa esplicita
+resta rispettata.
 
 ## Watcher LLM per un playbook ephemeral
 

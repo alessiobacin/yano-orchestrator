@@ -262,6 +262,26 @@ specialist is offline, `agent_list` is only the live-presence check; inspect
 the project-scoped Pi sessions and use a supported `--session`/`--continue`/
 `--resume` option when available, otherwise launch a fresh compatible session.
 
+### Delegation liveness and recovery
+
+Before every `agent_send`, inspect the destination's live presence. Yano now
+enforces this in the common transport: a live destination receives the command;
+an offline destination is rerouted to a live planner. If no planner is live,
+the message is retained on the project's watcher fallback channel. The
+persistent watcher starts or reopens `planner-01`, then forwards the original
+message while preserving the intended target, sender and assignment ID. A
+watcher is registered only through an explicit watcher command for the
+selected project/options; `yano start` does not start one implicitly. Agents
+must not silently continue after a missing recipient: the routing result and
+fallback path must be reported to the planner.
+The same router is used by the `debugger`, `suggester` and `auto-improver`
+registry services for their planner handoffs.
+The global npm installation installs the one-minute external self-heal; it runs
+`yano watcher supervise`, which checks every registered running watcher and
+relaunches dead Herdr panes while respecting explicit pauses. Install or repair
+it manually with `yano watcher cron install` and inspect it with `yano watcher
+cron status`.
+
 In persistent mode the watcher keeps its MQTT subscription open in addition to
 polling at `--interval-ms`. A `run_completed` event or a planner's completed
 turn triggers one extra `--once` scan immediately; this final scan is recorded
@@ -346,3 +366,8 @@ scrittura autorizzata del report globale, senza `bash`, `edit` o `write`.
 The CLI can be used by any role, but a command being documented here does not
 grant that role permission to perform it. If the role cannot perform an
 operation, report the exact command for the planner or user instead.
+
+The watcher supervisor also reconciles registered project SQLite runs. After a
+Herdr/process loss it recreates the workspace and `planner-01` for every
+non-finalized run, then sends a recovery prompt with trace, ticket and worktree
+context. Once all runs are finalized it closes that project's watcher tab.

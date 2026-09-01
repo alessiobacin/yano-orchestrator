@@ -39,12 +39,12 @@ try {
 	assert.equal(dryRun.dry_run, true);
 	assert.match(dryRun.command, /--role debugger/);
 
-	const report = await call("report", "--title", "Salvataggio non riuscito", "--description", "Il salvataggio restituisce 500 dopo aver compilato il form", "--severity", "high", "--source", "user", "--reporter", "qa@example.test", "--expected", "201 Created", "--actual", "500 Internal Server Error", "--steps", "apri form\ncompila titolo\ninvia", "--json");
+	const report = await call("report", "--title", "Salvataggio non riuscito", "--description", "Il salvataggio restituisce 500 dopo aver compilato il form", "--severity", "high", "--source", "user", "--reporter", "qa@example.test", "--expected", "201 Created", "--actual", "500 Internal Server Error", "--steps", "apri form\ncompila titolo\ninvia", "--environment", '{"browser":"test","os":"test"}', "--json");
 	assert.equal(report.duplicate, false);
 	assert.equal(report.bug.status, "reported");
 	const bugId = report.bug.bug_id;
 
-	const duplicate = await call("report", "--title", "Salvataggio non riuscito", "--description", "Il salvataggio restituisce 500 dopo aver compilato il form", "--severity", "high", "--source", "user", "--actual", "500 Internal Server Error", "--json");
+	const duplicate = await call("report", "--title", "Salvataggio non riuscito", "--description", "Il salvataggio restituisce 500 dopo aver compilato il form", "--severity", "high", "--source", "user", "--reporter", "qa@example.test", "--expected", "201 Created", "--actual", "500 Internal Server Error", "--steps", "apri form\ncompila titolo\ninvia", "--environment", '{"browser":"test","os":"test"}', "--json");
 	assert.equal(duplicate.duplicate, true);
 	assert.equal(duplicate.bug.bug_id, bugId);
 

@@ -38,6 +38,9 @@ const PROJECT_ROOT = path.resolve(new URL(".", import.meta.url).pathname, "..");
 const BROKER_URL = process.env.PI_ORCH_BROKER_URL || "mqtt://127.0.0.1:1883";
 const REAL_AGENTS_DIR = path.join(PROJECT_ROOT, "agents");
 const REAL_PROMPTS_DIR = path.join(PROJECT_ROOT, "prompts");
+// Keep this prompt-shape test independent from the operator's persistent
+// planner rules configured in the real global data root.
+process.env.YANO_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "yano-custom-prompts-data-"));
 
 let PASS = 0;
 function ok(cond, msg) {

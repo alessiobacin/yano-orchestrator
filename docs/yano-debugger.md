@@ -75,6 +75,15 @@ yano debugger report \
   --json
 ```
 
+I campi `--expected`, `--actual`, `--steps` e `--environment` sono obbligatori:
+un bug senza questi dati non è abbastanza utile per una diagnosi ripetibile.
+`status --bug-id ... --json` restituisce anche la cronologia degli eventi
+diagnostici (`events`).
+
+```bash
+yano debugger status --bug-id BUG-... --json
+```
+
 Il fingerprint rende idempotente la segnalazione: una segnalazione uguale
 restituisce il bug esistente invece di crearne uno duplicato.
 

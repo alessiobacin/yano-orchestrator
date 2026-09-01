@@ -213,7 +213,7 @@ invariants:
       The documentation-completeness audit checks for these categories,
       recognizing an existing equivalent directory the project already
       uses under a different name or location (e.g. `docs/quick_guides`
-      for quick-guides, `docs/diagramma` for diagram) before proposing a
+      for quick-guides) before proposing a
       new one — it never creates a duplicate parallel directory for a
       category that already has a home: architecture/ (architecture
       documents), guides/ (development guides), quick-guides/ (quick
@@ -222,7 +222,7 @@ invariants:
       working notes), postman/ (Postman collection — only if the project
       is detected to have a backend; otherwise explicitly declared not
       applicable, never silently skipped), cheat-sheet (command list),
-      diagram (mermaid diagram of the logical flow).
+      diagram (mermaid diagram of the logical flow, stored in `docs/diagram`).
   - id: every_missing_category_gets_a_real_file
     description: >-
       A clean-repo documentation plan is itemized for every canonical

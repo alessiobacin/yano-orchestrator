@@ -17,6 +17,11 @@ yano skills install --dry-run --json
 yano skills install
 ```
 
+Lo stesso lifecycle installa il supervisore globale del watcher, che ogni
+minuto esegue `yano watcher supervise`. Non avvia watcher sui progetti: quelli
+restano registrati solo tramite `yano watcher start`, che applica le opzioni
+scelte per il relativo `yano watch`.
+
 La strategia è una copia per catalogo indipendente: `~/.claude/skills/yano-cli`
 per Claude Code, `~/.codex/skills/yano-cli` per Codex e `~/.pi/agent/skills/yano-cli`
 solo se Pi non scopre già uno dei cataloghi precedenti dal proprio

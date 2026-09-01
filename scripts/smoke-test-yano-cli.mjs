@@ -22,7 +22,9 @@ assert.match(skill, /natural-language|richieste semantiche|richieste naturali/i,
 assert.ok(existsSync(path.join(skillRoot, "references", "command-reference.md")), "la reference CLI deve esistere");
 assert.ok(existsSync(path.join(skillRoot, "evals", "evals.json")), "le eval della skill devono esistere");
 assert.ok(packageJson.files.includes("skills-vendor"), "le skill Yano devono essere incluse nel pacchetto npm");
-assert.equal(packageJson.scripts.postinstall, "node scripts/install-yano-cli.mjs --if-global --quiet", "l'installazione globale deve usare lo script deterministico");
+assert.match(packageJson.scripts.postinstall, /node scripts\/install-yano-cli\.mjs --if-global --quiet/, "l'installazione globale deve usare lo script deterministico");
+assert.match(packageJson.scripts.postinstall, /node scripts\/install-yano-watcher-cron\.mjs --if-global --quiet/, "l'installazione globale deve installare anche il supervisore watcher");
+assert.ok(existsSync(path.join(repoRoot, "scripts", "install-yano-watcher-cron.mjs")), "lo script lifecycle del supervisore watcher deve essere incluso nel repository");
 assert.match(installer, /CLAUDE_CONFIG_DIR|CODEX_HOME|PI_CODING_AGENT_DIR/, "l'installer deve conoscere i cataloghi degli harness");
 assert.match(installer, /discoveryRoots|settings\.json/, "l'installer deve leggere le root scoperte da Pi");
 

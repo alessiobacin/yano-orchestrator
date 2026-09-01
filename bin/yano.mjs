@@ -87,6 +87,7 @@ import { runExternalStatus } from "../scripts/yano-external-status.mjs";
 import { applyGlobalConfig, runYanoConfig } from "../scripts/yano-config.mjs";
 import { runYanoHarnessSkills } from "../scripts/install-yano-cli.mjs";
 import { runYanoProjects } from "../scripts/yano-projects.mjs";
+import { runYanoRules } from "../scripts/yano-rules.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, "..");
@@ -131,6 +132,7 @@ function printTopUsage() {
 			"  architect [opzioni]  Progetta/provisiona playbook e ruoli globali — `yano architect --help`",
 			"  playbook|agent [opzioni] Catalogo read-only di playbook, ruoli e capability",
 			"  config [opzioni] Gestisce la configurazione globale utente — `yano config --help`",
+			"  rule [opzioni]   Gestisce regole globali e per-progetto — `yano rule --help`",
 			"  data [opzioni]    Mostra o migra il data-root globale — `yano data --help`",
 			"  pause [opzioni]  Salva uno snapshot non distruttivo e mette in pausa i run",
 			"  resume [opzioni] Ripristina uno snapshot e riapre gli agenti mancanti",
@@ -193,6 +195,10 @@ async function main() {
 	}
 	if (sub === "projects") {
 		runYanoProjects({ argv: rest });
+		return;
+	}
+	if (sub === "rule" || sub === "rules") {
+		runYanoRules({ argv: rest });
 		return;
 	}
 	if (sub === "skills") {
@@ -272,11 +278,11 @@ async function main() {
 			await runYanoWatcherRegistry({ argv: ["--help"] });
 			return;
 		}
-		if (["init", "start", "status", "pause", "resume"].includes(rest[0])) {
+		if (["init", "start", "status", "pause", "resume", "supervise", "cron"].includes(rest[0])) {
 			await runYanoWatcherRegistry({ argv: rest });
 			return;
 		}
-		console.error("Uso: yano watcher <init|start|status|pause|resume> [opzioni] | yano watcher projects [--all] [--json] [--project-root <dir>]");
+		console.error("Uso: yano watcher <init|start|status|pause|resume|supervise|cron> [opzioni] | yano watcher projects [--all] [--json] [--project-root <dir>]");
 		process.exit(1);
 	}
 	if (sub === "playbook" || sub === "agent") {

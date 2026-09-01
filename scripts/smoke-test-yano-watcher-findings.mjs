@@ -67,7 +67,9 @@ assert.equal(telegram.ok, true);
 assert.equal(requests.length, 1);
 assert.equal(requests[0].url, "/bottest-token/sendMessage");
 assert.equal(requests[0].body.chat_id, "5228139669");
-assert.equal(requests[0].body.text, "test watcher notification");
+assert.match(requests[0].body.text, /Mittente: yano-watcher/);
+assert.match(requests[0].body.text, /Server:/);
+assert.match(requests[0].body.text, /test watcher notification/);
 await new Promise((resolve) => server.close(resolve));
 
 process.env.YANO_DATA_DIR = path.join(root, "trace-data");

@@ -7,6 +7,7 @@
 
 import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { appendRawTraceRecord } from "./yano-trace-storage.mjs";
@@ -255,7 +256,7 @@ export function createYanoWatcherTicket({ finding, yanoRepo, projectRoot, projec
 	return { created: true, path: target, finding };
 }
 
-export async function sendTelegramWatcherNotification({ yanoRepo, message, env = process.env, apiBaseUrl = null }) {
+export async function sendTelegramWatcherNotification({ yanoRepo, message, sender = "yano-watcher", project = "sconosciuto", env = process.env, apiBaseUrl = null }) {
 	const fileEnv = loadEnvFile(yanoRepo);
 	// Runtime/global configuration wins. The maintenance checkout .env remains
 	// a development fallback for callers using this module directly.
@@ -265,6 +266,7 @@ export async function sendTelegramWatcherNotification({ yanoRepo, message, env =
 	if (String(env.YANO_WATCHER_NOTIFY_DRY_RUN || "") === "1") return { ok: true, detail: "dry-run", chat_id: chatId };
 	const base = (apiBaseUrl || env.YANO_TELEGRAM_API_URL || "https://api.telegram.org").replace(/\/$/, "");
 	try {
+		message = [`Mittente: ${sender}`, `Progetto: ${project}`, `Server: ${os.hostname()}`, "", message].join("\n");
 		const response = await fetch(`${base}/bot${encodeURIComponent(token)}/sendMessage`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
@@ -315,7 +317,11 @@ async function routeYanoWatcherFindingToDebugger(finding, { yanoRepo, sourceProj
 			severity: finding.severity,
 			source: "watcher",
 			reporter: "yano-watcher",
-			expected: finding.expected || "",
+			// `reportBug` requires both fields even when the source event only
+			// carries a classifier (for example workspace_scope_mismatch). Keep
+			// the debugger record actionable instead of silently dropping the
+			// routing for those findings.
+			expected: finding.expected || "The Yano orchestration invariant remains valid",
 			actual: finding.actual || finding.summary,
 			steps: [`Vedi il ticket markdown gemello: ${ticketPath || "n/d"}`, `Progetto osservato: ${sourceProject.name} (${sourceProject.root})`],
 			environment: {
@@ -350,7 +356,7 @@ export async function processYanoWatcherFindings({ records, projectRoot, project
 	for (const finding of findings) {
 		const result = createYanoWatcherTicket({ finding, yanoRepo, projectRoot: sourceProject.root, project: sourceProject.name, ticketsDir });
 		let telegram = { ok: false, detail: notify ? "not_sent" : "planner_route" };
-		if (!result.skipped && result.created && notify) telegram = await sendTelegramWatcherNotification({ yanoRepo, message: notificationText(result, sourceProject), env });
+		if (!result.skipped && result.created && notify) telegram = await sendTelegramWatcherNotification({ yanoRepo, message: notificationText(result, sourceProject), sender: "yano-watcher", project: sourceProject.name, env });
 		let debuggerRouting = { routed: false, reason: "not_a_new_ticket" };
 		if (!result.skipped && result.created) debuggerRouting = await routeYanoWatcherFindingToDebugger(finding, { yanoRepo, sourceProject, ticketPath: result.path });
 		try {

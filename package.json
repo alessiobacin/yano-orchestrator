@@ -1,6 +1,6 @@
 {
   "name": "yano-orchestrator",
-  "version": "1.5.08",
+  "version": "1.5.09",
   "private": true,
   "type": "module",
   "engines": {
@@ -34,7 +34,7 @@
     "end-project": "node scripts/end-project.mjs",
     "recovery": "node scripts/yano-recovery.mjs",
     "setup-dev-stubs": "node scripts/setup-dev-stubs.mjs",
-    "postinstall": "node scripts/install-yano-cli.mjs --if-global --quiet"
+    "postinstall": "node scripts/install-yano-cli.mjs --if-global --quiet && node scripts/install-yano-watcher-cron.mjs --if-global --quiet"
   },
   "dependencies": {
     "mqtt": "^5",

@@ -208,11 +208,33 @@ yano watch --help
 yano watcher start --help
 ```
 
+Le regole persistenti del planner si gestiscono con `yano rule`. Sono salvate
+nel data-root globale e possono valere per tutti i progetti oppure per una
+singola root:
+
+```bash
+yano rule --add --global "Tutti i progetti devono avere un diagramma di flusso della logica in <root progetto>/docs/diagram"
+yano rule --add --project-root /path/progetto "Regola specifica del progetto"
+yano rule --list --project-root /path/progetto --json
+```
+
 Questi comandi non aprono il broker e non modificano il registro. Un watcher
 continuo può partire prima del primo `orchestrator_init`: registra il preflight
 come `waiting` e resta vivo. Se nel frattempo vede un trace di debate già
 avviato, lo segnala come `missing-orchestrator-init` al planner invece di
 nasconderlo come semplice attesa.
+
+Ogni `agent_send` controlla la presence del destinatario prima di pubblicare.
+Se il destinatario è offline, Yano inoltra automaticamente il messaggio al
+planner live; se manca anche il planner, lo consegna al canale fallback del
+watcher, che avvia o riapre `planner-01` e ripete la consegna mantenendo
+destinatario originale, mittente e `assignment_id`. Il watcher non viene
+avviato da `yano start`: viene registrato solo quando lo chiedi esplicitamente
+con `yano watcher start` (che avvia `yano watch --away` con le opzioni scelte)
+per il progetto desiderato.
+Durante l'installazione globale di Yano (`npm install -g`) viene installato una
+sola volta anche il supervisore utente ogni minuto; verifica lo stato con
+`yano watcher cron status`.
 
 Ogni sessione Pi registra nei log globali `context_usage` con token effettivi,
 finestra, rapporto, caratteri serializzati e numero di entry. Il watcher può

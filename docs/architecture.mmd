@@ -181,6 +181,8 @@ flowchart TD
     SQLITE --> WATCHER
     WATCHER --> YANO_TICKETS
     WATCHER --> TELEGRAM
+    WATCHER -->|reconcile non-finalized runs| PLANNER
+    WATCHER -->|close tab after finalization| HERDR
     WATCHER --> WHATSAPP
     WATCHER --> SENDGRID
     GLOBAL_CONFIG --> TRACE_CONFIG

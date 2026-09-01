@@ -285,6 +285,35 @@ direct MQTT command to each live planner instance; if no live planner exists,
 it sends the alert to Telegram. A project with no agents and no detected fault
 is considered idle and does not page the user.
 
+The same liveness rule is enforced by `agent_send` before every delegation. A
+live target receives the command normally; an offline target is never reported
+as successfully delegated: the command is rerouted to a live `planner-01`, or,
+if no planner is live, to the project's persistent watcher channel
+(`system/agent-fallback`). The watcher preserves the original target, sender
+and assignment ID, starts/reopens `planner-01` through the Yano control plane
+when necessary, and then forwards the command. A persistent watcher is
+registered only by an explicit watcher command and remains scoped to the
+project/options selected by the operator; starting a planner with `yano start`
+does not implicitly create one.
+The registry services (`debugger`, `suggester` and `auto-improver`) use the same
+router for their planner handoffs; their completion or bug notifications also
+cannot disappear silently when the intended worker or planner is offline.
+
+All user-facing channel notifications are decorated centrally with the sender
+instance/role, project scope and operating-system hostname of the server that
+emitted them. Planner rules are stored in `<YANO_DATA_DIR>/rules/rules.json`;
+`yano rule --add --global` and `yano rule --add --project-root` inject the
+corresponding rules into the planner system prompt.
+The global Yano npm installation installs a user crontab entry that runs
+`yano watcher supervise` every minute; the same entry can be installed or
+repaired manually with `yano watcher cron install`. The supervisor serializes checks with a lock,
+cross-checks every registry row against Herdr, and self-heals dead watcher
+panes; explicit `paused` rows are never restarted.
+The same reconciliation checks project-local SQLite runs: non-finalized runs
+trigger recreation of the project workspace and `planner-01` with a recovery
+prompt grounded in trace, tickets and worktrees. Once every run is finalized,
+the project's watcher tab is closed automatically.
+
 The external Watcher created for a playbook performs one bounded validation pass
 and then keeps a zero-token `yano watch` process alive with a ten-minute
 interval. If `orchestrator.db` is not present yet, an ordinary watcher records

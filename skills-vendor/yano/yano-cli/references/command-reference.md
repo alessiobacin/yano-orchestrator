@@ -115,6 +115,19 @@ Codex copy already discovered by Pi is reused rather than duplicated. Use
 copy; use `--no-prune-duplicates` to inspect without moving safe duplicates.
 Unmanaged or modified duplicate directories are left in place and reported.
 
+## Persistent planner rules
+
+```text
+yano rule --add --global "<regola>"
+yano rule --add --project-root <dir> "<regola>"
+yano rule --list [--global|--project-root <dir>] [--json]
+yano rule --remove --global --id <RULE-id>
+```
+
+Rules are stored under `<YANO_DATA_DIR>/rules/rules.json`. Global and
+project-specific rules are injected into planner system prompts; removing a
+rule requires its ID from `--list --json`.
+
 ## Watcher and external agents
 
 ```text
@@ -123,7 +136,7 @@ yano watch --project-root <dir> --lookback-ms <ms> --interval-ms <ms> [--away] [
 yano watch --project-root <dir> --validation-run <id> --playbook-proposal <id> --once
 yano watcher init --project-root <dir> [--interval-ms <ms>] [--lookback-ms <ms>]
 yano watcher start --project-root <dir> [--dry-run] [--once] [--foreground]
-yano watcher status [--project-root <dir>] [--no-heal] [--json]  # cross-checks + self-heals a dead pane
+yano watcher status [--project-root <dir>] [--no-heal] [--json]  # self-heal watcher + planner dei run incompleti
 yano watcher pause|resume --project-root <dir>
 yano watcher projects [--all] [--project-root <dir>] [--json]
 yano architect projects [--all] [--project-root <dir>] [--json]
@@ -131,6 +144,21 @@ yano debugger projects [--all] [--project-root <dir>] [--json]
 yano auto-improve projects [--all] [--project-root <dir>] [--json]
 yano suggester projects [--all] [--project-root <dir>] [--json]
 ```
+
+`agent_send` is liveness-aware. An offline target is rerouted to a live
+planner; when no planner is live, the persistent watcher receives a retained
+fallback envelope, starts/reopens `planner-01`, and forwards the original
+message with its sender and assignment correlation intact. The persistent
+watcher exists only for projects explicitly registered through watcher
+commands; `yano start` does not create one.
+The debugger, suggester and auto-improver registry handoffs use this same
+liveness check and fallback channel.
+
+The global npm installation installs an idempotent user crontab entry running
+`yano watcher supervise` every minute. `yano watcher cron install` repairs or
+reinstalls it; `cron status` verifies it and `cron remove` removes only Yano's
+marked entry. The supervisor uses a lock and self-heals registered running
+watcher panes; paused projects are not restarted.
 
 The scan history window is `--lookback-ms`; the recurring polling delay is
 `--interval-ms`. `--once` exits after one scan. Watcher findings are routed to
@@ -335,3 +363,8 @@ are routed to the planner after their respective gates.
 - If a command is not listed here, consult `yano --help` and the command's
   help in the installed version, then update this reference in a follow-up
   change rather than guessing.
+
+The watcher supervisor also reconciles registered project SQLite runs. After a
+Herdr/process loss it recreates the workspace and `planner-01` for every
+non-finalized run, then sends a recovery prompt with trace, ticket and worktree
+context. Once all runs are finalized it closes that project's watcher tab.

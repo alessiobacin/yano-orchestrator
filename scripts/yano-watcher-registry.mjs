@@ -37,11 +37,14 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { appendRawTraceRecord, canonicalProjectScope, projectKey, readTraceRecords, resolveTraceProject, traceRoot } from "./yano-trace-storage.mjs";
+import { projectDbPath } from "./yano-project.mjs";
 
 const require = createRequire(import.meta.url);
 const WORKSPACE_LABEL = "yano-watcher";
 const DEFAULT_INTERVAL_MS = 600000; // 10 minuti — stesso default operativo di prompts/watcher.md
 const DEFAULT_LOOKBACK_MS = 3600000;
+const CRON_MARKER = "# yano-watcher-supervisor";
+const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 function value(argv, flag) { const i = argv.indexOf(flag); return i === -1 ? null : argv[i + 1]; }
 function has(argv, flag) { return argv.includes(flag); }
@@ -83,6 +86,17 @@ function openDatabase() {
 		);
 	`);
 	return db;
+}
+
+function openProjectDatabase(root) {
+	const file = projectDbPath(root);
+	const legacy = path.join(root, ".yano", "orchestrator.db");
+	const dbFile = fs.existsSync(file) ? file : legacy;
+	if (!fs.existsSync(dbFile)) return null;
+	try {
+		const { DatabaseSync } = requireSqlite();
+		return new DatabaseSync(dbFile, { readOnly: true });
+	} catch { return null; }
 }
 
 function now() { return new Date().toISOString(); }
@@ -129,6 +143,84 @@ function renameHerdrTab(tabId, label) {
 	if (!tabId || !label) return;
 	const result = spawnSync("herdr", ["tab", "rename", tabId, label], { encoding: "utf8" });
 	if (result.status !== 0) throw new Error(`yano watcher: impossibile rinominare la tab ${tabId} in ${label}${result.stderr ? `: ${result.stderr.trim()}` : ""}`);
+}
+
+function closeHerdrTab(tabId) {
+	if (!tabId) return { closed: false, reason: "missing_tab_id" };
+	const result = spawnSync("herdr", ["tab", "close", tabId], { encoding: "utf8" });
+	return result.status === 0
+		? { closed: true, tab_id: tabId }
+		: { closed: false, tab_id: tabId, error: (result.stderr || result.stdout || "Herdr non ha chiuso la tab").trim() };
+}
+
+function projectRuns(root) {
+	const db = openProjectDatabase(root);
+	if (!db) return { available: false, runs: [] };
+	try {
+		const runs = db.prepare("SELECT id, project, objective, status, finalization_status, updated_at FROM runs ORDER BY updated_at DESC").all();
+		return { available: true, runs };
+	} catch { return { available: false, runs: [] }; }
+	finally { try { db.close(); } catch { /* best effort */ } }
+}
+
+function runNeedsPlanner(run) {
+	return run.status === "active" || (run.status === "completed" && !["finalized", "not_applicable"].includes(run.finalization_status));
+}
+
+function findProjectWorkspace(snapshot, root, project) {
+	return snapshot?.workspaces?.find((workspace) => workspace.label === project || snapshot.panes?.some((pane) => pane.workspace_id === workspace.workspace_id && path.resolve(pane.cwd || "") === path.resolve(root))) || null;
+}
+
+function recoverPlanner({ row, snapshot, run }) {
+	const workspaceRoot = path.join(traceRoot(), "agent-workspaces", "recovery");
+	fs.mkdirSync(workspaceRoot, { recursive: true, mode: 0o700 });
+	let current = snapshot;
+	let workspace = findProjectWorkspace(current, row.root, row.name);
+	if (!workspace) {
+		const created = spawnSync("herdr", ["workspace", "create", "--cwd", row.root, "--label", row.name, "--focus"], { encoding: "utf8" });
+		if (created.status !== 0) throw new Error((created.stderr || "workspace non creato").trim());
+		current = herdrSnapshot() || current;
+		workspace = findProjectWorkspace(current, row.root, row.name);
+	}
+	if (!workspace) throw new Error(`workspace Herdr non trovato per ${row.name}`);
+	let tab = current?.tabs?.find((item) => item.workspace_id === workspace.workspace_id && item.label === "planner-01");
+	let pane = tab && current?.panes?.find((item) => item.tab_id === tab.tab_id);
+	if (!pane) {
+		const created = spawnSync("herdr", ["tab", "create", "--workspace", workspace.workspace_id, "--cwd", row.root, "--label", "planner-01", "--no-focus"], { encoding: "utf8" });
+		if (created.status !== 0) throw new Error((created.stderr || "tab planner non creata").trim());
+		current = herdrSnapshot() || current;
+		tab = current?.tabs?.find((item) => item.workspace_id === workspace.workspace_id && item.label === "planner-01");
+		pane = tab && current?.panes?.find((item) => item.tab_id === tab.tab_id);
+	}
+	if (!pane) throw new Error(`pane planner non trovato per ${row.name}`);
+	const prompt = `[yano-watcher recovery] Il workspace o il processo Herdr è stato perso. Ripristina il progetto ${row.name}: controlla SQLite, trace, run ${run.id}, ticket pending/running e worktree. Il run non è concluso (status=${run.status}, finalization_status=${run.finalization_status || "not_started"}). Non ricreare ticket esistenti; riprendi dal checkpoint osservabile, riattiva gli agenti mancanti e porta il lavoro fino alla risposta finale all'utente.`;
+	const launched = spawnSync("herdr", ["pane", "run", pane.pane_id, `yano start --instance planner-01 --role planner --project ${shellQuote(row.name)} ${shellQuote(prompt)}`], { cwd: row.root, encoding: "utf8" });
+	if (launched.status !== 0) throw new Error((launched.stderr || "planner non riavviato").trim());
+	return { recovered: true, workspace_id: workspace.workspace_id, planner_tab_id: tab.tab_id, planner_pane_id: pane.pane_id, run_id: run.id };
+}
+
+function reconcileProjectRun(db, row, snapshot) {
+	const { available, runs } = projectRuns(row.root);
+	if (!available || !runs.length) return { recovery: "not_applicable" };
+	const incomplete = runs.filter(runNeedsPlanner);
+	if (incomplete.length) {
+		const plannerLive = snapshot?.panes?.some((pane) => path.resolve(pane.cwd || "") === path.resolve(row.root) && /planner/i.test(`${pane.label || ""} ${pane.name || ""} ${pane.role || ""}`));
+		if (plannerLive) return { recovery: "planner_present", incomplete_runs: incomplete.map((run) => run.id) };
+		try {
+			const recovered = recoverPlanner({ row, snapshot, run: incomplete[0] });
+			try { appendRawTraceRecord({ cwd: row.root, project: row.name, record: { type: "watcher_planner_recovered", record_type: "event", source: "yano-watcher-registry", instance: "yano-watcher", run_ids: incomplete.map((run) => run.id), ...recovered } }); } catch { /* best effort */ }
+			return { recovery: "planner_recovered", incomplete_runs: incomplete.map((run) => run.id), ...recovered };
+		} catch (error) {
+			return { recovery: "planner_recovery_failed", incomplete_runs: incomplete.map((run) => run.id), recovery_error: error instanceof Error ? error.message : String(error) };
+		}
+	}
+	if (row.worker_tab_id && snapshot?.tabs?.some((tab) => tab.tab_id === row.worker_tab_id)) {
+		const closed = closeHerdrTab(row.worker_tab_id);
+		db.prepare("UPDATE watcher_projects SET worker_status = ?, updated_at = ? WHERE project_key = ?").run("stopped", now(), row.project_key);
+		try { appendRawTraceRecord({ cwd: row.root, project: row.name, record: { type: "watcher_project_completed", record_type: "event", source: "yano-watcher-registry", instance: "yano-watcher", closed_tab: closed } }); } catch { /* best effort */ }
+		return { recovery: "project_completed", watcher_closed: closed.closed, watcher_close_error: closed.error || null };
+	}
+	return { recovery: "project_completed", watcher_closed: false };
 }
 
 function findOrCreateWatcherWorkspace(snapshot, root, dryRun = false) {
@@ -272,16 +364,89 @@ function doStatusForRow(db, row, { heal = true } = {}) {
 	if (!snapshot) return { ...base, live: "unknown", note: "Herdr non raggiungibile: impossibile verificare lo stato reale" };
 	const tab = snapshot.tabs?.find((item) => item.tab_id === row.worker_tab_id);
 	const pane = tab && snapshot.panes?.find((item) => item.pane_id === row.worker_pane_id);
-	if (tab && pane) return { ...base, live: "running" };
+	if (tab && pane) return { ...base, live: "running", ...reconcileProjectRun(db, row, snapshot) };
 	const drifted = { ...base, live: "not_found", drift: true };
 	if (!heal) return drifted;
 	try {
 		const relaunched = launchHerdrWorker({ project: info, root: row.root, db, row, intervalMs: row.interval_ms, lookbackMs: row.lookback_ms, dryRun: false });
 		try { appendRawTraceRecord({ cwd: row.root, project: row.name, record: { type: "watcher_worker_recovered", record_type: "event", source: "yano-watcher-registry", instance: "yano-watcher", previous_tab_id: row.worker_tab_id, previous_pane_id: row.worker_pane_id } }); } catch { /* best effort */ }
-		return { ...drifted, recovered: true, ...relaunched, worker_status: "running" };
+		return { ...drifted, recovered: true, ...relaunched, worker_status: "running", ...reconcileProjectRun(db, row, herdrSnapshot()) };
 	} catch (error) {
 		return { ...drifted, recovered: false, recover_error: error instanceof Error ? error.message : String(error) };
 	}
+}
+
+function supervisorLockPath() { return path.join(traceRoot(), "watcher", "supervisor.lock"); }
+
+function withSupervisorLock(callback) {
+	const lock = supervisorLockPath();
+	fs.mkdirSync(path.dirname(lock), { recursive: true, mode: 0o700 });
+	let fd;
+	try {
+		fd = fs.openSync(lock, "wx");
+		fs.writeSync(fd, `${process.pid}\n${now()}\n`);
+	} catch (error) {
+		if (error?.code !== "EEXIST") throw error;
+		try {
+			const age = Date.now() - fs.statSync(lock).mtimeMs;
+			if (age > 120_000) {
+				fs.unlinkSync(lock);
+				fd = fs.openSync(lock, "wx");
+				fs.writeSync(fd, `${process.pid}\n${now()}\n`);
+			} else return { skipped: true, reason: "supervisor_already_running", lock_path: lock };
+		} catch (retryError) {
+			return { skipped: true, reason: "supervisor_lock_unavailable", lock_path: lock, detail: retryError instanceof Error ? retryError.message : String(retryError) };
+		}
+	}
+	try {
+		return callback();
+	} finally {
+		try { if (fd !== undefined) fs.closeSync(fd); } catch { /* best effort */ }
+		try { fs.unlinkSync(lock); } catch { /* best effort */ }
+	}
+}
+
+function supervise(db) {
+	return withSupervisorLock(() => {
+		const rows = db.prepare("SELECT * FROM watcher_projects ORDER BY updated_at DESC").all();
+		return {
+			checked_at: now(),
+			projects: rows.map((row) => doStatusForRow(db, row, { heal: true })),
+		};
+	});
+}
+
+function readCrontab() {
+	const result = spawnSync("crontab", ["-l"], { encoding: "utf8", maxBuffer: 1_000_000 });
+	if (result.status === 0) return result.stdout || "";
+	if (/no crontab for|can't open crontab/i.test(`${result.stdout || ""}\n${result.stderr || ""}`)) return "";
+	throw new Error(`yano watcher: impossibile leggere il crontab${result.stderr ? `: ${result.stderr.trim()}` : ""}`);
+}
+
+function cronCommand() {
+	return `${shellQuote(process.execPath)} ${shellQuote(path.join(PACKAGE_ROOT, "bin", "yano.mjs"))} watcher supervise --json >/dev/null 2>&1 ${CRON_MARKER}`;
+}
+
+function cronInstall() {
+	const line = `* * * * * ${cronCommand()}`;
+	const existing = readCrontab().split("\n").filter((item) => item.trim() && !item.includes(CRON_MARKER));
+	const content = [...existing, line].join("\n") + "\n";
+	const result = spawnSync("crontab", ["-"], { input: content, encoding: "utf8", maxBuffer: 1_000_000 });
+	if (result.status !== 0) throw new Error(`yano watcher: impossibile installare il crontab${result.stderr ? `: ${result.stderr.trim()}` : ""}`);
+	return { installed: true, schedule: "* * * * *", command: line, marker: CRON_MARKER };
+}
+
+function cronStatus() {
+	const line = readCrontab().split("\n").find((item) => item.includes(CRON_MARKER)) || null;
+	return { installed: Boolean(line), schedule: line ? "* * * * *" : null, command: line, marker: CRON_MARKER };
+}
+
+function cronRemove() {
+	const existing = readCrontab().split("\n").filter((item) => item.trim() && !item.includes(CRON_MARKER));
+	const content = existing.length ? `${existing.join("\n")}\n` : "";
+	const result = spawnSync("crontab", ["-"], { input: content, encoding: "utf8", maxBuffer: 1_000_000 });
+	if (result.status !== 0) throw new Error(`yano watcher: impossibile rimuovere il crontab${result.stderr ? `: ${result.stderr.trim()}` : ""}`);
+	return { installed: false, removed: true, marker: CRON_MARKER };
 }
 
 function print(valueToPrint, machine) {
@@ -294,6 +459,7 @@ function parseCommand(argv) {
 	const sub = argv[0];
 	return {
 		sub,
+		cronAction: argv[1] || null,
 		projectRoot: value(argv, "--project-root") || null,
 		project: value(argv, "--project"),
 		intervalMs: value(argv, "--interval-ms") ? Number(value(argv, "--interval-ms")) : null,
@@ -310,7 +476,7 @@ function parseCommand(argv) {
 
 function usage() {
 	return [
-		"Uso: yano watcher <init|start|status|pause|resume|projects> [opzioni]",
+		"Uso: yano watcher <init|start|status|pause|resume|supervise|cron|projects> [opzioni]",
 		"",
 		"  init --project-root <dir> [--interval-ms 600000] [--lookback-ms 3600000]",
 		"                                                     registra un progetto nel registro persistente",
@@ -320,6 +486,8 @@ function usage() {
 		"                                                     mostra lo stato registrato di uno o tutti i progetti e,",
 		"                                                     salvo --no-heal, rilancia il pane se risulta morto",
 		"  pause|resume --project-root <dir>                 sospende/riattiva il loop di polling",
+		"  supervise [--json]                                controllo globale idempotente; rilancia ogni watcher atteso ma morto",
+		"  cron install|status|remove                        installa/verifica/rimuove il controllo globale ogni minuto",
 		"  projects [--all] [--json]                         presenza Herdr/Pi effettiva (vedi yano watcher projects)",
 		"",
 		"`start`/`resume` lanciano il comando bounded/zero-token già esistente",
@@ -370,6 +538,17 @@ export async function runYanoWatcherRegistry({ argv = [] } = {}) {
 			const results = rows.map((row) => doStatusForRow(db, row, { heal }));
 			print(results, opts.json);
 			return results;
+		}
+		if (opts.sub === "supervise") {
+			const result = supervise(db);
+			print(result, opts.json);
+			return result;
+		}
+		if (opts.sub === "cron") {
+			const action = opts.cronAction || "status";
+			const result = action === "install" ? cronInstall() : action === "remove" ? cronRemove() : action === "status" ? cronStatus() : (() => { throw new Error(`yano watcher: azione cron sconosciuta "${action}"; usa install, status o remove`); })();
+			print(result, opts.json);
+			return result;
 		}
 		throw new Error(`yano watcher: comando sconosciuto "${opts.sub}".\n${usage()}`);
 	} finally {

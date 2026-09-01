@@ -28,7 +28,15 @@ yano debugger report \
   --expected "comportamento atteso" \
   --actual "comportamento osservato" \
   --steps $'passo 1\npasso 2' \
+  --environment '{"browser":"Chrome","os":"macOS","version":"1.0.0"}' \
   --json
+```
+
+`--expected`, `--actual`, `--steps` e `--environment` sono obbligatori. Il
+dettaglio completo, inclusa la cronologia diagnostica, si legge con:
+
+```bash
+yano debugger status --bug-id BUG-... --json
 ```
 
 Salva l'`bug_id` restituito. Le segnalazioni equivalenti vengono deduplicate.

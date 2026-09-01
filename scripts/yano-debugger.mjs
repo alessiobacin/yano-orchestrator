@@ -24,6 +24,7 @@ import { fileURLToPath } from "node:url";
 import { appendRawTraceRecord, projectKey, readTraceRecords, resolveTraceProject, traceRoot } from "./yano-trace-storage.mjs";
 import mqtt from "mqtt";
 import { resolveYanoConfig } from "./yano-config.mjs";
+import { routeAgentMessage } from "./yano-agent-routing.mjs";
 
 const require = createRequire(import.meta.url);
 const VALID_SEVERITIES = new Set(["low", "medium", "high", "critical"]);
@@ -197,7 +198,16 @@ function appendDebuggerEvent(db, bug, type, actor, payload = {}) {
 function bugWithProject(db, row) {
 	if (!row) return null;
 	const project = db.prepare("SELECT name, root FROM debugger_projects WHERE project_key = ?").get(row.project_key);
-	return { ...row, project_name: project?.name || null, root: project?.root || null, steps: json(row.steps_json, []), environment: json(row.environment_json, {}) };
+	const events = db.prepare("SELECT event_id, type, actor, payload_json, created_at FROM debugger_events WHERE bug_id = ? ORDER BY created_at ASC").all(row.bug_id)
+		.map((event) => ({ ...event, payload: json(event.payload_json, {}) }));
+	return {
+		...row,
+		project_name: project?.name || null,
+		root: project?.root || null,
+		steps: json(row.steps_json, []),
+		environment: json(row.environment_json, {}),
+		events,
+	};
 }
 
 function parseSteps(raw) {
@@ -363,13 +373,19 @@ function launchHerdrWorker({ project, root, db, row, intervalMs, dryRun }) {
 export function reportBug(db, opts) {
 	if (!opts.title?.trim()) throw new Error("yano debugger report: --title è obbligatorio");
 	if (!opts.description?.trim()) throw new Error("yano debugger report: --description è obbligatorio");
+	if (!opts.expected?.trim()) throw new Error("yano debugger report: --expected è obbligatorio");
+	if (!opts.actual?.trim()) throw new Error("yano debugger report: --actual è obbligatorio");
 	if (!VALID_SEVERITIES.has(opts.severity)) throw new Error(`yano debugger report: --severity deve essere uno tra ${[...VALID_SEVERITIES].join(", ")}`);
 	ensureSource(opts.source);
 	ensureMode(opts.mode);
 	if (opts.mode === "yano-maintenance" && !opts.projectRoot.includes("yano-orchestrator")) throw new Error("yano debugger: la modalità yano-maintenance richiede una root esplicita del repository yano-orchestrator");
 	const info = projectInfo(opts.projectRoot, opts.project, opts.mode);
 	const project = ensureProject(db, info);
-	const normalized = { title: opts.title.trim(), description: opts.description.trim(), expected: opts.expected || "", actual: opts.actual || "", steps: parseSteps(opts.steps), environment: safeJson(typeof opts.environment === "object" && opts.environment !== null ? opts.environment : json(opts.environment, opts.environment ? { value: opts.environment } : {})) };
+	const steps = parseSteps(opts.steps);
+	if (!steps.length) throw new Error("yano debugger report: --steps deve contenere almeno un passo riproducibile");
+	const environment = safeJson(typeof opts.environment === "object" && opts.environment !== null ? opts.environment : json(opts.environment, opts.environment ? { value: opts.environment } : {}));
+	if (!environment || typeof environment !== "object" || Array.isArray(environment) || !Object.keys(environment).length) throw new Error("yano debugger report: --environment deve contenere almeno un dato (es. browser, os, versione)");
+	const normalized = { title: opts.title.trim(), description: opts.description.trim(), expected: opts.expected.trim(), actual: opts.actual.trim(), steps, environment };
 	const hash = fingerprint(`${info.key}|${normalized.title.toLowerCase()}|${normalized.description.toLowerCase()}|${normalized.actual.toLowerCase()}`);
 	const duplicate = db.prepare("SELECT * FROM debugger_bugs WHERE project_key = ? AND fingerprint = ?").get(info.key, hash);
 	if (duplicate) return { bug: bugWithProject(db, duplicate), duplicate: true };
@@ -379,7 +395,7 @@ export function reportBug(db, opts) {
 		.run(bugId, project.project_key, normalized.title, normalized.description, opts.severity, opts.source, opts.reporter || null, normalized.expected, normalized.actual, JSON.stringify(normalized.steps), JSON.stringify(normalized.environment), "reported", hash, timestamp, timestamp);
 	const bug = bugWithProject(db, db.prepare("SELECT * FROM debugger_bugs WHERE bug_id = ?").get(bugId));
 	appendDebuggerEvent(db, bug, "report_received", opts.actor, { source: opts.source, reporter: opts.reporter || null });
-	return { bug, duplicate: false };
+	return { bug: bugWithProject(db, db.prepare("SELECT * FROM debugger_bugs WHERE bug_id = ?").get(bugId)), duplicate: false };
 }
 
 // Closes the "who actually looks at a newly reported bug" gap: reporting a
@@ -427,10 +443,12 @@ export async function notifyBugReported(db, result) {
 				timestamp: now(),
 				response_schema: null,
 			};
-			await client.publishAsync(`pi/${project}/roles/${targetRole}/tasks`, JSON.stringify(env), { qos: 1 });
+			return routeAgentMessage({ client, projectRoot: bug.root, project, packageRoot: path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."), message: env, targetRole });
 		};
-		await publishRole("debugger", `Nuovo bug segnalato nel registro yano-debugger: ${bug.bug_id} — "${bug.title}" (severità: ${bug.severity}, fonte: ${bug.source}). Prendilo in carico con \`yano debugger claim --bug-id ${bug.bug_id} --actor <tua-istanza>\`, leggilo con \`${statusCmd}\` e segui il tuo protocollo diagnostico (claim → riproduzione → evidenza → stato → notifica al planner).`);
-		await publishRole("planner", `È stato aperto un nuovo bug (${bug.bug_id}, severità ${bug.severity}) nel registro yano-debugger per questo progetto: "${bug.title}". Se non hai già un'istanza debugger attiva su questo progetto, valuta se avviarne una (\`yano debugger start --project-root ${bug.root}\`) o gestire tu la triage; altrimenti lascialo al debugger, che ti contatterà con l'esito.`);
+		const debuggerRoute = await publishRole("debugger", `Nuovo bug segnalato nel registro yano-debugger: ${bug.bug_id} — "${bug.title}" (severità: ${bug.severity}, fonte: ${bug.source}). Prendilo in carico con \`yano debugger claim --bug-id ${bug.bug_id} --actor <tua-istanza>\`, leggilo con \`${statusCmd}\` e segui il tuo protocollo diagnostico (claim → riproduzione → evidenza → stato → notifica al planner).`);
+		if (debuggerRoute.route === "target") {
+			await publishRole("planner", `È stato aperto un nuovo bug (${bug.bug_id}, severità ${bug.severity}) nel registro yano-debugger per questo progetto: "${bug.title}". Se non hai già un'istanza debugger attiva su questo progetto, valuta se avviarne una (\`yano debugger start --project-root ${bug.root}\`) o gestire tu la triage; altrimenti lascialo al debugger, che ti contatterà con l'esito.`);
+		}
 	} catch {
 		// best effort: MQTT unreachable or nobody subscribed is not an error —
 		// the bug is still durably registered and visible via `yano debugger status`.
@@ -666,7 +684,16 @@ export async function runYanoDebugger({ argv = [] } = {}) {
 		}
 		if (opts.sub === "status" && opts.bugId) {
 			const bug = getBugOrThrow(db, opts.bugId);
-			if (opts.json) print(bug, true); else { console.log(`${bug.bug_id} — ${bug.status} — ${bug.title}`); console.log(`progetto: ${bug.project_name} (${bug.root})`); console.log(`severità: ${bug.severity}; assegnatario: ${bug.assigned_instance || "nessuno"}`); }
+			if (opts.json) print(bug, true); else {
+				console.log(`${bug.bug_id} — ${bug.status} — ${bug.title}`);
+				console.log(`progetto: ${bug.project_name} (${bug.root})`);
+				console.log(`severità: ${bug.severity}; assegnatario: ${bug.assigned_instance || "nessuno"}`);
+				console.log(`atteso: ${bug.expected}`);
+				console.log(`osservato: ${bug.actual}`);
+				console.log(`passi: ${bug.steps.join(" | ")}`);
+				console.log(`ambiente: ${JSON.stringify(bug.environment)}`);
+				console.log(`eventi diagnostici: ${bug.events.length}`);
+			}
 			return bug;
 		}
 		if (opts.sub === "status") {

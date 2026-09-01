@@ -44,6 +44,7 @@ import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
+import { spawn, spawnSync } from "node:child_process";
 import mqtt from "mqtt";
 import { canonicalProjectScope, readTraceRecords, tracePaths } from "./yano-trace-storage.mjs";
 import { appendRawTraceRecord } from "./yano-trace-storage.mjs";
@@ -102,6 +103,126 @@ function installFinalEventMonitor({ client, cwd, project, argv, packageRoot, run
 	try {
 		client.on("message", onMessage);
 		client.subscribeAsync(topics, { qos: 0 }).catch(() => { /* best effort; cadence remains active */ });
+	} catch { /* best effort */ }
+}
+
+function herdrSnapshot() {
+	const result = spawnSync("herdr", ["api", "snapshot"], { encoding: "utf8", maxBuffer: 4_000_000 });
+	if (result.status !== 0) return null;
+	try {
+		const parsed = JSON.parse(result.stdout);
+		return parsed?.result?.snapshot || parsed?.result || parsed;
+	} catch { return null; }
+}
+
+function shellQuote(value) {
+	return process.platform === "win32" ? `"${String(value).replaceAll('"', '\\"')}"` : `'${String(value).replaceAll("'", `\'"'"\'`)}'`;
+}
+
+// This is deliberately a Yano control-plane action, not an application
+// mutation: a watcher may recover the missing coordinator, but it never edits
+// the observed project. A fresh tab is used when Herdr has a stale planner
+// pane; reusing a dead shell is the exact failure this path is meant to heal.
+function spawnPlannerForFallback({ cwd, project }) {
+	const snapshot = herdrSnapshot();
+	let workspace = snapshot?.workspaces?.find((item) => item.label === project || (snapshot.panes || []).some((pane) => pane.workspace_id === item.workspace_id && path.resolve(pane.cwd || "") === path.resolve(cwd)));
+	if (!workspace) {
+		const created = spawnSync("herdr", ["workspace", "create", "--cwd", cwd, "--label", project, "--no-focus"], { encoding: "utf8", maxBuffer: 1_000_000 });
+		if (created.status === 0) workspace = herdrSnapshot()?.workspaces?.find((item) => item.label === project);
+	}
+	if (workspace?.workspace_id) {
+		const label = `planner-01-recovery-${Date.now().toString(36)}`.slice(0, 60);
+		const createdTab = spawnSync("herdr", ["tab", "create", "--workspace", workspace.workspace_id, "--cwd", cwd, "--label", label, "--no-focus"], { encoding: "utf8", maxBuffer: 1_000_000 });
+		if (createdTab.status === 0) {
+			const refreshed = herdrSnapshot();
+			const tab = refreshed?.tabs?.find((item) => item.workspace_id === workspace.workspace_id && item.label === label);
+			const pane = tab && refreshed?.panes?.find((item) => item.tab_id === tab.tab_id);
+			if (pane?.pane_id) {
+				const command = `yano start --instance planner-01 --role planner --project ${shellQuote(project)}`;
+				const launched = spawnSync("herdr", ["pane", "run", pane.pane_id, command], { cwd, encoding: "utf8", maxBuffer: 1_000_000 });
+				if (launched.status === 0) return { ok: true, method: "herdr", pane_id: pane.pane_id, tab_id: tab.tab_id, command };
+			}
+		}
+	}
+	// Herdr is optional for the control plane. If it is unavailable, keep the
+	// recovery alive as a detached Yano process rather than dropping the
+	// original message; it will still publish planner-01 presence on MQTT.
+	try {
+		const child = spawn("yano", ["start", "--instance", "planner-01", "--role", "planner", "--project", project], { cwd, detached: true, stdio: "ignore" });
+		child.unref();
+		return { ok: true, method: "detached-yano", command: `yano start --instance planner-01 --role planner --project ${project}` };
+	} catch (error) {
+		return { ok: false, method: "none", error: error instanceof Error ? error.message : String(error) };
+	}
+}
+
+export async function handleAgentFallback({ client, cwd, project, packageRoot, payload }) {
+	if (!payload || payload.type !== "agent_route_fallback" || payload.project !== project || !payload.original) return;
+	const original = payload.original;
+	let planners = await discoverLiveAgents(client, project);
+	let livePlanners = planners.filter((agent) => agent.role === "planner");
+	let recovery = null;
+	if (!livePlanners.length) {
+		recovery = spawnPlannerForFallback({ cwd, project });
+		const deadline = Date.now() + 15_000;
+		while (Date.now() < deadline && !livePlanners.length) {
+			await new Promise((resolve) => setTimeout(resolve, 350));
+			planners = await discoverLiveAgents(client, project);
+			livePlanners = planners.filter((agent) => agent.role === "planner");
+		}
+	}
+	let delivered = 0;
+	for (const planner of livePlanners) {
+		try {
+			const envelope = {
+				...original,
+				target_instance: planner.instance,
+				target_role: "planner",
+				prompt: `[yano-routing] Destinatario originale offline: ${payload.original_target || "?"}. Il watcher ha recuperato il coordinatore: prendi in carico questo messaggio, informa il mittente e decidi se rilanciare o sostituire l'agente.\n\n${original.prompt}`,
+				reply_to: original.reply_to || `pi/${project}/agents/${original.sender_instance}/responses`,
+				hops: Number(original.hops || 0),
+				fallback_for: payload.original_target || null,
+				routed_by: "yano-watcher",
+			};
+			await client.publishAsync(`pi/${project}/agents/${planner.instance}/commands`, JSON.stringify(envelope), { qos: 1 });
+			delivered++;
+		} catch { /* best effort; next planner or next scan can retry */ }
+	}
+	try {
+		await client.publishAsync(`pi/${project}/system/agent-fallback`, "", { qos: 1, retain: true });
+	} catch { /* best effort */ }
+	try {
+		appendRawTraceRecord({ cwd, project, record: {
+			type: "yano_watcher_agent_fallback_route",
+			record_type: "event",
+			source: "yano-watcher",
+			instance: "yano-watcher",
+			project,
+			fallback_id: payload.fallback_id || null,
+			original_target: payload.original_target || null,
+			planner_instances: livePlanners.map((agent) => agent.instance),
+			delivered,
+			recovery,
+			status: delivered ? "delivered" : "blocked",
+		} });
+	} catch { /* tracing must never block recovery */ }
+	if (delivered) console.log(`yano watch: delega fallback inoltrata a ${livePlanners.map((agent) => agent.instance).join(", ")}.`);
+		else console.warn(`yano watch: impossibile consegnare il fallback al planner del progetto "${project}"; il messaggio resta tracciato.`);
+}
+
+function installAgentFallbackMonitor({ client, cwd, project, packageRoot, runtime }) {
+	if (!client || runtime.agentFallbackMonitorInstalled) return;
+	runtime.agentFallbackMonitorInstalled = true;
+	const topic = `pi/${project}/system/agent-fallback`;
+	const onMessage = (_topic, payload) => {
+		try {
+			const parsed = JSON.parse(payload.toString());
+			if (parsed?.type === "agent_route_fallback") void handleAgentFallback({ client, cwd, project, packageRoot, payload: parsed });
+		} catch { /* malformed/clear-retained payload */ }
+	};
+	try {
+		client.on("message", onMessage);
+		client.subscribeAsync(topic, { qos: 1 }).catch(() => { /* cadence remains active */ });
 	} catch { /* best effort */ }
 }
 
@@ -700,6 +821,7 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 		runtime.brokerUrl = brokerUrl;
 		persistentWatcherRuntimes.set(runtimeKey, runtime);
 		installFinalEventMonitor({ client, cwd: watchCwd, project, argv, packageRoot: effectivePackageRoot, runtime });
+		installAgentFallbackMonitor({ client, cwd: watchCwd, project, packageRoot: effectivePackageRoot, runtime });
 	}
 	const sharedPersistentClient = Boolean(runtime && runtime.client === client);
 	const liveAgents = await discoverLiveAgents(client, project);
@@ -827,6 +949,8 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 				const telegram = await sendTelegramWatcherNotification({
 					yanoRepo,
 					env: config,
+					sender: "yano-watcher",
+					project,
 					message: `🚨 Yano watcher: validazione bloccata perché il progetto non è inizializzato (manca orchestrator.db).\nProgetto: ${project}\nSegnale: validation_blocked\nNessun planner live è presente: serve attenzione dell’utente.\nDettagli: ${JSON.stringify(details)}`,
 				});
 				if (!telegram.ok && telegram.detail === "telegram_env_missing") throw missingConfigError("watch", telegram.missing, { packageRoot: effectivePackageRoot });
@@ -968,7 +1092,7 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 			try { appendRawTraceRecord({ cwd: watchCwd, project, record: { type: "yano_watcher_notification_route", record_type: "event", instance: "yano-watcher", route: "planner", planner_instances: livePlanners.map((agent) => agent.instance), delivered, signal, fingerprint: details.fingerprint || null, ticket_path: details.ticket_path || null, run_id: details.run_id || null, ticket_id: details.ticket_id || null } }); } catch { /* best effort */ }
 			return { route: "planner", delivered };
 		}
-		const telegram = await sendTelegramWatcherNotification({ yanoRepo, env: config, message: `🚨 Yano watcher: ${summary}\nProgetto: ${project}\nSegnale: ${signal}\nNessun planner live è presente: serve attenzione dell’utente.\nDettagli: ${JSON.stringify(details)}` });
+		const telegram = await sendTelegramWatcherNotification({ yanoRepo, env: config, sender: "yano-watcher", project, message: `🚨 Yano watcher: ${summary}\nProgetto: ${project}\nSegnale: ${signal}\nNessun planner live è presente: serve attenzione dell’utente.\nDettagli: ${JSON.stringify(details)}` });
 		if (!telegram.ok && telegram.detail === "telegram_env_missing") throw missingConfigError("watch", telegram.missing, { packageRoot: effectivePackageRoot });
 		try { appendRawTraceRecord({ cwd: watchCwd, project, record: { type: "yano_watcher_notification_route", record_type: "event", instance: "yano-watcher", route: "telegram", planner_instances: [], telegram: { ok: telegram.ok, detail: telegram.detail }, signal, fingerprint: details.fingerprint || null, ticket_path: details.ticket_path || null, run_id: details.run_id || null, ticket_id: details.ticket_id || null } }); } catch { /* best effort */ }
 		return { route: "telegram", telegram };

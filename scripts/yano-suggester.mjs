@@ -19,6 +19,7 @@ import mqtt from "mqtt";
 import { appendRawTraceRecord, buildTraceOverview, projectKey, readTraceRecords, resolveTraceProject, traceRoot } from "./yano-trace-storage.mjs";
 import { planTraceRetrieval } from "./yano-trace-index.mjs";
 import { resolveYanoConfig } from "./yano-config.mjs";
+import { routeAgentMessage } from "./yano-agent-routing.mjs";
 
 const require = createRequire(import.meta.url);
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -313,15 +314,11 @@ async function notifyChannels(message, mode) {
 
 async function notifyPlanner(info, suggestion, analysis) {
 	const client = mqtt.connect(process.env.PI_ORCH_BROKER_URL || "mqtt://127.0.0.1:1883", { reconnectPeriod: 0, connectTimeout: 1500 });
-	const live = new Map();
 	try {
 		await new Promise((resolve, reject) => { const timer = setTimeout(() => reject(new Error("planner discovery timeout")), 1800); client.once("connect", () => { clearTimeout(timer); resolve(); }); client.once("error", (error) => { clearTimeout(timer); reject(error); }); });
-		await client.subscribeAsync(`pi/${info.name}/agents/+/status`);
-		client.on("message", (_topic, payload) => { const card = json(payload.toString(), null); if (card?.role === "planner" && card.instance && card.project === info.name && card.status !== "offline") live.set(card.instance, card); });
-		await new Promise((resolve) => setTimeout(resolve, 150));
 		const message = { type: "command", assignment_id: `suggestion-${suggestion.suggestion_id}`, sender_instance: "yano-suggester", sender_role: "suggester", project: info.name, correlation_id: suggestion.suggestion_id, display: true, triggerTurn: true, followUp: true, prompt: `[yano-suggester] Suggerimento approvato dal superadmin per ${info.name}. Leggi il report ${analysis.report_path}. Non è stata modificata alcuna parte del progetto. Decidi se chiedere chiarimenti o avviare to-spec → to-tickets.` };
-		for (const planner of live.values()) await client.publishAsync(`pi/${info.name}/agents/${planner.instance}/commands`, JSON.stringify(message), { qos: 1 });
-		return { delivered: live.size, planners: [...live.keys()] };
+		const routed = await routeAgentMessage({ client, projectRoot: info.root, project: info.name, packageRoot: PACKAGE_ROOT, message, targetRole: "planner" });
+		return { delivered: routed.route === "watcher" ? 0 : routed.delivered, planners: routed.planners || [], route: routed.route, watcher_bootstrap: routed.watcher_bootstrap || null };
 	} catch (error) { return { delivered: 0, planners: [], detail: error instanceof Error ? error.message : String(error) }; }
 	finally { client.end(true); }
 }

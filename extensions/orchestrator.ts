@@ -44,12 +44,14 @@ import { parse as parseYaml } from "yaml";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
+import * as os from "node:os";
 import { execFile, execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { loadPlaybook } from "../scripts/playbook-loader.mjs";
 import { fetchPublicSource, searchPublicAlternatives } from "../scripts/yano-auto-improve-web.mjs";
 import { ensureTraceProject, getTraceConfig, projectKey, setTraceMode, traceEnabled, traceRoot } from "../scripts/yano-trace-storage.mjs";
+import { loadYanoRules } from "../scripts/yano-rules.mjs";
 
 // ESM-safe lazy require, used only inside SQLiteOrchestratorStorage's
 // constructor to resolve node:sqlite on first actual use (see the
@@ -395,6 +397,11 @@ function topics(project: string) {
 		agentEvents: (id: string) => `pi/${project}/agents/${id}/events`,
 		agentStatusWildcard: () => `pi/${project}/agents/+/status`,
 		roleTasks: (role: string) => `pi/${project}/roles/${role}/tasks`,
+		// A durable hand-off channel for the one case a normal role topic cannot
+		// solve: the requested recipient is not live and there is no live planner
+		// to receive the escalation. The continuous watcher subscribes here and
+		// either forwards the original command to a planner or starts one first.
+		agentFallback: () => `pi/${project}/system/agent-fallback`,
 		teamEvents: (team: string) => `pi/${project}/teams/${team}/events`,
 		// YanoOrchestrator ticket/dependency layer (see below): "something
 		// happened" signals only — SQLite (orchestratorStorage/orchestrator.db)
@@ -3413,10 +3420,16 @@ export default function (pi: ExtensionAPI) {
 		const primaryDir = flags.customPrompts ? localPromptsDir : globalPromptsDir;
 		const fallbackDir = flags.customPrompts ? globalPromptsDir : null;
 		const template = loadRolePrompt(primaryDir, fallbackDir, identity.role, roleCfg);
+		const rules = identity.role === "planner" ? loadYanoRules({ root: identity.cwd, project: identity.project }) : null;
+		const rulesPrompt = rules && (rules.global.length || rules.project.length)
+			? `\n\n## Regole Yano obbligatorie\nSegui sempre queste regole globali e specifiche del progetto. Se una regola è in conflitto con una richiesta, fermati e informa l'utente.\n${[...rules.global.map((rule: any) => `- [globale] ${rule.text}`), ...rules.project.map((rule: any) => `- [progetto] ${rule.text}`)].join("\n")}`
+			: "";
 		logEvent("role_prompt_resolved", {
 			custom_prompts: !!flags.customPrompts,
 			primary_dir: primaryDir,
 			fallback_dir: fallbackDir,
+			rules_global: rules?.global.length || 0,
+			rules_project: rules?.project.length || 0,
 		});
 		const systemPrompt = template
 			.replaceAll("{{INSTANCE}}", identity.instance)
@@ -3425,7 +3438,7 @@ export default function (pi: ExtensionAPI) {
 			.replaceAll("{{BRIEF}}", roleCfg?.brief || "")
 			.replaceAll("{{CAPABILITIES}}", roleCapabilitiesPrompt(roleCfg))
 			.replaceAll("{{PROJECT}}", identity.project)
-			.replaceAll("{{TEAM}}", identity.team.join(", "));
+			.replaceAll("{{TEAM}}", identity.team.join(", ")) + rulesPrompt;
 		herdrReportAgent(identity.displayName, "working", identity.instance);
 		// had_pending_inbound:false qui è il segnale diagnostico chiave per "un
 		// agente è partito da solo": significa che questo turno sta iniziando
@@ -4124,14 +4137,54 @@ export default function (pi: ExtensionAPI) {
 			// Still send regardless (the instance may be about to come online,
 			// or this presence snapshot may be a beat stale) — this only makes
 			// the silence visible immediately instead of half an hour later.
-			const liveMatch = params.target_instance
+			const hasLiveMatch = () => params.target_instance
 				? presence.get(params.target_instance)?.status !== "offline" && presence.has(params.target_instance)
 				: [...presence.values()].some((c) => c.role === params.target_role && c.status !== "offline");
+			// Retained MQTT presence can arrive just after the connect callback of a
+			// newly started peer. Give that retained snapshot one short event-loop
+			// window before declaring the target absent; otherwise two agents started
+			// back-to-back are incorrectly escalated to watcher.
+			let liveMatch = hasLiveMatch();
+			if (!liveMatch) {
+				await new Promise((resolve) => setTimeout(resolve, 150));
+				liveMatch = hasLiveMatch();
+			}
+			const requestedTarget = params.target_instance || `role:${params.target_role}`;
+			const livePlanners = [...presence.values()].filter((card) => card.role === "planner" && card.status !== "offline");
+			let route: "target" | "planner" | "watcher" = "target";
+			let fallbackTarget: string | null = null;
+			let watcherBootstrap: { attempted: boolean; ok: boolean; detail?: string } = { attempted: false, ok: false };
+			const ensureWatcherForFallback = (): { attempted: boolean; ok: boolean; detail?: string } => {
+				if (!identity || process.env.PI_ORCH_TEST_NO_EXIT === "1") return { attempted: false, ok: false, detail: "test harness: bootstrap skipped" };
+				try {
+					const output = execFileSync("yano", ["watcher", "start", "--project-root", identity.cwd, "--project", identity.project], {
+						cwd: identity.cwd,
+						encoding: "utf8",
+						timeout: 20_000,
+						maxBuffer: 2_000_000,
+					});
+					return { attempted: true, ok: true, detail: String(output || "").trim().slice(-500) };
+				} catch (error) {
+					return { attempted: true, ok: false, detail: error instanceof Error ? error.message : String(error) };
+				}
+			};
 			const noLiveTargetWarning = liveMatch
 				? null
-				: `⚠️ Nessuna istanza online per ${params.target_instance ? `"${params.target_instance}"` : `il ruolo "${params.target_role}"`} in questo progetto (verifica con agent_list). Il messaggio è stato pubblicato comunque, ma se non hai già lanciato quell'istanza (herdr agent start ...) nessuno lo riceverà mai — non trattare questo agent_send come una delega riuscita finché non confermi che l'istanza esiste davvero.`;
+				: `⚠️ Nessuna istanza online per ${params.target_instance ? `"${params.target_instance}"` : `il ruolo "${params.target_role}"`} in questo progetto: la delega viene inoltrata automaticamente a planner o watcher.`;
 			if (noLiveTargetWarning) {
-				logEvent("agent_send_no_live_target", { target: params.target_instance ?? `role:${params.target_role}` });
+				if (livePlanners.length) {
+					route = "planner";
+					fallbackTarget = livePlanners[0].instance;
+				} else {
+					route = "watcher";
+					watcherBootstrap = ensureWatcherForFallback();
+				}
+				logEvent("agent_send_no_live_target", {
+					target: requestedTarget,
+					route,
+					fallback_target: fallbackTarget,
+					watcher_bootstrap: watcherBootstrap,
+				});
 			}
 
 			const assignment_id = ulid();
@@ -4150,8 +4203,30 @@ export default function (pi: ExtensionAPI) {
 				response_schema: (params.response_schema as object | undefined) ?? null,
 			};
 
-			const destTopic = params.target_instance ? T.agentCommands(params.target_instance) : T.roleTasks(params.target_role!);
-			await client.publishAsync(destTopic, JSON.stringify(env), { qos: 1 });
+			let destTopic: string;
+			if (route === "planner" && fallbackTarget) {
+					destTopic = T.agentCommands(fallbackTarget);
+					env.target_instance = fallbackTarget;
+					env.target_role = "planner";
+					env.prompt = `[yano-routing] Destinatario originale offline: ${requestedTarget}. Prendi in carico il messaggio originale e decidi se rilanciare o sostituire l'agente; non lasciare il flusso in attesa.\n\n${params.prompt}`;
+				await client.publishAsync(destTopic, JSON.stringify(env), { qos: 1 });
+			} else if (route === "watcher") {
+				destTopic = T.agentFallback();
+				// The watcher is a process, not a Pi peer. Keep the original command
+				// intact inside a routing envelope so it can be replayed after it has
+				// spawned planner-01. Retained QoS1 closes the startup race.
+				await client.publishAsync(destTopic, JSON.stringify({
+					type: "agent_route_fallback",
+					fallback_id: ulid(),
+					project: identity.project,
+					original_target: requestedTarget,
+					original: env,
+					timestamp: nowIso(),
+				}), { qos: 1, retain: true });
+			} else {
+				destTopic = params.target_instance ? T.agentCommands(params.target_instance) : T.roleTasks(params.target_role!);
+				await client.publishAsync(destTopic, JSON.stringify(env), { qos: 1 });
+			}
 
 			let resolveFn!: (v: { response?: any; error?: string | null }) => void;
 			const promise = new Promise<{ response?: any; error?: string | null }>((res) => { resolveFn = res; });
@@ -4205,7 +4280,7 @@ export default function (pi: ExtensionAPI) {
 			pendingReplies.set(assignment_id, entry);
 
 			pi.appendEntry("orchestrator-log", { event: "outbound_command", assignment_id, target: entry.target, hops });
-			logEvent("agent_send_out", { assignment_id, target: entry.target, hops, new_round: !!params.new_round, prompt_preview: params.prompt.slice(0, 200) });
+			logEvent("agent_send_out", { assignment_id, target: entry.target, hops, new_round: !!params.new_round, prompt_preview: params.prompt.slice(0, 200), route, fallback_target: fallbackTarget, watcher_bootstrap: watcherBootstrap });
 
 			// Best-effort audit line in the task's report (Revisione 19) — never
 			// lets a report-bookkeeping problem fail the actual send, which is
@@ -4234,7 +4309,7 @@ export default function (pi: ExtensionAPI) {
 					type: "text" as const,
 					text: `agent_send → ${entry.target}\nassignment_id ${assignment_id}${noLiveTargetWarning ? `\n\n${noLiveTargetWarning}` : ""}`,
 				}],
-				details: { assignment_id, target: entry.target, hops, no_live_target: !!noLiveTargetWarning },
+				details: { assignment_id, target: entry.target, hops, no_live_target: !!noLiveTargetWarning, route, fallback_target: fallbackTarget, watcher_bootstrap: watcherBootstrap },
 			};
 		},
 		renderCall(args, theme) {
@@ -4648,12 +4723,13 @@ export default function (pi: ExtensionAPI) {
 		if (missing.length > 0) {
 			return { ok: false, detail: `non configurato — variabili mancanti nel .env: ${missing.join(", ")}` };
 		}
+		const contextualMessage = userMessageContext(message);
 		const url = `${apiUrl!.replace(/\/+$/, "")}/message/sendText/${encodeURIComponent(instanceName!)}`;
 		try {
 			const res = await fetch(url, {
 				method: "POST",
 				headers: { "Content-Type": "application/json", apikey: apiKey! },
-				body: JSON.stringify({ number: destination, text: message }),
+				body: JSON.stringify({ number: destination, text: contextualMessage }),
 			});
 			if (!res.ok) {
 				const body = await res.text().catch(() => "");
@@ -4674,10 +4750,11 @@ export default function (pi: ExtensionAPI) {
 			return { ok: false, detail: `non configurato — variabili mancanti nel .env: ${missing.join(", ")}` };
 		}
 		try {
+			const contextualMessage = userMessageContext(message);
 			const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ chat_id: chatId, text: message, disable_web_page_preview: true }),
+				body: JSON.stringify({ chat_id: chatId, text: contextualMessage, disable_web_page_preview: true }),
 			});
 			if (!res.ok) {
 				const body = await res.text().catch(() => "");
@@ -4704,6 +4781,7 @@ export default function (pi: ExtensionAPI) {
 		const recipients = to.split(",").map((email) => email.trim()).filter(Boolean).map((email) => ({ email }));
 		if (!recipients.length) return { ok: false, detail: "non configurato — SENDGRID_TO_EMAIL è vuoto" };
 		try {
+			const contextualMessage = userMessageContext(message);
 			const res = await fetch("https://api.sendgrid.com/v3/mail/send", {
 				method: "POST",
 				headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
@@ -4711,7 +4789,7 @@ export default function (pi: ExtensionAPI) {
 					personalizations: [{ to: recipients }],
 					from: { email: from },
 					subject: getEnvVar(identity.cwd, "SENDGRID_SUBJECT") || "Yano notification",
-					content: [{ type: "text/plain", value: message }],
+					content: [{ type: "text/plain", value: contextualMessage }],
 				}),
 			});
 			if (!res.ok) {
@@ -4722,6 +4800,10 @@ export default function (pi: ExtensionAPI) {
 		} catch (err) {
 			return { ok: false, detail: err instanceof Error ? err.message : String(err) };
 		}
+	}
+
+	function userMessageContext(message: string): string {
+		return [`Mittente: ${identity?.instance || "yano"} (${identity?.role || "system"})`, `Progetto: ${identity?.project || "sconosciuto"}`, `Server: ${os.hostname()}`, "", message].join("\n");
 	}
 
 	async function sendNotifications(message: string): Promise<{ ok: boolean; detail: string; channels: Record<string, { ok: boolean; detail: string }> }> {

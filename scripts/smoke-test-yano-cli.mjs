@@ -4,7 +4,8 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import YAML from "yaml";
@@ -50,8 +51,16 @@ function composed(args) {
 	return execFileSync("node", ["scripts/launch-planner.mjs", ...args, "--print-only"], {
 		cwd: repoRoot,
 		encoding: "utf8",
+		env: isolatedPiEnv,
 	});
 }
+
+// Keep assertions about Yano's portable fallback independent from skills the
+// developer happens to have installed globally in Pi.
+const isolatedHome = mkdtempSync(path.join(os.tmpdir(), "yano-skill-test-"));
+const isolatedPiHome = path.join(isolatedHome, ".pi", "agent");
+mkdirSync(isolatedPiHome, { recursive: true });
+const isolatedPiEnv = { ...process.env, HOME: isolatedHome, PI_CODING_AGENT_DIR: isolatedPiHome };
 
 const planner = composed(["--instance", "cli-skill-smoke-planner"]);
 const coder = composed(["--instance", "cli-skill-smoke-coder", "--role", "coder"]);

@@ -44,6 +44,7 @@ transitions:
     requires:
       - required_cli_skill_mcp_checked
       - phase_one_unlocked
+      - coder_and_reviewer_have_distinct_pinned_llm_models
   - id: submit_review
     from: implementing
     to: review
@@ -83,4 +84,5 @@ invariants:
   - spec_and_standards_are_reported_separately
   - code_smells_are_heuristics_not_automatic_blockers
   - docs_sync_last
+  - coder_and_reviewer_use_distinct_pinned_llm_models
   - no_finalize_before_explicit_user_confirmation

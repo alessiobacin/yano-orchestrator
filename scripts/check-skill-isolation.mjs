@@ -20,13 +20,20 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import YAML from "yaml";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
+// The assertions below verify Yano's vendored fallback paths. Do not let the
+// developer's globally configured Pi skill roots alter that deterministic
+// fixture (the separate conflict smoke test covers that integration).
+const isolatedPiHome = mkdtempSync(path.join(os.tmpdir(), "yano-skill-isolation-"));
+mkdirSync(isolatedPiHome, { recursive: true });
+process.env.PI_CODING_AGENT_DIR = isolatedPiHome;
 const MATT_POCOCK_SKILLS = ["wayfinder", "to-spec", "to-tickets", "grilling", "domain-modeling", "setup-matt-pocock-skills"];
 const YANO_PLANNER_SKILL = "yano-planner-trace-analysis";
 const YANO_CLI_SKILL = "yano-cli";

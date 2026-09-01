@@ -4,6 +4,28 @@ La documentazione di Yano è parte del contratto operativo del codice: un
 comando, un flag, un percorso dati, un ruolo o un flusso non è completato finché
 gli utenti e gli agenti non possono trovarne la descrizione aggiornata.
 
+## Contratto dell'agente `docs-sync`
+
+Ogni invocazione di `docs-sync`, non solo il playbook `clean-repo`, verifica
+questo inventario. Riusa un equivalente già adottato dal progetto; altrimenti
+crea il percorso sotto `docs/`, con almeno un artefatto reale e aggiornato:
+
+| Categoria | Percorso convenzionale | Artefatto richiesto |
+| --- | --- | --- |
+| Architecture documents | `docs/architecture/` | Markdown sull'architettura effettiva |
+| Development guides | `docs/guides/` | Guide operative per sviluppatori |
+| User quick guides | `docs/quick-guides/` | Flussi completi con comandi, opzioni ed esempi verificati |
+| Architecture Decision Records | `docs/adr/` | ADR con decisione e contesto |
+| Technical/working notes | `docs/notes/` | Note tecniche pertinenti |
+| Postman | `docs/postman/` | Collection JSON importabile se esiste un backend |
+| Cheat sheet | `docs/cheat-sheet/` | Elenco dei comandi reali |
+| Logic diagram | `docs/diagram/` | Diagramma Mermaid del flusso logico reale |
+
+Directory vuote, TODO e template generici non soddisfano il contratto. Se non
+esiste un backend, `postman` è l'unica categoria che può essere non applicabile:
+la decisione e l'evidenza vanno riportate. Gli altri percorsi devono essere
+creati quando assenti e aggiornati quando il task rende il contenuto obsoleto.
+
 ## Matrice obbligatoria
 
 | Modifica | Superfici da verificare |

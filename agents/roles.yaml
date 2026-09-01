@@ -26,6 +26,9 @@ roles:
     model:
       provider: llmproxy
       model: llmproxy
+    model_diversity:
+      must_differ_from: reviewer
+      reason: "Independent implementation perspective: a coder must never share the reviewer's exact pinned LLM."
     skills:
       - tdd-development
       - yano-planner-trace-analysis
@@ -44,6 +47,9 @@ roles:
     model:
       provider: llmproxy
       model: llmproxy
+    model_diversity:
+      must_differ_from: coder
+      reason: "Independent critical review: a reviewer must never share the coder's exact pinned LLM."
     skills:
       - code-review
       - yano-code-review
@@ -404,7 +410,7 @@ roles:
     activation: always
     playbook: documentation-release
     label: "Documentation Sync Agent"
-    brief: "Sei SEMPRE l'ultima fase di ogni piano (Revisione 24 — plan_set lo impone). Per task di sviluppo: verifichi che README, i doc di progetto (es. docs/*.md) e le spec API (se openapi-writer le mantiene) siano coerenti con lo stato REALE del codice nel worktree — funzioni pubbliche, endpoint, flag CLI, tool registrati — e che copra almeno cos'è il progetto, come installarlo, cosa è stato fatto in QUESTO task, come usarlo. Per task che non toccano codice (analisi, migrazioni infra, task una tantum) scrivi comunque documentazione, ma mirata a cosa è stato effettivamente fatto — non serve una sezione di installazione se non è pertinente, usa il buon senso sul task. Se trovi disallineamenti li correggi tu direttamente (è un task di documentazione, non serve passare dal coder) e registri tutto nel file di report. Nel playbook clean-repo devi inoltre verificare e completare tutte le categorie documentali canoniche: architecture, guides, quick-guides, adr, notes, postman (se esiste un backend), cheat-sheet e diagram. Per ogni categoria mancante devi creare la directory nella convenzione già usata dal progetto e almeno un file con contenuto reale ricavato dal repository; non lasciare directory vuote, placeholder o TODO. Riconosci prima equivalenti già esistenti anche con nome/percorso diverso. Per un backend la collection Postman JSON è obbligatoria; senza backend devi dichiarare esplicitamente postman non applicabile nel report. Il diagramma deve essere Mermaid e descrivere il flusso logico reale."
+    brief: "Sei SEMPRE l'ultima fase di ogni piano (Revisione 24 — plan_set lo impone). Per task di sviluppo: verifichi che README, i doc di progetto (es. docs/*.md) e le spec API (se openapi-writer le mantiene) siano coerenti con lo stato REALE del codice nel worktree — funzioni pubbliche, endpoint, flag CLI, tool registrati — e che copra almeno cos'è il progetto, come installarlo, cosa è stato fatto in QUESTO task, come usarlo. Per task che non toccano codice (analisi, migrazioni infra, task una tantum) scrivi comunque documentazione, ma mirata a cosa è stato effettivamente fatto — non serve una sezione di installazione se non è pertinente, usa il buon senso sul task. Se trovi disallineamenti li correggi tu direttamente (è un task di documentazione, non serve passare dal coder) e registri tutto nel file di report. A OGNI invocazione verifica e sincronizza le categorie documentali canoniche: architecture, guides, quick-guides, adr, notes, postman (se esiste un backend), cheat-sheet e diagram. Per ogni categoria mancante crea la directory nella convenzione già usata dal progetto e almeno un file con contenuto reale ricavato dal repository; aggiorna quelli esistenti se lo stato del codice è cambiato; non lasciare directory vuote, placeholder o TODO. Riconosci prima equivalenti già esistenti anche con nome/percorso diverso. Per un backend la collection Postman JSON è obbligatoria; senza backend dichiara esplicitamente postman non applicabile nel report. Il diagramma deve essere Mermaid e descrivere il flusso logico reale."
     model: { provider: llmproxy, model: llmproxy }
     skills: [documentation-review, yano-planner-trace-analysis, yano-cli]
     cli: [git, npx]

@@ -196,6 +196,68 @@ function resolveYanoArchitectSkillPath(packageRoot) {
 	return resolveVendoredSkillPaths(packageRoot, "yano", [YANO_ARCHITECT_SKILL])[0];
 }
 
+// Pi carica automaticamente le skill in ~/.pi/agent/skills e nelle directory
+// dichiarate in ~/.pi/agent/settings.json. Passare di nuovo una skill con lo
+// stesso `name:` tramite --skill produce il messaggio "Skill conflicts" e Pi
+// scarta una delle due copie. Il catalogo globale e quello vendorizzato sono
+// entrambi utili: il primo è la copia aggiornata dell'operatore, il secondo è
+// il fallback portabile di Yano. Perciò non copiamo né cancelliamo nulla:
+// omettiamo soltanto dal comando esplicito i nomi che Pi scoprirà già da sé.
+function skillNameAt(skillPath) {
+	try {
+		const source = readFileSync(path.join(skillPath, "SKILL.md"), "utf8");
+		const match = source.match(/^name:\s*([^\s#]+)\s*$/m);
+		return match?.[1] || path.basename(skillPath);
+	} catch {
+		return path.basename(skillPath);
+	}
+}
+
+function expandHome(value, home) {
+	if (typeof value !== "string" || value.length === 0) return null;
+	if (value === "~") return home;
+	if (value.startsWith("~/")) return path.join(home, value.slice(2));
+	return path.resolve(value);
+}
+
+export function piAutomaticSkillNames({ env = process.env, home = env.HOME || process.env.HOME } = {}) {
+	if (!home) return new Set();
+	const piHome = expandHome(env.PI_CODING_AGENT_DIR || "~/.pi/agent", home);
+	if (!piHome) return new Set();
+	const roots = [path.join(piHome, "skills")];
+	try {
+		const settings = JSON.parse(readFileSync(path.join(piHome, "settings.json"), "utf8"));
+		for (const configuredRoot of settings.skills || []) {
+			const resolved = expandHome(configuredRoot, home);
+			if (resolved) roots.push(resolved);
+		}
+	} catch {
+		// No settings is a normal first-run state; the default Pi skills root is
+		// still checked above.
+	}
+	const names = new Set();
+	for (const root of new Set(roots)) {
+		try {
+			for (const entry of readdirSync(root, { withFileTypes: true })) {
+				const skillPath = path.join(root, entry.name);
+				// User skill catalogues commonly contain symlinks (for example
+				// ~/.claude/skills/wayfinder -> ~/.agents/skills/wayfinder).
+				// Dirent.isDirectory() is false for those links, while Pi follows
+				// them and therefore sees the skill. Presence of SKILL.md is the
+				// authoritative test for both normal directories and symlinks.
+				if (existsSync(path.join(skillPath, "SKILL.md"))) names.add(skillNameAt(skillPath));
+			}
+		} catch {
+			// A configured optional root can legitimately be absent.
+		}
+	}
+	return names;
+}
+
+export function explicitSkillPathsWithoutPiConflicts(skillPaths, automaticNames = piAutomaticSkillNames()) {
+	return [...new Set(skillPaths)].filter((skillPath) => !automaticNames.has(skillNameAt(skillPath)));
+}
+
 function generatedRoleManifest(role) {
 	const root = path.join(traceRoot(), "catalog", "agents", role);
 	if (!existsSync(root)) return null;
@@ -553,7 +615,8 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 	const yanoCodeMemSkillFlags = ["--skill", resolveYanoCodeMemSkillPath(packageRoot)];
 	const yanoObserverDryRunSkillFlags = ["--skill", resolveYanoObserverDryRunSkillPath(packageRoot)];
 	const allSkillFlags = [...mattPocockSkillFlags, ...yanoTraceSkillFlags, ...yanoCliSkillFlags, ...yanoCodeMemSkillFlags, ...yanoObserverDryRunSkillFlags, ...chromeDevToolsSkillFlags, ...yanoReviewSkillFlags, ...yanoDeploymentSkillFlags, ...yanoObserverSkillFlags, ...yanoAutoImprovementSkillFlags, ...yanoSuggesterSkillFlags, ...yanoArchitectSkillFlags, ...generatedSkillFlags];
-	const skillFlags = [...new Set(allSkillFlags.filter((_, index) => index % 2 === 1))].flatMap((skillPath) => ["--skill", skillPath]);
+	const requestedSkillPaths = allSkillFlags.filter((_, index) => index % 2 === 1);
+	const skillFlags = explicitSkillPathsWithoutPiConflicts(requestedSkillPaths).flatMap((skillPath) => ["--skill", skillPath]);
 	// -e esplicito SOLO in sviluppo del pacchetto stesso (looksLikePackageRepo)
 	// — mai per una copia locale residua in un progetto scaffoldato, anche se
 	// esiste sul disco (vedi Revisione 38 sopra): l'estensione installata

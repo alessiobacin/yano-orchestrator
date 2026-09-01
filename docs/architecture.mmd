@@ -15,6 +15,7 @@ flowchart TD
     CLI --> CLI_SKILL["yano-cli\nshared Pi-agent command contract\nsemantic intent → scoped CLI"]
     INIT --> CODE_MEM_INIT["cm init pi\nrequired local-memory bootstrap"]
     CLI --> CODE_MEM_SKILL["yano-code-mem\nshared retrieval + safe-recording protocol"]
+    HUMAN_PI["plain pi\nhuman session; no Yano identity"] --> CLI
     INIT --> PLANNER["pi planner\nrole + instance identity"]
     HERDR_INIT --> PLANNER
 

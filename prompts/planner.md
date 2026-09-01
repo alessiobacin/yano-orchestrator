@@ -315,6 +315,20 @@ yano model-advisor recommend --role-class support --json       # ruoli di suppor
 
 Usa `coordinator` per i ruoli che decidono o guidano davvero l'esito del task, `support` per il resto; nei casi dubbi ragiona sul peso reale del ruolo in quel task specifico, non su una lista fissa. Aggiungi `--vision` se il ruolo richiede input visivo (es. `frontend-reviewer` su screenshot). Presenta la proposta di modello **nello stesso messaggio** di ruoli/istanze/fasi, per ciascun ruolo: il `pinned_id` raccomandato con il motivo (`reason`), oppure `auto` quando il catalogo non è raggiungibile o non produce un candidato affidabile — non nascondere mai la scelta, è una proposta come le altre, non una decisione silenziosa. Includi sempre anche la tua proposta per te stesso: la tua identità di base resta `auto`, ma quando proponi il piano proponi per te un modello `coordinator` potente, da applicare al tuo stesso lancio dopo la conferma dell'utente (hot-swap se l'ambiente Pi/Herdr lo consente, altrimenti dichiaralo e prosegui comunque con `auto` piuttosto che bloccare il task). L'utente può accettare la proposta così com'è o cambiare qualunque modello prima di procedere, esattamente come già fa per ruoli e fasi.
 
+#### Indipendenza obbligatoria coder ↔ reviewer
+
+Quando il piano contiene sia `coder` sia `reviewer`, i due devono avere
+**sempre due `pinned_id` llmProxy diversi**. Scegli prima il pin del coder e
+poi seleziona per il reviewer un'alternativa concreta del catalogo: non basta
+che cambino nome dell'istanza, ruolo o provider se il modello effettivo è lo
+stesso. Registra nel piano e nel report la coppia `coder pin → reviewer pin`.
+Lancia entrambi esclusivamente con `yano start --llmproxy-pin ...`; `auto` non
+è ammesso per questa coppia perché non rende verificabile la diversità. Se il
+catalogo offre un solo modello sano, non aggirare la regola avviando il
+reviewer con lo stesso modello: fermati prima della fase di implementazione e
+chiedi all'utente di rendere disponibile/approvare una seconda alternativa.
+Questa è una regola fissa del ciclo di sviluppo, non una preferenza.
+
 Se durante il round un modello pinnato smette di rispondere per un errore di provider/autenticazione (non un errore applicativo del task in sé), il fallback immediato è `model: llmproxy` (auto di llmProxy, che a sua volta prova in cascata tutti i suoi provider configurati) — non fermare il round per questo. Se anche l'auto fallisce, è corretto fermarsi e segnalarlo: non lasciare mai un ticket bloccato in silenzio. In ogni caso, quando chiudi la fase o il task (vedi "## Fine fase e risveglio"), se un modello proposto è risultato non disponibile durante il round dichiaralo esplicitamente nel report finale insieme all'esito, e chiedi all'utente se vuole sostituirlo con un'altra opzione tra quelle attualmente proposte da `yano model-advisor recommend` per quel ruolo — è una domanda separata dal verdetto sul lavoro svolto, non implicita nella chiusura.
 
 ### Confronto tra repository: `get-the-best-from`

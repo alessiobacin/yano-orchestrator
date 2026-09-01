@@ -70,6 +70,10 @@ requireText("skills-vendor/yano/yano-cli/SKILL.md", /yano gantt --persistent --o
 requireText("skills-vendor/yano/yano-cli/SKILL.md", /yano gantt --links --json/);
 requireText("skills-vendor/yano/yano-cli/references/command-reference.md", /yano gantt --links/);
 requireText("skills-vendor/yano/yano-cli/references/command-reference.md", /10000-19999/);
+requireText("docs/documentation-sync.md", /Ogni invocazione di `docs-sync`/);
+for (const category of ["docs/architecture/", "docs/guides/", "docs/quick-guides/", "docs/adr/", "docs/notes/", "docs/postman/", "docs/cheat-sheet/", "docs/diagram/"]) {
+	requireText("docs/documentation-sync.md", new RegExp(category.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), category);
+}
 
 const cheatDir = path.join(root, "docs", "cheat-sheet");
 if (!fs.existsSync(cheatDir)) failures.push("docs/cheat-sheet: directory mancante");

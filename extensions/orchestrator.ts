@@ -2512,7 +2512,7 @@ function yanoReconcilePersistedState(storage: OrchestratorStorage, project: stri
 
 export default function (pi: ExtensionAPI) {
 	pi.registerFlag("instance", {
-		description: "Agent instance id (must match a key in agents/agents.yaml, e.g. coder-01). Required.",
+		description: "Agent instance id (must match a key in agents/agents.yaml, e.g. coder-01). Required only for an orchestrated Yano agent; plain `pi` remains a normal human session.",
 		type: "string",
 		default: undefined,
 	});
@@ -3125,7 +3125,9 @@ export default function (pi: ExtensionAPI) {
 		const cwd = ctx.cwd || process.cwd();
 
 		if (!flags.instance) {
-			ctx.ui?.notify?.("orchestrator: --instance is required (e.g. --instance coder-01)", "error");
+			// The extension is globally auto-loaded by Pi. A bare `pi` is an
+			// ordinary human session, not a malformed Yano worker: leave it
+			// completely alone until an explicit --instance opts into orchestration.
 			return;
 		}
 

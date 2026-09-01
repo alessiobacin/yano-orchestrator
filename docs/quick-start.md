@@ -157,6 +157,11 @@ Controlla il percorso effettivo con `yano trace status`.
 yano start --instance planner-01 --role planner
 ```
 
+`pi` senza flag resta sempre una sessione umana normale, anche dentro un
+progetto inizializzato da Yano: non richiede `--instance` e non si collega
+all'orchestratore. Per creare un agente Yano usa invece `yano start` (o il
+comando equivalente con `--instance`), che gli assegna identità e progetto.
+
 `yano start` applica comunque `full` automaticamente. Per una raccolta più
 leggera si può usare `yano start --trace-mode events` (oppure `standard`/`off`).
 

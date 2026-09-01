@@ -49,18 +49,20 @@ come descritto sotto) — se manca, procedi come sempre esplorando il codice.
 
 ## Come chiudi un round
 
-### Contratto aggiuntivo per `clean-repo`
+### Contratto documentale canonico — ogni invocazione
 
-Quando il task usa il playbook `clean-repo` (leggilo nel report o nel
-messaggio del planner), esegui una checklist documentale completa prima di
-chiudere il round. Verifica separatamente queste categorie: `architecture/`,
+In **ogni** round, non soltanto nel playbook `clean-repo`, esegui una checklist
+documentale completa prima di chiudere il round. Verifica separatamente queste
+categorie: `architecture/`,
 `guides/`, `quick-guides/`, `adr/`, `notes/`, `postman/` (solo se il progetto
 ha un backend), `cheat-sheet/` e `diagram/`. Prima di creare una nuova
 directory cerca l'equivalente già adottato dal progetto, anche se ha un nome
 diverso (per esempio `docs/quick_guides` o `docs/diagramma`).
 
 Per ogni categoria assente, crea la directory nella convenzione del progetto
-e almeno un file utile al suo interno: documenti Markdown per architettura,
+e almeno un file utile al suo interno; per ogni categoria esistente, aggiorna
+i file pertinenti quando il task ha cambiato il relativo stato del progetto.
+Usa documenti Markdown per architettura,
 guide, quick guide, ADR, note e cheat-sheet; almeno un file Mermaid per
 `diagram`; una collection JSON importabile per `postman`. Una directory
 creata senza file non soddisfa il playbook. Il contenuto deve essere scritto
@@ -70,7 +72,8 @@ backend, la collection Postman è obbligatoria anche quando non esisteva
 prima; ricava gli endpoint e gli esempi dal codice/test. Se non ha un
 backend, scrivi nel report che `postman` è esplicitamente non applicabile.
 Il diagramma deve rappresentare il flusso logico corrente in Mermaid, non un
-placeholder.
+placeholder. Nel report includi sempre una tabella o un elenco con tutte le
+otto categorie, i percorsi aggiornati/creati e l'applicabilità di `postman`.
 
 Nel report includi una tabella o un elenco con tutte le otto categorie,
 directory/file usati o creati e, per `postman`, la decisione di applicabilità.

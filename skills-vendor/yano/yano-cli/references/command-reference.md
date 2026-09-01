@@ -246,6 +246,10 @@ yano playbook export <id> [--out <file>]
 yano playbook import <bundle.json> [--dry-run] [--once] [--json]
 yano playbook remove <id> --yes
 yano playbook purge <id> --yes
+
+`clean-repo` richiede inoltre directory non vuote e file reali per le
+categorie documentali mancanti; la collection Postman è obbligatoria per i
+backend e il diagramma deve essere Mermaid.
 yano agent list [--json]
 yano agent show <id> [--json]
 ```

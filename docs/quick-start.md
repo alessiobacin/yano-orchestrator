@@ -3,6 +3,15 @@
 Questa guida prepara un progetto nuovo, attiva il trace e porta il primo task
 fino al feedback dell'utente.
 
+## Pulizia e documentazione della repo
+
+Per chiedere una pulizia completa, includi anche la documentazione mancante:
+`Pulisci la repo e crea la documentazione mancante`. Il Planner presenta un
+piano unico da approvare; `clean-repo` crea file reali nelle categorie
+`architecture`, `guides`, `quick-guides`, `adr`, `notes`, `cheat-sheet` e
+`diagram`, oltre a una collection Postman se rileva un backend. Gli equivalenti
+esistenti vengono riusati, senza duplicati.
+
 Se cerchi solo i comandi per una singola operazione, usa la raccolta di
 [quick guides](./quick_guides/README.md). Questa pagina resta il percorso
 completo e ragionato dal primo avvio fino alla diagnosi del risultato.
@@ -230,6 +239,12 @@ yano debugger projects
 yano auto-improve projects       # alias: yano auto-improver projects
 yano suggester projects
 ```
+
+L'evidence pack auto-improve rileva anche test, build e config lint presenti
+nel repository, non solo gli script npm; segnala separatamente l'eventuale
+mancanza di un comando standard. Il worker parte da un transcript Pi nuovo a
+ogni audit, pur potendo riusare la tab Herdr, e può scrivere solo il report
+globale tramite il tool dedicato `auto_improve_complete`.
 
 Le viste mostrano gli agenti live. Aggiungi `--all --json` per includere anche
 proposte e registrazioni offline. `yano fleet --project-root /path` resta la

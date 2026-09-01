@@ -223,6 +223,23 @@ invariants:
       is detected to have a backend; otherwise explicitly declared not
       applicable, never silently skipped), cheat-sheet (command list),
       diagram (mermaid diagram of the logical flow).
+  - id: every_missing_category_gets_a_real_file
+    description: >-
+      A clean-repo documentation plan is itemized for every canonical
+      category. If no equivalent directory or file exists, docs-sync creates
+      the directory in the repository's convention and at least one real,
+      useful file inside it: Markdown for architecture, guides, quick-guides,
+      ADRs, notes and cheat-sheet; Mermaid source for diagram; and an
+      importable Postman collection JSON when a backend is detected. Empty
+      directories, TODO-only placeholders and generic invented examples do
+      not satisfy the playbook. If no backend is detected, the plan and final
+      report explicitly mark postman as not applicable.
+  - id: clean_repo_documentation_inventory_is_complete
+    description: >-
+      The repo-curator report and the docs-sync closing report list all eight
+      categories (including postman applicability), the existing equivalent
+      path or the concrete path/file created, and the evidence used to derive
+      the content. README existence alone never closes a documentation gap.
   - id: missing_docs_are_real_not_placeholders
     description: A documentation file docs-sync creates to fill a gap
       reflects the actual current repository — real commands, real

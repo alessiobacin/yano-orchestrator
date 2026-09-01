@@ -1,5 +1,9 @@
 # Diagrammi operativi Yano
 
+Il flusso `clean-repo` comprende l'audit delle categorie documentali e la
+creazione approvata dei file mancanti, inclusa la collection Postman quando il
+progetto ha un backend.
+
 `architecture.mmd` resta il diagramma complessivo. Questa cartella contiene
 viste più piccole, utili durante diagnosi e onboarding:
 

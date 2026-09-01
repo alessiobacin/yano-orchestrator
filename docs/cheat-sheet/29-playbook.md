@@ -15,6 +15,10 @@ yano playbook purge knowledge-authoring --yes
 
 Nel piano runtime di `clean-repo`, `repo-curator` è il ruolo obbligatorio della
 fase 1; `docs-sync` resta nella fase finale e `reviewer` verifica il risultato.
+Il playbook deve inoltre colmare ogni categoria mancante con una directory non
+vuota e contenuto reale: architettura, guide, quick guide, ADR, note,
+cheat-sheet, diagramma Mermaid e, se c'è un backend, collection Postman JSON.
+L'assenza di backend va dichiarata esplicitamente nel report.
 
 Import e promozione passano dall’architect, che segnala conflitti e requisiti
 mancanti. remove disabilita logicamente; purge elimina dopo conferma esplicita.

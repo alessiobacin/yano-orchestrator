@@ -141,6 +141,9 @@ flowchart TD
         PLAYBOOK_BUNDLE["portable JSON bundle\nexport / import"]
         PLAYBOOK_LIFECYCLE["remove = soft disable\npurge = confirmed delete"]
         REQUIREMENT_GATE["requirements gate\nCLI / MCP / skill / credential"]
+        CLEAN_REPO["clean-repo\nrepo-curator audit + approved cleanup"]
+        DOC_COMPLETENESS["docs-sync\n8 categories + real files"]
+        POSTMAN_COLLECTION["postman/\nJSON collection when backend"]
     end
 
     subgraph DELIVERY_AGENT["Deployment boundary"]
@@ -247,6 +250,10 @@ flowchart TD
     PLANNER --> ARCHITECT
     ARCHITECT --> ARCHITECT_CATALOG
     ARCHITECT_CATALOG --> PLANNER
+    PLANNER --> CLEAN_REPO
+    CLEAN_REPO --> DOC_COMPLETENESS
+    DOC_COMPLETENESS --> POSTMAN_COLLECTION
+    DOC_COMPLETENESS --> MERMAID_DOCS["diagram/\nMermaid logical flow"]
     PLANNER --> DEPLOY_AGENT
     DEPLOY_AGENT --> DEPLOY_PLAYBOOK
     DEPLOY_AGENT --> DEV_SOURCE

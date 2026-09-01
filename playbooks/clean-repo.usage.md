@@ -208,6 +208,15 @@ precisa prima di proporre una nuova directory per una di queste categorie:
 riconoscere una directory equivalente che il progetto usa già, sotto un
 nome o una posizione diversa, ed evitare di creare un doppione parallelo.
 
+Ogni categoria realmente mancante deve diventare un deliverable, non solo una
+voce nel piano: `docs-sync` crea la directory secondo la convenzione del
+progetto e almeno un file reale dentro di essa. Markdown per architettura,
+guide, quick guide, ADR, note e cheat-sheet; Mermaid per il diagramma;
+collection JSON importabile per Postman quando è presente un backend.
+Directory vuote, stub, TODO o esempi inventati non soddisfano il playbook.
+L'inventario finale deve elencare tutte le categorie, i percorsi usati/creati
+e la decisione esplicita su Postman.
+
 **yano-orchestrator stesso è un esempio dal vivo di questa regola**,
 verificato eseguendo `ls docs/` e `ls .` nella root del repository come
 parte della stesura di questa sezione:

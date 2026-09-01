@@ -196,6 +196,52 @@ function readProjectManifest(root) {
 	});
 }
 
+// package.json scripts are useful, but they are not the only reliable signal
+// that a project has tests or a build. Keep this discovery bounded and
+// metadata-only: the specialist still performs the detailed read-only audit.
+function discoverProjectSurfaces(root) {
+	const surfaces = { test_files: [], build_files: [], lint_configs: [], ci_workflows: [], mcp_configs: [], plugin_manifests: [], integration_markers: [] };
+	const queue = [{ dir: root, relative: "", depth: 0 }];
+	const ignored = new Set([".git", ".worktrees", "node_modules", "coverage", ".cache"]);
+	const maxFiles = 5000;
+	while (queue.length && surfaces.test_files.length + surfaces.build_files.length + surfaces.lint_configs.length < maxFiles) {
+		const current = queue.shift();
+		let entries = [];
+		try { entries = fs.readdirSync(current.dir, { withFileTypes: true }); } catch { continue; }
+		for (const entry of entries) {
+			const relative = path.join(current.relative, entry.name);
+			if (entry.isDirectory()) {
+				if (!ignored.has(entry.name) && current.depth < 5) queue.push({ dir: path.join(current.dir, entry.name), relative, depth: current.depth + 1 });
+				continue;
+			}
+			const normalized = relative.split(path.sep).join("/");
+			if (/(^|\/)(?:test|tests|__tests__)(\/|$)/i.test(normalized) || /(^|\/)(?:test|benchmark)[^/]*\.(?:sh|mjs|cjs|js|ts)$/i.test(normalized) || /\.(?:test|spec)\.[^.]+$/i.test(entry.name)) {
+				if (surfaces.test_files.length < 80) surfaces.test_files.push(normalized);
+			}
+			if (/(^|\/)build\//i.test(normalized) || /^(?:Makefile|makefile|gulpfile(?:\.[^.]+)?|Gruntfile(?:\.[^.]+)?)$/i.test(entry.name)) {
+				if (surfaces.build_files.length < 40) surfaces.build_files.push(normalized);
+			}
+			if (/^(?:\.eslintrc(?:\.[^.]+)?|eslint\.config\.[^.]+|biome\.jsonc?|oxlint\.jsonc?|ruff\.toml|\.flake8|mypy\.ini)$/i.test(entry.name)) {
+				if (surfaces.lint_configs.length < 40) surfaces.lint_configs.push(normalized);
+			}
+			if (/^\.github\/workflows\/.+\.(?:yml|yaml)$/i.test(normalized) && surfaces.ci_workflows.length < 40) surfaces.ci_workflows.push(normalized);
+			if (/(^|\/)(?:\.mcp\.json|mcp\.json|mcp\.ya?ml)$/i.test(normalized) && surfaces.mcp_configs.length < 40) surfaces.mcp_configs.push(normalized);
+			if (/(^|\/)(?:plugin\.json|\.claude-plugin\/|\.codex-plugin\/)/i.test(normalized) && surfaces.plugin_manifests.length < 40) surfaces.plugin_manifests.push(normalized);
+			if (/(^|\/)(?:plugins?|connectors?|integrations?|adapters?|providers?|tools?)\//i.test(normalized) && surfaces.integration_markers.length < 80) surfaces.integration_markers.push(normalized);
+		}
+	}
+	return {
+		...surfaces,
+		test_files: surfaces.test_files.sort(),
+		build_files: surfaces.build_files.sort(),
+		lint_configs: surfaces.lint_configs.sort(),
+		ci_workflows: surfaces.ci_workflows.sort(),
+		mcp_configs: surfaces.mcp_configs.sort(),
+		plugin_manifests: surfaces.plugin_manifests.sort(),
+		integration_markers: surfaces.integration_markers.sort(),
+	};
+}
+
 function collectEvidence(info, row, auditId) {
 	const since = row.last_completed_at ? new Date(row.last_completed_at) : null;
 	const trace = readTraceRecords({ cwd: info.root, project: info.name, since, limit: MAX_TRACE_RECORDS });
@@ -209,6 +255,10 @@ function collectEvidence(info, row, auditId) {
 		recent_commits: command("git", ["log", "-n", "12", "--date=iso", "--format=%h %ad %s"], info.root),
 	};
 	const scripts = packageManifest.find((item) => item.file === "package.json")?.scripts || {};
+	const surfaces = discoverProjectSurfaces(info.root);
+	const hasTestScript = Boolean(scripts.test || scripts["test:e2e"] || scripts.e2e);
+	const hasBuildScript = Boolean(scripts.build);
+	const hasLintScript = Boolean(scripts.lint);
 	const retrieval = planTraceRetrieval({ cwd: info.root, project: info.name, query: "regressioni errori feedback performance feature mancante test documentazione", limit: 12, budget: 6000 });
 	const evidence = {
 		read_only: true,
@@ -220,7 +270,24 @@ function collectEvidence(info, row, auditId) {
 		git: safeJson(git),
 		trace: { count: trace.length, records: trace.slice(-60).map(safeJson), failures, feedback, overview: safeJson(overview) },
 		semantic_retrieval: safeJson(retrieval),
-		available_checks: { npm_scripts: Object.keys(scripts), has_tests: Boolean(scripts.test || scripts["test:e2e"] || scripts.e2e), has_lint: Boolean(scripts.lint), has_build: Boolean(scripts.build) },
+		available_checks: {
+			npm_scripts: Object.keys(scripts),
+			has_tests: hasTestScript || surfaces.test_files.length > 0,
+			has_test_script: hasTestScript,
+			has_lint: hasLintScript || surfaces.lint_configs.length > 0,
+			has_lint_script: hasLintScript,
+			has_build: hasBuildScript || surfaces.build_files.length > 0,
+			has_build_script: hasBuildScript,
+			project_surfaces: surfaces,
+		},
+		comparison_audit: {
+			required: true,
+			mode: "360-degree-gap-analysis",
+			dimensions: ["capability", "features", "quality", "performance", "security", "privacy", "documentation", "ux", "llm-agent-ux", "tools", "api", "mcp", "connectors", "plugins", "deployment", "tests", "maturity", "license"],
+			source_policy: "Use public first-party repository, documentation and package-registry sources; record URL and fetched evidence for every material comparison.",
+			discovery_tools: ["auto_improve_web_search", "auto_improve_web_fetch"],
+			queries_to_start: [`${info.name} alternatives`, `${info.name} similar software`, `${info.name} API plugin connector`],
+		},
 		budgets: { max_trace_records: MAX_TRACE_RECORDS, max_command_output: MAX_OUTPUT, commands_are_observational: true },
 	};
 	const dir = projectDataRoot(info.key);
@@ -233,9 +300,11 @@ function collectEvidence(info, row, auditId) {
 function initialRecommendations(evidence) {
 	const result = [];
 	const checks = evidence.available_checks;
-	if (!checks.has_tests) result.push({ category: "quality", title: "Aggiungere una suite di test riproducibile", priority: "high", confidence: "high", evidence: ["package.json: nessuno script test rilevato"] });
-	if (!checks.has_lint) result.push({ category: "quality", title: "Aggiungere linting automatizzato", priority: "medium", confidence: "medium", evidence: ["package.json: nessuno script lint rilevato"] });
-	if (!checks.has_build && evidence.manifest.some((item) => item.file === "package.json")) result.push({ category: "delivery", title: "Definire una build verificabile", priority: "medium", confidence: "medium", evidence: ["package.json: nessuno script build rilevato"] });
+	if (!checks.has_tests) result.push({ category: "quality", title: "Aggiungere una suite di test riproducibile", priority: "high", confidence: "high", evidence: ["nessun test o script test rilevato nei marker di progetto"] });
+	else if (!checks.has_test_script) result.push({ category: "quality", title: "Esporre un comando test standard", priority: "medium", confidence: "high", evidence: [`test rilevati senza script standard: ${(checks.project_surfaces?.test_files || []).slice(0, 5).join(", ")}`] });
+	if (!checks.has_lint) result.push({ category: "quality", title: "Aggiungere linting automatizzato", priority: "medium", confidence: "medium", evidence: ["nessuno script o config lint rilevato"] });
+	if (!checks.has_build && evidence.manifest.some((item) => item.file === "package.json")) result.push({ category: "delivery", title: "Definire una build verificabile", priority: "medium", confidence: "medium", evidence: ["nessun marker o script build rilevato"] });
+	else if (checks.has_build && !checks.has_build_script) result.push({ category: "delivery", title: "Esporre un comando build standard", priority: "low", confidence: "medium", evidence: [`marker build rilevati senza script: ${(checks.project_surfaces?.build_files || []).slice(0, 5).join(", ")}`] });
 	if (evidence.trace.failures.length) result.push({ category: "reliability", title: "Analizzare i failure signal ricorrenti del trace", priority: "high", confidence: "medium", evidence: evidence.trace.failures.slice(0, 5).map((item) => item.type || "trace failure") });
 	if (evidence.trace.feedback.some((item) => /rejected|partial|negative/i.test(String(item.status || "")))) result.push({ category: "product", title: "Rivedere i round respinti dall'utente", priority: "high", confidence: "medium", evidence: ["feedback con esito rejected/partial"] });
 	return result;
@@ -265,7 +334,14 @@ function writeReportSkeleton(info, auditId, evidence, recommendations) {
 		`- Trace osservati nella finestra: ${evidence.trace.count}`,
 		`- Failure signal candidati: ${evidence.trace.failures.length}`,
 		`- Feedback osservati: ${evidence.trace.feedback.length}`,
-		`- Script test/lint/build: ${[evidence.available_checks.has_tests && "test", evidence.available_checks.has_lint && "lint", evidence.available_checks.has_build && "build"].filter(Boolean).join(", ") || "nessuno rilevato"}`,
+		`- Test/build/lint rilevati: ${[evidence.available_checks.has_tests && "test", evidence.available_checks.has_build && "build", evidence.available_checks.has_lint && "lint"].filter(Boolean).join(", ") || "nessuno"}`,
+		`- Script standard: ${[evidence.available_checks.has_test_script && "test", evidence.available_checks.has_build_script && "build", evidence.available_checks.has_lint_script && "lint"].filter(Boolean).join(", ") || "nessuno rilevato"}`,
+		"",
+		"## Audit 360° obbligatorio",
+		"",
+		"Non limitarti alla qualità del codice. Ricostruisci la capability principale del progetto e confrontala con almeno tre alternative comparabili, usando fonti ufficiali HTTPS verificate. Copri feature, performance, sicurezza/privacy, UX, UX per LLM/agent, tool/API, MCP, connettori, plugin/estensioni, deployment, test, maturità e licenza.",
+		"",
+		"Il report finale deve contenere una matrice `attuale vs alternativa`, URL delle fonti consultate, gap verificati e proposte concrete classificate come bug, miglioramento tecnico, feature prodotto, tool, connettore, plugin o UX. Ogni proposta deve indicare valore, complessità, rischio, confidenza e `requires_human_decision`. Se la ricerca online fallisce, riportare query, fonti non raggiungibili e limite senza inventare risultati.",
 		"",
 		"## Handoff planner",
 		"",
@@ -309,8 +385,12 @@ function launchWorker(info, row, auditId, evidencePath, reportPath, dryRun = fal
 	const workspaceRoot = path.join(dataRoot(), "agent-workspaces");
 	fs.mkdirSync(workspaceRoot, { recursive: true, mode: 0o700 });
 	const instance = row.worker_instance || `auto-improver-${info.name}`;
-	const prompt = `Esegui l'audit auto-improve ${auditId} in modo esclusivamente read-only. Leggi evidence pack ${evidencePath} e completa il report ${reportPath}. Non modificare mai ${info.root}. Dopo aver scritto il report finale usa: yano auto-improve complete --project-root ${shellQuote(info.root)} --audit-id ${shellQuote(auditId)} --report-file ${shellQuote(reportPath)} --summary-file <file-json-nella-temp>. Invia il risultato al planner.`;
-	const commandLine = `yano start --instance ${shellQuote(instance)} --role auto-improver --project ${shellQuote(info.name)} --continue ${shellQuote(prompt)}`;
+	const prompt = `Esegui l'audit auto-improve ${auditId} in modo esclusivamente read-only e con valutazione a 360 gradi. Leggi evidence pack ${evidencePath} e analizza direttamente ${info.root} senza modificarlo. Oltre a codice, test, performance, sicurezza, documentazione e UX, identifica la missione/capability principale del progetto e confrontala con almeno 3 software o servizi comparabili. Usa auto_improve_web_search per trovare candidati e auto_improve_web_fetch per verificare solo fonti ufficiali HTTPS: repository, documentazione o package registry. Per ogni confronto valuta feature, qualità del retrieval/risultato, esperienza utente, esperienza LLM/agent, tool/API, MCP, connettori, plugin/estensioni, integrazioni, privacy, deployment, performance, test, maturità e licenza. Produci una gap matrix tra progetto attuale e alternative e proposte concrete di feature, correzioni, tool, connettori e plugin mancanti, ciascuna con valore, complessità, rischio, confidenza e requires_human_decision. Distingui sempre evidenza verificata, inferenza e limite non verificabile; non inventare fonti o feature. Se il web non è disponibile, documenta le query e il limite invece di fingere il confronto. Completa il report globale ${reportPath} usando il tool auto_improve_complete, che è l'unico write autorizzato e scrive solo nel data-root globale. Non usare bash, edit, write, git, build, worktree o comandi equivalenti. Invia il risultato al planner.`;
+	// Never resume an old Pi transcript: an auto-improve audit is a fresh,
+	// bounded read-only inspection. The Herdr tab/instance may be reused, but
+	// `--continue` could resurrect stale implementation context and commands.
+	const readOnlyTools = "read,grep,find,ls,auto_improve_web_search,auto_improve_web_fetch,agent_list,agent_get,agent_send,agent_await,auto_improve_complete";
+	const commandLine = `yano start --instance ${shellQuote(instance)} --role auto-improver --project ${shellQuote(info.name)} --tools ${shellQuote(readOnlyTools)} ${shellQuote(prompt)}`;
 	if (dryRun) return { workspace_id: row.workspace_id, tab_id: row.worker_tab_id, pane_id: row.worker_pane_id, instance, command: commandLine, dry_run: true };
 	const snapshot = herdrSnapshot();
 	if (!snapshot) throw new Error("yano auto-improve: Herdr non raggiungibile; avvia Herdr e riprova");

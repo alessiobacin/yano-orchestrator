@@ -48,7 +48,8 @@ import { execFile, execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { loadPlaybook } from "../scripts/playbook-loader.mjs";
-import { ensureTraceProject, getTraceConfig, setTraceMode, traceEnabled } from "../scripts/yano-trace-storage.mjs";
+import { fetchPublicSource, searchPublicAlternatives } from "../scripts/yano-auto-improve-web.mjs";
+import { ensureTraceProject, getTraceConfig, projectKey, setTraceMode, traceEnabled, traceRoot } from "../scripts/yano-trace-storage.mjs";
 
 // ESM-safe lazy require, used only inside SQLiteOrchestratorStorage's
 // constructor to resolve node:sqlite on first actual use (see the
@@ -3882,6 +3883,80 @@ export default function (pi: ExtensionAPI) {
 
 	// ━━ Tools ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+	// The auto-improver is an observer. Prompt instructions alone are not a
+	// sufficient safety boundary because a resumed/stale Pi transcript can still
+	// request bash/edit/write. Give that role a narrow runtime tool surface and
+	// keep the only write operation below inside the global Yano data directory.
+	pi.registerTool({
+		name: "auto_improve_web_search",
+		label: "Auto-Improve Web Search",
+		description: "Search public GitHub and npm indexes for comparable software. Read-only, bounded and available only to auto-improver.",
+		parameters: Type.Object({ query: Type.String({ description: "Capability-focused comparison query, not a secret." }) }),
+		async execute(_callId, params) {
+			if (!identity || identity.role !== "auto-improver") throw new Error("auto_improve_web_search: tool riservato al ruolo auto-improver.");
+			try {
+				const result = await searchPublicAlternatives({ query: params.query });
+				return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }], details: { query: params.query, result_count: result.results.length, read_only: true } };
+			} catch (error) {
+				return { content: [{ type: "text" as const, text: `auto_improve_web_search: ${error instanceof Error ? error.message : String(error)}` }], details: { query: params.query, read_only: true, error: true } };
+			}
+		},
+		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("auto_improve_web_search ")) + theme.fg("accent", (args as any).query ?? "?"), 0, 0); },
+		renderResult(result, _options, theme) { const d = result.details as any; return new Text(theme.fg(d?.error ? "error" : "success", d?.error ? "✗ web search failed" : `✓ ${d?.result_count ?? 0} candidates`), 0, 0); },
+	});
+
+	pi.registerTool({
+		name: "auto_improve_web_fetch",
+		label: "Auto-Improve Web Fetch",
+		description: "Fetch one explicit public HTTPS source for the comparison report. Read-only, bounded and available only to auto-improver.",
+		parameters: Type.Object({ url: Type.String({ description: "Official HTTPS repository, documentation or package URL to verify." }) }),
+		async execute(_callId, params) {
+			if (!identity || identity.role !== "auto-improver") throw new Error("auto_improve_web_fetch: tool riservato al ruolo auto-improver.");
+			try {
+				const result = await fetchPublicSource({ url: params.url });
+				return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }], details: { url: params.url, status: result.status, read_only: true } };
+			} catch (error) {
+				return { content: [{ type: "text" as const, text: `auto_improve_web_fetch: ${error instanceof Error ? error.message : String(error)}` }], details: { url: params.url, read_only: true, error: true } };
+			}
+		},
+		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("auto_improve_web_fetch ")) + theme.fg("accent", (args as any).url ?? "?"), 0, 0); },
+		renderResult(result, _options, theme) { const d = result.details as any; return new Text(theme.fg(d?.error ? "error" : "success", d?.error ? "✗ source fetch failed" : `✓ HTTP ${d?.status ?? "?"}`), 0, 0); },
+	});
+
+	pi.registerTool({
+		name: "auto_improve_complete",
+		label: "Auto-Improve Complete",
+		description: "Complete an auto-improve audit by writing its Markdown report only to the global Yano auto-improver data directory. Available only to the auto-improver role.",
+		parameters: Type.Object({
+			audit_id: Type.String(),
+			report_file: Type.String(),
+			report_markdown: Type.String(),
+			summary: Type.String(),
+		}),
+		async execute(_callId, params) {
+			if (!identity || identity.role !== "auto-improver") throw new Error("auto_improve_complete: tool riservato al ruolo auto-improver.");
+			if (!/^AUDIT-[A-Z0-9-]+$/i.test(params.audit_id)) throw new Error("auto_improve_complete: audit_id non valido.");
+			const globalRoot = path.resolve(path.join(traceRoot(), "auto-improver"));
+			// Pi commonly returns the report path relative to the project's data
+			// root ("reports/AUDIT-....md"). Resolve that form explicitly; an
+			// absolute path is still accepted only after the same containment check.
+			const projectRoot = path.resolve(path.join(globalRoot, "projects", projectKey(identity.cwd, identity.project)));
+			const rawReportFile = String(params.report_file || "");
+			const reportFile = path.resolve(path.isAbsolute(rawReportFile) ? rawReportFile : path.join(projectRoot, rawReportFile));
+			if (reportFile !== globalRoot && !reportFile.startsWith(`${globalRoot}${path.sep}`)) {
+				throw new Error("auto_improve_complete: report_file deve restare nel data-root globale auto-improver.");
+			}
+			if (!reportFile.endsWith(`${path.sep}reports${path.sep}${params.audit_id}.md`)) {
+				throw new Error("auto_improve_complete: report_file non corrisponde all'audit richiesto.");
+			}
+			fs.writeFileSync(reportFile, params.report_markdown.endsWith("\n") ? params.report_markdown : `${params.report_markdown}\n`, { mode: 0o600 });
+			const output = execFileSync("yano", ["auto-improve", "complete", "--project-root", identity.cwd, "--audit-id", params.audit_id, "--report-file", reportFile, "--summary", params.summary, "--json"], { cwd: identity.cwd, encoding: "utf8", timeout: 15_000, maxBuffer: 2 * 1024 * 1024 });
+			return { content: [{ type: "text" as const, text: output.trim() || `auto-improve ${params.audit_id}: completed` }], details: { audit_id: params.audit_id, report_file: reportFile, read_only_project: true } };
+		},
+		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("auto_improve_complete ")) + theme.fg("accent", (args as any).audit_id ?? "?"), 0, 0); },
+		renderResult(_result, _options, theme) { return new Text(theme.fg("success", "✓ audit completed (global report only)"), 0, 0); },
+	});
+
 	pi.registerTool({
 		name: "agent_control",
 		label: "Agent Control",
@@ -4234,10 +4309,12 @@ export default function (pi: ExtensionAPI) {
 				return { content: [{ type: "text" as const, text: `agent_await: error — ${(winner as any).error}` }], details: { error: (winner as any).error } };
 			}
 			const resp = (winner as any).response;
-			return { content: [{ type: "text" as const, text: typeof resp === "string" ? resp : JSON.stringify(resp, null, 2) }], details: { response: resp } };
+			return { content: [{ type: "text" as const, text: typeof resp === "string" ? resp : JSON.stringify(resp, null, 2) }], details: { response: resp, assignment_id: params.assignment_id, target: entry.target } };
 		},
 		renderCall(args, theme) {
-			return new Text(theme.fg("toolTitle", theme.bold("agent_await ")) + theme.fg("warning", (args as any).assignment_id ?? "?"), 0, 0);
+			const assignmentId = String((args as any).assignment_id ?? "?");
+			const target = pendingReplies.get(assignmentId)?.target ?? "?";
+			return new Text(theme.fg("toolTitle", theme.bold("agent_await ")) + theme.fg("accent", target) + theme.fg("dim", " - ") + theme.fg("warning", assignmentId), 0, 0);
 		},
 		renderResult(result, _options, theme) {
 			const d = result.details as any;

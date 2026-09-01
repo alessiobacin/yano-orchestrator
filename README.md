@@ -29,6 +29,12 @@ Everything communicates over a local MQTT broker, using role/instance identity a
 - **A global `yano` CLI** (`yano init`, `yano start`, `yano doctor`, `yano update`, `yano copy-prompts`, `yano uninstall`, `yano end`, `yano pause`, `yano resume`, `yano recovery`) for scaffolding, launching, verifying the environment, checkpointing and restoring active work, and closing projects — `yano resume` restores agents exclusively in the visible Herdr workspace
 - **External `yano-debugger` agent** — `yano debugger` keeps application bug reports and diagnostic transitions in global SQLite, starts one Herdr debugger tab per project, preserves trace provenance and hands accepted diagnoses to the planner
 - **Read-only external observers** — debugger diagnostica senza modificare, mentre `yano auto-improve` esegue audit periodici (default 5 giorni) in un workspace Herdr globale e consegna evidenze/raccomandazioni al planner
+
+Gli audit auto-improve riconoscono test, build e lint anche quando il progetto
+non li dichiara come script npm; distinguono quindi una suite esistente senza
+comando standard dall'assenza effettiva di test. Ogni audit usa inoltre un
+transcript Pi nuovo, anche quando riusa la tab Herdr del progetto, e una
+allow-list runtime che esclude `bash`, `edit` e `write` dal worker.
 - **User suggestion observer** — `yano suggester` raccoglie proposte in un workspace Herdr globale, le deduplica e notifica il planner solo dopo approvazione del superadmin
 - **Model advisor** — `yano model-advisor` propone un pin llmProxy `model@provider-id` per role-class (coordinator/support) in base a costo/coding/latenza live di llmProxy, con fallback ad auto-routing (`llmproxy`) quando i dati non sono disponibili — vedi `docs/yano-model-advisor.md`
 - **Global playbook/role architect** — `yano architect` crea proposte ephemeral, verifica skill/CLI/MCP, avvia il watcher di validazione e promuove versioni immutabili solo dopo feedback positivo; `yano playbook|agent` consulta il catalogo
@@ -198,6 +204,11 @@ yano playbook export knowledge-authoring --out ./knowledge-authoring.yano-playbo
 yano playbook import ./knowledge-authoring.yano-playbook.json
 yano playbook remove <playbook-personale> --yes
 yano playbook purge <playbook-personale> --yes
+Il playbook `clean-repo` completa anche la documentazione: verifica
+`architecture`, `guides`, `quick-guides`, `adr`, `notes`, `postman` (se c'è un
+backend), `cheat-sheet` e `diagram`. Ogni categoria mancante riceve una
+directory e almeno un file reale; directory vuote, placeholder e TODO non
+sono validi. Le directory equivalenti già presenti vengono riutilizzate.
 yano trace status              # modalità e percorso del trace globale
 yano trace enable --mode full  # trace completo dei dati osservabili
 yano trace events --follow     # segue gli eventi raw mentre gli agenti lavorano

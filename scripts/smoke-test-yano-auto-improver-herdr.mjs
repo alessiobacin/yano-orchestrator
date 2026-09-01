@@ -92,7 +92,11 @@ try {
 	assert.match(paneRun[3], /yano start/);
 	assert.match(paneRun[3], /--instance 'auto-improver-focusboard'/);
 	assert.match(paneRun[3], /--role auto-improver/);
-	assert.match(paneRun[3], /--continue/);
+	const toolsMatch = paneRun[3].match(/--tools '([^']+)'/);
+	assert.ok(toolsMatch, "allow-list strumenti non presente nel comando Herdr");
+	assert.deepEqual(toolsMatch[1].split(","), ["read", "grep", "find", "ls", "auto_improve_web_search", "auto_improve_web_fetch", "agent_list", "agent_get", "agent_send", "agent_await", "auto_improve_complete"]);
+	assert.doesNotMatch(paneRun[3], /--continue/);
+	assert.ok(!toolsMatch[1].match(/\b(?:bash|edit|write)\b/), "allow-list contiene uno strumento di scrittura o shell");
 
 	const running = runCli(["auto-improve", "status", "--project-root", projectRoot, "--json"]);
 	assert.equal(running.project.worker_status, "running");

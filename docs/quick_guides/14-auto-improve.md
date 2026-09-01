@@ -35,7 +35,18 @@ yano auto-improve run --project-root /Users/me/projects/my-app --once
 ```
 
 Il worker usa il workspace globale `yano-auto-improver` e la tab
-`auto-improver-<project-name>`.
+`auto-improver-<project-name>`, ma ogni audit parte da un transcript Pi nuovo:
+non viene riutilizzato un vecchio `--continue` che potrebbe contenere un piano
+di implementazione. Il worker è inoltre avviato con una allow-list senza
+`bash`, `edit` o `write`; può usare `auto_improve_web_search` e
+`auto_improve_web_fetch` per un confronto online bounded e read-only con fonti
+ufficiali HTTPS. L'unica scrittura ammessa è `auto_improve_complete`
+per il report globale dell'audit. Ogni report deve includere una valutazione a
+360° della capability principale contro almeno tre alternative, con gap matrix
+su feature, UX utente/LLM, tool/API, MCP, connettori, plugin, sicurezza,
+performance, test, deployment, maturità e licenza. Ogni proposta indica
+`requires_human_decision`. Il tool accetta `reports/<audit-id>.md` come
+percorso relativo al data-root globale oppure il percorso assoluto equivalente.
 
 Per sospendere, riattivare o fermare la pianificazione:
 
@@ -47,6 +58,11 @@ yano auto-improve stop --project-root /Users/me/projects/my-app
 
 L'agente è solo osservatore: non modifica mai il progetto. Invia le
 raccomandazioni al planner, che decide se aprire ticket di sviluppo.
+
+L'evidence pack considera anche marker reali del repository (`tests/`, file
+`*.test.*`, `build/` e config lint), non soltanto gli script di `package.json`.
+Se una suite esiste ma non ha un comando standard, l'auto-improver propone di
+esporre quel comando invece di segnalare erroneamente l'assenza dei test.
 
 ## API REST (per chi non usa la shell)
 
@@ -92,4 +108,3 @@ curl -s http://127.0.0.1:4178/projects/workspace-a1b2c3d4e5f6/audits
 
 Per l'implementazione completa vedere
 [Yano Auto-Improver](../yano-auto-improve.md).
-

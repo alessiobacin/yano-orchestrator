@@ -1,5 +1,13 @@
 # Yano Orchestrator Architecture
 
+### Clean-repo e completezza documentale
+
+`clean-repo` coordina `repo-curator`, `docs-sync` e `reviewer`. Dopo
+l'approvazione del piano, `docs-sync` crea i documenti mancanti per
+architettura, guide, quick guide, ADR, note, cheat-sheet e diagramma Mermaid;
+per un backend crea anche una collection Postman JSON. Il report elenca tutte
+le categorie e dichiara Postman non applicabile quando non c'è backend.
+
 This document is the human-readable companion to [`architecture.mmd`](./architecture.mmd), the Mermaid source diagram for the current system. The detailed command flows are split into [`docs/diagramma/`](diagramma/README.md), so each operational path can be read without loading the whole architecture graph.
 
 ## Purpose
@@ -349,6 +357,14 @@ ogni `5d`) e avvia, tramite Herdr, una tab `auto-improver-<project-name>` per pr
 `yano-auto-improver`. Ogni audit raccoglie un evidence pack limitato con
 manifest, Git, trace/semantic retrieval, test/lint/build disponibili, bug e
 feedback; i report vivono soltanto nella directory globale `<YANO_DATA_DIR>/`.
+La discovery di test/build/lint usa anche marker reali del repository (in modo
+bounded e read-only), distinguendo una suite esistente senza script standard
+dalla sua assenza. Il worker Pi è inoltre limitato a tool di lettura,
+coordinamento, ricerca web pubblica e `auto_improve_complete`, che scrive
+soltanto il report globale. Ogni audit deve confrontare la capability principale
+con almeno tre alternative tramite fonti ufficiali HTTPS e produrre una gap
+matrix su feature, UX utente/LLM, tool/API, MCP, connettori, plugin, qualità,
+performance, sicurezza, test, deployment, maturità e licenza.
 
 L'auto-improver è read-only come tutti gli agenti esterni: non modifica il
 progetto osservato, non crea worktree, non fa commit, non installa dipendenze,

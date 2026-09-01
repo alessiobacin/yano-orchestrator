@@ -219,6 +219,8 @@ async function runScenario(cwd, project) {
 	const sendResult = await planner.call("agent_send", { target_instance: "coder-01", prompt: "implementa la feature X (round 2)" });
 	const assignmentId = sendResult.details.assignment_id;
 	ok(!!assignmentId, "agent_send returns an assignment_id");
+	const awaitRender = planner.tool("agent_await").renderCall({ assignment_id: assignmentId }, { bold: (value) => value, fg: (_color, value) => value });
+	ok(awaitRender.content === `agent_await coder-01 - ${assignmentId}`, "agent_await render shows target agent name followed by assignment_id");
 
 	await waitUntil(() => coder.inboundWakeups().some((m) => m.msg.details.assignment_id === assignmentId), 3000, "coder-01 receives the inbound task wake-up (handleCommand's existing behavior, unaffected by this fix)");
 

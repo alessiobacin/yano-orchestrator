@@ -291,6 +291,7 @@ planner hypothesis. Never clear trace data during diagnosis.
 yano playbook list --json
 yano playbook candidates --task "<user task>" --project-root <dir> --json
 yano playbook show <id> --json
+yano playbook show clean-repo --json  # verifica anche il contratto documentale
 yano agent show <role> --json
 yano playbook check <file> --json
 ```
@@ -327,6 +328,18 @@ installation.
   provisioning, revision and promotion.
 - Watcher, debugger, auto-improver, suggester: inspect and report within their
   separate read-only contracts; they do not mutate the reference application.
+
+`yano auto-improve` costruisce un evidence pack bounded: considera sia gli
+script dichiarati sia i marker del repository per test/build/lint, quindi non
+deduce l'assenza di test dalla sola mancanza di `package.json.scripts.test`.
+Ogni audit richiede inoltre una valutazione 360° della capability principale
+contro almeno tre alternative, con fonti ufficiali HTTPS, gap su feature,
+UX, LLM/agent, tool/API, MCP, connettori e plugin; il worker usa per questo
+`auto_improve_web_search` e `auto_improve_web_fetch` in sola lettura.
+Ogni audit deve partire da un transcript Pi nuovo: la tab Herdr può essere
+riusata, ma non si deve passare `--continue` a un auto-improver. Il launcher
+deve anche usare la allow-list read-only con `auto_improve_complete` come unica
+scrittura autorizzata del report globale, senza `bash`, `edit` o `write`.
 - Coder/reviewer/specialists: use scoped trace evidence for their assigned
   task and do not make cross-project conclusions from raw history.
 

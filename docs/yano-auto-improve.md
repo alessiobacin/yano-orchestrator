@@ -12,6 +12,27 @@ deploy e non apre ticket operativi in autonomia. Scrive solo nella directory
 globale `<YANO_DATA_DIR>/auto-improver/` e nel database SQLite globale. Il planner resta
 l'unico responsabile di accettare una proposta e avviare il flusso di sviluppo.
 
+## Evidence pack
+
+Ogni audit salva nel data-root globale un evidence pack bounded: manifest e
+script dichiarati, marker reali di test/build/lint (per esempio `tests/`, file
+`*.test.*`, `build/` e config ESLint/Biome), stato Git, trace, failure signal e
+recupero semantico. La presenza di test o build non dipende quindi soltanto da
+uno script npm; se manca uno script standard, il report lo segnala come limite
+di riproducibilità separato dall'assenza della suite. La discovery è solo
+metadati e non autorizza modifiche al progetto.
+
+Ogni audit include anche una valutazione a 360°: il worker ricostruisce la
+capability principale del progetto, cerca almeno tre alternative comparabili
+su indici pubblici GitHub/npm e verifica le fonti ufficiali HTTPS. Il confronto
+copre feature, qualità, performance, sicurezza/privacy, documentazione, UX
+utente e UX per LLM/agent, tool/API, MCP, connettori, plugin/estensioni,
+deployment, test, maturità e licenza. Il report deve contenere una gap matrix
+`attuale vs alternativa`, URL delle fonti, limiti della ricerca e proposte
+classificate per bug, miglioramento tecnico, feature, tool, connettore, plugin
+o UX. Le proposte indicano sempre valore, complessità, rischio, confidenza e
+`requires_human_decision`.
+
 ## Avvio
 
 ```sh
@@ -21,8 +42,18 @@ yano auto-improve start --project-root /path/progetto --once --dry-run --json
 ```
 
 `start` crea o riusa il workspace Herdr `yano-auto-improver`, apre una tab con
-il nome del progetto, lancia l'agente e avvia lo scheduler detached. Per
+il nome del progetto, lancia un transcript Pi nuovo per l'audit e avvia lo
+scheduler detached. La tab/istanza può essere riusata, ma gli audit non
+riprendono transcript precedenti, così il confine read-only resta verificabile. Per
 verificare il comando senza Herdr:
+
+Il worker reale riceve una allow-list di tool (`read`, `grep`, `find`, `ls`,
+`auto_improve_web_search`, `auto_improve_web_fetch`, coordinamento MQTT e
+`auto_improve_complete`); `bash`, `edit` e `write` non sono disponibili. I due
+tool web cercano soltanto indici pubblici e leggono fonti HTTPS bounded, senza
+creare o modificare risorse. `auto_improve_complete` può scrivere solo il report globale
+associato all'audit (accetta `reports/<audit-id>.md` relativo al data-root o il
+percorso assoluto equivalente) e poi chiude l'audit tramite la CLI.
 
 ```sh
 yano auto-improve start --project-root /path/progetto --dry-run --no-daemon --json

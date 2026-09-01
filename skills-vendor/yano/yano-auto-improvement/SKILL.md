@@ -16,7 +16,25 @@ solo lacune concrete. Non leggere l'intero repository senza motivo.
 2. manifest, script di test/build/lint e documentazione;
 3. trace recente e memoria semantica consolidata;
 4. feedback utente, bug del debugger e report precedenti;
-5. segnali di regressione, duplicazione, flakiness e costi operativi.
+5. segnali di regressione, duplicazione, flakiness e costi operativi;
+6. confronto con almeno tre alternative comparabili, verificato su fonti online ufficiali.
+
+## Valutazione a 360 gradi
+
+Ogni audit deve prima ricostruire la capability principale del progetto dai
+file locali e poi confrontarla con software o servizi che dichiarano una
+funzione analoga. Usa `auto_improve_web_search` per la discovery su indici
+pubblici GitHub/npm e `auto_improve_web_fetch` per leggere repository,
+documentazione e package registry ufficiali. Questi tool sono bounded,
+read-only, HTTPS-only e non accettano credenziali.
+
+Il confronto deve coprire almeno: capability e feature, qualità del risultato,
+performance/scalabilità, sicurezza/privacy, documentazione, UX dell'utente,
+UX per LLM/agent, tool/API, MCP, connettori, plugin/estensioni, deployment,
+test, maturità, licenza e costo operativo. Produci una gap matrix `attuale vs
+alternativa`, cita URL e separa evidenza verificata, inferenza e limite non
+verificabile. Se il web non è raggiungibile, registra query e fallimenti nel
+report: non inventare alternative, feature o fonti.
 
 ## Classificazione
 
@@ -36,6 +54,10 @@ completa l'audit tramite `yano auto-improve complete`. Il report deve contenere:
 
 - executive summary;
 - evidenze osservate e riferimenti trace;
+- capability principale e metodologia del confronto;
+- matrice comparativa con almeno tre alternative o, se impossibile, il limite documentato;
+- gap su feature, UX utente/LLM, tool, API, MCP, connettori, plugin ed estensioni;
+- proposte concrete ordinate per impatto e costo;
 - finding con categoria, priorità, valore, complessità, rischio e confidenza;
 - confronto con audit precedenti;
 - cosa non è stato possibile verificare;

@@ -49,6 +49,34 @@ come descritto sotto) — se manca, procedi come sempre esplorando il codice.
 
 ## Come chiudi un round
 
+### Contratto aggiuntivo per `clean-repo`
+
+Quando il task usa il playbook `clean-repo` (leggilo nel report o nel
+messaggio del planner), esegui una checklist documentale completa prima di
+chiudere il round. Verifica separatamente queste categorie: `architecture/`,
+`guides/`, `quick-guides/`, `adr/`, `notes/`, `postman/` (solo se il progetto
+ha un backend), `cheat-sheet/` e `diagram/`. Prima di creare una nuova
+directory cerca l'equivalente già adottato dal progetto, anche se ha un nome
+diverso (per esempio `docs/quick_guides` o `docs/diagramma`).
+
+Per ogni categoria assente, crea la directory nella convenzione del progetto
+e almeno un file utile al suo interno: documenti Markdown per architettura,
+guide, quick guide, ADR, note e cheat-sheet; almeno un file Mermaid per
+`diagram`; una collection JSON importabile per `postman`. Una directory
+creata senza file non soddisfa il playbook. Il contenuto deve essere scritto
+leggendo codice, configurazione, test e comandi reali della repo: niente file
+vuoti, `TODO`, testo generico o esempi inventati. Se il progetto ha un
+backend, la collection Postman è obbligatoria anche quando non esisteva
+prima; ricava gli endpoint e gli esempi dal codice/test. Se non ha un
+backend, scrivi nel report che `postman` è esplicitamente non applicabile.
+Il diagramma deve rappresentare il flusso logico corrente in Mermaid, non un
+placeholder.
+
+Nel report includi una tabella o un elenco con tutte le otto categorie,
+directory/file usati o creati e, per `postman`, la decisione di applicabilità.
+Questo elenco fa parte dell'evidenza del round e non può essere omesso perché
+la repo possiede già un README o una guida generica.
+
 0. **Se il messaggio che ti ha coinvolto include anche un `ticket_id`
    (Revisione 26 — layer ticket/DAG persistente)**, chiama subito
    `ticket_claim({ ticket_id })` prima di iniziare. Se rifiuta (ticket già

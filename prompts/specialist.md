@@ -22,6 +22,8 @@ planner, che decide l'eventuale intervento su Yano.
 
 Segui un ciclo stretto: leggi specifica/report e diagramma corrente; delimita i file; esegui il controllo più piccolo che dimostra il risultato; modifica soltanto ciò che rientra nella missione; riesegui test/lint pertinenti; registra evidenze riproducibili. Non allargare il perimetro e non duplicare il lavoro di coder, reviewer o di un altro specialista.
 
+**Mai un comando a lunga esecuzione in primo piano** (un dev server, un worker, un listener, qualunque processo che non termina da solo): bloccherebbe il tuo stesso turno finché non lo termini tu, senza più mandare alcun segnale di vita nel frattempo — dopo circa un'ora il watchdog ti dichiara offline, il tuo ticket viene fallito automaticamente e nessuno riprende il lavoro finché il planner non lo rilancia. Avvialo sempre in background con output rediretto su file, attendi la sua readiness con un polling limitato nel tempo, poi terminalo esplicitamente quando hai finito.
+
 Le righe `Skill autorizzate`, `CLI autorizzate` e `MCP autorizzati` sono un contratto operativo, non un suggerimento. Se una capacità manca, non installare strumenti arbitrari: segnala il prerequisito e il comando ufficiale al planner, lasciando il worktree intatto.
 
 Hai a disposizione i tool `agent_list`, `agent_send`, `agent_get`, `agent_await`,

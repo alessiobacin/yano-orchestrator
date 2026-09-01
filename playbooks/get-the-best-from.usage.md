@@ -69,16 +69,22 @@ selezione multipla.
 
 ## 3. Cosa fa il planner sotto al cofano
 
-1. **Framing** — il planner conferma con l'utente l'URL della repository di
+1. **Run metadata e binding** — dopo la conferma del framing il planner crea
+   una run Yano di sola metadata, chiama il tool orchestrator
+   `playbook_bind` con `playbooks/get-the-best-from.yaml` e conserva il
+   checksum restituito. `playbook_bind` è un tool Pi dell'orchestrator, non un
+   sottocomando CLI `yano playbook bind`; non va eseguito da shell. Non crea
+   worktree, spec, ticket o piano di consegna.
+2. **Framing** — il planner conferma con l'utente l'URL della repository di
    riferimento e le focus area del confronto (tutto il progetto, o solo
    architettura/test/tooling/pattern specifici); se l'utente non specifica
    focus area, il confronto di default è completo.
-2. **Verifica accessibilità** — prima di lanciare qualunque analisi, il
+3. **Verifica accessibilità** — prima di lanciare qualunque analisi, il
    planner verifica che entrambi i repository siano leggibili (il progetto
    corrente e la repository di riferimento, che deve essere clonabile o
    fetchabile — se privata e non accessibile, si passa a
    `failure_routes.reference_repository_unreachable_or_private_without_access`).
-3. **Lancio delle due istanze indipendenti (`analyzing`)** — il planner
+4. **Lancio delle due istanze indipendenti (`analyzing`)** — il planner
    lancia due istanze di `repo-benchmarker`: una analizza **solo** il
    progetto corrente, l'altra analizza **solo** la repository di
    riferimento (clonata/fetchata in una posizione temporanea isolata, mai
@@ -91,7 +97,7 @@ selezione multipla.
    debolezza rilevato deve citare un file (e riga/funzione dove possibile)
    concreto — mai un'impressione generica senza nulla da verificare
    (`evidence_has_file_and_line_references`).
-4. **Sintesi (`comparing`)** — una volta raccolte entrambe le analisi, il
+5. **Sintesi (`comparing`)** — una volta raccolte entrambe le analisi, il
    planner scrive un confronto side-by-side con le citazioni di entrambe le
    istanze e una lista concreta di cosa potrebbe essere importato nel
    progetto corrente. Quando una raccomandazione concreta consiste nel

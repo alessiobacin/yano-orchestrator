@@ -22,6 +22,11 @@ domande, il Planner tratta il caso come `catalog.action: create` e chiede ad
 Architect una nuova proposta invece di forzare il task in un playbook che non
 calza.
 
+Per `clean-repo`, il piano strutturato può partire con `repo-curator`: è il
+ruolo di esecuzione dedicato alla pulizia e alle relocation, equivalente al
+`coder` del flusso di codice. Le fasi successive possono includere
+`reviewer` e devono chiudersi con `docs-sync`.
+
 ## Controllare requisiti e credenziali
 
 ```bash
@@ -45,6 +50,10 @@ yano config set SERVICE_REGION eu-west-1
 I valori finiscono nella configurazione globale (`yano config path`), non nel
 progetto osservato. Dopo averli aggiunti, ripetere il check o il capability
 gate di Architect.
+
+Per una run strutturata il binding è un'operazione del tool orchestrator
+`playbook_bind`, eseguita dal Planner dopo `run_create`; `yano playbook bind`
+non è un sottocomando CLI.
 
 ## Esportare e importare
 

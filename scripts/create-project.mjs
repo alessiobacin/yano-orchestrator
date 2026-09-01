@@ -200,6 +200,39 @@ function ensureGitignore(targetDir) {
 	if (missing.length) fs.appendFileSync(file, `${current.endsWith("\n") || current.length === 0 ? "" : "\n"}${missing.join("\n")}\n`);
 }
 
+// A newly initialised repository has no commit yet. Git worktrees branch from
+// HEAD, so creating one from an unborn repository silently produces an empty
+// checkout and every worker then loses the application/configuration files.
+// Establish the scaffold/application as the immutable starting point once,
+// after all Yano files have been written. Existing repositories with a real
+// HEAD are left untouched; their normal application history remains the
+// worktree base.
+function ensureInitialGitBaseline(targetDir) {
+	if (!fs.existsSync(path.join(targetDir, ".git"))) return false;
+	try {
+		execFileSync("git", ["rev-parse", "--verify", "HEAD"], { cwd: targetDir, stdio: "ignore" });
+		return false;
+	} catch {
+		// Unborn repository — continue below.
+	}
+	try {
+		execFileSync("git", ["add", "-A"], { cwd: targetDir, stdio: "ignore" });
+		execFileSync("git", ["diff", "--cached", "--quiet"], { cwd: targetDir, stdio: "ignore" });
+		return false; // Nothing to baseline (e.g. an empty project).
+	} catch {
+		// `diff --cached --quiet` exits 1 when there is staged content. Commit it
+		// in the next block; any add failure is reported as a normal setup warning.
+	}
+	try {
+		execFileSync("git", ["commit", "-m", "chore: initialize project baseline for Yano worktree isolation"], { cwd: targetDir, stdio: "ignore" });
+		console.log("create-project: baseline Git iniziale creato per l\u2019isolamento dei worktree.");
+		return true;
+	} catch (err) {
+		console.warn(`create-project: baseline Git iniziale non creato (${err instanceof Error ? err.message : String(err)}) — configura user.name/user.email e ripeti yano init prima di usare un playbook di sviluppo.`);
+		return false;
+	}
+}
+
 async function ensureMcpCredentials(targetDir) {
 	const candidates = [path.join(targetDir, ".mcp.json"), path.join(targetDir, ".pi", "mcp.json")];
 	const activePath = candidates.find((candidate) => fs.existsSync(candidate));
@@ -539,6 +572,7 @@ export async function runCreateProject({ packageRoot, cwd, argv, preflightTools 
 			console.warn(`create-project: \`git init\` non riuscito (${err instanceof Error ? err.message : String(err)}) — inizializzalo tu a mano, serve per l'isolamento in worktree.`);
 		}
 	}
+	if (!noGit) ensureInitialGitBaseline(targetDir);
 	if (noGit && !fs.existsSync(path.join(targetDir, ".git"))) console.log("create-project: --no-git — nessun repository Git inizializzato.");
 
 	// Auto-discovery del sistema operativo (Revisione 32, richiesto

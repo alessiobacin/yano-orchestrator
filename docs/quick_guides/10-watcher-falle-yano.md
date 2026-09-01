@@ -52,6 +52,30 @@ predefinito è 24 ore:
 yano watch --project-root /path/progetto --lookback-ms 3600000 --once
 ```
 
+### Controllo e compaction del contesto
+
+Ogni agente registra nel proprio JSONL globale un evento `context_usage` a
+`session_start`, `turn_end` e `agent_end`. I campi `context_tokens` (quando Pi
+ha già una misura del provider), `effective_context_tokens`,
+`context_window_tokens`, `context_ratio`, `context_chars` e `context_entries`
+permettono al watcher di distinguere un contesto cresciuto da un semplice
+heartbeat. La compaction è generale e non dipende dal playbook:
+
+```bash
+yano watch --project-root /path/progetto --interval-ms 60000 --away \
+  --context-compact-ratio 0.82
+```
+
+Quando la soglia è superata, il watcher registra
+`yano_watcher_context_check`, invia `context_compact_request` all'agente e
+l'estensione chiama la compaction nativa di Pi. Il risultato è visibile come
+`context_compaction_completed` con `restart_mode: pi_native_compaction`, seguito
+da una nuova misura più bassa. Se l'agente non è live, il watcher instrada il
+finding al planner per il recovery della sessione. La soglia predefinita è
+`0.82` e può essere impostata anche con
+`YANO_WATCH_CONTEXT_COMPACT_RATIO`; `--lookback-ms` continua a definire la
+finestra osservata, mentre `--interval-ms` definisce la cadenza.
+
 Questo analizza gli ultimi 3.600.000 ms e termina. Per controllare ogni ora:
 
 ```bash
@@ -67,12 +91,15 @@ sono sempre read-only: stampano l'uso senza aprire il broker, creare il registro
 o avviare un processo. Se il progetto è appena inizializzato e manca
 `orchestrator.db`, un watcher continuo ordinario resta vivo, registra la
 scansione come `waiting` con motivo `not_initialized` e ritenta al giro
-successivo senza notificare un errore. Questo è il percorso normale per una
-conversazione che non ha ancora bisogno di persistenza operativa. Solo una
-scansione avviata con contesto esplicito di validazione (`--validation-run`,
-`--playbook-proposal`, `--playbook-id` o round/checksum) usa `blocked` e la
-relativa escalation. Quando il Planner esegue `orchestrator_init`, le scansioni
-successive entrano nel normale controllo dei ticket.
+successivo senza notificare un errore. Questo resta il percorso normale per
+una conversazione senza evidenza di dibattito. Se invece il trace contiene un
+debate già avviato, la mancanza del DB è una violazione: il watcher registra
+`yano_watcher_debate_check` con `missing-orchestrator-init`, avverte il planner
+e non crea il database al suo posto. Il planner deve quindi chiamare
+`orchestrator_init` come primo preflight, prima di framing o lancio agenti.
+Solo una scansione avviata con contesto esplicito di validazione
+(`--validation-run`, `--playbook-proposal`, `--playbook-id` o round/checksum)
+usa inoltre `blocked` e la relativa escalation.
 
 Per un Watcher persistente lanciato dall'Architect, la prima verifica è
 bounded e poi il processo resta in polling read-only ogni dieci minuti:
@@ -186,6 +213,32 @@ Nel playbook `conversation` il watcher controlla anche che l'eventuale
 falliti. La segnalazione viene deduplicata e inviata al planner live per il
 recupero; con nessun planner viene usato Telegram. Un `curl` o un `grep` di
 documentazione non è una violazione.
+
+Nel playbook `debate` il controllo è separato: quando il trace contiene un
+intent esplicito di dibattito, il watcher registra
+`yano_watcher_debate_check` e segnala `debate_policy_violation` se il planner
+usa `conversation-researcher`, termina con meno di due `debater`, non mostra
+una proposta `yano model-advisor recommend` oppure lancia il roster senza una
+proposta e una conferma esplicita dell'utente. Un researcher read-only
+non rende sano un dibattito instradato male: il finding debate viene inviato al
+planner per il recupero, o a Telegram se non è più online.
+
+Se il trace mostra un errore 4xx/5xx del modello pinnato, il watcher registra
+anche `model-runtime-fallback`: il planner deve dichiarare il fallback e
+verificarne l'esito, invece di considerare automaticamente valido il modello
+proposto.
+
+Il `pinned_id` mostrato nel piano, per esempio
+`z-ai/glm-5.3-flash@openrouter-glm`, appartiene al catalogo llmProxy. Il lancio
+Pi corretto usa `--provider llmproxy --model
+'z-ai/glm-5.3-flash@openrouter-glm'`; `openrouter-glm` non va mai usato come
+provider Pi. Per evitare errori nel comando composto, il planner può usare
+`yano start --llmproxy-pin 'z-ai/glm-5.3-flash@openrouter-glm' --print-only`.
+
+L'avviso di Pi `Using custom model id` è atteso quando Pi conosce il solo
+modello generico `llmproxy`: non equivale a un errore. Il watcher considera
+fallimento solo un 4xx/5xx del modello, ad esempio `is returning: 400`, e in
+quel caso registra `model-runtime-fallback`.
 
 Il watcher persistente mantiene anche la sottoscrizione MQTT agli eventi di
 fine turno (`planner_task_completed`) e di fine run (`run_completed`). Ricevuto

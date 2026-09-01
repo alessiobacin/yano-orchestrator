@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// yano model-advisor — recommends a concrete llmProxy provider:model pin per
+// yano model-advisor — recommends a concrete llmProxy model@provider-id pin per
 // task/role, based on live cost/coding-benchmark/latency data pulled from
 // llmProxy (http://127.0.0.1:7045 by default — Alessio's local instance).
 // Library + CLI only in this increment: `yano model-advisor <recommend|catalog>`.
@@ -52,6 +52,17 @@ export const AFFORDABLE_BAND_MULTIPLIER = 3;
 // A support role never picks something below this coding score, even if it
 // is the cheapest option in the affordable band.
 export const SUPPORT_MIN_CODING_FLOOR = 60;
+
+// llmProxy distinguishes a provider *instance* (for example
+// `openrouter-glm`) from its provider kind (`openrouter`). The gateway's
+// explicit instance syntax is `model@provider-id`; do not emit
+// `provider-id:model`, because that is either parsed as a bare model or can
+// trigger provider-kind shorthand/fallback handling.
+export function llmProxyPin(entry) {
+	const providerId = String(entry?.id || "").trim();
+	const model = String(entry?.model || "").trim();
+	return providerId && model ? `${model}@${providerId}` : null;
+}
 
 function value(argv, flag) {
 	const index = argv.indexOf(flag);
@@ -386,7 +397,7 @@ export function scoreCatalog(catalog, { roleClass, requireVision = false } = {})
 		const ranked = unknownPriced
 			.slice()
 			.sort((a, b) => (b.coding ?? -Infinity) - (a.coding ?? -Infinity))
-			.map((entry) => ({ ...entry, pinned_id: `${entry.id}:${entry.model}`, reason: reasonFor(entry, roleClass, { noPriceData: true }) }));
+			.map((entry) => ({ ...entry, pinned_id: llmProxyPin(entry), reason: reasonFor(entry, roleClass, { noPriceData: true }) }));
 		return { ranked, band_relaxed: ranked.length > 0 };
 	}
 
@@ -402,13 +413,13 @@ export function scoreCatalog(catalog, { roleClass, requireVision = false } = {})
 	const candidatePool = bandRelaxed ? knownPriced : affordable;
 
 	const rankedPriced = rankPricedEntries(candidatePool, roleClass)
-		.map((entry) => ({ ...entry, pinned_id: `${entry.id}:${entry.model}`, reason: reasonFor(entry, roleClass, { cheapest, affordableCeiling, bandRelaxed }) }));
+		.map((entry) => ({ ...entry, pinned_id: llmProxyPin(entry), reason: reasonFor(entry, roleClass, { cheapest, affordableCeiling, bandRelaxed }) }));
 	// Unknown-priced entries are always listed as low-priority alternatives —
 	// they never win by default over a priced entry.
 	const rankedUnknown = unknownPriced
 		.slice()
 		.sort((a, b) => (b.coding ?? -Infinity) - (a.coding ?? -Infinity))
-		.map((entry) => ({ ...entry, pinned_id: `${entry.id}:${entry.model}`, reason: reasonFor(entry, roleClass, {}) }));
+		.map((entry) => ({ ...entry, pinned_id: llmProxyPin(entry), reason: reasonFor(entry, roleClass, {}) }));
 
 	return { ranked: [...rankedPriced, ...rankedUnknown], band_relaxed: bandRelaxed };
 }
@@ -464,7 +475,7 @@ function usage() {
 		"Uso: yano model-advisor <recommend|catalog|explain> [opzioni]",
 		"",
 		"  recommend --role-class coordinator|support [--vision] [--json]",
-		"                        propone un provider:model pinnato per la role-class indicata,",
+		"                        propone un pin llmProxy model@provider-id per la role-class indicata,",
 		"                        in base al catalogo live di llmProxy (costo/coding/latenza).",
 		"                        Senza dati utilizzabili propone sempre l'auto-routing (\"llmproxy\").",
 		"  catalog [--json]      stampa il catalogo llmProxy normalizzato così com'è ora",

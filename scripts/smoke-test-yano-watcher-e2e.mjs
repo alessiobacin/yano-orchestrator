@@ -11,9 +11,10 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), "yano-watcher-e2e-"));
 const yanoRepo = path.join(root, "yano-orchestrator");
 const projectRoot = path.join(root, "focusboard-trace-test");
 const genericProjectRoot = path.join(root, "ordinary-project");
+const pausedProjectRoot = path.join(root, "paused-project");
 const uninitializedProjectRoot = path.join(root, "uninitialized-project");
 const traceRoot = path.join(root, "temp");
-for (const dir of [yanoRepo, projectRoot, genericProjectRoot, uninitializedProjectRoot]) fs.mkdirSync(dir, { recursive: true });
+for (const dir of [yanoRepo, projectRoot, genericProjectRoot, pausedProjectRoot, uninitializedProjectRoot]) fs.mkdirSync(dir, { recursive: true });
 fs.writeFileSync(path.join(yanoRepo, ".env"), `YANO_ORCHESTRATOR_REPO=${yanoRepo}\nTELEGRAM_BOT_TOKEN=e2e-token\nTELEGRAM_DESTINATION_CHAT_ID=5228139669\n`);
 
 function seedDatabase(cwd) {
@@ -22,11 +23,22 @@ function seedDatabase(cwd) {
 	fs.mkdirSync(dbDir, { recursive: true });
 	const db = new DatabaseSync(path.join(dbDir, "orchestrator.db"));
 	db.exec("CREATE TABLE tickets (id TEXT PRIMARY KEY, status TEXT, updated_at TEXT, assigned_instance TEXT, run_id TEXT, title TEXT)");
+	db.exec("CREATE TABLE decision_holds (id TEXT PRIMARY KEY, run_id TEXT, status TEXT)");
 	db.close();
 }
 
 seedDatabase(projectRoot);
 seedDatabase(genericProjectRoot);
+seedDatabase(pausedProjectRoot);
+{
+	const { DatabaseSync } = process.getBuiltinModule("node:sqlite");
+	const dbPath = path.join(pausedProjectRoot, ".pi", "extensions", "yano-orchestrator", "orchestratorStorage", "orchestrator.db");
+	const db = new DatabaseSync(dbPath);
+	const old = new Date(Date.now() - 3_600_000).toISOString();
+	db.prepare("INSERT INTO tickets VALUES (?, 'running', ?, ?, ?, ?)").run("paused-ticket", old, "worker-01", "paused-run", "ticket intentionally paused");
+	db.prepare("INSERT INTO decision_holds VALUES (?, ?, 'open')").run("paused-hold", "paused-run");
+	db.close();
+}
 process.env.YANO_DATA_DIR = traceRoot;
 process.env.YANO_ORCHESTRATOR_REPO = path.join(root, "wrong-repository");
 process.env.PI_ORCH_BROKER_URL = "mqtt://127.0.0.1:1";
@@ -89,6 +101,11 @@ try {
 	await runWatch({ cwd: genericProjectRoot, argv: ["--once", "--project", "ordinary-project"], packageRoot: yanoRepo });
 	assert.equal(fs.readdirSync(issueDir).filter((file) => file.endsWith(".md")).length, 1);
 	assert.equal(requests.length, 1);
+
+	// An open human gate is intentional waiting, not a stall: the observer must
+	// remain healthy even when the assigned worker's ticket is old.
+	const paused = await runWatch({ cwd: pausedProjectRoot, argv: ["--once", "--project", "paused-project"], packageRoot: yanoRepo });
+	assert.equal(paused.status, "healthy");
 
 	// Conversation mode may intentionally have no operational DB yet. An
 	// ordinary watcher pass waits quietly; it must not manufacture a validation

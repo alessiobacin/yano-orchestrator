@@ -50,6 +50,30 @@ caricata da un clone Pi scrivano in due directory dati diverse. Per ispezionare 
 avviato da una vecchia versione si può indicare temporaneamente il suo store
 con `--data-dir`.
 
+### Dimensione del contesto e compaction
+
+Ogni sessione registra nel proprio file `events/<instance>.jsonl` eventi
+`context_usage` a ogni avvio e fine turno. Sono metadati bounded, non il
+contenuto del contesto: `context_tokens`/`effective_context_tokens`,
+`context_window_tokens`, `context_ratio`, `context_percent`,
+`context_tokens_source`, `context_chars` e `context_entries`. I token effettivi
+provengono da `ctx.getContextUsage()`; quando Pi non li rende ancora
+disponibili viene conservata una stima esplicita basata sul ramo visibile.
+
+Il watcher osserva l'ultima misura di ogni agente, indipendentemente dal
+playbook. Sopra la soglia invia una richiesta MQTT di compaction all'agente;
+l'estensione esegue `ctx.compact()` e registra
+`context_compaction_completed`/`context_compaction_failed`. La compaction nativa
+di Pi riassume la parte vecchia della sessione e riprende con il contesto
+ridotto, preservando run, ticket, worktree e report. La soglia predefinita è
+`0.82` e si configura così:
+
+```bash
+yano watch --project-root /path/al/progetto --interval-ms 60000 --away \
+  --context-compact-ratio 0.82
+# oppure: YANO_WATCH_CONTEXT_COMPACT_RATIO=0.82
+```
+
 ## Escalation delle falle di Yano
 
 Quando `yano watch` osserva un progetto, oltre agli stall controlla i record
@@ -60,8 +84,12 @@ discordanza tra workspace e progetto. Gli errori generici dell'applicazione
 
 L'assenza di `orchestrator.db` non è di per sé un errore: un watcher ordinario
 scrive `yano_watcher_scan` con `status: waiting` e `reason: not_initialized` e
-continua il polling senza escalation. Il valore `blocked` è riservato alle
-passate con contesto esplicito di validazione.
+continua il polling senza escalation quando non c'è ancora attività di debate.
+Se però il trace contiene un debate già avviato, il watcher registra
+`missing-orchestrator-init`, avverte il planner e non considera il flusso
+valido: `orchestrator_init` deve precedere framing e lancio degli agenti. Il
+valore `blocked` resta riservato alle passate con contesto esplicito di
+validazione.
 
 Per ogni segnale nuovo viene creato un ticket Markdown deduplicato nel checkout
 del repository Yano:
@@ -72,7 +100,9 @@ del repository Yano:
 
 Il ticket contiene progetto, run, round, agente, record di evidenza, impatto e
 criteri di chiusura per l'LLM che dovrà correggere Yano. Le rilevazioni
-successive dello stesso problema non ricreano il file. Il watcher aggiunge
+successive dello stesso problema nello stesso progetto non ricreano il file:
+il fingerprint include lo scope del progetto, così un errore omonimo di un
+altro progetto non viene riutilizzato per deduplicazione. Il watcher aggiunge
 anche un evento `yano_watcher_finding` nel trace del progetto.
 
 La configurazione usa il `.env` del checkout Yano quando si lavora dal
@@ -116,6 +146,14 @@ segnala solo tool Yano di consegna vietati, comandi shell mutanti o un lancio
 fallito dello specialista; i comandi di lettura (`curl`, `grep`, `git status`,
 `yano trace`) non sono errori. Le violazioni sono deduplicate e instradate al
 planner live, oppure a Telegram se non c'è un planner.
+
+Per un intent esplicito `debate` esegue invece un controllo dedicato:
+`yano_watcher_debate_check` deve trovare almeno due istanze `debater`, una
+proposta `yano model-advisor recommend` e una conferma esplicita del piano
+prima del lancio/conclusione, e non accetta `conversation-researcher` come
+sostituto. Una violazione produce il segnale
+`debate_policy_violation`; il controllo debate prevale sul semplice esito
+read-only del researcher e non viene emesso un falso `conversation healthy`.
 
 Il watcher persistente ascolta inoltre `run_completed` e
 `planner_task_completed` sul broker. Ogni evento accoda una sola passata

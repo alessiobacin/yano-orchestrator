@@ -40,6 +40,7 @@ async function main() {
 	ok(/research-guide\.md/.test(p), "planner.md references the research guide (Ticket 09 wired)");
 	ok(/to-tickets/.test(p) && /skill è vendorizzata/.test(p) && /SQLite/.test(p), "planner.md documents the to-spec->to-tickets closure: vendored skill, user approval and SQLite runtime import");
 	ok(/ticket_create/.test(p), "planner.md links the to-tickets output to the persistent ticket layer");
+	ok(/Prima di ogni `ticket_complete`.*running.*assigned_instance/.test(p) && /non tentare mai di completare un ticket `pending`/.test(p), "planner recovery guard requires a live worker claim before ticket completion");
 
 	console.log("\n=== skill isolation must still hold (mattpocock skills ONLY for planner) ===");
 	const { stdout } = await execFileP("node", ["scripts/check-skill-isolation.mjs"], { cwd: PROJECT_ROOT });

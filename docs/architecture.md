@@ -23,7 +23,7 @@ pi planner ── reads prompts + agents/roles.yaml
   └── optional adapters: WhatsApp, MCP, effect delivery, browser tooling
 ```
 
-Every instance has an `instance`, `role`, `project` and `team` identity. MQTT topics are scoped as `pi/<project>/...`, so two projects sharing a broker remain isolated unless the operator deliberately passes the same `--project` value. `yano start` resolves the root identity and passes the derived scope explicitly to the child `pi` process, so an auto-loaded extension from a different installation cannot silently choose a shared/default namespace. The runtime also validates both the status topic and the `project` field in every retained presence card before adding it to the roster. An explicit scope override is reported at startup when it differs from the scope derived by the current project root; all instances that must collaborate must use the same value.
+Every instance has an `instance`, `role`, `project` and `team` identity. MQTT topics are scoped as `pi/<project>/...`, so two projects sharing a broker remain isolated unless the operator deliberately passes the same `--project` value. `yano start` resolves the root identity and passes the canonical slug explicitly to the child `pi` process, so an auto-loaded extension from a different installation cannot silently choose a shared/default namespace; a human display name belonging to the same root is normalized to that slug even when it appears in a generated command. The runtime also validates both the status topic and the `project` field in every retained presence card before adding it to the roster. An explicit scope override is reported at startup when it differs from the scope derived by the current project root; all instances that must collaborate must use the same value. The watcher also inspects session-start trace records and reports `project_scope_mismatch` when a worker from the root joins the wrong namespace.
 
 ## Main flow
 
@@ -295,10 +295,26 @@ launches. It emits `yano_watcher_conversation_check`, records deduplicated
 `conversation_policy_violation` events, and routes corrective context to a
 live planner or Telegram. Read-only documentation queries remain valid.
 
+Explicit `debate` intents use a separate deterministic contract check:
+`yano_watcher_debate_check` reports `debate_policy_violation` when the planner
+uses `conversation-researcher`, completes without at least two `debater`
+instances, omits the `yano model-advisor` proposal, or launches the roster
+without a proposed and explicitly user-confirmed plan. A read-only researcher
+therefore cannot make a wrongly routed debate appear healthy.
+
 The persistent watcher also subscribes to planner and run completion events.
 `planner_task_completed` and `run_completed` enqueue one immediate final scan,
 recorded as `yano_watcher_final_scan_requested` plus a `once: true` scan; the
 configured polling cadence remains active after that pass.
+
+Every Pi session also emits bounded `context_usage` telemetry to its per-agent
+trace log. The external watcher uses the latest `context_ratio` for each live
+agent and, above `YANO_WATCH_CONTEXT_COMPACT_RATIO` (default `0.82`), sends a
+`context_compact_request` control message to that agent. The agent owns the
+session operation and invokes Pi's native `ctx.compact()`, recording
+`context_compaction_completed` or `context_compaction_failed`; the native
+compaction reloads the effective context and resumes the same Yano work with
+SQLite/run/ticket state intact. This path is intentionally playbook-agnostic.
 
 ### Global `yano-debugger`
 

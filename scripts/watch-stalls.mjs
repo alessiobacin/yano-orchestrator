@@ -25,6 +25,7 @@
 //   yano watch [--project <slug>] [--project-root <dir>]
 //              [--lookback-ms 86400000] [--stall-ms 900000]
 //              [--interval-ms 60000] [--once] [--away]
+//              [--context-compact-ratio 0.82]
 //              [--validation-run <id>] [--playbook-proposal <id>]
 //   (in locale: node scripts/watch-stalls.mjs [stesse opzioni])
 //
@@ -44,7 +45,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import mqtt from "mqtt";
-import { readTraceRecords, tracePaths } from "./yano-trace-storage.mjs";
+import { canonicalProjectScope, readTraceRecords, tracePaths } from "./yano-trace-storage.mjs";
 import { appendRawTraceRecord } from "./yano-trace-storage.mjs";
 import { processYanoWatcherFindings, resolveYanoRepository, sendTelegramWatcherNotification } from "./yano-watcher-findings.mjs";
 import { missingConfigError, resolveYanoConfig } from "./yano-config.mjs";
@@ -105,7 +106,7 @@ function installFinalEventMonitor({ client, cwd, project, argv, packageRoot, run
 }
 
 function parseArgs(argv) {
-	const o = { project: null, projectRoot: null, lookbackMs: 86_400_000, stallMs: 900000, intervalMs: 60000, once: false, away: false, validationRun: null, playbookProposal: null, playbookId: null, playbookChecksum: null, validationRound: null };
+	const o = { project: null, projectRoot: null, lookbackMs: 86_400_000, stallMs: 900000, intervalMs: 60000, once: false, away: false, contextCompactRatio: Number(process.env.YANO_WATCH_CONTEXT_COMPACT_RATIO) || 0.82, validationRun: null, playbookProposal: null, playbookId: null, playbookChecksum: null, validationRound: null };
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i];
 		if (a === "--project") o.project = argv[++i];
@@ -115,6 +116,7 @@ function parseArgs(argv) {
 		else if (a === "--interval-ms") o.intervalMs = Number(argv[++i]);
 		else if (a === "--once") o.once = true;
 		else if (a === "--away" || a === "-aw") o.away = true;
+		else if (a === "--context-compact-ratio") o.contextCompactRatio = Number(argv[++i]);
 		else if (a === "--validation-run") o.validationRun = argv[++i];
 		else if (a === "--playbook-proposal") o.playbookProposal = argv[++i];
 		else if (a === "--playbook-id") o.playbookId = argv[++i];
@@ -145,6 +147,28 @@ const CONVERSATION_FORBIDDEN_TOOLS = new Set([
 // before `>` or `<`; otherwise harmless quoted HTML selectors such as
 // `grep '<title>'` look like filesystem writes.
 const CONVERSATION_MUTATING_COMMAND = /(?:\b(?:git\s+(?:init|add|commit|checkout|switch|merge|worktree|branch\s+(?:-d|-D|--delete))|yano\s+init)\b|(?:^|[;&|]\s*)(?:rm|mv|cp|touch|mkdir|rmdir|install)\s+|(?:^|[;&|\s])\d*>>?\s*(?:[~./$A-Za-z_]))/i;
+const DEBATE_INTENT = /\b(?:debat(?:e|ing)?|dibattit(?:o|i)|second\s+opinion|seconda\s+opinione|confronta\s+(?:le\s+)?prospettive|pro\s+e\s+contro|pros\s+and\s+cons|multi[- ]model\s+(?:discussion|debate)|discussione\s+multi[- ]modello)\b/i;
+const DEBATER_INSTANCE = /^debater(?:-|$)/i;
+const CONVERSATION_RESEARCHER_INSTANCE = /^conversation-researcher(?:-|$)/i;
+const REPO_BENCHMARKER_INSTANCE = /^repo-benchmarker(?:-|$)/i;
+const CONFIRMATION_REQUEST = /(?:conferma|confermi|approv(?:i|azione)|posso\s+(?:continuare|procedere)|procedere\s+con\s+questo\s+roster)/i;
+const USER_CONFIRMATION = /\b(?:s[iì]|yes|ok|confermo|confermiamo|approvo|procedi|continua|vai\s+pure)\b/i;
+const GET_BEST_FROM_INTENT = /\bget-the-best-from\b|(?:confront|compare|benchmark|learn from|ispirat)[^\n]{0,180}(?:repo|repository|progetto|github)/i;
+const REPO_BENCHMARKER_MUTATING_COMMAND = /(?:\bgit\s+(?:add|commit|push|reset|clean|checkout|switch|merge|worktree|branch\s+(?:-d|-D|--delete))\b|(?:^|[;&|]\s*)(?:rm|mv|cp|touch|mkdir|rmdir|install)\s+|(?:^|[;&|\s])\d*>>?\s*[~./$A-Za-z_])/i;
+
+function branchMessages(record) {
+	const branch = record.branch || record.data?.branch || [];
+	return Array.isArray(branch)
+		? branch.map((entry) => entry?.message).filter((message) => message && typeof message === "object")
+		: [];
+}
+
+function messageText(message) {
+	const content = message?.content;
+	if (typeof content === "string") return content;
+	if (Array.isArray(content)) return content.filter((item) => item?.type === "text").map((item) => item.text).join(" ");
+	return "";
+}
 
 function conversationFinding({ kind, record, instance, role, tool, command = null, expected, actual }) {
 	const identity = [kind, instance || "?", tool || "?", record.tool_call_id || record.id || "?", command || ""].join("|");
@@ -232,6 +256,326 @@ export function inspectConversationPolicy(records = []) {
 	return { conversationEvidence, findings };
 }
 
+function debateFinding({ kind, record, expected, actual, instance = null, role = null, tool = null }) {
+	const identity = [kind, instance || "?", tool || "?", record.tool_call_id || record.id || "?"].join("|");
+	return {
+		signal: "debate_policy_violation",
+		fingerprint: crypto.createHash("sha256").update(identity).digest("hex"),
+		severity: "high",
+		category: "debate-policy",
+		summary: `Violazione del contratto debate: ${actual}`,
+		expected,
+		actual,
+		instance,
+		role,
+		tool,
+		record_id: record.tool_call_id || record.id || null,
+		ts: record.ts || null,
+		kind,
+	};
+}
+
+function recordText(record) {
+	return [
+		record.args?.command,
+		record.args?.prompt,
+		record.prompt_preview,
+		record.text,
+		record.result?.content?.map?.((item) => item.text).join(" "),
+		...branchMessages(record).map(messageText),
+	].filter(Boolean).join(" ");
+}
+
+// Only explicit user/planner intent and debate routing signals can activate
+// the debate contract. Tool results are deliberately excluded: a catalog or
+// help response commonly lists the word "debate" as one of several options,
+// which is not evidence that the current task is a debate.
+function debateIntentText(record) {
+	if (record.type === "visible_session_branch") {
+		return branchMessages(record)
+			.filter((message) => message.role === "user" || (message.role === "assistant" && CONFIRMATION_REQUEST.test(messageText(message))))
+			.map(messageText)
+			.join(" ");
+	}
+	if (record.type === "assistant_response" || record.type === "user_message") return [record.text, record.prompt, record.prompt_preview].filter(Boolean).join(" ");
+	if (record.type === "agent_send_out") return [record.prompt, record.prompt_preview].filter(Boolean).join(" ");
+	if (record.type === "session_start" && (record.role === "debater" || DEBATER_INSTANCE.test(String(record.instance || "")))) return "debater";
+	if ((record.type === "tool_execution_start" || record.type === "tool_execution_start_payload") && /(?:--task|--prompt)\s+/.test(String(record.args?.command || ""))) return String(record.args.command);
+	return "";
+}
+
+export function inspectProjectScope(records = [], canonicalProject) {
+	const latestStarts = new Map();
+	for (const record of records) {
+		if (record.source === "yano-watcher" || record.instance === "yano-watcher") continue;
+		if (record.type !== "session_start" || !record.instance) continue;
+		latestStarts.set(record.instance, record);
+	}
+	const mismatches = [...latestStarts.values()].filter((record) =>
+		record.project_scope_override === true &&
+		record.default_project === canonicalProject &&
+		record.project && record.project !== canonicalProject,
+	);
+	const findings = mismatches.map((record) => {
+		const identity = `${record.instance}|${record.project}|${canonicalProject}`;
+		return {
+			signal: "project_scope_mismatch",
+			fingerprint: crypto.createHash("sha256").update(identity).digest("hex"),
+			severity: "high",
+			category: "routing",
+			summary: `L'istanza ${record.instance} usa uno scope MQTT diverso da quello canonico del progetto.`,
+			expected: `Tutte le istanze della root devono usare lo scope ${canonicalProject}.`,
+			actual: `${record.instance} usa ${record.project}, mentre la root risolve ${canonicalProject}.`,
+			instance: record.instance,
+			role: record.role || null,
+			project: record.project,
+			canonical_project: canonicalProject,
+			record_id: record.id || null,
+			ts: record.ts || null,
+			kind: "mqtt-project-scope-mismatch",
+		};
+	});
+	return { scopeEvidence: mismatches.length > 0, mismatches, findings };
+}
+
+// Deterministic contract check for the multi-agent debate path. It does not
+// judge the quality of an argument; it only catches a routing failure that a
+// generic "conversation" health check cannot see (wrong specialist, missing
+// minimum roster, or no model-advisor proposal before completion).
+export function inspectDebatePolicy(records = [], { completed = false, initialized = true } = {}) {
+	const debaters = new Set();
+	const conversationResearchers = new Set();
+	let debateEvidence = false;
+	let modelAdvisorCalls = 0;
+	let firstDebateEvidence = null;
+	let confirmationRequested = false;
+	let userConfirmation = false;
+	let debaterLaunch = false;
+	const modelRuntimeFailures = [];
+	const modelRuntimeFailureKeys = new Set();
+
+	for (const record of records) {
+		if (record.source === "yano-watcher" || record.instance === "yano-watcher") continue;
+		const text = debateIntentText(record);
+		if (DEBATE_INTENT.test(text)) {
+			debateEvidence = true;
+			firstDebateEvidence ||= record;
+		}
+		if ((record.role === "debater" || DEBATER_INSTANCE.test(String(record.instance || ""))) && /(?:is returning|restituisce|restituendo|returning)\s*:\s*[45]\d\d/i.test(text)) {
+			const failure = text.match(/(?:is returning|restituisce|restituendo|returning)\s*:\s*[45]\d\d/i)?.[0] || "model-error";
+			const failureKey = `${record.instance || "?"}|${failure}`;
+			if (!modelRuntimeFailureKeys.has(failureKey)) {
+				modelRuntimeFailureKeys.add(failureKey);
+				modelRuntimeFailures.push(record);
+			}
+		}
+		for (const message of branchMessages(record)) {
+			const messageBody = messageText(message);
+			if (message.role === "assistant" && CONFIRMATION_REQUEST.test(messageBody) && DEBATE_INTENT.test(messageBody)) confirmationRequested = true;
+			if (message.role === "user" && USER_CONFIRMATION.test(messageBody) && !/\b(?:non|not|don't|non\s+voglio)\b/i.test(messageBody)) userConfirmation = true;
+		}
+		if (record.type === "session_start" && (DEBATER_INSTANCE.test(String(record.instance || "")) || record.role === "debater")) {
+			debaters.add(record.instance || `debater-${debaters.size + 1}`);
+			debaterLaunch = true;
+		}
+		if (record.type === "agent_send_out") {
+			const target = String(record.target || record.target_instance || "");
+			if (DEBATER_INSTANCE.test(target)) {
+				debaters.add(target);
+				debaterLaunch = true;
+			}
+			if (CONVERSATION_RESEARCHER_INSTANCE.test(target)) {
+				conversationResearchers.add(target);
+				// A wrongly routed specialist is still a launch attempt: the
+				// debate confirmation gate must reject it as well.
+				debaterLaunch = true;
+			}
+		}
+		if (record.role === "debater" || DEBATER_INSTANCE.test(String(record.instance || ""))) debaters.add(record.instance || `debater-${debaters.size + 1}`);
+		if (record.role === "conversation-researcher" || CONVERSATION_RESEARCHER_INSTANCE.test(String(record.instance || ""))) conversationResearchers.add(record.instance || "conversation-researcher");
+		if (/\byano\s+model-advisor\s+recommend\b/i.test(record.args?.command || "")) modelAdvisorCalls++;
+	}
+
+	if (!debateEvidence) return { debateEvidence: false, findings: [], debaters: [...debaters], conversationResearchers: [...conversationResearchers], modelAdvisorCalls };
+	const findings = [];
+	if (!initialized) {
+		findings.push(debateFinding({
+			kind: "missing-orchestrator-init",
+			record: firstDebateEvidence || { id: "debate-before-init" },
+			expected: "Il planner deve chiamare orchestrator_init prima di framing, proposta, lancio o delega di un debate.",
+			actual: "il trace contiene un debate ma il progetto non ha ancora orchestrator.db",
+		}));
+	}
+	for (const record of modelRuntimeFailures) {
+		findings.push(debateFinding({
+			kind: "model-runtime-fallback",
+			record,
+			instance: record.instance || null,
+			expected: "Se il modello pinnato fallisce, il planner deve verificare il fallback llmproxy, dichiararlo nel report e decidere se rilanciare o sostituire il modello.",
+			actual: `il trace segnala un errore del modello pinnato e un fallback runtime: ${recordText(record).match(/.{0,120}(?:is returning|restituisce|restituendo|returning)\s*:\s*[45]\d\d.{0,160}/i)?.[0] || "errore provider/modello"}`,
+		}));
+	}
+	for (const record of records) {
+		if (record.source === "yano-watcher" || record.instance === "yano-watcher") continue;
+		const target = String(record.target || record.target_instance || "");
+		if (record.type === "agent_send_out" && CONVERSATION_RESEARCHER_INSTANCE.test(target)) {
+			findings.push(debateFinding({
+				kind: "wrong-specialist",
+				record,
+				instance: target,
+				role: "conversation-researcher",
+				expected: "Un intent debate deve usare almeno due istanze debater; conversation-researcher non è un sostituto del roster debate.",
+				actual: `il planner ha delegato un dibattito a ${target}`,
+			}));
+		}
+	}
+	if (completed && debaters.size < 2) {
+		findings.push(debateFinding({
+			kind: "insufficient-debaters",
+			record: firstDebateEvidence || { id: "debate-completion" },
+			expected: "Il playbook debate deve lanciare e attendere almeno due debater prima della sintesi finale.",
+			actual: `il flusso è terminato con ${debaters.size} debater`,
+		}));
+	}
+	if (completed && debaters.size >= 2 && modelAdvisorCalls === 0) {
+		findings.push(debateFinding({
+			kind: "missing-model-proposal",
+			record: firstDebateEvidence || { id: "debate-model-proposal" },
+			expected: "Prima del lancio il planner deve proporre un modello per ogni debater tramite yano model-advisor, dichiarando eventuale degradazione.",
+			actual: "nessuna chiamata yano model-advisor recommend è presente nel trace del dibattito",
+		}));
+	}
+	if (completed && debaterLaunch && (!confirmationRequested || !userConfirmation)) {
+		findings.push(debateFinding({
+			kind: "missing-user-confirmation",
+			record: firstDebateEvidence || { id: "debate-confirmation" },
+			expected: "Prima del lancio deve esistere una proposta del roster/model@provider-id e una conferma esplicita dell'utente; le modifiche richieste riaprono il gate.",
+			actual: `confirmation_requested=${confirmationRequested}, user_confirmed=${userConfirmation}`,
+		}));
+	}
+	return { debateEvidence: true, findings, debaters: [...debaters], conversationResearchers: [...conversationResearchers], modelAdvisorCalls, confirmationRequested, userConfirmation, modelRuntimeFailures: modelRuntimeFailures.length };
+}
+
+function getBestFromIntentText(record) {
+	if (record.type === "visible_session_branch") {
+		return branchMessages(record)
+			.filter((message) => message.role === "user" || (message.role === "assistant" && /get-the-best-from|repo-benchmarker|confront|compare|benchmark/i.test(messageText(message))))
+			.map(messageText)
+			.join(" ");
+	}
+	if (record.type === "assistant_response" || record.type === "user_message") return [record.text, record.prompt, record.prompt_preview].filter(Boolean).join(" ");
+	if (record.type === "agent_send_out") return [record.prompt, record.prompt_preview].filter(Boolean).join(" ");
+	if ((record.type === "tool_execution_start" || record.type === "tool_execution_start_payload") && /(?:--task|--prompt)\s+/.test(String(record.args?.command || ""))) return String(record.args.command);
+	return "";
+}
+
+function getBestFromFinding({ kind, record, expected, actual, instance = null, role = null, tool = null }) {
+	const identity = [kind, instance || "?", tool || "?", record.tool_call_id || record.id || "?"].join("|");
+	return {
+		signal: "get_best_from_policy_violation",
+		fingerprint: crypto.createHash("sha256").update(identity).digest("hex"),
+		severity: "high",
+		category: "get-best-from-policy",
+		summary: `Violazione del contratto get-the-best-from: ${actual}`,
+		expected,
+		actual,
+		instance,
+		role,
+		tool,
+		record_id: record.tool_call_id || record.id || null,
+		ts: record.ts || null,
+		kind,
+	};
+}
+
+// Deterministic contract check for comparative repository benchmarking. The
+// watcher does not assess the quality of the comparison; it verifies the
+// observable safety gates: two independent benchmarkers, model proposals
+// before completion, both analyses ending before the planner synthesis, and
+// no mutating shell command from a benchmarker.
+export function inspectGetBestFromPolicy(records = [], { completed = false } = {}) {
+	const benchmarkers = new Set();
+	const benchmarkerEnds = new Map();
+	const findings = [];
+	let evidence = false;
+	let modelAdvisorCalls = 0;
+	let finalPlannerResponse = null;
+	let plannerEnd = null;
+	for (const record of records) {
+		if (record.source === "yano-watcher" || record.instance === "yano-watcher") continue;
+		const instance = String(record.instance || "");
+		const target = String(record.target || record.target_instance || "");
+		const intentText = getBestFromIntentText(record);
+		if (GET_BEST_FROM_INTENT.test(intentText)) evidence = true;
+		if (record.role === "repo-benchmarker" || REPO_BENCHMARKER_INSTANCE.test(instance)) {
+			evidence = true;
+			if (instance) benchmarkers.add(instance);
+			if (record.type === "agent_end") benchmarkerEnds.set(instance, record);
+			if ((record.type === "tool_execution_start_payload" || record.type === "tool_execution_start") && record.tool === "bash" && REPO_BENCHMARKER_MUTATING_COMMAND.test(String(record.args?.command || ""))) {
+				findings.push(getBestFromFinding({
+					kind: "mutating-shell",
+					record,
+					instance,
+					role: record.role || "repo-benchmarker",
+					tool: record.tool,
+					expected: "repo-benchmarker deve analizzare in sola lettura e non modificare Git o il filesystem del progetto.",
+					actual: `repo-benchmarker ha eseguito un comando potenzialmente mutante: ${String(record.args?.command || "").slice(0, 240)}`,
+				}));
+			}
+		}
+		if (record.type === "agent_send_out" && REPO_BENCHMARKER_INSTANCE.test(target)) {
+			evidence = true;
+			benchmarkers.add(target);
+		}
+		if (/\byano\s+model-advisor\s+recommend\b/i.test(String(record.args?.command || ""))) modelAdvisorCalls++;
+		if (record.type === "assistant_response" && record.role === "planner" && /side[- ]by[- ]side|sintesi comparativa|confronto comparativo|report finale/i.test(String(record.text || ""))) finalPlannerResponse = record;
+		if (record.type === "agent_end" && record.role === "planner") plannerEnd = record;
+	}
+	if (!evidence) return { getBestFromEvidence: false, findings: [], benchmarkers: [], modelAdvisorCalls };
+	if (completed && benchmarkers.size < 2) {
+		findings.push(getBestFromFinding({
+			kind: "insufficient-benchmarkers",
+			record: finalPlannerResponse || plannerEnd || { id: "get-best-from-completion" },
+			expected: "Il playbook deve lanciare e attendere due repo-benchmarker indipendenti, uno per ciascun repository.",
+			actual: `il flusso è terminato con ${benchmarkers.size} repo-benchmarker`,
+		}));
+	}
+	if (completed && modelAdvisorCalls === 0) {
+		findings.push(getBestFromFinding({
+			kind: "missing-model-proposal",
+			record: finalPlannerResponse || plannerEnd || { id: "get-best-from-model-proposal" },
+			expected: "Prima del lancio il planner deve proporre i modelli tramite yano model-advisor e conservarne il pin nel framing.",
+			actual: "nessuna chiamata yano model-advisor recommend è presente nel trace",
+		}));
+	}
+	if (completed && benchmarkers.size >= 2) {
+		const incomplete = [...benchmarkers].filter((instance) => !benchmarkerEnds.has(instance));
+		if (incomplete.length) findings.push(getBestFromFinding({
+			kind: "incomplete-analysis",
+			record: finalPlannerResponse || plannerEnd || { id: "get-best-from-analysis" },
+			expected: "La sintesi deve iniziare solo dopo la conclusione di entrambe le analisi cieche.",
+			actual: `manca il marker agent_end per: ${incomplete.join(", ")}`,
+		}));
+		if (finalPlannerResponse && plannerEnd) {
+			const synthesisAt = new Date(finalPlannerResponse.ts || plannerEnd.ts || 0).getTime();
+			const late = [...benchmarkerEnds.entries()].filter(([, record]) => new Date(record.ts || 0).getTime() > synthesisAt).map(([instance]) => instance);
+			if (late.length) findings.push(getBestFromFinding({
+				kind: "comparison-before-analyses-complete",
+				record: finalPlannerResponse,
+				expected: "Le due analisi devono essere terminate prima della sintesi side-by-side.",
+				actual: `la sintesi del planner precede la conclusione di: ${late.join(", ")}`,
+			}));
+		}
+		if (finalPlannerResponse && !/(?:[A-Za-z0-9_./-]+\.[A-Za-z0-9_-]+:\d+)/.test(String(finalPlannerResponse.text || ""))) findings.push(getBestFromFinding({
+			kind: "missing-citations",
+			record: finalPlannerResponse,
+			expected: "La sintesi deve contenere citazioni concrete file:riga per le evidenze e i candidati d'importazione.",
+			actual: "la risposta finale non contiene citazioni file:riga riconoscibili",
+		}));
+	}
+	return { getBestFromEvidence: true, findings, benchmarkers: [...benchmarkers], modelAdvisorCalls };
+}
+
 export function watchUsage() {
 	return [
 		"Uso: yano watch [opzioni]",
@@ -241,6 +585,7 @@ export function watchUsage() {
 		"  --lookback-ms <ms>               finestra temporale della scansione",
 		"  --stall-ms <ms>                  soglia per un ticket stalled",
 		"  --interval-ms <ms>               intervallo del polling persistente",
+		"  --context-compact-ratio <0..1>   soglia watcher per compaction automatica (default 0.82; env YANO_WATCH_CONTEXT_COMPACT_RATIO)",
 		"  --once                           esegue una sola scansione e termina",
 		"  --away                           nasconde gli heartbeat senza finding",
 		"  --help, -h                       mostra questo messaggio",
@@ -317,7 +662,7 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 	const opts = parseArgs(argv);
 	const startedAt = new Date().toISOString();
 	const watchCwd = opts.projectRoot ? path.resolve(opts.projectRoot) : cwd;
-	const project = opts.project || resolveProject(watchCwd);
+	const project = canonicalProjectScope(watchCwd, opts.project || resolveProject(watchCwd));
 	const effectivePackageRoot = packageRoot || path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 	const config = resolveYanoConfig({ packageRoot: effectivePackageRoot });
 	const yanoRepo = resolveYanoRepository({ packageRoot: effectivePackageRoot });
@@ -367,6 +712,69 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 	// explicitly supplied validation context is allowed to enter the blocked
 	// route below.
 	if (!existsSync(dbPath)) {
+		// A debate is observable in the trace before the first operational ticket
+		// exists. Do not let the conversation-mode "not initialized" fast path
+		// hide a debate that already launched agents: the planner must call
+		// orchestrator_init before framing or launching them. This remains
+		// read-only; the watcher reports the violation but never creates the DB.
+		const preDbTraceRecords = readTraceRecords({ cwd: watchCwd, project, since: new Date(Date.now() - Math.max(0, opts.lookbackMs)), limit: 100000 });
+		const preDbDebateCheck = inspectDebatePolicy(preDbTraceRecords, {
+			initialized: false,
+			completed: preDbTraceRecords.some((record) => record.type === "agent_end" && record.role === "planner"),
+		});
+		if (preDbDebateCheck.debateEvidence) {
+			const findings = preDbDebateCheck.findings;
+			try {
+				appendRawTraceRecord({ cwd: watchCwd, project, record: {
+					type: "yano_watcher_debate_check",
+					record_type: "event",
+					source: "yano-watcher",
+					instance: "yano-watcher",
+					project,
+					status: "violation",
+					checked_at: new Date().toISOString(),
+					violations: findings.length,
+					orchestrator_db: false,
+					debaters: preDbDebateCheck.debaters,
+					conversation_researchers: preDbDebateCheck.conversationResearchers,
+					model_advisor_calls: preDbDebateCheck.modelAdvisorCalls,
+					model_runtime_failures: preDbDebateCheck.modelRuntimeFailures,
+					confirmation_requested: preDbDebateCheck.confirmationRequested,
+					user_confirmed: preDbDebateCheck.userConfirmation,
+					message: "Il trace contiene un debate prima di orchestrator_init: il watcher segnala il difetto senza creare il DB.",
+				} });
+			} catch { /* tracing must never block the watcher */ }
+			const routed = new Set(preDbTraceRecords
+				.filter((record) => record.type === "yano_watcher_notification_route" && record.signal === "debate_policy_violation")
+				.map((record) => record.fingerprint)
+				.filter(Boolean));
+			for (const finding of findings) {
+				if (routed.has(finding.fingerprint)) continue;
+				if (livePlanners.length && client) {
+					for (const planner of livePlanners) {
+						try {
+							await client.publishAsync(`pi/${project}/agents/${planner.instance}/commands`, JSON.stringify({
+								type: "command",
+								assignment_id: `watcher-${crypto.randomUUID()}`,
+								sender_instance: "yano-watcher",
+								sender_role: "yano-watcher",
+								target_instance: planner.instance,
+								project,
+								prompt: `[yano-watcher] Violazione debate: ${finding.actual}. Manca orchestrator.db perché il planner ha saltato orchestrator_init. Inizializza ora il workspace Yano, verifica il DB e poi ripara/verifica il flusso; non dichiarare il debate valido finché il watcher non può rileggerlo.`,
+								timestamp: new Date().toISOString(),
+							}), { qos: 1 });
+						} catch { /* best effort */ }
+					}
+				}
+				try { appendRawTraceRecord({ cwd: watchCwd, project, record: { type: "yano_watcher_notification_route", record_type: "event", instance: "yano-watcher", route: livePlanners.length && client ? "planner" : "local", delivered: livePlanners.length && client ? livePlanners.length : 0, planner_instances: livePlanners.map((agent) => agent.instance), signal: finding.signal, fingerprint: finding.fingerprint, kind: finding.kind } }); } catch { /* best effort */ }
+				routed.add(finding.fingerprint);
+			}
+			appendWatcherScan({ cwd: watchCwd, project, opts, status: "finding", reason: "debate_not_initialized", findings: findings.length, liveAgents: liveAgents.length, livePlanners: livePlanners.length });
+			console.log(`yano watch: violazione debate — trace presente ma manca orchestrator.db (${dbPath}); il planner è stato avvertito.`);
+			if (client && !sharedPersistentClient) { try { await new Promise((resolve) => setTimeout(resolve, 120)); client.end(false); } catch { /* best effort */ } }
+			scheduleNextPass({ cwd, argv, packageRoot });
+			return { status: "finding", reason: "debate_not_initialized", findings, project, db_path: dbPath };
+		}
 		if (!hasValidationContext(opts)) {
 			appendWatcherScan({ cwd: watchCwd, project, opts, startedAt, status: "waiting", reason: "not_initialized", liveAgents: liveAgents.length, livePlanners: livePlanners.length });
 			console.log(`yano watch: in attesa — nessun orchestrator.db per questo progetto (${dbPath}); nessuna validazione da segnalare.`);
@@ -447,8 +855,16 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 	const now = Date.now();
 	let stalled = [];
 	try {
-		const rows = db.prepare("SELECT * FROM tickets WHERE status = 'running' ORDER BY updated_at ASC").all();
+	const rows = db.prepare("SELECT * FROM tickets WHERE status = 'running' ORDER BY updated_at ASC").all();
+		// An open human decision hold is an intentional pause, not a worker
+		// stall.  Refactor specialists, for example, may exit after proposing
+		// their plan while the planner waits for user confirmation.
 		stalled = rows.filter((t) => now - new Date(t.updated_at).getTime() > opts.stallMs);
+		if (stalled.length) {
+			const holdRows = db.prepare("SELECT DISTINCT run_id FROM decision_holds WHERE status = 'open'").all();
+			const pausedRuns = new Set(holdRows.map((row) => row.run_id));
+			stalled = stalled.filter((t) => !pausedRuns.has(t.run_id));
+		}
 	} catch (err) {
 		appendWatcherScan({ cwd: watchCwd, project, opts, startedAt, status: "error", reason: "sqlite_query_failed", liveAgents: liveAgents.length, livePlanners: livePlanners.length });
 		console.error(`yano watch: query SQLite fallita (${err instanceof Error ? err.message : String(err)})`);
@@ -557,6 +973,94 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 		try { appendRawTraceRecord({ cwd: watchCwd, project, record: { type: "yano_watcher_notification_route", record_type: "event", instance: "yano-watcher", route: "telegram", planner_instances: [], telegram: { ok: telegram.ok, detail: telegram.detail }, signal, fingerprint: details.fingerprint || null, ticket_path: details.ticket_path || null, run_id: details.run_id || null, ticket_id: details.ticket_id || null } }); } catch { /* best effort */ }
 		return { route: "telegram", telegram };
 	};
+
+	// Context maintenance is playbook-agnostic. The extension emits one
+	// bounded context_usage record per lifecycle point; the watcher keeps only
+	// the newest record for each live instance and asks Pi to compact when the
+	// effective context crosses the configured ratio. The request is sent to
+	// the agent itself (not to an LLM and not to SQLite), so the operation stays
+	// at a safe session boundary and preserves the normal Yano ticket state.
+	let contextFindings = [];
+	try {
+		const contextRecords = readTraceRecords({ cwd: watchCwd, project, since: new Date(Date.now() - Math.max(0, opts.lookbackMs)), limit: 100000 })
+			.filter((record) => record.type === "context_usage" && record.instance && Number.isFinite(Number(record.effective_context_tokens)));
+		const latestByInstance = new Map();
+		for (const record of contextRecords) {
+			const previous = latestByInstance.get(record.instance);
+			if (!previous || String(record.ts || "") > String(previous.ts || "")) latestByInstance.set(record.instance, record);
+		}
+		const ratioThreshold = Number.isFinite(opts.contextCompactRatio) && opts.contextCompactRatio > 0 && opts.contextCompactRatio < 1
+			? opts.contextCompactRatio
+			: 0.82;
+		for (const record of latestByInstance.values()) {
+			const ratio = Number(record.context_ratio ?? (Number(record.context_window_tokens) > 0 ? Number(record.effective_context_tokens) / Number(record.context_window_tokens) : NaN));
+			if (!Number.isFinite(ratio) || ratio < ratioThreshold) continue;
+			const finding = {
+				signal: "context_compaction_requested",
+				fingerprint: crypto.createHash("sha256").update(`${record.instance}|${record.ts}|${record.effective_context_tokens}`).digest("hex"),
+				severity: "high",
+				category: "context-window",
+				summary: `Il contesto di ${record.instance} è al ${Math.round(ratio * 100)}%: richiesta compaction Pi.`,
+				instance: record.instance,
+				role: record.role || null,
+				context_tokens: Number(record.effective_context_tokens),
+				context_window_tokens: Number(record.context_window_tokens) || null,
+				context_ratio: ratio,
+				threshold_ratio: ratioThreshold,
+				observed_at: record.ts || null,
+			};
+			contextFindings.push(finding);
+		}
+		try {
+			appendRawTraceRecord({ cwd: watchCwd, project, record: {
+				type: "yano_watcher_context_check",
+				record_type: "event",
+				source: "yano-watcher",
+				instance: "yano-watcher",
+				project,
+				status: contextFindings.length ? "high" : "healthy",
+				checked_at: new Date().toISOString(),
+				threshold_ratio: ratioThreshold,
+				observed_agents: latestByInstance.size,
+				high_context_agents: contextFindings.map((item) => item.instance),
+				message: contextFindings.length
+					? "Il watcher ha rilevato contesti oltre soglia e avviato la compaction nativa Pi."
+					: "Dimensioni contesto sotto soglia.",
+			} });
+		} catch { /* best effort */ }
+
+		const priorContextRoutes = new Set(readTraceRecords({ cwd: watchCwd, project, limit: 100000 })
+			.filter((record) => record.type === "yano_watcher_notification_route" && record.signal === "context_compaction_requested")
+			.map((record) => record.fingerprint)
+			.filter(Boolean));
+		for (const finding of contextFindings) {
+			if (priorContextRoutes.has(finding.fingerprint)) continue;
+			const target = liveAgents.find((agent) => agent.instance === finding.instance);
+			let delivered = 0;
+			if (target && client) {
+				try {
+					await client.publishAsync(`pi/${project}/agents/${target.instance}/commands`, JSON.stringify({
+						type: "context_compact_request",
+						request_id: `context-${crypto.randomUUID()}`,
+						requested_by_instance: "yano-watcher",
+						requested_by_role: "watcher",
+						reason: finding.summary,
+						custom_instructions: "Riduci il contesto mantenendo obiettivo, decisioni, stato ticket, file modificati e prossimi passi. Riprendi il lavoro dal punto corrente.",
+						timestamp: new Date().toISOString(),
+					}), { qos: 1 });
+					delivered = 1;
+				} catch { /* route below informs planner */ }
+			}
+			if (delivered) {
+				try { appendRawTraceRecord({ cwd: watchCwd, project, record: { type: "yano_watcher_notification_route", record_type: "event", source: "yano-watcher", instance: "yano-watcher", route: "agent", delivered, target_instance: finding.instance, signal: finding.signal, fingerprint: finding.fingerprint } }); } catch { /* best effort */ }
+			} else {
+				await routeNotice({ summary: `${finding.summary} L'agente non è raggiungibile: planner, verifica la sessione e usa il recovery supportato.`, signal: finding.signal, details: finding });
+			}
+			priorContextRoutes.add(finding.fingerprint);
+		}
+	} catch (error) {
+		console.warn(`yano watch: controllo contesto non riuscito — ${error instanceof Error ? error.message : String(error)}`);
+	}
 	const previouslyRoutedStalls = new Set(readTraceRecords({ cwd: watchCwd, project, limit: 100000 })
 		.filter((record) => record.type === "yano_watcher_notification_route" && record.signal === "ticket_stalled")
 		.map((record) => `${record.run_id || "?"}:${record.ticket_id || "?"}`));
@@ -576,10 +1080,40 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 	// not create maintenance tickets in the Yano repository.
 	let validationFindings = [];
 	let conversationFindings = [];
+	let debateFindings = [];
+	let getBestFromFindings = [];
+	let scopeFindings = [];
 	try {
 		const traceRecords = readTraceRecords({ cwd: watchCwd, project, since: new Date(Date.now() - Math.max(0, opts.lookbackMs)), limit: 100000 });
+		const scopeCheck = inspectProjectScope(traceRecords, project);
+		scopeFindings = scopeCheck.findings;
+		if (scopeCheck.scopeEvidence) {
+			try {
+				appendRawTraceRecord({ cwd: watchCwd, project, record: {
+					type: "yano_watcher_scope_check",
+					record_type: "event",
+					source: "yano-watcher",
+					instance: "yano-watcher",
+					project,
+					status: "violation",
+					checked_at: new Date().toISOString(),
+					violations: scopeFindings.length,
+					mismatches: scopeCheck.mismatches.map((record) => ({ instance: record.instance, role: record.role || null, project: record.project, default_project: record.default_project })),
+					message: "Una o più istanze della root usano uno scope MQTT diverso da quello canonico.",
+				} });
+			} catch { /* tracing must never block the watcher */ }
+		}
+		const debateCheck = inspectDebatePolicy(traceRecords, {
+			// `agent_end` is the authoritative end-of-turn marker in the trace.
+			// Do not use retained MQTT presence here: a pane can still advertise a
+			// recent heartbeat for a process that Herdr already marked done.
+			completed: traceRecords.some((record) => record.type === "agent_end" && record.role === "planner"),
+		});
 		const conversationCheck = inspectConversationPolicy(traceRecords);
-		if (conversationCheck.conversationEvidence) {
+		// A debate may contain a conversation-researcher only as the faulty
+		// route we are reporting. Do not emit a misleading "conversation
+		// healthy" event for that trace; the debate check owns the verdict.
+		if (conversationCheck.conversationEvidence && !debateCheck.debateEvidence) {
 			conversationFindings = conversationCheck.findings;
 			const previousViolationFingerprints = new Set(traceRecords
 				.filter((record) => record.type === "yano_watcher_conversation_violation")
@@ -603,6 +1137,53 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 					message: conversationFindings.length
 						? "Il trace della conversazione contiene una violazione o un errore di runtime da correggere."
 						: "Regole conversation verificate: consulto read-only e nessuna operazione di consegna rilevata.",
+				} });
+			} catch { /* tracing must never block the watcher */ }
+		}
+		if (debateCheck.debateEvidence) {
+			debateFindings = debateCheck.findings;
+			try {
+				appendRawTraceRecord({ cwd: watchCwd, project, record: {
+					type: "yano_watcher_debate_check",
+					record_type: "event",
+					source: "yano-watcher",
+					instance: "yano-watcher",
+					project,
+					status: debateFindings.length ? "violation" : "healthy",
+					checked_at: new Date().toISOString(),
+					violations: debateFindings.length,
+					debaters: debateCheck.debaters,
+					conversation_researchers: debateCheck.conversationResearchers,
+					model_advisor_calls: debateCheck.modelAdvisorCalls,
+					model_runtime_failures: debateCheck.modelRuntimeFailures,
+					confirmation_requested: debateCheck.confirmationRequested,
+					user_confirmed: debateCheck.userConfirmation,
+					message: debateFindings.length
+						? "Il trace del dibattito viola il roster o il percorso di selezione dei modelli."
+						: "Regole debate verificate: roster e percorso specialistico coerenti.",
+				} });
+			} catch { /* tracing must never block the watcher */ }
+		}
+		const getBestFromCheck = inspectGetBestFromPolicy(traceRecords, {
+			completed: traceRecords.some((record) => record.type === "agent_end" && record.role === "planner"),
+		});
+		if (getBestFromCheck.getBestFromEvidence) {
+			getBestFromFindings = getBestFromCheck.findings;
+			try {
+				appendRawTraceRecord({ cwd: watchCwd, project, record: {
+					type: "yano_watcher_get_best_from_check",
+					record_type: "event",
+					source: "yano-watcher",
+					instance: "yano-watcher",
+					project,
+					status: getBestFromFindings.length ? "violation" : "healthy",
+					checked_at: new Date().toISOString(),
+					violations: getBestFromFindings.length,
+					benchmarkers: getBestFromCheck.benchmarkers,
+					model_advisor_calls: getBestFromCheck.modelAdvisorCalls,
+					message: getBestFromFindings.length
+						? "Il trace del confronto tra repository viola uno o più gate osservabili del playbook."
+						: "Regole get-the-best-from verificate: due analisi cieche, modelli proposti, sintesi successiva e sola lettura.",
 				} });
 			} catch { /* tracing must never block the watcher */ }
 		}
@@ -652,6 +1233,57 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 			}
 			routedConversationKeys.add(finding.fingerprint);
 		}
+		const routedDebateKeys = new Set(traceRecords
+			.filter((record) => record.type === "yano_watcher_notification_route" && record.signal === "debate_policy_violation")
+			.map((record) => record.fingerprint)
+			.filter(Boolean));
+		for (const finding of debateFindings) {
+			if (routedDebateKeys.has(finding.fingerprint)) continue;
+			try {
+				await routeNotice({
+					summary: finding.summary,
+					signal: finding.signal,
+					details: { fingerprint: finding.fingerprint, kind: finding.kind, instance: finding.instance, expected: finding.expected, actual: finding.actual, debaters: debateCheck.debaters, model_advisor_calls: debateCheck.modelAdvisorCalls, model_runtime_failures: debateCheck.modelRuntimeFailures },
+				});
+			} catch (error) {
+				try { appendRawTraceRecord({ cwd: watchCwd, project, record: { type: "yano_watcher_notification_route", record_type: "event", instance: "yano-watcher", route: "local", delivered: 0, planner_instances: livePlanners.map((agent) => agent.instance), signal: finding.signal, fingerprint: finding.fingerprint, notification_error: error instanceof Error ? error.message : String(error) } }); } catch { /* best effort */ }
+			}
+			routedDebateKeys.add(finding.fingerprint);
+		}
+		const routedGetBestKeys = new Set(traceRecords
+			.filter((record) => record.type === "yano_watcher_notification_route" && record.signal === "get_best_from_policy_violation")
+			.map((record) => record.fingerprint)
+			.filter(Boolean));
+		for (const finding of getBestFromFindings) {
+			if (routedGetBestKeys.has(finding.fingerprint)) continue;
+			try {
+				await routeNotice({
+					summary: finding.summary,
+					signal: finding.signal,
+					details: { fingerprint: finding.fingerprint, kind: finding.kind, instance: finding.instance, expected: finding.expected, actual: finding.actual },
+				});
+			} catch (error) {
+				try { appendRawTraceRecord({ cwd: watchCwd, project, record: { type: "yano_watcher_notification_route", record_type: "event", instance: "yano-watcher", route: "local", delivered: 0, planner_instances: livePlanners.map((agent) => agent.instance), signal: finding.signal, fingerprint: finding.fingerprint, notification_error: error instanceof Error ? error.message : String(error) } }); } catch { /* best effort */ }
+			}
+			routedGetBestKeys.add(finding.fingerprint);
+		}
+		const routedScopeKeys = new Set(traceRecords
+			.filter((record) => record.type === "yano_watcher_notification_route" && record.signal === "project_scope_mismatch")
+			.map((record) => record.fingerprint)
+			.filter(Boolean));
+		for (const finding of scopeFindings) {
+			if (routedScopeKeys.has(finding.fingerprint)) continue;
+			try {
+				await routeNotice({
+					summary: finding.summary,
+					signal: finding.signal,
+					details: { fingerprint: finding.fingerprint, kind: finding.kind, instance: finding.instance, role: finding.role, expected: finding.expected, actual: finding.actual, project: finding.project, canonical_project: finding.canonical_project },
+				});
+			} catch (error) {
+				try { appendRawTraceRecord({ cwd: watchCwd, project, record: { type: "yano_watcher_notification_route", record_type: "event", instance: "yano-watcher", route: "local", delivered: 0, planner_instances: livePlanners.map((agent) => agent.instance), signal: finding.signal, fingerprint: finding.fingerprint, notification_error: error instanceof Error ? error.message : String(error) } }); } catch { /* best effort */ }
+			}
+			routedScopeKeys.add(finding.fingerprint);
+		}
 	} catch (error) {
 		if (error?.code === "YANO_CONFIG_MISSING") throw error;
 		console.warn(`yano watch: escalation Yano non riuscita — ${error instanceof Error ? error.message : String(error)}`);
@@ -660,9 +1292,9 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 	// A clean validation pass is positive evidence only for the architect's
 	// bounded proposal. It is never sent to Telegram as an alert and never
 	// promotes anything by itself; the planner still collects user feedback.
-	validationFindings = [...validationFindings, ...conversationFindings];
+	validationFindings = [...validationFindings, ...conversationFindings, ...debateFindings, ...getBestFromFindings, ...scopeFindings];
 
-	if (opts.validationRun && marker.length === 0 && validationFindings.length === 0) {
+	if (opts.validationRun && marker.length === 0 && validationFindings.length === 0 && contextFindings.length === 0) {
 		const healthy = {
 			ts: new Date().toISOString(),
 			type: "yano_watcher_round_ok",
@@ -700,7 +1332,7 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 		}
 	}
 
-	const scanStatus = marker.length || validationFindings.length ? "finding" : "healthy";
+	const scanStatus = marker.length || validationFindings.length || contextFindings.length ? "finding" : "healthy";
 	const scan = appendWatcherScan({
 		cwd: watchCwd,
 		project,
@@ -709,7 +1341,7 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 		status: scanStatus,
 		reason: null,
 		stalls: marker.length,
-		findings: validationFindings.length,
+		findings: validationFindings.length + contextFindings.length,
 		liveAgents: liveAgents.length,
 		livePlanners: livePlanners.length,
 	});

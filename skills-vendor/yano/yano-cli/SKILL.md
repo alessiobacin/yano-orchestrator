@@ -211,13 +211,20 @@ worker.
 
 ```text
 yano watch --project-root <dir> --lookback-ms 3600000 --once
-yano watch --project-root <dir> --lookback-ms 3600000 --interval-ms 600000 --away
+yano watch --project-root <dir> --lookback-ms 3600000 --interval-ms 600000 --away --context-compact-ratio 0.82
 yano trace events --project <name> --instance yano-watcher --type yano_watcher_scan --limit 20 --json
 ```
 
 The `yano_watcher_scan` event records start/end timestamps, duration, status,
 lookback, interval, findings, stalls, and live-agent counts. A quiet scan is
 not evidence that the worker tab is absent; inspect the event and Herdr status.
+Each agent trace also records bounded `context_usage` metadata (effective
+tokens/window/ratio, serialized size and entry count). Above the configured
+ratio (default `0.82`, override with `--context-compact-ratio` or
+`YANO_WATCH_CONTEXT_COMPACT_RATIO`) the watcher sends a control request to the
+agent, which invokes Pi native `ctx.compact()` and records
+`context_compaction_completed` or `context_compaction_failed`. This is
+playbook-agnostic and preserves Yano's SQLite state while the session resumes.
 
 When a conversation trace contains a planner consultation with
 `conversation-researcher`, the watcher also performs a deterministic policy
@@ -226,6 +233,34 @@ check. It records `yano_watcher_conversation_check` with `status: healthy` or
 failed specialist launches as `conversation_policy_violation`, then routes a
 deduplicated corrective notice to a live planner (or Telegram). Read-only
 commands such as `curl`, `grep`, `git status`, and `yano trace` are accepted.
+
+When the trace contains an explicit `debate`/`dibattito` intent, the watcher
+applies a separate `debate` contract check. It records
+`yano_watcher_debate_check` and raises `debate_policy_violation` when the
+planner delegates to `conversation-researcher`, completes without at least
+two `debater` instances, or completes without a `yano model-advisor recommend`
+proposal. A debate trace is not reported as a healthy conversation trace just
+because the unrelated researcher stayed read-only; the debate-specific finding
+is routed to the live planner (or the configured escalation path).
+
+The planner must call `orchestrator_init` before any debate framing or agent
+launch. If a debate trace exists while `orchestrator.db` is missing, the
+watcher records `missing-orchestrator-init` instead of treating the project as
+an ordinary uninitialized conversation. A `yano model-advisor` `pinned_id`
+such as `z-ai/glm-5.3-flash@openrouter-glm` is an llmProxy catalog pin, not a Pi
+provider: launch Pi with `--provider llmproxy --model
+'z-ai/glm-5.3-flash@openrouter-glm'`, never `--provider openrouter-glm`.
+If the trace contains a 4xx/5xx from the pinned model, the watcher also emits
+`model-runtime-fallback`; the planner must report and verify the fallback.
+
+The debate playbook has a human gate before launch: the planner must present
+the topic, roster, stance and exact `model@provider-id` for every debater, ask for
+confirmation, and apply any requested roster/model changes before starting
+agents. The planner must not call `yano start`, `herdr agent start`,
+`agent_send` or `agent_await` before that confirmation. When a legitimate
+specialist is offline, `agent_list` is only the live-presence check; inspect
+the project-scoped Pi sessions and use a supported `--session`/`--continue`/
+`--resume` option when available, otherwise launch a fresh compatible session.
 
 In persistent mode the watcher keeps its MQTT subscription open in addition to
 polling at `--interval-ms`. A `run_completed` event or a planner's completed

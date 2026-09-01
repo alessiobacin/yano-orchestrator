@@ -24,6 +24,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { inspectGetBestFromPolicy } from "./watch-stalls.mjs";
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "yano-get-the-best-from-playbook-"));
 const projectRoot = path.join(root, "project");
@@ -31,7 +32,7 @@ const dataDir = path.join(root, "yano-temp");
 fs.mkdirSync(projectRoot, { recursive: true });
 fs.writeFileSync(path.join(projectRoot, "package.json"), `${JSON.stringify({ name: "get-the-best-from-smoke", private: true }, null, 2)}\n`);
 
-const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+	const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const cli = path.join(packageRoot, "bin", "yano.mjs");
 const env = { ...process.env, YANO_DATA_DIR: dataDir };
 
@@ -43,6 +44,37 @@ function runCli(args) {
 }
 
 try {
+	const plannerPrompt = fs.readFileSync(path.join(packageRoot, "prompts", "planner.md"), "utf8");
+	assert.match(plannerPrompt, /tool\s+orchestrator `playbook_bind`/);
+	assert.match(plannerPrompt, /non esiste il comando CLI[\s\S]*yano playbook bind/);
+
+	const healthyTrace = [
+		{ type: "tool_execution_start_payload", instance: "planner-01", role: "planner", args: { command: "yano architect assess --task \"confronto code-mem con https://github.com/estonshi/detwin\" --json" } },
+		{ type: "visible_session_branch", branch: [
+			{ message: { role: "assistant", content: [{ type: "text", text: "Piano get-the-best-from con due repo-benchmarker e modelli model@provider. Confermi?" }] } },
+			{ message: { role: "user", content: [{ type: "text", text: "Confermo, procedi." }] } },
+		] },
+		{ type: "tool_execution_start_payload", instance: "planner-01", role: "planner", args: { command: "yano model-advisor recommend --role-class coordinator --json" } },
+		{ type: "session_start", instance: "repo-benchmarker-01", role: "repo-benchmarker" },
+		{ type: "session_start", instance: "repo-benchmarker-02", role: "repo-benchmarker" },
+		{ type: "agent_send_out", instance: "planner-01", role: "planner", target: "repo-benchmarker-01", prompt_preview: "Analizza soltanto code-mem" },
+		{ type: "agent_send_out", instance: "planner-01", role: "planner", target: "repo-benchmarker-02", prompt_preview: "Analizza soltanto il clone temporaneo" },
+		{ type: "agent_end", instance: "repo-benchmarker-01", role: "repo-benchmarker", ts: "2026-09-01T11:00:01.000Z" },
+		{ type: "agent_end", instance: "repo-benchmarker-02", role: "repo-benchmarker", ts: "2026-09-01T11:00:02.000Z" },
+		{ type: "assistant_response", instance: "planner-01", role: "planner", ts: "2026-09-01T11:00:03.000Z", text: "Sintesi comparativa side-by-side: code-mem/src/retrieval.js:19 e detwin/0.9.0/detwin.c:1124. Licenza verificata." },
+		{ type: "agent_end", instance: "planner-01", role: "planner", ts: "2026-09-01T11:00:04.000Z" },
+	];
+	const healthyPolicy = inspectGetBestFromPolicy(healthyTrace, { completed: true });
+	assert.equal(healthyPolicy.getBestFromEvidence, true);
+	assert.equal(healthyPolicy.findings.length, 0, JSON.stringify(healthyPolicy.findings));
+	const badPolicy = inspectGetBestFromPolicy([
+		{ type: "assistant_response", instance: "planner-01", role: "planner", text: "Confronto repository GitHub con get-the-best-from" },
+		{ type: "session_start", instance: "repo-benchmarker-01", role: "repo-benchmarker" },
+		{ type: "agent_end", instance: "planner-01", role: "planner" },
+	], { completed: true });
+	assert.ok(badPolicy.findings.some((finding) => finding.kind === "insufficient-benchmarkers"));
+	assert.ok(badPolicy.findings.some((finding) => finding.kind === "missing-model-proposal"));
+
 	// (a) Realistic get-the-best-from-intent tasks — comparing the current
 	// project against another repository given as a GitHub link and asking
 	// what could be imported — must route to the new `get-the-best-from`
@@ -74,6 +106,7 @@ try {
 		"compare this repo with https://github.com/other/project and tell me what we could learn from it",
 		"cosa possiamo importare da un altro progetto simile su GitHub?",
 		"benchmark against another repo to see where we're weaker",
+		"Confronto non distruttivo tra il progetto corrente code-mem e la repository esterna estonshi/detwin per individuare pattern utili da adottare",
 	];
 	for (const task of getTheBestFromTasks) {
 		const assessment = runCli(["architect", "assess", "--project-root", projectRoot, "--task", task, "--json"]);

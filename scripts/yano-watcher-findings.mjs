@@ -85,7 +85,10 @@ function failure({ category, signal, severity, summary, record, evidence }) {
 		record_ts: record.ts || null,
 		payload: safeJson(record),
 	};
-	const fingerprintInput = [category, signal, detail.type, detail.tool, detail.expected, detail.actual, summary].map((item) => String(item || "")).join("|");
+	// Findings are deduplicated within the watched project. Including the
+	// project identity prevents a generic failure (for example an agent_send
+	// policy refusal) from reusing a ticket created for a different project.
+	const fingerprintInput = [detail.project_key || detail.project, category, signal, detail.type, detail.tool, detail.expected, detail.actual, summary].map((item) => String(item || "")).join("|");
 	detail.fingerprint = crypto.createHash("sha256").update(fingerprintInput).digest("hex");
 	return detail;
 }

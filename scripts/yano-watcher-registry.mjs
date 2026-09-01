@@ -36,7 +36,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import { appendRawTraceRecord, projectKey, readTraceRecords, resolveTraceProject, traceRoot } from "./yano-trace-storage.mjs";
+import { appendRawTraceRecord, canonicalProjectScope, projectKey, readTraceRecords, resolveTraceProject, traceRoot } from "./yano-trace-storage.mjs";
 
 const require = createRequire(import.meta.url);
 const WORKSPACE_LABEL = "yano-watcher";
@@ -192,13 +192,14 @@ function launchHerdrWorker({ project, root, db, row, intervalMs, lookbackMs, dry
 }
 
 function watcherOnce(info, project) {
-	const trace = readTraceRecords({ cwd: info.root, project: info.name, limit: 200 });
+	const scope = canonicalProjectScope(info.root, info.name);
+	const trace = readTraceRecords({ cwd: info.root, project: scope, limit: 200 });
 	const scans = trace.filter((record) => record.type === "yano_watcher_scan");
 	const findings = trace.filter((record) => record.type === "yano_watcher_finding");
 	return {
 		once: true,
 		read_only: true,
-		project: info.name,
+		project: scope,
 		project_root: info.root,
 		worker_started: false,
 		worker_status: project.worker_status,

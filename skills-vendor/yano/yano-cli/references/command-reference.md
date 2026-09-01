@@ -119,7 +119,7 @@ Unmanaged or modified duplicate directories are left in place and reported.
 
 ```text
 yano watch --project-root <dir> [--project <name>] [--once]
-yano watch --project-root <dir> --lookback-ms <ms> --interval-ms <ms> [--away]
+yano watch --project-root <dir> --lookback-ms <ms> --interval-ms <ms> [--away] [--context-compact-ratio <0..1>]
 yano watch --project-root <dir> --validation-run <id> --playbook-proposal <id> --once
 yano watcher init --project-root <dir> [--interval-ms <ms>] [--lookback-ms <ms>]
 yano watcher start --project-root <dir> [--dry-run] [--once] [--foreground]
@@ -139,9 +139,38 @@ configured escalation path. A watcher does not edit the watched application.
 When an ordinary continuous watcher starts before `orchestrator.db` exists, it
 records a `waiting` scan with reason `not_initialized`, remains alive and does
 not notify an error until a later poll can inspect the newly initialized
-database. A watcher started with explicit validation context (for example
+database, provided there is no debate trace. If a debate trace already exists,
+the missing DB produces `missing-orchestrator-init` and is routed to the
+planner. A watcher started with explicit validation context (for example
 `--validation-run` or `--playbook-proposal`) records `blocked` and uses the
 configured escalation path.
+
+For an explicit `debate` intent, the scan also records
+`yano_watcher_debate_check`. The deterministic check rejects delegation to
+`conversation-researcher`, completion with fewer than two `debater` instances,
+or completion without a `yano model-advisor recommend` proposal, using the
+signal `debate_policy_violation`. This check is separate from the read-only
+`conversation` policy check.
+
+An HTTP 4xx/5xx from the pinned model also produces the
+`model-runtime-fallback` finding; the planner must report and verify the
+fallback instead of silently treating the proposed model as successful.
+
+Il planner deve chiamare `orchestrator_init` prima di framing o lancio di un
+debate. Se il trace del debate esiste mentre manca `orchestrator.db`, il
+watcher registra `missing-orchestrator-init` e avvisa il planner; non crea il
+database al suo posto. Il `pinned_id` llmProxy, ad esempio
+`z-ai/glm-5.3-flash@openrouter-glm`, va passato a Pi con provider `llmproxy` e
+modello completo; `openrouter-glm` non è un provider Pi.
+Il flag `yano start --llmproxy-pin '<model-id@provider-id>' --print-only`
+compone automaticamente questa coppia di flag.
+
+Before any debater launch, the planner must present and request confirmation
+of the complete debate plan: instances, stance, provider and model per agent.
+Changes requested by the user return the flow to the same confirmation gate.
+For an offline legitimate specialist, `agent_list` is not a session history;
+inspect project-scoped Pi sessions and use a supported `--session`,
+`--continue` or `--resume` launch option before falling back to a new session.
 
 ## Trace and semantic evidence
 
@@ -280,7 +309,7 @@ yano suggester reject --suggestion-id <id> --actor <superadmin> --reason <text> 
 yano suggester serve [--port <port>] [--host <host>] [--json]  # REST API — see docs/yano-suggester.md#api-rest-yano-suggester-serve
 
 yano model-advisor catalog [--json]                             # catalogo llmProxy normalizzato
-yano model-advisor recommend --role-class coordinator|support [--vision] [--json]  # provider:model pinnato migliore per la role-class
+yano model-advisor recommend --role-class coordinator|support [--vision] [--json]  # model@provider-id pinnato migliore per la role-class
 yano model-advisor explain --role-class coordinator|support [--vision] [--json]    # come recommend, ma con l'intera classifica motivata — see docs/yano-model-advisor.md
 ```
 

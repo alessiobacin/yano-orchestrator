@@ -39,6 +39,18 @@ export function resolveTraceProject(cwd, explicitProject = null) {
 	return path.basename(path.resolve(cwd)) || "default";
 }
 
+// MQTT topics use a stable slug for the project rooted at `cwd`. An explicit
+// project remains a deliberate shared-scope override, except when the caller
+// passed this same root's human-facing display name (the common value emitted
+// by Architect). Treating that display name as an override forks one project
+// into two MQTT networks, so collapse it to the root's canonical scope.
+export function canonicalProjectScope(cwd, explicitProject = null) {
+	const derived = slugify(resolveTraceProject(cwd));
+	if (explicitProject === null || explicitProject === undefined || !String(explicitProject).trim()) return derived;
+	const explicit = String(explicitProject).trim();
+	return slugify(explicit) === derived ? derived : explicit;
+}
+
 function canonicalCwd(cwd) {
 	try { return fs.realpathSync(cwd); } catch { return path.resolve(cwd); }
 }

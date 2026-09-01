@@ -1,5 +1,78 @@
 # Development notes
 
+## Revisione 62 — chiusura del client MQTT nel watcher smoke test
+
+La suite completa restava appesa dopo `smoke-test-watch-stalls` perché il
+subscriber MQTT usato per osservare `ticket_stalled` non veniva chiuso. Con
+`PI_ORCH_TEST_NO_EXIT=1` il processo manteneva il socket aperto anche dopo le
+asserzioni verdi. Il test ora esegue `sub.endAsync()` prima di terminare, così
+il risultato di `npm test` riflette davvero la conclusione di tutti i check.
+
+## Revisione 61 — recovery senza completamenti prematuri
+
+Il trace dell'E2E `manual-e2e-11-refactor-live` ha mostrato un ordine errato
+dopo il repair: il planner ha provato `ticket_complete` su un ticket reviewer
+ancora `pending`, prima che la nuova sessione del reviewer eseguisse
+`ticket_claim`. Il runtime rifiutava correttamente l'operazione, ma il watcher
+la registrava come `tool_failure` e il flusso perdeva un passaggio inutile.
+
+Il prompt del planner ora impone una verifica di stato/assegnatario prima di
+ogni chiusura: un ticket pending/ready/failed o non reclamato non può essere
+completato; se l'agente è offline va rilanciato e deve reclamare il ticket. La
+regola preserva l'override del planner solo per un ticket già `running`, senza
+permettere di simulare il lavoro del worker. La regressione è coperta dal
+planning-flow smoke test.
+
+## Revisione 59 — handoff planner→reviewer nel refactor
+
+Il primo E2E dopo la revisione del gate ha trovato un secondo caso legittimo:
+nel playbook `refactor` il planner delega il reviewer solo dopo aver sbloccato
+la fase 2, mentre il reviewer del backend-change generale è normalmente
+contattato direttamente dal coder nella stessa fase. Il controllo handoff ora
+consente `planner → reviewer` soltanto se il piano contiene
+`refactoring-specialist`; il percorso backend generico resta protetto contro
+il salto diretto del planner al reviewer.
+
+La matrice è coperta da `smoke-test-plan-gate.mjs` sia per l'autorizzazione
+refactor sia per il rifiuto del percorso backend non dichiarato.
+
+## Revisione 58 — fase di coding dedicata al playbook refactor
+
+Il primo E2E reale dopo la correzione dei worktree ha trovato un secondo
+errore: il planner proponeva correttamente `refactoring-specialist` e
+`reviewer`, ma `plan_set` imponeva ancora `coder` nella fase 1. Questo rendeva
+impossibile avviare proprio il playbook `refactor`, il cui agente di coding è
+`refactoring-specialist`. Il gate ora accetta quel ruolo in fase 1 e il ciclo
+di handoff applica il percorso `planner → refactoring-specialist → reviewer →
+planner`, mantenendo separato il percorso backend `coder → reviewer`.
+
+La regressione è coperta da `smoke-test-plan-gate.mjs`; il prompt del planner
+descrive inoltre esplicitamente le fasi corrette del refactor, senza aggiungere
+un `coder` generico solo per soddisfare il gate.
+
+## Revisione 56 — riallineamento automatico dello scope MQTT e watcher anti-falsi positivi
+
+Un test manuale del playbook `refactor` ha mostrato che Architect passava ai
+worker il nome umano `Manual E2E 08 Refactor Playbook`, mentre il planner usava
+lo slug `manual-e2e-08-refactor-playbook`. I processi risultavano vivi in Herdr
+ma pubblicavano su due alberi MQTT separati: `agent_list` vedeva solo il
+planner. `canonicalProjectScope()` normalizza ora il nome umano della stessa
+root sia nel launcher sia nel watcher, mantenendo invece intatti gli override
+espliciti destinati a scope condivisi diversi.
+
+Il watcher controlla inoltre gli ultimi `session_start` e registra/notifica
+`project_scope_mismatch`, mentre la detection del playbook `debate` considera
+solo intenti espliciti, routing e messaggi della sessione: la parola `debate`
+presente in una risposta del catalogo/tool non è più sufficiente per aprire un
+falso allarme. Infine `refactoring-specialist` usa la skill catalogata
+`refactor`, evitando la sostituzione silenziosa con un `coder` generico; il
+gate riconosce anche la vecchia grafia `refactoring` nei roster già scaffoldati.
+
+Regressioni: `smoke-test-launch-any-role.mjs` copre il nome umano normalizzato;
+`smoke-test-yano-debate-playbook.mjs` copre catalogo non-intenzionale,
+`project_scope_mismatch` e il warning informativo di Pi senza classificarlo
+come errore runtime.
+
 ## Revisione 55 — skill CLI condivisa per gli agenti Pi
 
 Non esisteva una skill che spiegasse a tutti gli agenti l'intera superficie
@@ -4894,3 +4967,42 @@ Se preferisci una GUI: [MQTT Explorer](https://mqttexplorer.com/) —
 `brew install --cask mqtt-explorer` — connessione a host `localhost`, porta
 `1883`, nessun TLS, nessuna credenziale (il broker di sviluppo accetta
 connessioni anonime), topic di sottoscrizione lasciato al default `#`.
+## Revisione 57 — baseline Git per worktree e avvio worker dalla root
+
+Un E2E reale su un progetto appena creato ha trovato un doppio difetto di
+sequenziamento: `yano init` eseguiva `git init` ma lasciava il repository senza
+commit; il successivo `worktree_create` produceva quindi un checkout vuoto. In
+più il planner tentava di lanciare i worker con `cd .worktrees/<slug>`, mentre
+l'estensione rifiuta correttamente una cwd dentro una worktree per impedire DB,
+report e topic MQTT annidati.
+
+Ora `yano init` crea una sola baseline Git quando il repository è nuovo/unborn,
+rispettando `.gitignore`; repository già dotati di una history non vengono
+committati automaticamente. Il prompt del planner impone invece il lancio di
+tutti gli agenti dalla root del progetto con `yano start`, passando loro il
+`worktree_path` come directory operativa. Così la worktree contiene il codice
+iniziale, mentre identità MQTT, `orchestrator.db`, report e coordinamento restano
+coerenti nella root del progetto.
+## Revisione 60 — ruoli condivisi nei ticket specializzati
+
+`reviewer` e `docs-sync` sono ruoli riutilizzati da più playbook, ma il loro
+default statico in `agents/roles.yaml` rappresenta solo il percorso normale.
+`ticket_claim` mantiene il controllo sul binding immutabile del playbook e
+rifiuta i claim cross-playbook privi di autorizzazione; quando il ticket
+dichiara esplicitamente il ruolo in `required_capabilities`, quella è
+l'autorizzazione run-scoped e il claim è ammesso. Questo evita che un reviewer
+di `refactor` o un docs-sync finale venga bloccato dal default `backend-change`
+o `documentation-release`, senza rendere generico il claim di qualunque ruolo.
+
+## Revisione 63 — i gate umani non sono stall o ticket orfani
+
+Un test live del playbook `refactor` ha evidenziato un falso positivo: il
+refactoring specialist aveva completato il preflight e attendeva la conferma
+utente del piano, ma il ticket risultava già `running`. Dopo un'attesa
+prolungata, il watchdog lo aveva classificato come stalled/orphaned e lo aveva
+marcato `failed`, nonostante il `decision_hold` fosse ancora aperto.
+
+Ora sia il watchdog interno sia `yano watch` escludono dai controlli di stall e
+offline i run con un `decision_hold` umano aperto. Il ticket resta osservabile
+nel DB e riprende normalmente quando il planner riceve la risposta; non viene
+più fallito o rilanciato durante una pausa deliberatamente richiesta.

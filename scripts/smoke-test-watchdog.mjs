@@ -212,7 +212,6 @@ async function runScenario(cwd, project) {
 	// tool start must refresh its progress clock and prevent a false stall.
 	const progressDb = new (await import("node:sqlite")).DatabaseSync(path.join(cwd, ".pi", "extensions", "yano-orchestrator", "orchestratorStorage", "orchestrator.db"));
 	progressDb.prepare("UPDATE tickets SET updated_at = ? WHERE id = ?").run(new Date(Date.now() - 5_000).toISOString(), ticketId);
-	progressDb.close();
 	const toolStartHook = coder.harness.hooks.get("tool_execution_start");
 	if (toolStartHook) await toolStartHook({ type: "tool_execution_start", toolCallId: "progress", toolName: "bash", args: {} }, coder.ctx);
 	const progressCheck = await planner.call("run_watchdog_check", { run_id: runId });
@@ -225,6 +224,19 @@ async function runScenario(cwd, project) {
 
 	const freshCheck = await planner.call("run_watchdog_check", { run_id: runId });
 	ok(freshCheck.details.stalled.length === 0, "run_watchdog_check: a just-claimed ticket is not yet stalled");
+
+	// A human decision gate deliberately pauses the run.  Even if the worker
+	// has disappeared after delivering its preflight result, neither watchdog
+	// path may classify that intentional wait as a stall.
+	const hold = await planner.call("decision_hold_create", { run_id: runId, question: "approval gate for watchdog regression", owner: "user", idempotency_key: "watchdog-approval-gate" });
+	progressDb.prepare("UPDATE tickets SET updated_at = ? WHERE id = ?").run(new Date(Date.now() - 5_000).toISOString(), ticketId);
+	const pausedCheck = await planner.call("run_watchdog_check", { run_id: runId });
+	ok(pausedCheck.details.stalled.length === 0 && pausedCheck.details.orphaned.length === 0, "an open human decision hold suppresses false stalled/orphaned alerts");
+	await planner.call("decision_hold_cancel", { id: hold.details.hold.id, generation: hold.details.hold.generation, reason: "watchdog regression setup complete", idempotency_key: "watchdog-approval-gate-cancel" });
+	// Reset the synthetic age used by the paused-gate assertion so the next
+	// section still verifies the normal first threshold from a fresh episode.
+	progressDb.prepare("UPDATE tickets SET updated_at = ? WHERE id = ?").run(new Date().toISOString(), ticketId);
+	progressDb.close();
 
 	await waitUntil(
 		() => planner.watchdogMessages().length >= 1,

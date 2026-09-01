@@ -84,13 +84,18 @@ function assertRoleHandoffAllowed(senderRole, targetRole, slug) {
 	const sender = senderRole.trim().toLowerCase();
 	const target = targetRole.trim().toLowerCase();
 	const backendRoles = new Set(["coder", "reviewer"]);
+	const refactorRoles = new Set(["refactoring-specialist"]);
 	const frontendRoles = new Set(["frontend-developer", "frontend-reviewer"]);
 	const coreRoles = new Set(["planner", ...backendRoles, ...frontendRoles]);
-	if (!coreRoles.has(target)) return;
+	if (!coreRoles.has(target) && !refactorRoles.has(target)) return;
+	const isRefactorPlan = slug === "refactor-plan";
+	const isCleanRepoPlan = slug === "clean-repo-plan";
 	const allowed = target === "planner"
 		? sender === "reviewer" || !coreRoles.has(sender)
 		: target === "reviewer"
-			? sender === "coder"
+			? sender === "coder" || sender === "refactoring-specialist" || (sender === "planner" && (isRefactorPlan || isCleanRepoPlan))
+			: target === "refactoring-specialist"
+				? sender === "planner" || sender === "reviewer"
 			: target === "frontend-reviewer"
 				? sender === "frontend-developer"
 				: sender === "planner" || sender === "reviewer" || sender === "frontend-reviewer";
@@ -98,18 +103,22 @@ function assertRoleHandoffAllowed(senderRole, targetRole, slug) {
 }
 
 // Mirrors the plan_set tool's execute() — including its role check and
-// structural validation (phase 1 must include coder, no role in two phases,
-// and the Revisione 21 follow-up TDD exception: phase 1 may be "tdd-agent"
-// ALONE if — and only if — "coder" is then in phase 2 right after).
+// structural validation (phase 1 must include a coding role, no role in two
+// phases, and the Revisione 21 follow-up TDD exception: phase 1 may be
+// "tdd-agent" ALONE if — and only if — "coder" is then in phase 2 right
+// after). The dedicated refactor and clean-repo execution roles are valid in
+// phase 1 too.
 function planSet(worktreePath, callerRole, slug, phasesInput) {
 	if (callerRole !== "planner") throw new Error(`plan_set: only the planner role may declare a task's execution plan (this instance is "${callerRole}").`);
 	if (phasesInput.length === 0) throw new Error("plan_set: phases must have at least one entry.");
 	for (const p of phasesInput) if (p.roles.length === 0) throw new Error("plan_set: every phase needs at least one role.");
 	const phase1Roles = phasesInput[0].roles.map((r) => r.trim().toLowerCase());
 	const isTddOnlyPhase1 = phase1Roles.length === 1 && phase1Roles[0] === "tdd-agent";
-	if (!phase1Roles.includes("coder") && !isTddOnlyPhase1) {
+	const hasDedicatedRefactorCoder = phase1Roles.includes("refactoring-specialist");
+	const hasDedicatedCleanupCoder = phase1Roles.includes("repo-curator");
+	if (!phase1Roles.includes("coder") && !hasDedicatedRefactorCoder && !hasDedicatedCleanupCoder && !isTddOnlyPhase1) {
 		throw new Error(
-			'plan_set: phase 1 must include "coder" — coder is always phase 1, no phase may precede it. The ONE exception: ' +
+			'plan_set: phase 1 must include "coder" (or "refactoring-specialist"/"repo-curator" for dedicated playbooks). The ONE exception: ' +
 				'phase 1 may be "tdd-agent" ALONE (genuine TDD), with "coder" required in phase 2 right after.',
 		);
 	}
@@ -209,6 +218,22 @@ async function main() {
 	);
 	console.log("   OK — rejected before it could ever be acted on");
 
+	console.log("1a. the refactor playbook may use refactoring-specialist as its phase-1 coding role...");
+	assert.doesNotThrow(() => planSet(worktree_path, "planner", "refactor-plan", [
+		{ roles: ["refactoring-specialist"], note: "safe restructuring" },
+		{ roles: ["reviewer"] },
+		{ roles: ["docs-sync"] },
+	]));
+	console.log("   OK — refactoring-specialist is accepted without a generic coder");
+
+	console.log("1a-clean-repo. clean-repo may use repo-curator as its phase-1 execution role...");
+	assert.doesNotThrow(() => planSet(worktree_path, "planner", "clean-repo-plan", [
+		{ roles: ["repo-curator"], note: "audit and approved cleanup" },
+		{ roles: ["reviewer"] },
+		{ roles: ["docs-sync"] },
+	]));
+	console.log("   OK — repo-curator is accepted without a generic coder");
+
 	console.log("1b. ...UNLESS it's the Revisione 21 TDD exception: phase 1 = tdd-agent alone, phase 2 = coder (plus, from Revisione 24, a closing docs-sync phase)...");
 	assert.doesNotThrow(
 		() =>
@@ -285,11 +310,18 @@ async function main() {
 	assert.doesNotThrow(() => agentSendGateCheck(worktree_path, "codice-fiscale-api", "reviewer", {}, undefined, "coder"));
 	assert.doesNotThrow(() => agentSendGateCheck(worktree_path, "codice-fiscale-api", "coder", {}, undefined, "reviewer"));
 	assert.doesNotThrow(() => agentSendGateCheck(worktree_path, "codice-fiscale-api", "planner", {}, undefined, "reviewer"));
+	planAdvance(worktree_path, "planner", "refactor-plan", 1);
+	assert.doesNotThrow(() => agentSendGateCheck(worktree_path, "refactor-plan", "refactoring-specialist", {}, undefined, "planner"));
+	assert.doesNotThrow(() => agentSendGateCheck(worktree_path, "refactor-plan", "reviewer", {}, undefined, "planner"));
+	planAdvance(worktree_path, "planner", "clean-repo-plan", 1);
+	assert.doesNotThrow(() => agentSendGateCheck(worktree_path, "clean-repo-plan", "reviewer", {}, undefined, "planner"));
+	assert.doesNotThrow(() => agentSendGateCheck(worktree_path, "refactor-plan", "reviewer", {}, undefined, "refactoring-specialist"));
+	assert.doesNotThrow(() => agentSendGateCheck(worktree_path, "refactor-plan", "refactoring-specialist", {}, undefined, "reviewer"));
 	assert.throws(() => agentSendGateCheck(worktree_path, "codice-fiscale-api", "reviewer", {}, undefined, "planner"), /handoff planner → reviewer/);
 	assert.throws(() => agentSendGateCheck(worktree_path, "codice-fiscale-api", "planner", {}, undefined, "coder"), /handoff coder → planner/);
 	assert.throws(() => agentSendGateCheck(worktree_path, "codice-fiscale-api", "reviewer", {}, undefined, "reviewer"), /handoff reviewer → reviewer/);
 	assert.doesNotThrow(() => agentSendGateCheck(worktree_path, "codice-fiscale-api", "non-code-validator", {}, undefined, "planner"));
-	console.log("   OK — planner→coder→reviewer→planner plus reviewer→coder correction loop enforced; specialists remain explicit");
+	console.log("   OK — planner→coder/refactoring-specialist/repo-curator→reviewer→planner plus reviewer correction loops enforced");
 
 	console.log("5. agent_send to a phase-2 role (security-evaluator) BEFORE phase 1 completes is REFUSED...");
 	assert.throws(

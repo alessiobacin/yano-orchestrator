@@ -384,6 +384,8 @@ async function runScenario(cwd, project) {
 	const ticketC = (await planner.call("ticket_create", { run_id: runId, title: "Security review", depends_on: [ticketA.id], required_capabilities: ["security-review"] })).details.ticket;
 	// D depends on B and C
 	const ticketD = (await planner.call("ticket_create", { run_id: runId, title: "Final docs sync", depends_on: [ticketB.id, ticketC.id] })).details.ticket;
+	const prematureComplete = await planner.callExpectError("ticket_complete", { ticket_id: ticketA.id, status: "done" });
+	ok(/not running.*pending/.test(prematureComplete.message), "planner cannot complete a pending ticket before the assigned worker claims it");
 
 	const readyState1 = (await planner.call("tickets_ready", { run_id: runId })).details;
 	ok(readyState1.ready.includes(ticketA.id) && readyState1.ready.includes(ticketB.id), "A and B are READY (no dependencies)");
@@ -500,6 +502,10 @@ async function runScenario(cwd, project) {
 	ok(scopedTicket.required_playbook === "backend-change", "ticket persists its explicit required Playbook contract");
 	const wrongPlaybook = await specialist.callExpectError("ticket_claim", { ticket_id: scopedTicket.id });
 	ok(/mapped to playbook/.test(wrongPlaybook.message), "ticket_claim refuses a role mapped to a different Playbook");
+	const sharedRoleTicket = (await planner.call("ticket_create", { run_id: scopedRun.id, title: "Shared-role scoped work", required_playbook: "backend-change", required_capabilities: ["docs-sync"] })).details.ticket;
+	const sharedRoleClaim = await specialist.call("ticket_claim", { ticket_id: sharedRoleTicket.id });
+	ok(sharedRoleClaim.details.ticket.assigned_instance === "docs-sync-01", "a shared role may claim a cross-playbook ticket when the run explicitly requires that role capability");
+	await specialist.call("ticket_complete", { ticket_id: sharedRoleTicket.id, status: "done" });
 	await coder.call("ticket_claim", { ticket_id: scopedTicket.id });
 	await coder.call("ticket_complete", { ticket_id: scopedTicket.id, status: "done" });
 	await planner.call("retention_policy_set", { project, event_days: 30, evidence_days: 30, outbox_days: 30, dead_letter_days: 30, policy_version: 1 });

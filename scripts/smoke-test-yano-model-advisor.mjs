@@ -9,6 +9,7 @@ import {
 	fetchProviderCatalogFromCli,
 	scoreCatalog,
 	recommend,
+	llmProxyPin,
 	runYanoModelAdvisor,
 	AFFORDABLE_BAND_MULTIPLIER,
 	SUPPORT_MIN_CODING_FLOOR,
@@ -191,7 +192,10 @@ const fixtureCatalog = { ok: true, source: "cli", fetched_at: new Date().toISOSt
 const coordinatorScore = scoreCatalog(fixtureCatalog, { roleClass: "coordinator" });
 assert(coordinatorScore.ranked.length > 0, "coordinator scoring returns candidates");
 assert(coordinatorScore.ranked[0].id === "openrouter-glm", `coordinator top pick is openrouter-glm (got ${coordinatorScore.ranked[0].id})`);
-assert(coordinatorScore.ranked[0].pinned_id === "openrouter-glm:z-ai/glm-5.3-flash", `coordinator top pick pinned_id (got ${coordinatorScore.ranked[0].pinned_id})`);
+assert(coordinatorScore.ranked[0].pinned_id === "z-ai/glm-5.3-flash@openrouter-glm", `coordinator top pick pinned_id uses llmProxy model@provider-id (got ${coordinatorScore.ranked[0].pinned_id})`);
+assert(llmProxyPin(glm) === "z-ai/glm-5.3-flash@openrouter-glm", "llmProxyPin preserves the model and explicit provider instance in gateway order");
+assert(llmProxyPin(bacin) === "deepseek-v4-flash@opencode-bacin", "llmProxyPin works for another provider instance");
+assert(!coordinatorScore.ranked[0].pinned_id.startsWith("openrouter-glm:"), "model-advisor never emits the ambiguous provider-id:model form");
 assert(coordinatorScore.band_relaxed === false, "coordinator scoring did not need to relax the affordable band for this sample");
 // kimi has the single highest coding score (76.2) but must lose: its blended
 // price (9.00) is nowhere near AFFORDABLE_BAND_MULTIPLIER(=3)x the cheapest

@@ -63,6 +63,10 @@ const LAZY_SKILL_SOURCES = {
 	"domain-modeling": MATT_SKILLS_REPO,
 	"setup-matt-pocock-skills": MATT_SKILLS_REPO,
 };
+// Keep older scaffolded rosters launchable after the skill was renamed in the
+// catalog. The project-local role declaration remains authoritative, but the
+// prerequisite gate may satisfy this legacy spelling with the installed skill.
+const SKILL_COMPATIBILITY_ALIASES = Object.freeze({ refactoring: "refactor" });
 const LAZY_CLI_INSTALLERS = {
 	"playwright-cli": ["npm", ["install", "-g", PLAYWRIGHT_CLI_PACKAGE]],
 	postman: ["npm", ["install", "-g", "postman-cli"]],
@@ -386,16 +390,18 @@ export function ensureRolePrerequisites({ packageRoot, cwd, role, install = true
 	if (!cfg || cfg.activation !== "lazy") return { ok: true, role, skipped: true, missing: [] };
 	const missing = [];
 	for (const skill of cfg.skills ?? []) {
-		if (skillFile(skill, packageRoot)) continue;
-		const source = LAZY_SKILL_SOURCES[skill];
+		const resolvedSkill = skillFile(skill, packageRoot) || (SKILL_COMPATIBILITY_ALIASES[skill] && skillFile(SKILL_COMPATIBILITY_ALIASES[skill], packageRoot));
+		if (resolvedSkill) continue;
+		const installName = SKILL_COMPATIBILITY_ALIASES[skill] || skill;
+		const source = LAZY_SKILL_SOURCES[skill] || LAZY_SKILL_SOURCES[installName];
 		if (!source) {
 			missing.push({ kind: "skill", name: skill, hint: `installa/verifica la skill '${skill}' nel tuo catalogo Codex` });
 			continue;
 		}
-		if (!skillFile(skill, packageRoot) && install) {
-			runInstall("npx", ["-y", "skills", "add", source, "--skill", skill, "--global", "--yes"]);
+		if (!skillFile(skill, packageRoot) && !skillFile(installName, packageRoot) && install) {
+			runInstall("npx", ["-y", "skills", "add", source, "--skill", installName, "--global", "--yes"]);
 		}
-		if (!skillFile(skill, packageRoot)) missing.push({ kind: "skill", name: skill, hint: `npx -y skills add ${source} --skill ${skill} --global --yes` });
+		if (!skillFile(skill, packageRoot) && !skillFile(installName, packageRoot)) missing.push({ kind: "skill", name: skill, hint: `npx -y skills add ${source} --skill ${installName} --global --yes` });
 	}
 	for (const cli of cfg.cli ?? []) {
 		if (cli === "git" || cli === "npm" || cli === "npx") continue;

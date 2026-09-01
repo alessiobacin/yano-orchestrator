@@ -27,8 +27,14 @@ const yanoFailure = {
 };
 const projectFailure = { type: "tool_execution_end", tool: "npm test", ok: false, error: "assertion failed" };
 assert.equal(detectYanoFindings([yanoFailure], { project_key: "workspace-test" }).length, 1);
-assert.equal(detectYanoFindings([yanoFailure, { ...yanoFailure }], { project_key: "workspace-test" }).length, 1, "lo stesso finding ripetuto dal lookback non deve duplicare la segnalazione");
-assert.equal(detectYanoFindings([projectFailure]).length, 0, "un test del progetto non deve diventare un ticket Yano");
+	assert.equal(detectYanoFindings([yanoFailure, { ...yanoFailure }], { project_key: "workspace-test" }).length, 1, "lo stesso finding ripetuto dal lookback non deve duplicare la segnalazione");
+	const sameFailureOtherProject = { ...yanoFailure, project: "other-project", project_key: "workspace-other" };
+	assert.notEqual(
+		detectYanoFindings([yanoFailure])[0].fingerprint,
+		detectYanoFindings([sameFailureOtherProject])[0].fingerprint,
+		"lo stesso errore in un altro progetto non deve riusare il fingerprint del progetto osservato",
+	);
+	assert.equal(detectYanoFindings([projectFailure]).length, 0, "un test del progetto non deve diventare un ticket Yano");
 
 const first = createYanoWatcherTicket({ finding: detectYanoFindings([yanoFailure])[0], yanoRepo, projectRoot, project: "focusboard-trace-test" });
 assert.equal(first.created, true);

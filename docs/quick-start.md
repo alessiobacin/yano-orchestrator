@@ -49,8 +49,9 @@ yano init --name "Mio Progetto"
 
 Per un progetto usato solo come conversation test, senza repository Git o
 worktree di sviluppo, puoi usare `yano init --name "Conversation Test" --no-git`.
-Il database operativo verrà comunque creato più avanti da `orchestrator_init`
-se il planner avvia un consulto specialistico.
+Il planner deve chiamare `orchestrator_init` come primo preflight del task: il
+database operativo viene così creato prima di qualunque consulto o debate,
+senza creare worktree, repository o artefatti di sviluppo.
 
 Per aprire automaticamente Herdr, creare un workspace con il nome della
 cartella corrente ed eseguire subito il planner nello stesso terminale:
@@ -200,7 +201,24 @@ yano watcher start --help
 
 Questi comandi non aprono il broker e non modificano il registro. Un watcher
 continuo può partire prima del primo `orchestrator_init`: registra il preflight
-come `blocked`, resta vivo e ritenta al polling successivo.
+come `waiting` e resta vivo. Se nel frattempo vede un trace di debate già
+avviato, lo segnala come `missing-orchestrator-init` al planner invece di
+nasconderlo come semplice attesa.
+
+Ogni sessione Pi registra nei log globali `context_usage` con token effettivi,
+finestra, rapporto, caratteri serializzati e numero di entry. Il watcher può
+chiedere la compaction nativa della sessione, valida per ogni playbook, quando
+il rapporto supera la soglia configurata:
+
+```bash
+yano watch --project-root /path/progetto --interval-ms 60000 --away \
+  --context-compact-ratio 0.82
+```
+
+La stessa soglia può essere impostata con `YANO_WATCH_CONTEXT_COMPACT_RATIO`.
+L'agente esegue `ctx.compact()` al proprio safe point, conserva il riepilogo
+nel session log e registra `context_compaction_completed`; non viene ricreato
+il run e non viene toccato il codice del progetto.
 
 Per sapere su quali progetti sono attivi i worker esterni, senza interrogare
 manualmente Herdr:

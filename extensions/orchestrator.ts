@@ -209,6 +209,19 @@ type TerminateEnvelope = {
 	timestamp: string;
 };
 
+// Watcher-driven context maintenance. This is deliberately a control message
+// rather than a normal task: the target agent owns its Pi session and is the
+// only component allowed to ask Pi to compact that session.
+type ContextCompactRequestEnvelope = {
+	type: "context_compact_request";
+	request_id: string;
+	requested_by_instance: string;
+	requested_by_role: string;
+	reason: string;
+	custom_instructions?: string;
+	timestamp: string;
+};
+
 // Controlled reload handshake used by `yano update --reload`. It is a
 // quiescence request, not a hot-reload: the running extension stops accepting
 // new delegated work and publishes readiness before the supervisor sends the
@@ -425,9 +438,23 @@ function nowIso(): string {
 	return new Date().toISOString();
 }
 
+function contextTextLength(value: unknown): number {
+	try { return JSON.stringify(value ?? null).length; } catch { return 0; }
+}
+
 const SENSITIVE_PROJECTION_KEY = /(?:secret|password|token|authorization|api[_-]?key|private[_-]?key)/i;
+// These are numeric/context-catalog fields, not credentials. They must remain
+// visible in forensic logs even though the generic redactor quite correctly
+// treats the word "token" as sensitive elsewhere.
+const SAFE_CONTEXT_PROJECTION_KEYS = new Set([
+	"context_tokens",
+	"effective_context_tokens",
+	"estimated_context_tokens",
+	"context_window_tokens",
+	"context_tokens_source",
+]);
 function redactRuntimeProjection(value: unknown, key?: string): unknown {
-	if (key && SENSITIVE_PROJECTION_KEY.test(key)) return "[REDACTED]";
+	if (key && SENSITIVE_PROJECTION_KEY.test(key) && !SAFE_CONTEXT_PROJECTION_KEYS.has(key)) return "[REDACTED]";
 	if (Array.isArray(value)) return value.map((item) => redactRuntimeProjection(item));
 	if (value && typeof value === "object") {
 		return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([childKey, childValue]) => [childKey, redactRuntimeProjection(childValue, childKey)]));
@@ -2364,7 +2391,13 @@ interface StalledTicketInfo {
 function yanoFindStalledTickets(storage: OrchestratorStorage, project: string, nowMs: number, stallMs: number): StalledTicketInfo[] {
 	const stalled: StalledTicketInfo[] = [];
 	const runs = storage.listRuns(project).filter((r) => r.status === "active");
+	// An open human decision hold is an intentional pause.  A worker may have
+	// completed its preflight turn and exited while the planner waits for the
+	// user's answer; treating that normal state as a stalled ticket creates a
+	// false watchdog escalation every interval.
+	const pausedRuns = new Set(runs.filter((run) => storage.listDecisionHolds(run.id, "open").length > 0).map((run) => run.id));
 	for (const run of runs) {
+		if (pausedRuns.has(run.id)) continue;
 		for (const t of storage.listTickets(run.id)) {
 			if (t.status !== "running") continue;
 			const elapsed = nowMs - Date.parse(t.updated_at);
@@ -2430,10 +2463,15 @@ function yanoFindOrphanedTickets(
 	storage: OrchestratorStorage,
 	project: string,
 	presenceSnapshot: Map<string, { status: PresenceStatus }>,
+	options: { ignoreOpenDecisionHolds?: boolean } = {},
 ): OrphanedTicketInfo[] {
 	const orphaned: OrphanedTicketInfo[] = [];
 	const runs = storage.listRuns(project).filter((r) => r.status === "active");
 	for (const run of runs) {
+		// The audit/reconciliation caller still needs to see the dangling state.
+		// Operational watchdog callers can opt out so an intentional human gate
+		// is not turned into a failure or a relaunch request.
+		if (options.ignoreOpenDecisionHolds && storage.listDecisionHolds(run.id, "open").length > 0) continue;
 		for (const t of storage.listTickets(run.id)) {
 			if (t.status !== "running" || !t.assigned_instance) continue;
 			const card = presenceSnapshot.get(t.assigned_instance);
@@ -2607,6 +2645,7 @@ export default function (pi: ExtensionAPI) {
 	}
 	let currentCtx: ExtensionContext | null = null;
 	let currentInbound: InboundContext | null = null;
+	let contextCompactionInFlight = false;
 	let reloadRequested = false;
 	function reloadReady(): boolean {
 		// Hidden model generation is not recoverable. Readiness means all
@@ -2665,6 +2704,41 @@ export default function (pi: ExtensionAPI) {
 		} catch {
 			// best-effort
 		}
+	}
+
+	// Pi exposes the authoritative post-provider context estimate through
+	// getContextUsage(). Keep a branch-size fallback as well: immediately after
+	// compaction Pi intentionally reports tokens=null until the next response,
+	// and older Pi builds may not expose the helper at all. We never persist the
+	// branch itself here, only bounded size metadata, so every agent log can be
+	// inspected by the zero-token watcher without leaking the conversation.
+	function contextUsageSnapshot(ctx: any): Record<string, unknown> {
+		const branch = (() => {
+			try { return ctx?.sessionManager?.getBranch?.() ?? []; } catch { return []; }
+		})();
+		const branchChars = contextTextLength(branch);
+		const estimatedTokens = Math.max(0, Math.ceil(branchChars / 4));
+		let usage: any = null;
+		try { usage = ctx?.getContextUsage?.() ?? null; } catch { usage = null; }
+		const contextWindowTokens = Number(usage?.contextWindow ?? ctx?.model?.contextWindow ?? 0) || null;
+		const piTokens = Number.isFinite(usage?.tokens) ? Number(usage.tokens) : null;
+		const effectiveTokens = piTokens ?? estimatedTokens;
+		const ratio = contextWindowTokens ? effectiveTokens / contextWindowTokens : null;
+		return {
+			context_tokens: piTokens,
+			effective_context_tokens: effectiveTokens,
+			estimated_context_tokens: estimatedTokens,
+			context_window_tokens: contextWindowTokens,
+			context_ratio: ratio,
+			context_percent: Number.isFinite(usage?.percent) ? Number(usage.percent) : (ratio === null ? null : ratio * 100),
+			context_tokens_source: piTokens === null ? "branch_estimate" : "pi_getContextUsage",
+			context_chars: branchChars,
+			context_entries: Array.isArray(branch) ? branch.length : 0,
+		};
+	}
+
+	function logContextUsage(ctx: any, point: string, extra: Record<string, unknown> = {}): void {
+		logEvent("context_usage", { point, ...contextUsageSnapshot(ctx), ...extra });
 	}
 
 	// ━━ Agent status snapshot for the report (Revisione 19) ━━━━━━━━━━━━━━━
@@ -2807,6 +2881,63 @@ export default function (pi: ExtensionAPI) {
 			prompt_preview: env.prompt.slice(0, 200),
 		});
 		void publishPresence("busy");
+	}
+
+	function handleContextCompactRequest(env: ContextCompactRequestEnvelope): void {
+		if (!identity || !currentCtx) return;
+		if (contextCompactionInFlight) {
+			logEvent("context_compaction_skipped", { request_id: env.request_id, reason: "already_in_flight" });
+			return;
+		}
+		if (typeof (currentCtx as any).compact !== "function") {
+			logEvent("context_compaction_failed", { request_id: env.request_id, reason: "pi_compact_unavailable" });
+			return;
+		}
+		contextCompactionInFlight = true;
+		logContextUsage(currentCtx, "compact_requested", {
+			request_id: env.request_id,
+			requested_by_instance: env.requested_by_instance,
+			reason: env.reason,
+		});
+		try {
+			(currentCtx as any).compact({
+				customInstructions: env.custom_instructions || "Preserva obiettivo, vincoli, decisioni, stato dei ticket e prossimi passi; mantieni il contesto operativo verificabile.",
+				onComplete: (result: any) => {
+					logEvent("context_compaction_completed", {
+						request_id: env.request_id,
+						reason: env.reason,
+						compaction_tokens_before: result?.tokensBefore ?? null,
+						estimated_tokens_after: result?.estimatedTokensAfter ?? null,
+						first_kept_entry_id: result?.firstKeptEntryId ?? null,
+						restart_mode: "pi_native_compaction",
+					});
+					const after = contextUsageSnapshot(currentCtx);
+					const compactedTokens = Number(result?.estimatedTokensAfter);
+					logEvent("context_usage", {
+						point: "compact_completed",
+						...after,
+						...(Number.isFinite(compactedTokens) ? {
+							context_tokens: compactedTokens,
+							effective_context_tokens: compactedTokens,
+							context_tokens_source: "pi_compaction_result",
+							context_ratio: after.context_window_tokens ? compactedTokens / Number(after.context_window_tokens) : null,
+							context_percent: after.context_window_tokens ? (compactedTokens / Number(after.context_window_tokens)) * 100 : null,
+						} : {}),
+						request_id: env.request_id,
+						restart_mode: "pi_native_compaction",
+					});
+					contextCompactionInFlight = false;
+					void publishPresence(computeSelfStatus());
+				},
+				onError: (error: Error) => {
+					logEvent("context_compaction_failed", { request_id: env.request_id, reason: env.reason, error: error?.message || String(error) });
+					contextCompactionInFlight = false;
+				},
+			});
+		} catch (error) {
+			contextCompactionInFlight = false;
+			logEvent("context_compaction_failed", { request_id: env.request_id, reason: env.reason, error: error instanceof Error ? error.message : String(error) });
+		}
 	}
 
 	function handleReloadPrepare(env: ReloadPrepareEnvelope): void {
@@ -3094,6 +3225,7 @@ export default function (pi: ExtensionAPI) {
 				? process.env.YANO_EXPECTED_YANO_VERSION === YANO_RUNTIME_PACKAGE_VERSION
 				: null,
 		});
+		logContextUsage(ctx, "session_start");
 
 		// Install the widget immediately, BEFORE the broker connection is even
 		// attempted, so there's always something visible at the bottom of the
@@ -3148,8 +3280,9 @@ export default function (pi: ExtensionAPI) {
 			if (!identity || !T) return;
 			if (topicStr === T.agentCommands(identity.instance)) {
 				try {
-					const env = JSON.parse(payload.toString("utf-8")) as CommandEnvelope | TerminateEnvelope | ReloadPrepareEnvelope | ReloadCancelEnvelope;
+					const env = JSON.parse(payload.toString("utf-8")) as CommandEnvelope | ContextCompactRequestEnvelope | TerminateEnvelope | ReloadPrepareEnvelope | ReloadCancelEnvelope;
 					if (env.type === "command") handleCommand(env);
+					else if (env.type === "context_compact_request") handleContextCompactRequest(env);
 					else if (env.type === "reload_prepare") handleReloadPrepare(env);
 					else if (env.type === "reload_cancel") handleReloadCancel(env);
 					else if (env.type === "terminate") handleTerminate(env);
@@ -3299,6 +3432,47 @@ export default function (pi: ExtensionAPI) {
 		// scripts/review-log.mjs, che lo segnala esplicitamente.
 		logEvent("turn_start", { had_pending_inbound: [...inboundQueue.values()].some((i) => !i.fulfilled) });
 		return { systemPrompt };
+	});
+
+	// Record context at every completed turn. This is the stable observation
+	// point used by the external watcher: the agent is at a safe point and Pi's
+	// usage estimate reflects the latest provider response.
+	pi.on("turn_end", async (_event: any, ctx: any) => {
+		logContextUsage(ctx, "turn_end", { turn_index: _event?.turnIndex ?? null });
+	});
+
+	pi.on("session_before_compact", async (event: any, ctx: any) => {
+		logContextUsage(ctx, "before_compact", {
+			reason: event?.reason ?? null,
+			will_retry: event?.willRetry ?? null,
+			compaction_tokens_before: event?.preparation?.tokensBefore ?? null,
+		});
+	});
+
+	pi.on("session_compact", async (event: any, ctx: any) => {
+		const entry = event?.compactionEntry;
+		logEvent("context_compacted", {
+			reason: event?.reason ?? null,
+			from_extension: event?.fromExtension ?? false,
+			will_retry: event?.willRetry ?? null,
+			compaction_tokens_before: entry?.tokensBefore ?? null,
+			estimated_tokens_after: entry?.estimatedTokensAfter ?? null,
+			first_kept_entry_id: entry?.firstKeptEntryId ?? null,
+		});
+		logContextUsage(ctx, "after_compact", { compaction_reason: event?.reason ?? null });
+		contextCompactionInFlight = false;
+		void publishPresence(computeSelfStatus());
+	});
+
+	pi.on("session_compact_failed", async (event: any, ctx: any) => {
+		logEvent("context_compaction_failed", {
+			reason: event?.reason ?? null,
+			error: event?.errorMessage ?? null,
+			aborted: event?.aborted ?? false,
+			will_retry: event?.willRetry ?? null,
+		});
+		logContextUsage(ctx, "compact_failed", { compaction_reason: event?.reason ?? null });
+		contextCompactionInFlight = false;
 	});
 
 	// Pi exposes these lifecycle hooks in the live harness. They are kept
@@ -3539,7 +3713,7 @@ export default function (pi: ExtensionAPI) {
 		// exactly the planner treating "the coder never showed up" as license
 		// to do the work itself instead of relaunching one.
 		try {
-			const orphaned = yanoFindOrphanedTickets(yanoStorage, identity.project, presence);
+			const orphaned = yanoFindOrphanedTickets(yanoStorage, identity.project, presence, { ignoreOpenDecisionHolds: true });
 			for (const o of orphaned) {
 				const episodeKey = `${o.ticket_id}::${o.running_since}`;
 				if (watchdogOrphanAlerted.has(episodeKey)) continue;
@@ -5140,26 +5314,49 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	// Phase ordering alone does not prevent shortcuts when coder and reviewer
-	// share a phase. Keep the core code handoff deterministic while leaving
-	// specialist/non-code roles to their declared Playbook path.
+	// share a phase. Keep the core code handoff deterministic while also
+	// recognising the dedicated refactor coding role.
 	function assertRoleHandoffAllowed(senderRole: string, targetRole: string, slug: string): void {
 		const sender = senderRole.trim().toLowerCase();
 		const target = targetRole.trim().toLowerCase();
 		const backendRoles = new Set(["coder", "reviewer"]);
+		const refactorRoles = new Set(["refactoring-specialist"]);
 		const frontendRoles = new Set(["frontend-developer", "frontend-reviewer"]);
 		const coreRoles = new Set(["planner", ...backendRoles, ...frontendRoles]);
-		if (!coreRoles.has(target)) return;
+		if (!coreRoles.has(target) && !refactorRoles.has(target)) return;
+		const isRefactorPlan = (() => {
+			try {
+				const wt = requireWorktree(slug);
+				const plan = readPlan(wt.path, slug);
+				return !!plan?.phases.some((p) => p.roles.some((r) => r.trim().toLowerCase() === "refactoring-specialist"));
+			} catch {
+				return false;
+			}
+		})();
+		const isCleanRepoPlan = (() => {
+			try {
+				const wt = requireWorktree(slug);
+				const plan = readPlan(wt.path, slug);
+				return !!plan?.phases.some((p) => p.roles.some((r) => r.trim().toLowerCase() === "repo-curator"));
+			} catch {
+				return false;
+			}
+		})();
 		const allowed = target === "planner"
 			? sender === "reviewer" || !coreRoles.has(sender)
 			: target === "reviewer"
-				? sender === "coder"
+				? sender === "coder" || sender === "refactoring-specialist" || (sender === "planner" && (isRefactorPlan || isCleanRepoPlan))
+				: target === "refactoring-specialist"
+					? sender === "planner" || sender === "reviewer"
 				: target === "frontend-reviewer"
 					? sender === "frontend-developer"
 					: sender === "planner" || sender === "reviewer" || sender === "frontend-reviewer";
 		if (!allowed) {
 			throw new Error(
 				`agent_send: refused — handoff ${senderRole} → ${targetRole} is not allowed for "${slug}". ` +
-				"The enforced paths are planner → coder → reviewer → planner and planner → frontend-developer → frontend-reviewer → planner; " +
+				"The enforced paths are planner → coder → reviewer → planner, planner → refactoring-specialist → reviewer → planner, " +
+				"planner → repo-curator → reviewer → planner for clean-repo; and " +
+				"planner → frontend-developer → frontend-reviewer → planner; " +
 				"each reviewer may return corrections only to its matching developer role.",
 			);
 		}
@@ -5172,8 +5369,9 @@ export default function (pi: ExtensionAPI) {
 			"Declare (or replace) a task's execution plan as an ordered list of phases — planner-only. Replaces writing " +
 			"reports/<slug>.plan.md by hand (Revisione 18): this tool renders that file for you AND, unlike the hand-written " +
 			"version, is actually enforced by agent_send (Revisione 21) — a send addressed to a role in a phase that isn't " +
-			"unlocked yet is refused outright, for any sender, not just you. Phase 1 MUST include \"coder\" (its direct " +
-			"correction cycle with reviewer stays internal to phase 1, not separate phases) — this is what stops a plan from " +
+			"unlocked yet is refused outright, for any sender, not just you. Phase 1 MUST include \"coder\" for the general " +
+			"backend-change playbook, \"refactoring-specialist\" for the refactor playbook, or \"repo-curator\" for clean-repo (their reviewer follows in a later " +
+			"phase) — this is what stops a plan from " +
 			"ever scheduling a specialist BEFORE coder, which happened in a real test (see docs/development-notes.md, Revisione 20). " +
 			"ONE exception: phase 1 may be [\"tdd-agent\"] alone (genuine TDD — tests written before implementation), but only " +
 			"if \"coder\" is then in phase 2. The LAST phase MUST include \"docs-sync\" (Revisione 24) — every task plan ends " +
@@ -5212,12 +5410,19 @@ export default function (pi: ExtensionAPI) {
 			// very next phase, so it's never more than one phase away.
 			const phase1Roles = params.phases[0].roles.map((r) => r.trim().toLowerCase());
 			const isTddOnlyPhase1 = phase1Roles.length === 1 && phase1Roles[0] === "tdd-agent";
-			if (!phase1Roles.includes("coder") && !isTddOnlyPhase1) {
+			const hasDedicatedRefactorCoder = phase1Roles.includes("refactoring-specialist");
+			// clean-repo has no generic coder: repo-curator is its dedicated
+			// execution role and owns the approved file removals/relocations.
+			// Treat it like refactoring-specialist for the phase-1 structural
+			// gate, otherwise the clean-repo playbook can never advance from its
+			// mandatory plan_set gate despite requiring a worktree and tickets.
+			const hasDedicatedCleanupCoder = phase1Roles.includes("repo-curator");
+			if (!phase1Roles.includes("coder") && !hasDedicatedRefactorCoder && !hasDedicatedCleanupCoder && !isTddOnlyPhase1) {
 				throw new Error(
-					'plan_set: phase 1 must include "coder" — coder is always phase 1, no phase may precede it (see prompts/planner.md). ' +
+					'plan_set: phase 1 must include "coder" (or the dedicated refactor/cleanup role "refactoring-specialist"/"repo-curator") — a coding role is always phase 1, no phase may precede it (see prompts/planner.md). ' +
 						'The ONE exception: phase 1 may be "tdd-agent" ALONE (genuine TDD, tests before implementation), with "coder" ' +
-						'required in phase 2 right after. If a specialist doesn\'t depend on the new code, put it in phase 1 ALONGSIDE ' +
-						"coder, not in a phase before it.",
+						'required in phase 2 right after. For the refactor playbook, put "refactoring-specialist" in phase 1 and "reviewer" after it. ' +
+						"If a specialist doesn\'t depend on the new code, put it in phase 1 ALONGSIDE the applicable coding role, not in a phase before it.",
 				);
 			}
 			if (isTddOnlyPhase1) {
@@ -6023,7 +6228,16 @@ export default function (pi: ExtensionAPI) {
 					throw new Error(`ticket_claim: ticket "${ticket.id}" requires playbook "${ticket.required_playbook}", but the run has no matching immutable binding.`);
 				}
 				if (identity.playbook && identity.playbook !== ticket.required_playbook) {
-					throw new Error(`ticket_claim: role "${identity.role}" is mapped to playbook "${identity.playbook}" and cannot claim a "${ticket.required_playbook}" ticket.`);
+					// A role's default playbook describes its normal activation path,
+					// but shared roles (notably reviewer and docs-sync) are also
+					// deliberately selected by specialised playbooks.  An explicit
+					// required_capabilities role is the run-scoped authorisation for
+					// that assignment; keep rejecting an unqualified cross-playbook
+					// claim so the contract is still meaningful.
+					const explicitlyRequiredForRole = ticket.required_capabilities.some((capability) => capability.toLowerCase() === identity.role.toLowerCase());
+					if (!explicitlyRequiredForRole) {
+						throw new Error(`ticket_claim: role "${identity.role}" is mapped to playbook "${identity.playbook}" and cannot claim a "${ticket.required_playbook}" ticket without an explicit role capability.`);
+					}
 				}
 			}
 			const tickets = storage.listTickets(ticket.run_id);
@@ -6476,7 +6690,7 @@ export default function (pi: ExtensionAPI) {
 			const stalled = params.run_id ? all.filter((s) => s.run_id === params.run_id) : all;
 			const allUnfinalized = yanoFindUnfinalizedRuns(storage, identity.project, Date.now(), WATCHDOG_FINALIZE_GRACE_MS);
 			const unfinalized = params.run_id ? allUnfinalized.filter((r) => r.run_id === params.run_id) : allUnfinalized;
-			const allOrphaned = yanoFindOrphanedTickets(storage, identity.project, presence);
+			const allOrphaned = yanoFindOrphanedTickets(storage, identity.project, presence, { ignoreOpenDecisionHolds: true });
 			const orphaned = params.run_id ? allOrphaned.filter((o) => o.run_id === params.run_id) : allOrphaned;
 			const lines = [
 				...stalled.map((s) => `⚠️ ${s.ticket_id} "${s.title}" — assegnato a ${s.assigned_instance ?? "?"}, running da ${Math.round(s.elapsed_ms / 60_000)} min.`),
@@ -6538,6 +6752,7 @@ export default function (pi: ExtensionAPI) {
 		// finisce senza aver mai avuto un inbound da soddisfare è un turno che
 		// l'agente ha fatto di propria iniziativa, non su assegnazione.
 		logEvent("agent_end", { had_inbound: !!inbound, assignment_id: inbound?.assignment_id ?? null });
+		logContextUsage(ctx, "agent_end");
 		if (!identity) return;
 
 		let lastAssistantText = "";

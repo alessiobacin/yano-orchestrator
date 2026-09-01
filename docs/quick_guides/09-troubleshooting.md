@@ -26,8 +26,12 @@ yano trace status
 ~~~
 
 Assicurati che tutte le istanze siano state avviate dalla stessa root e con lo
-stesso '--project'. Se non usi uno scope esplicito, ometti '--project' su tutte
-le istanze.
+stesso scope canonico slugificato. Se non usi uno scope esplicito, ometti
+'--project' su tutte le istanze: `yano start` lo deriva dalla root. Se un
+comando generato contiene il nome umano del progetto (con spazi/maiuscole),
+la versione aggiornata di `yano start` lo normalizza automaticamente quando
+corrisponde alla root corrente. Un eventuale `project_scope_mismatch` nel
+watcher indica invece che un pannello già avviato va riallineato/rilanciato.
 
 ## Un agente appare busy anche se non lavora
 

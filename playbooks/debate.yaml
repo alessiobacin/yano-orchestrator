@@ -52,6 +52,9 @@ states:
   - id: framing
     owner: planner
     terminal: false
+  - id: awaiting_user_confirmation
+    owner: human
+    terminal: false
   - id: opening_round
     owner: debater
     terminal: false
@@ -74,8 +77,22 @@ transitions:
     actor: planner
     requires:
       - objective_received
-  - id: launch_debate
+  - id: present_roster_and_models
     from: framing
+    to: awaiting_user_confirmation
+    actor: planner
+    requires:
+      - topic_and_objective_presented
+      - debater_roster_stances_and_models_presented
+      - explicit_confirmation_requested
+    effects:
+      - id: debate-roster-confirmation-hold
+        kind: human_approval
+        payload:
+          question: Confermare topic, debater, stance e provider:model proposti per avviare il debate?
+          owner: user
+  - id: launch_debate
+    from: awaiting_user_confirmation
     to: opening_round
     actor: planner
     requires:
@@ -83,6 +100,14 @@ transitions:
       - debater_roster_and_models_proposed
       - distinct_models_across_debaters_or_degradation_declared
       - user_confirmed_roster_and_models
+  - id: revise_roster
+    from: awaiting_user_confirmation
+    to: awaiting_user_confirmation
+    actor: planner
+    requires:
+      - user_requested_roster_or_model_change
+      - revised_roster_and_models_presented
+      - explicit_confirmation_requested
   - id: open_rebuttal
     from: opening_round
     to: rebuttal_round

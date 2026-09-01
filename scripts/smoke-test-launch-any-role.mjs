@@ -70,7 +70,22 @@ function main() {
 	ok(!coderOut.includes("--config-dir .pi/agents"), "coder: modern root roster does not inherit a legacy config directory");
 	ok(coderOut.includes(path.join(PACKAGE_ROOT, "skills-vendor", "yano", "yano-planner-trace-analysis")), "coder: receives the shared Yano trace skill");
 	ok(!coderOut.includes(path.join(PACKAGE_ROOT, "skills-vendor", "mattpocock")), "coder: receives no planner-only mattpocock skills");
-	ok(!coderOut.includes("-e extensions/orchestrator.ts"), "coder: no stale -e flag (modern scaffold, relies on global install)");
+ok(!coderOut.includes("-e extensions/orchestrator.ts"), "coder: no stale -e flag (modern scaffold, relies on global install)");
+
+	console.log("\n=== TEST 1a — a human project name cannot fork the MQTT scope ===");
+	const namedDir = scratchDir("yano-display-name-scope");
+	fs.mkdirSync(path.join(namedDir, ".pi", "extensions", "yano-orchestrator", "config"), { recursive: true });
+	fs.writeFileSync(path.join(namedDir, "package.json"), JSON.stringify({ name: "display-name-scope-test" }, null, 2));
+	fs.writeFileSync(path.join(namedDir, ".pi", "extensions", "yano-orchestrator", "config", "project.json"), JSON.stringify({ project: "Manual E2E 08 Refactor Playbook" }));
+	const displayNameOut = run(namedDir, ["--instance", "coder-01", "--role", "coder", "--project", "Manual E2E 08 Refactor Playbook", "--print-only"]);
+	ok(displayNameOut.includes("--project manual-e2e-08-refactor-playbook"), "display project name is normalized to the root's canonical MQTT scope");
+	ok(!displayNameOut.includes("--project \"Manual E2E 08 Refactor Playbook\""), "display project name is not passed verbatim to the child Pi process");
+
+console.log("\n=== TEST 1b — an llmProxy catalog pin is translated to Pi's configured provider ===");
+const pinnedOut = run(dir, ["--instance", "debater-01", "--role", "debater", "--llmproxy-pin", "z-ai/glm-5.3-flash@openrouter-glm", "--print-only"]);
+ok(pinnedOut.includes("--provider llmproxy --model z-ai/glm-5.3-flash@openrouter-glm"), "llmProxy pin: composed command uses Pi provider llmproxy and the complete model@provider-id pin");
+ok(!pinnedOut.includes("--provider openrouter-glm"), "llmProxy pin: catalog id is never emitted as a Pi provider");
+ok(!pinnedOut.includes("--llmproxy-pin"), "llmProxy pin: Yano-only flag is consumed before Pi launch");
 
 console.log("\n=== TEST 2 — --role reviewer: backend reviewer gets no frontend browser skill ===");
 const reviewerOut = run(dir, ["--instance", "reviewer-01", "--role", "reviewer", "--print-only"]);

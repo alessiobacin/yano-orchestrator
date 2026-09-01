@@ -1,6 +1,7 @@
 # Yano Model Advisor
 
-`yano model-advisor` propone un provider:model **pinnato** per una
+`yano model-advisor` propone un pin llmProxy **pinnato** nel formato
+`model@provider-id` per una
 role-class (`coordinator` o `support`), scegliendolo tra il catalogo live di
 llmProxy — l'istanza locale di [llmProxy](../../llmProxy) che Alessio gira
 via Docker, di norma su `http://127.0.0.1:7045` — in base a costo, punteggio
@@ -9,11 +10,10 @@ di coding e latenza reali del momento, invece di una alias fissa
 
 Questo incremento è solo **libreria + CLI**: non c'è un server REST (a
 differenza di `yano debugger`/`yano auto-improve`/`yano suggester`), perché
-una singola lookup non richiede nulla di persistente. La lettura effettiva
-del suggerimento da parte del planner — con conferma dell'utente e fallback
-automatico ad "auto" se il modello pinnato smette di essere disponibile a
-metà round — è un incremento successivo di `prompts/planner.md`, non
-ancora presente.
+una singola lookup non richiede nulla di persistente. Il planner legge il
+suggerimento, lo presenta con il roster e lo usa solo dopo la conferma
+dell'utente; se il modello pinnato smette di essere disponibile a metà round
+usa il fallback `llmproxy` (auto-routing) e lo dichiara nel report.
 
 ## Perché
 
@@ -80,15 +80,42 @@ affidabili.
 | kimi | **76.2** (il più alto in assoluto) | 3.00 / 15.00 | 9.00 | no |
 | meta | n/a | n/a | — | non disponibile (bench in errore) |
 
-- **coordinator** → `openrouter-glm:z-ai/glm-5.3-flash` — batte
+- **coordinator** → `z-ai/glm-5.3-flash@openrouter-glm` — batte
   opencode-bacin/alessio (coding 69.1 contro 71.5, a un prezzo quasi
   identico) e batte kimi (coding più alto in assoluto, 76.2, ma ~95× più
   caro del più economico — ben fuori dalla fascia dei "quasi economico
   allo stesso modo").
-- **support** → `opencode-bacin:deepseek-v4-flash` (o
-  `opencode-alessio:deepseek-v4-flash`, stesso prezzo) — il più economico
+- **support** → `deepseek-v4-flash@opencode-bacin` (o
+  `deepseek-v4-flash@opencode-alessio`, stesso prezzo) — il più economico
   tra chi supera la soglia di coding 60; kimi e qwen restano esclusi
   perché troppo costosi, anche se qwen supererebbe la soglia di coding.
+
+## Come si passa il pin a Pi
+
+Il valore `pinned_id` è un identificatore del catalogo llmProxy nel formato
+`model-id@provider-id`, non un nome
+di provider Pi. Con la configurazione standard di Pi, che espone il solo
+provider locale `llmproxy`, il pin va passato così:
+
+```bash
+pi --provider llmproxy --model 'z-ai/glm-5.3-flash@openrouter-glm' ...
+```
+
+Per lasciare a Yano la traduzione senza comporre manualmente i flag Pi, il
+planner usa `yano start --llmproxy-pin
+'z-ai/glm-5.3-flash@openrouter-glm' --print-only` e inoltra a Herdr il comando
+stampato.
+
+Non usare `--provider openrouter-glm --model z-ai/glm-5.3-flash` e non usare
+`openrouter-glm:z-ai/glm-5.3-flash`: il primo tenta di risolvere l'istanza come
+provider Pi inesistente, il secondo non seleziona correttamente un'istanza
+llmProxy e può causare un 400/fallback. Per lasciare a
+llmProxy la scelta dinamica usare `--provider llmproxy --model llmproxy`.
+
+Pi può mostrare `Using custom model id` perché il catalogo locale di Pi
+dichiara il solo modello generico `llmproxy`; non è un fallimento. La prova
+operativa è il footer `[llmproxy]` e l'assenza di `is returning: 4xx/5xx` nel
+trace. Il watcher segnala soltanto il secondo caso come `model-runtime-fallback`.
 
 ## Uso da CLI
 

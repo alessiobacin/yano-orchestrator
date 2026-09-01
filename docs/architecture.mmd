@@ -78,7 +78,7 @@ flowchart TD
     end
 
     subgraph GLOBAL_TRACE["Global Yano per-user data root (platform default or YANO_DATA_DIR)"]
-        TRACE["traces/<project-key>/events\nJSONL forensic trace\nevents / standard / full"]
+        TRACE["traces/<project-key>/events\nJSONL forensic trace\nevents / standard / full\ncontext_usage per agent"]
         TRACE_ANALYSIS["feedback / summaries / opinions\nfiltered context + cross-project overview"]
         TRACE_INDEX["semantic-index.sqlite\ntrace_documents + Ollama embeddings\nhybrid filtered search"]
         TRACE_MEMORY["trace_memories\nepisodic failures/opinions/summaries\nsystemic recurring patterns"]
@@ -90,7 +90,7 @@ flowchart TD
 
     subgraph YANO_WATCHER["Global watcher boundary"]
         WATCHER["yano-watcher\nrole watcher\nread-only validation agent\ntab: watcher-<project-name>"]
-        WATCHER_ONCE["yano watch --once / --interval-ms\nzero-token bounded scan / polling\npre-init ordinary waiting scan; explicit validation blocked\nyano_watcher_scan timestamp event"]
+        WATCHER_ONCE["yano watch --once / --interval-ms\nzero-token bounded scan / polling\ncontext threshold → native Pi compaction request\npre-init ordinary waiting scan; explicit validation blocked\nyano_watcher_scan timestamp event"]
         YANO_TICKETS["yano-orchestrator/.scratch/optimize-orchestrator/issues\nMarkdown maintenance tickets"]
     end
 

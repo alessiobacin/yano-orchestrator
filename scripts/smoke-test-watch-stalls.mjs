@@ -223,6 +223,7 @@ console.log("\n=== PART 3b — idempotency: a second pass surfaces the same find
 	const row = db.prepare("SELECT status FROM tickets WHERE id = ?").get(stalled.id);
 	db.close();
 	ok(row.status === "running", "the watcher never mutates ticket state (surfacing only — resumability contract)");
+	await sub.endAsync();
 
 	console.log(`\n${PASS} assertions passed.`);
 	console.log("WATCH-STALLS SMOKE TEST PASSED");

@@ -2,6 +2,7 @@
 // package manager metadata, application agents/ directory or local settings.
 
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import path from "node:path";
@@ -49,6 +50,7 @@ try {
 	assert.match(gitignore, /dist\//, "existing .gitignore entry is preserved");
 	assert.match(gitignore, /\.pi\//, "Yano runtime is ignored");
 	assert.ok(fs.existsSync(path.join(project, "mqtt", "compose.yaml")), "missing Yano MQTT infrastructure is added");
+	assert.doesNotThrow(() => execFileSync("git", ["rev-parse", "--verify", "HEAD"], { cwd: project, stdio: "ignore" }), "a new Git repository gets a baseline commit so worktree-based playbooks have a real HEAD");
 
 	await runCreateProject({ packageRoot: root, cwd: noGitProject, argv: ["--name", "Conversation Test", "--no-git"], preflightTools });
 	assert.equal(fs.existsSync(path.join(noGitProject, ".git")), false, "--no-git leaves a conversation test without a Git repository");

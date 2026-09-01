@@ -30,7 +30,7 @@ Everything communicates over a local MQTT broker, using role/instance identity a
 - **External `yano-debugger` agent** — `yano debugger` keeps application bug reports and diagnostic transitions in global SQLite, starts one Herdr debugger tab per project, preserves trace provenance and hands accepted diagnoses to the planner
 - **Read-only external observers** — debugger diagnostica senza modificare, mentre `yano auto-improve` esegue audit periodici (default 5 giorni) in un workspace Herdr globale e consegna evidenze/raccomandazioni al planner
 - **User suggestion observer** — `yano suggester` raccoglie proposte in un workspace Herdr globale, le deduplica e notifica il planner solo dopo approvazione del superadmin
-- **Model advisor** — `yano model-advisor` propone un provider:model pinnato per role-class (coordinator/support) in base a costo/coding/latenza live di llmProxy, con fallback ad auto-routing (`llmproxy`) quando i dati non sono disponibili — vedi `docs/yano-model-advisor.md`
+- **Model advisor** — `yano model-advisor` propone un pin llmProxy `model@provider-id` per role-class (coordinator/support) in base a costo/coding/latenza live di llmProxy, con fallback ad auto-routing (`llmproxy`) quando i dati non sono disponibili — vedi `docs/yano-model-advisor.md`
 - **Global playbook/role architect** — `yano architect` crea proposte ephemeral, verifica skill/CLI/MCP, avvia il watcher di validazione e promuove versioni immutabili solo dopo feedback positivo; `yano playbook|agent` consulta il catalogo
 - **Controlled deployment agent** — `deployment-agent` uses the `deployment-delivery` Playbook and `yano-deployment` skill to keep development source-based, dockerize staging/production, preserve paired ports and require rollback evidence plus explicit production approval
 - **Shared trace-analysis skill** for planner, coder, reviewer and specialists — workers can inspect the filtered origin of a mismatch, while the planner records cross-project opinions and systemic interventions
@@ -178,6 +178,8 @@ yano gantt --persistent --open # dashboard live persistente, con link recuperabi
 yano gantt --link              # link persistente del progetto corrente
 yano gantt --links             # tutti i link Gantt persistenti registrati
 yano watch --once              # one stalled-ticket scan
+# context telemetry is written per agent; watcher can request native Pi compaction
+yano watch --once --context-compact-ratio 0.82
 # yano watch --help and yano watcher <subcommand> --help are read-only
 # senza orchestrator.db un watcher ordinario resta in attesa senza errore;
 # solo una validazione esplicita usa lo stato blocked e l'escalation
@@ -234,8 +236,11 @@ yano suggester serve --port 4179 # API REST (un'unica istanza, molti progetti)
 
 ```bash
 yano model-advisor catalog --json                                   # catalogo llmProxy normalizzato, così com'è ora
-yano model-advisor recommend --role-class coordinator --json      # provider:model pinnato migliore per un ruolo ad alto impatto
-yano model-advisor recommend --role-class support --json          # provider:model pinnato migliore, più economico, per un ruolo di supporto
+yano model-advisor recommend --role-class coordinator --json      # model@provider-id pinnato migliore per un ruolo ad alto impatto
+yano model-advisor recommend --role-class support --json          # model@provider-id pinnato migliore, più economico, per un ruolo di supporto
+
+# Per lanciare un agente con il pin restituito: Yano lo traduce nel provider Pi llmproxy
+yano start --instance debater-01 --role debater --llmproxy-pin 'z-ai/glm-5.3-flash@openrouter-glm' --print-only
 ```
 
 A run (the ticket/DAG layer's top-level container for one objective — see "Layer ticket/DAG persistente" in `docs/development-notes.md`, Revisione 26) normally closes itself once every one of its tickets is marked done. `yano end` is for when that doesn't happen — a session ended before every ticket was formally completed, the goal changed, or you're simply satisfied with where things landed and want to declare it done. It never touches tickets, worktrees, or any file outside this project's own `orchestrator.db` — closing a run just changes its own status and records the change in its event history, visible later via `run_status` from inside a planner session.

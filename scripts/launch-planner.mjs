@@ -77,7 +77,7 @@ import { fileURLToPath } from "node:url";
 import YAML from "yaml";
 import { ensureRolePrerequisites, isSupportedNodeRuntime } from "./doctor.mjs";
 import { globalDataPath } from "./yano-config.mjs";
-import { TRACE_MODES, getTraceConfig, resolveTraceProject, setTraceMode, slugify, traceRoot } from "./yano-trace-storage.mjs";
+import { TRACE_MODES, canonicalProjectScope, getTraceConfig, resolveTraceProject, setTraceMode, slugify, traceRoot } from "./yano-trace-storage.mjs";
 
 // Le 6 skill vendorizzate destinate al ruolo planner — vedi
 // skills-vendor/mattpocock/VERSION.md per la motivazione di ciascuna
@@ -307,6 +307,7 @@ function parseArgs(argv) {
 	let role; // undefined finché non trovato — risolto a "planner" più sotto se mai passato
 	let traceMode;
 	let proposalId;
+	let llmproxyPin;
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i];
 		if (a === "--print-only") {
@@ -343,9 +344,17 @@ function parseArgs(argv) {
 			}
 			continue;
 		}
+		if (a === "--llmproxy-pin") {
+			llmproxyPin = argv[++i];
+			if (!llmproxyPin) {
+				console.error("launch-planner: --llmproxy-pin richiede un pinned_id llmProxy model@provider-id.");
+				process.exit(1);
+			}
+			continue;
+		}
 		passthrough.push(a);
 	}
-	return { passthrough, printOnly, json, role: role ?? "planner", traceMode, proposalId };
+	return { passthrough, printOnly, json, role: role ?? "planner", traceMode, proposalId, llmproxyPin };
 }
 
 // runLaunchPlanner({ packageRoot, cwd, argv }) — packageRoot risolve le
@@ -374,7 +383,7 @@ function parseArgs(argv) {
 // `yano init` scrive sempre: agents/roles.yaml oppure
 // .pi/extensions/yano-orchestrator/config/project.json.
 export function runLaunchPlanner({ packageRoot, cwd, argv }) {
-	const { passthrough, printOnly, json, role, traceMode, proposalId } = parseArgs(argv);
+	const { passthrough, printOnly, json, role, traceMode, proposalId, llmproxyPin } = parseArgs(argv);
 	const ephemeralRole = ephemeralRoleManifest({ proposalId, role, cwd });
 	if (!isSupportedNodeRuntime()) {
 		console.error(`launch-planner: Node.js ${process.version} non supportato — serve Node 22.5.0 o superiore.`);
@@ -426,8 +435,8 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 	// repeat project discovery made a stale install able to fall back to a
 	// shared/default MQTT namespace and mix projects. An operator-supplied
 	// --project remains verbatim for deliberate shared scopes.
-	const derivedProject = slugify(resolveTraceProject(cwd));
-	const traceProject = explicitProject || derivedProject;
+	const derivedProject = canonicalProjectScope(cwd);
+	const traceProject = canonicalProjectScope(cwd, explicitProject);
 	const requestedTraceMode = traceMode || process.env.YANO_TRACE_MODE || "full";
 	if (!TRACE_MODES.includes(requestedTraceMode)) {
 		console.error(`launch-planner: modalità trace non valida "${requestedTraceMode}".`);
@@ -531,16 +540,24 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 	// è esattamente ciò che mancava quando il planner componeva a mano
 	// `pi -e extensions/orchestrator.ts` per lanciare altri ruoli.
 	const extensionFlags = hasLocalExtension && looksLikePackageRepo ? ["-e", "extensions/orchestrator.ts"] : [];
+	const normalizedPassthrough = [...passthrough];
+	if (projectFlagIndex >= 0 && normalizedPassthrough[projectFlagIndex + 1] !== undefined) normalizedPassthrough[projectFlagIndex + 1] = traceProject;
 	const projectScopeFlags = explicitProject ? [] : ["--project", derivedProject];
 	const hasExplicitConfigDir = passthrough.includes("--config-dir");
 	const legacyConfigDirFlags = !hasExplicitConfigDir && !existsSync(path.join(cwd, "agents", "roles.yaml")) && existsSync(path.join(cwd, ".pi", "agents", "roles.yaml"))
 		? ["--config-dir", path.join(".pi", "agents")]
 		: [];
 	const generatedConfigFlags = generatedConfigDir && !hasExplicitConfigDir ? ["--config-dir", generatedConfigDir] : [];
-	const piArgs = [...extensionFlags, ...passthrough, ...projectScopeFlags, ...legacyConfigDirFlags, ...generatedConfigFlags, "--role", role, ...skillFlags];
+	// `yano model-advisor` returns an llmProxy catalog pin such as
+	// `z-ai/glm-5.3-flash@openrouter-glm`. Keep the translation to Pi in this
+	// launcher so planners never have to mistake the catalog id for a Pi
+	// provider (`--provider openrouter-glm` is invalid). The explicit flag is
+	// consumed here and becomes the only Pi provider/model pair.
+	const llmproxyFlags = llmproxyPin ? ["--provider", "llmproxy", "--model", llmproxyPin] : [];
+	const piArgs = [...extensionFlags, ...normalizedPassthrough, ...projectScopeFlags, ...legacyConfigDirFlags, ...generatedConfigFlags, ...llmproxyFlags, "--role", role, ...skillFlags];
 
 	const printable = ["pi", ...piArgs].map((a) => (a.includes(" ") ? `"${a}"` : a)).join(" ");
-	if (json) console.log(JSON.stringify({ command: "pi", args: piArgs, cwd, trace_mode: traceConfig.mode, project: traceProject, proposal_id: proposalId || null, playbook_path: generatedRole?.playbookPath || null, role_source: ephemeralRole ? "architect-ephemeral" : (generatedRole ? "architect-catalog" : "project") }));
+	if (json) console.log(JSON.stringify({ command: "pi", args: piArgs, cwd, trace_mode: traceConfig.mode, project: traceProject, proposal_id: proposalId || null, llmproxy_pin: llmproxyPin || null, playbook_path: generatedRole?.playbookPath || null, role_source: ephemeralRole ? "architect-ephemeral" : (generatedRole ? "architect-catalog" : "project") }));
 	else console.log(`launch-planner: comando composto (cwd ${cwd}, trace ${traceConfig.mode}, progetto ${traceProject}):\n  ${printable}\n`);
 
 	if (printOnly) {

@@ -39,6 +39,7 @@ import { createRequire } from "node:module";
 import { appendRawTraceRecord, canonicalProjectScope, projectKey, readTraceRecords, resolveTraceProject, traceRoot } from "./yano-trace-storage.mjs";
 import { projectDbPath } from "./yano-project.mjs";
 import { ensureGlobalYanoServices } from "./yano-global-services.mjs";
+import { superviseExternalServices } from "./yano-services.mjs";
 import { findAgentIdentityConflicts, formatAgentIdentityConflicts } from "./yano-agent-identity.mjs";
 
 const require = createRequire(import.meta.url);
@@ -495,7 +496,7 @@ function doStatusForRow(db, row, { heal = true } = {}) {
 function supervisorLockPath() { return path.join(traceRoot(), "watcher", "supervisor.lock"); }
 function supervisorHeartbeatPath() { return path.join(traceRoot(), "watcher", "supervisor-heartbeat.json"); }
 
-function withSupervisorLock(callback) {
+async function withSupervisorLock(callback) {
 	const lock = supervisorLockPath();
 	fs.mkdirSync(path.dirname(lock), { recursive: true, mode: 0o700 });
 	let fd;
@@ -516,7 +517,7 @@ function withSupervisorLock(callback) {
 		}
 	}
 	try {
-		return callback();
+		return await callback();
 	} finally {
 		try { if (fd !== undefined) fs.closeSync(fd); } catch { /* best effort */ }
 		try { fs.unlinkSync(lock); } catch { /* best effort */ }
@@ -650,7 +651,7 @@ function activateDefaultDebuggers() {
 }
 
 function supervise(db) {
-	return withSupervisorLock(() => {
+	return withSupervisorLock(async () => {
 		const rows = db.prepare("SELECT * FROM watcher_projects ORDER BY updated_at DESC").all();
 		const snapshot = herdrSnapshot();
 		const orphan_tabs_removed = pruneOrphanWatcherTabs(snapshot, rows);
@@ -660,12 +661,21 @@ function supervise(db) {
 			if (row) appendRawTraceRecord({ cwd: row.root, project: resolveTraceProject(row.root), record: { type: "watcher_identity_conflict", payload: conflict } });
 		}
 		const global_services = ensureGlobalYanoServices();
+		// User-declared external dependencies (Docker/pm2/llmProxy/...): same
+		// one-per-minute cadence as every other recovery in this loop, so the
+		// whole fleet — Yano's own service tabs above, project planners below,
+		// and now the operator's own external services — heals deterministically
+		// after a computer restart or a crashed container/process, not just the
+		// parts Yano happens to own directly.
+		let external_services;
+		try { external_services = await superviseExternalServices(); } catch (error) { external_services = { error: error instanceof Error ? error.message : String(error) }; }
 		const activated = [...rows.map((row) => activateDefaultWorkers(db, row)).filter(Boolean), ...activateDefaultDebuggers()];
 		const result = {
 			checked_at: now(),
 			projects: rows.map((row) => doStatusForRow(db, row, { heal: true })),
 			activated,
 			global_services,
+			external_services,
 			external_workers: externalWorkerRecovery(snapshot),
 			orphan_tabs_removed,
 			identity_conflicts: identityConflicts,
@@ -827,7 +837,7 @@ export async function runYanoWatcherRegistry({ argv = [] } = {}) {
 			return results;
 		}
 		if (opts.sub === "supervise") {
-			const result = supervise(db);
+			const result = await supervise(db);
 			print(result, opts.json);
 			return result;
 		}

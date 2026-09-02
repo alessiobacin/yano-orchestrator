@@ -597,6 +597,29 @@ hygiene or the coder correction loop.
 
 ## Failure and recovery
 
+### External service supervision
+
+Everything above heals components Yano owns directly (Herdr panes, SQLite
+runs, its own bundled MQTT broker). `scripts/yano-services.mjs` extends the
+same one-minute cron loop (`yano watcher supervise`) to services Yano depends
+on operationally but does not own — a local LLM router such as llmProxy, the
+Docker daemon itself, an MQTT broker container, a pm2-managed process, or any
+other declared command/container. `yano services add --name <name>
+(--healthcheck-http <url>|--healthcheck-command <cmd>) (--restart-docker
+<container>|--restart-pm2 <app>|--restart-command <cmd>)` registers one in
+`<YANO_DATA_DIR>/services/services.json`; every enabled entry is health-checked
+on each supervisor pass and, on failure, restarted with bounded exponential
+backoff (`--backoff-base-ms`/`--backoff-max-ms`/`--max-attempts`, default
+5s/5min/6). A service that exhausts its restart attempts is marked
+`giving_up`: it stays health-checked (so an external/manual fix is still
+observed) but Yano stops trying to restart something that structurally cannot
+come back on its own. `yano services check` is the read-only counterpart used
+for manual diagnosis — it never restarts anything or mutates persisted state.
+This is what lets the fleet recover deterministically after a computer restart
+or a crashed container/process, instead of the affected role silently
+degrading (for example every `model: llmproxy` role falling back to `auto`
+routing when llmProxy itself is unreachable, with no attempt to bring it back).
+
 ### Controlled Yano reload
 
 An already-running Pi process has the extension module, tool registry, MQTT

@@ -62,6 +62,7 @@ Use the smallest command that answers the request. Typical translations are:
 | Configure a missing requirement | `yano config set <KEY> <value>` or `... --stdin` | global per-user config path, never application `.env` for global installs |
 | Check/install this skill in local harnesses | `yano skills status --json`, then `yano skills install` | Claude Code/Codex/Pi catalogs and Pi's shared discovery roots |
 | Create a recurring job in natural language | `yano cron --add "ogni giorno alle 14 e alle 21 esegui …" --project-root "$PWD"` | cron expression, durable job id and project root |
+| Register an external dependency for auto-restart | `yano services add --name llmproxy --healthcheck-http http://127.0.0.1:7045/api/providers --restart-pm2 llmproxy` | health-checked and restarted deterministically by `yano watcher supervise`, not just observed |
 
 When the agent is already running from the project directory, the shorter
 equivalent is `yano gantt --persistent --open`. The explicit
@@ -403,6 +404,24 @@ the global Yano data-root, and returns a job id. Manage it with `yano cron
 The global one-minute supervisor restores the `yano-scheduler` Herdr agent
 after a reboot or closed tab, then dispatches due jobs to a planner in the
 job's project. A scheduled task never bypasses playbook approval gates.
+
+### External service supervision
+
+Yano heals its own components (Herdr panes, SQLite runs, its bundled MQTT
+broker) but historically had no way to notice or fix a crashed *external*
+dependency — a local LLM router such as llmProxy, a Docker container, a
+pm2-managed process. `yano services add --name <name> (--healthcheck-http
+<url>|--healthcheck-command "<cmd>") (--restart-docker <container>|--restart-pm2
+<app>|--restart-command "<cmd>")` registers one; `yano watcher supervise`
+(the same one-minute cron loop) health-checks every enabled service on each
+pass and, on failure, restarts it with bounded exponential backoff
+(`--backoff-base-ms`/`--backoff-max-ms`/`--max-attempts`, defaults 5s/5min/6).
+After `max-attempts` consecutive failed restarts a service is marked
+`giving_up`: it keeps being health-checked (so an external/manual fix is
+still picked up) but Yano stops hammering a target that cannot come back on
+its own. `yano services check` is the read-only counterpart — it never
+restarts anything. `yano services list|enable|disable|remove` manage the
+registry (`<YANO_DATA_DIR>/services/services.json`).
 ### Identità degli agenti
 
 Prima di creare un agente, Yano verifica la coppia canonica `project-root` +

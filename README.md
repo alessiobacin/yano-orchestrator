@@ -201,6 +201,13 @@ yano watcher projects --all --json          # tutti i progetti registrati, anche
 yano watcher resume --project-root /path/progetto  # riattiva esplicitamente un progetto idle
 yano cron --add "ogni giorno alle 14 e alle 21 esegui la pulizia del progetto" --project-root "$PWD"
 yano cron --list --json                     # job persistenti; il supervisore riapre yano-scheduler ogni minuto
+# yano services: registro di servizi esterni (Docker/pm2/comando) che Yano non possiede ma da cui dipende
+# (broker MQTT, llmProxy, ...); `yano watcher supervise` (cron ogni minuto) li ricontrolla e riavvia da solo
+yano services add --name llmproxy --healthcheck-http http://127.0.0.1:7045/api/providers --restart-pm2 llmproxy
+yano services add --name mqtt-broker --healthcheck-command "docker inspect -f {{.State.Running}} yano-mqtt-broker | grep -q true" --restart-docker yano-mqtt-broker
+yano services list --json                   # stato/health/backoff correnti
+yano services check --json                  # sola lettura, nessun riavvio
+yano services supervise --json              # health-check + riavvio deterministico con backoff (già chiamato da yano watcher supervise)
 yano config path                 # percorso della configurazione globale utente
 yano config list --all           # variabili configurabili, segreti oscurati
 yano config set YANO_ORCHESTRATOR_REPO /path/to/yano-orchestrator

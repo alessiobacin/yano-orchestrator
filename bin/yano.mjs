@@ -89,6 +89,7 @@ import { runYanoHarnessSkills } from "../scripts/install-yano-cli.mjs";
 import { runYanoProjects } from "../scripts/yano-projects.mjs";
 import { runYanoRules } from "../scripts/yano-rules.mjs";
 import { runYanoScheduler } from "../scripts/yano-scheduler.mjs";
+import { runYanoServices } from "../scripts/yano-services.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, "..");
@@ -137,6 +138,7 @@ function printTopUsage() {
 			"  rule [opzioni]   Gestisce regole globali e per-progetto — `yano rule --help`",
 			"  schedule [opzioni] Crea job ricorrenti tracciati; cron persistente e ripulibile — `yano schedule --help`",
 			"  cron [opzioni]  CRUD naturale dei job ricorrenti e supervisore yano-scheduler — `yano cron --help`",
+			"  services [opzioni] Registro servizi esterni (Docker/pm2/comando) con health-check e restart deterministico — `yano services --help`",
 			"  data [opzioni]    Mostra o migra il data-root globale — `yano data --help`",
 			"  pause [opzioni]  Salva uno snapshot non distruttivo e mette in pausa i run",
 			"  resume [opzioni] Ripristina uno snapshot e riapre gli agenti mancanti",
@@ -224,6 +226,10 @@ async function main() {
 		else if (rest.includes("--install")) await runYanoScheduler({ argv: ["cron", "install", ...json] });
 		else if (rest.includes("--uninstall")) await runYanoScheduler({ argv: ["cron", "remove", ...json] });
 		else await runYanoScheduler({ argv: ["cron", "status", ...json] });
+		return;
+	}
+	if (sub === "services") {
+		await runYanoServices({ argv: rest });
 		return;
 	}
 	if (sub === "skills") {

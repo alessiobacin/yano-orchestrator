@@ -27,6 +27,8 @@ yano config [subcommand] [options]
 yano data [subcommand] [options]
 yano cron --add <natural request> [--project-root <dir>]
 yano cron --list|--remove <id>|--enable <id>|--disable <id>|--run <id>|--supervise
+yano services add --name <name> (--healthcheck-http <url>|--healthcheck-command <cmd>) (--restart-docker <container>|--restart-pm2 <app>|--restart-command <cmd>) [--timeout-ms|--backoff-base-ms|--backoff-max-ms|--max-attempts|--disabled]
+yano services list|remove|enable|disable|check|supervise [options]  # external Docker/pm2/command dependencies (llmProxy, broker...); supervise runs inside `yano watcher supervise`
 yano architect [subcommand] [options]
 yano watcher init|start|status|pause|resume|leave [options]  # persistent registry — see docs/quick_guides/10-watcher-falle-yano.md
 yano leave [--project-root <dir>] --yes                # permanently removes only watcher supervision

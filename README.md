@@ -284,6 +284,10 @@ Per le procedure brevi, scegli una singola operazione nella raccolta
 una repository esistente, avvio con Herdr, update normale o reload, recovery,
 trace e troubleshooting.
 
+Per lo sviluppo di Yano stesso (nuovi comandi, agenti, playbook) le guide
+operative stanno in [`docs/guides/`](docs/guides/README.md) e le decisioni
+architetturali in [`docs/adr/`](docs/adr/README.md).
+
 Scaffold a new project and start the planner:
 
 ```bash
@@ -410,7 +414,9 @@ skills-vendor/yano/yano-code-mem/ required project-memory protocol injected into
 skills-vendor/awesome-copilot/    vendored chrome-devtools skill, reviewer/frontend-developer only —
                                    see VERSION.md
 mqtt/                             local Mosquitto broker config for development
-docs/                             architecture, trace reference, quick start, quick guides, Mermaid diagrams and development notes
+docs/                             architecture (+Mermaid source), trace reference, quick start, quick guides,
+                                   development guides (docs/guides/), ADRs (docs/adr/), cheat-sheet,
+                                   Mermaid diagrams (docs/diagram/) and development notes
 .env.example                      WhatsApp, Telegram, and SendGrid notification template
 mcp.json.example                  chrome-devtools MCP server configuration template
 ```

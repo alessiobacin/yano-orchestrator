@@ -237,7 +237,7 @@ function parseCommand(argv) {
 
 function usage() {
 	return [
-		"Uso: yano debugger <init|start|status|report|claim|transition|pause|resume|serve> [opzioni]",
+		"Uso: yano debugger <init|start|status|report|claim|transition|pause|resume|leave|serve> [opzioni]",
 		"",
 		"  init --project-root <dir>                         registra un progetto",
 		"  start --project-root <dir> [--dry-run]            apre/riusa la tab Herdr del debugger",
@@ -247,6 +247,7 @@ function usage() {
 		"  claim --project-root <dir> --bug-id <id>          assegna il bug al debugger",
 		"  transition --project-root <dir> --bug-id <id> --to <stato>",
 		"  pause|resume --project-root <dir>                sospende/riattiva il worker logico",
+		"  leave --project-root <dir> --yes                 rimuove il debugger dal progetto e chiude la tab",
 		"  serve [--port <porta>] [--host <host>] [--json]  avvia l'API REST del debugger",
 		"                                                    (un'unica istanza per tutti i progetti registrati;",
 		"                                                    default 127.0.0.1:4177, override con",
@@ -531,6 +532,15 @@ function doPause(db, info, existing) {
 	return result;
 }
 
+function doLeave(db, info, existing, { dryRun = false } = {}) {
+	if (!existing) return { project: info.name, left: false, reason: "not_registered" };
+	const snapshot = herdrSnapshot();
+	const tabExists = Boolean(existing.worker_tab_id && snapshot?.tabs?.some((tab) => tab.tab_id === existing.worker_tab_id));
+	const closed = dryRun || !tabExists ? { closed: false, reason: dryRun ? "dry_run" : "tab_already_absent" } : closeHerdrTab(existing.worker_tab_id);
+	if (!dryRun) db.prepare("DELETE FROM debugger_projects WHERE project_key = ?").run(existing.project_key);
+	return { project: info.name, left: !dryRun, dry_run: dryRun, debugger_closed: closed.closed, debugger_close_error: closed.error || null };
+}
+
 async function doResume(db, info, existing, opts = {}) {
 	if (existing.worker_status === "running" && !opts.dryRun && !opts.force) {
 		return { project: info.name, worker_status: "running", already_running: true, workspace_id: existing.workspace_id, tab_id: existing.worker_tab_id, instance: existing.worker_instance };
@@ -730,12 +740,14 @@ export async function runYanoDebugger({ argv = [] } = {}) {
 			print(updated, opts.json);
 			return updated;
 		}
-		if (opts.sub === "pause" || opts.sub === "resume") {
+		if (opts.sub === "pause" || opts.sub === "resume" || opts.sub === "leave") {
 			const info = projectInfo(opts.projectRoot, opts.project, opts.mode);
 			const existing = getProject(db, info);
-			if (!existing) throw new Error("yano debugger: progetto non inizializzato; esegui prima `yano debugger init`");
+			if (opts.sub === "leave" && !opts.yes && !opts.dryRun) throw new Error("yano debugger leave: aggiungi --yes per rimuovere definitivamente il progetto dal debugger");
+			if (!existing && opts.sub !== "leave") throw new Error("yano debugger: progetto non inizializzato; esegui prima `yano debugger init`");
 			const result = opts.sub === "pause"
 				? doPause(db, info, existing)
+				: opts.sub === "leave" ? doLeave(db, info, existing, { dryRun: opts.dryRun })
 				: await doResume(db, info, existing, { dryRun: opts.dryRun, force: opts.force, basePort: opts.basePort, intervalMs: opts.intervalMs, foreground: opts.foreground });
 			print(result, opts.json);
 			return result;

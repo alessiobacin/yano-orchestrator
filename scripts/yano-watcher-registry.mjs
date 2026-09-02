@@ -182,6 +182,10 @@ function projectRuns(root) {
 	finally { try { db.close(); } catch { /* best effort */ } }
 }
 
+function projectHasActiveWork(root) {
+	return projectRuns(root).runs.some(runNeedsPlanner);
+}
+
 function runNeedsPlanner(run) {
 	return run.status === "active" || (run.status === "completed" && !["finalized", "not_applicable"].includes(run.finalization_status));
 }
@@ -551,13 +555,51 @@ function externalWorkerRecovery(snapshot) {
 	return results;
 }
 
+function activateDefaultWorkers(db, row) {
+	// `stopped` is the neutral state created by `yano init`: it means no
+	// current work, not an operator opt-out. `paused` and a deleted registry
+	// row remain explicit opt-outs and are never revived by cron.
+	if (row.worker_status !== "stopped" || !projectHasActiveWork(row.root)) return null;
+	const info = infoFromRow(row);
+	const watcher = doStart(db, info, { intervalMs: row.interval_ms, lookbackMs: row.lookback_ms });
+	return {
+		project: row.name,
+		root: row.root,
+		activated: true,
+		watcher: { worker_status: watcher.worker_status, instance: watcher.instance || null },
+	};
+}
+
+function activateDefaultDebuggers() {
+	const file = path.join(traceRoot(), "debugger", "debugger.sqlite");
+	if (!fs.existsSync(file)) return [];
+	const results = [];
+	try {
+		const { DatabaseSync } = requireSqlite();
+		const db = new DatabaseSync(file, { readOnly: true });
+		const rows = db.prepare("SELECT root, name, worker_status FROM debugger_projects WHERE worker_status = 'stopped'").all();
+		db.close();
+		for (const row of rows) {
+			if (!projectHasActiveWork(row.root)) continue;
+			const args = ["debugger", "start", "--project-root", row.root, "--project", row.name, "--json"];
+			const launched = spawnSync(process.execPath, [path.join(PACKAGE_ROOT, "bin", "yano.mjs"), ...args], { encoding: "utf8", maxBuffer: 4_000_000 });
+			results.push({ role: "debugger", project: row.name, root: row.root, activated: launched.status === 0, error: launched.status === 0 ? null : (launched.stderr || launched.stdout || "debugger start failed").trim() });
+		}
+	} catch (error) {
+		results.push({ role: "debugger", activated: false, error: error instanceof Error ? error.message : String(error) });
+	}
+	return results;
+}
+
 function supervise(db) {
 	return withSupervisorLock(() => {
 		const rows = db.prepare("SELECT * FROM watcher_projects ORDER BY updated_at DESC").all();
 		const snapshot = herdrSnapshot();
+		const activated = [...rows.map((row) => activateDefaultWorkers(db, row)).filter(Boolean), ...activateDefaultDebuggers()];
 		const result = {
 			checked_at: now(),
 			projects: rows.map((row) => doStatusForRow(db, row, { heal: true })),
+			activated,
 			external_workers: externalWorkerRecovery(snapshot),
 		};
 		try { fs.writeFileSync(supervisorHeartbeatPath(), JSON.stringify({ checked_at: result.checked_at, pid: process.pid, project_count: rows.length, external_recoveries: result.external_workers }, null, 2), { mode: 0o600 }); } catch { /* best effort */ }

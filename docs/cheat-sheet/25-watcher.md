@@ -10,6 +10,7 @@ yano watcher status --json                        # stato registrato + self-heal
 yano watcher pause --project-root "$PWD"
 yano watcher resume --project-root "$PWD"
 yano watcher projects --all --json                # presenza Herdr/Pi effettiva (Architect/registro)
+yano watcher resume --project-root "$PWD"        # riattiva esplicitamente un progetto idle
 yano watch --project-root "$PWD" --once
 ~~~
 

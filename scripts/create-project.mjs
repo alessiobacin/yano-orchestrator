@@ -79,6 +79,8 @@ import { fileURLToPath } from "node:url";
 import { runDoctor, ensurePlaywrightPrerequisites, ensureCorePrerequisites, ensureEmbeddingPrerequisites, ensureCodeMemPrerequisite, isSupportedNodeRuntime } from "./doctor.mjs";
 import { runHerdrInit } from "./init-herdr.mjs";
 import { installYanoCliSkill } from "./install-yano-cli.mjs";
+import { runYanoWatcherRegistry } from "./yano-watcher-registry.mjs";
+import { runYanoDebugger } from "./yano-debugger.mjs";
 
 function parseArgs(argv) {
 	let name;
@@ -597,6 +599,18 @@ export async function runCreateProject({ packageRoot, cwd, argv, preflightTools 
 	}
 	if (!noGit) ensureInitialGitBaseline(targetDir);
 	if (noGit && !fs.existsSync(path.join(targetDir, ".git"))) console.log("create-project: --no-git — nessun repository Git inizializzato.");
+
+	// Every initialized project is registered with the two always-available
+	// control-plane services. Registration is intentionally separate from
+	// starting a Herdr tab: the global supervisor starts them when a run becomes
+	// active, while an idle project remains visible and resumable explicitly.
+	try {
+		await runYanoWatcherRegistry({ argv: ["init", "--project-root", targetDir, "--json"] });
+		await runYanoDebugger({ argv: ["init", "--project-root", targetDir, "--json"] });
+		console.log("create-project: watcher e debugger registrati; il supervisore li avvierà automaticamente con task attivi.");
+	} catch (error) {
+		console.warn(`create-project: registrazione watcher/debugger non riuscita (${error instanceof Error ? error.message : String(error)}) — riprova con yano watcher init e yano debugger init.`);
+	}
 
 	// Auto-discovery del sistema operativo (Revisione 32, richiesto
 	// dall'operatore): il comando di copia e le opzioni broker suggerite

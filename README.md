@@ -196,6 +196,8 @@ yano watcher start --project-root "$PWD"   # persistent registry: Herdr-supervis
 yano watcher cron install                  # installa manualmente il self-heal ogni minuto
 yano watcher status --json                 # self-heal watcher + planner dei run incompleti
 yano leave --yes                            # dalla root: rimuove definitivamente solo il watcher del progetto
+yano watcher projects --all --json          # tutti i progetti registrati, anche senza task attivi
+yano watcher resume --project-root /path/progetto  # riattiva esplicitamente un progetto idle
 yano cron --add "ogni giorno alle 14 e alle 21 esegui la pulizia del progetto" --project-root "$PWD"
 yano cron --list --json                     # job persistenti; il supervisore riapre yano-scheduler ogni minuto
 yano config path                 # percorso della configurazione globale utente
@@ -237,6 +239,7 @@ yano debugger start             # avvia/riusa il worker nel workspace Herdr yano
 yano debugger start --once --json # preflight read-only senza Herdr
 yano debugger status --json     # stato del worker e dei bug del progetto
 yano debugger status --bug-id BUG-... --json # dettaglio bug + eventi diagnostici
+yano debugger leave --project-root /path/progetto --yes # disattiva definitivamente il debugger per il progetto
 yano debugger serve --port 4177 # API REST (un'unica istanza, molti progetti — docs/docs/postman/yano-debugger.postman_collection.json)
 yano auto-improve init --project-root /path/progetto --interval 5d --notify auto
 yano auto-improve start --project-root /path/progetto
@@ -253,6 +256,14 @@ yano suggester status --project-root /path/progetto --json
 yano suggester approve --suggestion-id SUG-... --actor superadmin --yes
 yano suggester serve --port 4179 # API REST (un'unica istanza, molti progetti)
 ```
+
+Watcher e debugger sono registrati automaticamente da `yano init`. Il
+supervisore globale li avvia quando rileva run/task attivi, ma rispetta una
+pausa o un `leave` esplicito. I progetti senza task restano visibili in
+`yano watcher projects --all --json` e possono essere riattivati con
+`yano watcher resume --project-root ...`. Architect, suggester e auto-improver
+restano invece servizi on-demand; scheduler è globale e viene ricreato dal
+cron ogni minuto.
 
 ```bash
 yano model-advisor catalog --json                                   # catalogo llmProxy normalizzato, così com'è ora

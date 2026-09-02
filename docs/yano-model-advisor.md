@@ -138,6 +138,16 @@ yano model-advisor explain --role-class coordinator|support [--vision] [--json]
 ```bash
 yano config set YANO_LLMPROXY_URL http://127.0.0.1:7045   # default se omessa
 yano config set YANO_LLMPROXY_API_KEY --stdin              # opzionale, solo se il gate di llmProxy è attivo
+
+Le opzioni runtime di llmProxy possono essere salvate nello stesso registro
+globale e vengono ereditate dai processi Pi/Yano:
+
+```bash
+yano config set LLMPROXY_INFERENCE_INFO_INLINE 1
+yano config set LLMPROXY_METERING_INLINE 0
+yano config set LLMPROXY_PROVIDER_CREDIT_INLINE 1
+yano config set LLMPROXY_SHORT_ANSWER 0
+```
 ```
 
 Vedi anche `.env.example` per l'equivalente in un checkout di sviluppo.

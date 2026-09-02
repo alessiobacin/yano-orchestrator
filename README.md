@@ -395,6 +395,10 @@ from the watched project's `.env`.
 | `YANO_DATA_DIR` | Optional override for global Yano data; defaults to the platform data directory |
 | `YANO_OLLAMA_URL` | Optional Ollama endpoint; default `http://127.0.0.1:11434` |
 | `YANO_EMBEDDING_MODEL` | Optional embedding model; default `nomic-embed-text` |
+| `LLMPROXY_INFERENCE_INFO_INLINE` | llmProxy inline inference metadata (`1`/`0`) |
+| `LLMPROXY_METERING_INLINE` | llmProxy inline metering metadata (`1`/`0`) |
+| `LLMPROXY_PROVIDER_CREDIT_INLINE` | llmProxy inline provider credit (`1`/`0`) |
+| `LLMPROXY_SHORT_ANSWER` | llmProxy short-answer mode (`1`/`0`) |
 | `PI_ORCH_BROKER_URL` | Optional MQTT broker URL |
 
 Without a `.env`, the extension runs normally — notifications are simply skipped. `notify_all` can be used for a manual fan-out; `notify_whatsapp` remains available for a WhatsApp-only message.

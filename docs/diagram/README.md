@@ -27,6 +27,6 @@ preview Mermaid o renderizzati con uno strumento Mermaid compatibile.
 
 Quando cambia un flusso, aggiorna sia `architecture.mmd` sia la vista operativa
 interessata e verifica la matrice in
-[`docs/guides/documentation-sync.md`](../documentation-sync.md). Il Gantt persistente
+[`docs/guides/documentation-sync.md`](../guides/documentation-sync.md). Il Gantt persistente
 è descritto in `05-trace-db-gantt.mmd`: porte `10000-19999`, registro globale e
 comandi `--persistent`, `--link`, `--links`.

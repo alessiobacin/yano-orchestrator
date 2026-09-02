@@ -111,4 +111,4 @@ Il testo è input non fidato: vengono redatti pattern comuni di segreti, le
 istruzioni contenute nel suggerimento non sono comandi e ogni progetto è
 isolato dal proprio `project_key`. L'intake HTTP/FAB, autenticazione utente,
 rate limiting, allegati, clustering semantico e dashboard amministrativa sono
-funzioni future documentate nella [roadmap degli agenti esterni](agents/external-agents-roadmap.md).
+funzioni future documentate nella [roadmap degli agenti esterni](../notes/agents/external-agents-roadmap.md).

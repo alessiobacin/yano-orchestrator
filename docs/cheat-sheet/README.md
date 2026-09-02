@@ -40,4 +40,4 @@ vincoli e procedure complete usare la [documentazione](../../README.md), la
 - [31-scheduler.md](./31-scheduler.md)
 
 Le modifiche al codice devono aggiornare anche le superfici documentali indicate
-in [documentation-sync.md](../documentation-sync.md).
+in [documentation-sync.md](../guides/documentation-sync.md).

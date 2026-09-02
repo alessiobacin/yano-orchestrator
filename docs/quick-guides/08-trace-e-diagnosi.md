@@ -57,4 +57,4 @@ yano trace overview --all-projects --json
 ~~~
 
 Non cancellare il trace durante una diagnosi. Per la guida completa consulta
-[yano trace](../yano-trace.md).
+[yano trace](./yano-trace.md).

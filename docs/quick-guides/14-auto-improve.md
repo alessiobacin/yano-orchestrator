@@ -107,4 +107,4 @@ curl -s http://127.0.0.1:4178/projects/workspace-a1b2c3d4e5f6/audits
 ```
 
 Per l'implementazione completa vedere
-[Yano Auto-Improver](../yano-auto-improve.md).
+[Yano Auto-Improver](./yano-auto-improve.md).

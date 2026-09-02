@@ -322,7 +322,7 @@ feedback utente → context filtrato → bug prodotto / bug Yano
 ```
 
 La skill condivisa
-[`yano-planner-trace-analysis`](../skills-vendor/yano/yano-planner-trace-analysis/SKILL.md)
+[`yano-planner-trace-analysis`](../../skills-vendor/yano/yano-planner-trace-analysis/SKILL.md)
 contiene il contratto operativo che tutti gli agenti ricevono; al planner
 spetta la decisione finale sulle modifiche sistemiche.
 

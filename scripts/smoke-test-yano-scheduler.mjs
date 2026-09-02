@@ -20,7 +20,7 @@ const spawn = (command, args, options = {}) => {
 	if (command === process.execPath && args.includes("launch-planner.mjs")) return { status: 0, stdout: JSON.stringify({ args: ["--instance", "yano-scheduler", "--role", "scheduler"] }), stderr: "" };
 	if (command === "herdr") {
 		const workspace = workspaceCreated ? [{ workspace_id: "w-scheduler", label: "yano-scheduler" }] : [];
-		const tabs = schedulerTabCreated ? [{ tab_id: "t-scheduler", workspace_id: "w-scheduler", label: "yano-scheduler" }] : [];
+		const tabs = schedulerTabCreated ? [{ tab_id: "t-scheduler", workspace_id: "w-scheduler", label: "scheduler-service" }] : [];
 		const panes = schedulerTabCreated ? [{ pane_id: "p-scheduler", tab_id: "t-scheduler", workspace_id: "w-scheduler", cwd: path.resolve(process.cwd()) }] : [];
 		return { status: 0, stdout: JSON.stringify({ result: { snapshot: { agents: [], workspaces: workspace, tabs, panes } } }), stderr: "" };
 	}

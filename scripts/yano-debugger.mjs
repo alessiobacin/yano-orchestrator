@@ -331,6 +331,14 @@ function findOrCreateDebuggerWorkspace(snapshot, root, dryRun = false) {
 	return { workspace, created: true };
 }
 
+function closeUnusedInitialTab(snapshot, workspaceId, keepTabId) {
+	const tab = (snapshot?.tabs || []).find((item) => item.workspace_id === workspaceId && item.tab_id !== keepTabId && /^(1|\d+)$/.test(item.label || ""));
+	if (!tab) return;
+	const pane = (snapshot?.panes || []).find((item) => item.tab_id === tab.tab_id);
+	const agent = pane && (snapshot?.agents || []).find((item) => item.pane_id === pane.pane_id);
+	if (!agent || ["done", "offline", "unknown"].includes(String(agent.agent_status || "").toLowerCase())) spawnSync("herdr", ["tab", "close", tab.tab_id], { encoding: "utf8" });
+}
+
 function launchHerdrWorker({ project, root, db, row, intervalMs, dryRun }) {
 	const workspaceRoot = path.join(traceRoot(), "agent-workspaces", "yano-debugger");
 	fs.mkdirSync(workspaceRoot, { recursive: true, mode: 0o700 });
@@ -368,6 +376,7 @@ function launchHerdrWorker({ project, root, db, row, intervalMs, dryRun }) {
 	const timestamp = now();
 	db.prepare("UPDATE debugger_projects SET workspace_id = ?, worker_tab_id = ?, worker_pane_id = ?, worker_instance = ?, worker_status = ?, interval_ms = ?, updated_at = ? WHERE project_key = ?")
 		.run(workspace.workspace_id, tab.tab_id, pane.pane_id, instance, "running", intervalMs, timestamp, project.key);
+	closeUnusedInitialTab(herdrSnapshot(), workspace.workspace_id, tab.tab_id);
 	return { workspace_id: workspace.workspace_id, tab_id: tab.tab_id, pane_id: pane.pane_id, instance, command, dry_run: dryRun };
 }
 

@@ -202,6 +202,9 @@ function ensureSchedulerWorkspace(spawn = spawnSync) {
 		}
 	}
 	if (!pane?.pane_id) fail("Herdr non ha restituito il pane della tab yano-scheduler.");
+	snapshot = herdrSnapshot(spawn) || snapshot;
+	const initial = snapshot?.tabs?.find((item) => item.workspace_id === workspace.workspace_id && item.tab_id !== tab.tab_id && /^(1|\d+)$/.test(item.label || ""));
+	if (initial) spawn("herdr", ["tab", "close", initial.tab_id], { encoding: "utf8", maxBuffer: 1_000_000 });
 	return { workspace, tab, pane };
 }
 function superviseAgent(store, now, spawn = spawnSync) {
@@ -224,7 +227,12 @@ function superviseAgent(store, now, spawn = spawnSync) {
 	const composed = spawn(process.execPath, [path.join(PACKAGE_ROOT, "scripts", "launch-planner.mjs"), "--instance", SCHEDULER_INSTANCE, "--role", "scheduler", "--json", "--print-only"], { cwd: PACKAGE_ROOT, encoding: "utf8", maxBuffer: 1_000_000, env: process.env });
 	let args;
 	try { args = JSON.parse(composed.stdout || "").args; } catch { return { running: false, recovered: true, instance: SCHEDULER_INSTANCE, status: 1, error: `impossibile comporre il comando Pi scheduler: ${(composed.stderr || composed.stdout || "risposta vuota").trim()}` }; }
-	const result = spawn("herdr", ["agent", "start", SCHEDULER_AGENT_NAME, "--kind", "pi", "--pane", target.pane.pane_id, "--", ...args], { cwd: PACKAGE_ROOT, encoding: "utf8", maxBuffer: 1_000_000, env: process.env });
+	// Do not use `herdr agent start` here: Herdr infers the agent kind from the
+	// tab label and can classify scheduler-service as a legacy non-Pi kind.
+	// Starting Pi explicitly in the owned pane is the same reliable path used by
+	// the global watcher/debugger services.
+	const command = ["pi", ...args].map(shellQuote).join(" ");
+	const result = spawn("herdr", ["pane", "run", target.pane.pane_id, `exec ${command}`], { cwd: PACKAGE_ROOT, encoding: "utf8", maxBuffer: 1_000_000, env: process.env });
 	const after = herdrSnapshot(spawn);
 	const started = after?.agents?.find((agent) => agent.pane_id === target.pane.pane_id && isLivePi(agent));
 	const running = result.status === 0 || Boolean(started);

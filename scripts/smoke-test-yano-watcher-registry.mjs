@@ -21,7 +21,7 @@ try {
 	const initialized = await call("init", "--project", "llmproxy", "--lookback-ms", "3600000", "--json");
 	assert.equal(initialized.project.interval_ms, 300000, "un watcher senza override usa cinque minuti");
 	assert.equal(initialized.project.lookback_ms, 3600000);
-	assert.equal(initialized.project.worker_status, "stopped");
+	assert.equal(initialized.project.worker_status, "running");
 
 	const once = await call("start", "--once", "--json");
 	assert.equal(once.once, true);

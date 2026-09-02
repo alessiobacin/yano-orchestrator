@@ -69,6 +69,12 @@ function ensureService(service) {
 	const command = ["pi", ...args].map(shellQuote).join(" ");
 	const started = run("herdr", ["pane", "run", pane.pane_id, `exec ${command}`], { cwd: PACKAGE_ROOT });
 	const after = snapshot();
+	const initial = after?.tabs?.find((item) => item.workspace_id === workspace.workspace_id && item.tab_id !== tab.tab_id && /^(1|\d+)$/.test(item.label || ""));
+	if (initial) {
+		const initialPane = after?.panes?.find((item) => item.tab_id === initial.tab_id);
+		const initialAgent = initialPane && after?.agents?.find((item) => item.pane_id === initialPane.pane_id);
+		if (!initialAgent || ["done", "offline", "unknown"].includes(String(initialAgent.agent_status || "").toLowerCase())) run("herdr", ["tab", "close", initial.tab_id]);
+	}
 	const live = after?.agents?.find((item) => item.pane_id === pane.pane_id && isLive(item));
 	return { service: service.instance, running: Boolean(live), recovered: true, workspace_id: workspace.workspace_id, tab_id: tab.tab_id, pane_id: pane.pane_id, error: live || started.status === 0 ? null : (started.stderr || started.stdout || "Herdr non ha avviato l'agente").trim() };
 }

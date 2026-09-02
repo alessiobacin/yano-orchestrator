@@ -165,6 +165,15 @@ function closeHerdrTab(tabId) {
 		: { closed: false, tab_id: tabId, error: (result.stderr || result.stdout || "Herdr non ha chiuso la tab").trim() };
 }
 
+function closeUnusedInitialTab(snapshot, workspaceId, keepTabId) {
+	const initial = (snapshot?.tabs || []).find((tab) => tab.workspace_id === workspaceId && tab.tab_id !== keepTabId && /^(1|\d+)$/.test(tab.label || ""));
+	if (!initial) return null;
+	const pane = (snapshot?.panes || []).find((item) => item.tab_id === initial.tab_id);
+	const agent = pane && (snapshot?.agents || []).find((item) => item.pane_id === pane.pane_id);
+	if (agent && !["done", "offline", "unknown"].includes(String(agent.agent_status || "").toLowerCase())) return null;
+	return closeHerdrTab(initial.tab_id);
+}
+
 function projectRuns(root) {
 	const db = openProjectDatabase(root);
 	if (!db) return { available: false, runs: [] };
@@ -204,8 +213,17 @@ function plannerAgentsInWorkspace(snapshot, workspaceId, root) {
 	return (snapshot?.agents || []).filter((agent) =>
 		agent.workspace_id === workspaceId &&
 		path.resolve(agent.cwd || "") === path.resolve(root) &&
-		/planner/i.test(`${agent.terminal_title_stripped || ""} ${agent.terminal_title || ""} ${agent.name || ""}`),
+		(plannerLabelForAgent(snapshot, agent) || /planner/i.test(`${agent.terminal_title_stripped || ""} ${agent.terminal_title || ""} ${agent.name || ""}`)),
 	);
+}
+
+// Herdr can expose a live Pi pane without copying Pi's instance name into
+// `agent.name` (notably after a restart). The tab label is the durable Yano
+// identity in that case; ignoring it made every healthy planner look missing
+// and caused a new recovery tab to be created on every supervisor pass.
+function plannerLabelForAgent(snapshot, agent) {
+	const tab = snapshot?.tabs?.find((item) => item.tab_id === agent.tab_id);
+	return Boolean(tab && /^planner(?:-\d+)?$/i.test(tab.label || ""));
 }
 
 function plannerStalled(run) {
@@ -355,6 +373,7 @@ function launchHerdrWorker({ project, root, db, row, intervalMs, lookbackMs, dry
 	const timestamp = now();
 	db.prepare("UPDATE watcher_projects SET workspace_id = ?, worker_tab_id = ?, worker_pane_id = ?, worker_instance = ?, worker_status = ?, interval_ms = ?, lookback_ms = ?, updated_at = ? WHERE project_key = ?")
 		.run(workspace.workspace_id, tab.tab_id, pane.pane_id, instance, "running", intervalMs, lookbackMs, timestamp, project.key);
+	closeUnusedInitialTab(herdrSnapshot(), workspace.workspace_id, tab.tab_id);
 	return { workspace_id: workspace.workspace_id, tab_id: tab.tab_id, pane_id: pane.pane_id, instance, command, dry_run: dryRun };
 }
 
@@ -579,6 +598,22 @@ function externalWorkerRecovery(snapshot) {
 	return results;
 }
 
+function pruneOrphanWatcherTabs(snapshot, rows) {
+	if (!snapshot) return [];
+	const knownRoots = new Set(rows.map((row) => path.resolve(row.root)));
+	const removed = [];
+	for (const tab of snapshot.tabs || []) {
+		if (!/^watcher-/i.test(tab.label || "")) continue;
+		const pane = (snapshot.panes || []).find((item) => item.tab_id === tab.tab_id);
+		const root = pane?.cwd ? path.resolve(pane.cwd) : null;
+		if (!root || (root !== path.resolve(traceRoot()) && !knownRoots.has(root) && !fs.existsSync(root))) {
+			const closed = closeHerdrTab(tab.tab_id);
+			removed.push({ tab_id: tab.tab_id, label: tab.label, root, ...closed });
+		}
+	}
+	return removed;
+}
+
 function activateDefaultWorkers(db, row) {
 	// Every registered project is visible by default. Only `paused` is an
 	// explicit per-project opt-out; `stopped` is a recoverable stale state.
@@ -618,6 +653,7 @@ function supervise(db) {
 	return withSupervisorLock(() => {
 		const rows = db.prepare("SELECT * FROM watcher_projects ORDER BY updated_at DESC").all();
 		const snapshot = herdrSnapshot();
+		const orphan_tabs_removed = pruneOrphanWatcherTabs(snapshot, rows);
 		const identityConflicts = snapshot ? findAgentIdentityConflicts(snapshot) : [];
 		for (const conflict of identityConflicts) {
 			const row = rows.find((candidate) => path.resolve(candidate.root) === path.resolve(conflict.root));
@@ -631,6 +667,7 @@ function supervise(db) {
 			activated,
 			global_services,
 			external_workers: externalWorkerRecovery(snapshot),
+			orphan_tabs_removed,
 			identity_conflicts: identityConflicts,
 			errors: formatAgentIdentityConflicts(identityConflicts),
 		};

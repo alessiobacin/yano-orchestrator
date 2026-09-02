@@ -403,3 +403,9 @@ the global Yano data-root, and returns a job id. Manage it with `yano cron
 The global one-minute supervisor restores the `yano-scheduler` Herdr agent
 after a reboot or closed tab, then dispatches due jobs to a planner in the
 job's project. A scheduled task never bypasses playbook approval gates.
+### Identità degli agenti
+
+Prima di creare un agente, Yano verifica la coppia canonica `project-root` +
+`instance` e rifiuta i duplicati. I planner multipli devono essere numerati
+(`planner-01`, `planner-02`, ...). Per audit e collisioni già presenti:
+`yano watcher supervise --json`.

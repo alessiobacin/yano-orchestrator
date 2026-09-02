@@ -395,3 +395,5 @@ The watcher supervisor also reconciles registered project SQLite runs. After a
 Herdr/process loss it recreates the workspace and `planner-01` for every
 non-finalized run, then sends a recovery prompt with trace, ticket and worktree
 context. Once all runs are finalized it closes that project's watcher tab.
+yano watcher supervise --json
+# verifica collisioni di identità e planner duplicati senza crearne altri

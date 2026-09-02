@@ -195,6 +195,7 @@ yano watch --once --context-compact-ratio 0.82
 yano watcher start --project-root "$PWD"   # persistent registry: Herdr-supervised yano watch --away
 yano watcher cron install                  # installa manualmente il self-heal ogni minuto
 yano watcher status --json                 # self-heal watcher + planner dei run incompleti
+yano watcher supervise --json              # verifica anche collisioni di identità live
 yano leave --yes                            # dalla root: rimuove definitivamente solo il watcher del progetto
 yano watcher projects --all --json          # tutti i progetti registrati, anche senza task attivi
 yano watcher resume --project-root /path/progetto  # riattiva esplicitamente un progetto idle

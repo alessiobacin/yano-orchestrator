@@ -2605,6 +2605,38 @@ export default function (pi: ExtensionAPI) {
 		capacity: number;
 		skills: string[]; // resolved role+instance skills (architecture.md §3-4) — used by ticket_claim's capability match
 	} | null = null;
+	let identityLeasePath: string | null = null;
+	function acquireIdentityLease(root: string, project: string, instance: string): void {
+		const key = crypto.createHash("sha256").update(`${projectKey(root, project)}\0${instance}`).digest("hex");
+		const dir = path.join(traceRoot(), "agent-identities");
+		fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+		const leasePath = path.join(dir, `${key}.lock`);
+		try {
+			const fd = fs.openSync(leasePath, "wx", 0o600);
+			fs.writeFileSync(fd, JSON.stringify({ pid: process.pid, root, project, instance, created_at: nowIso() }));
+			fs.closeSync(fd);
+			identityLeasePath = leasePath;
+			return;
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+		}
+		let stale = false;
+		try {
+			const lease = JSON.parse(fs.readFileSync(leasePath, "utf8"));
+			try { process.kill(Number(lease.pid), 0); } catch { stale = true; }
+		} catch { stale = true; }
+		if (!stale) throw new Error(`identità già in uso nel progetto: ${instance} (${root}); avvio rifiutato per evitare due agenti con lo stesso nome`);
+		try { fs.unlinkSync(leasePath); } catch { /* another supervisor may have repaired it */ }
+		const fd = fs.openSync(leasePath, "wx", 0o600);
+		fs.writeFileSync(fd, JSON.stringify({ pid: process.pid, root, project, instance, created_at: nowIso() }));
+		fs.closeSync(fd);
+		identityLeasePath = leasePath;
+	}
+	function releaseIdentityLease(): void {
+		if (!identityLeasePath) return;
+		try { fs.unlinkSync(identityLeasePath); } catch { /* best effort */ }
+		identityLeasePath = null;
+	}
 	let client: MqttClient | null = null;
 	let T: ReturnType<typeof topics> | null = null;
 	const presence = new Map<string, PresenceCard>();
@@ -3209,6 +3241,13 @@ export default function (pi: ExtensionAPI) {
 			capacity: resolved.capacity,
 			skills: resolved.skills,
 		};
+		try {
+			acquireIdentityLease(cwd, project, flags.instance);
+		} catch (error) {
+			ctx.ui?.notify?.(`orchestrator: avvio rifiutato — ${error instanceof Error ? error.message : String(error)}`, "error");
+			identity = null;
+			return;
+		}
 		T = topics(project, process.env.PI_ORCH_TEST_NO_EXIT === "1" ? project : projectKey(cwd, project));
 
 		// `yano start` supplies an expected mode. Enforce it at the extension
@@ -7058,6 +7097,7 @@ export default function (pi: ExtensionAPI) {
 		if (currentCtx?.hasUI) {
 			try { currentCtx.ui.setWidget("orchestrator-pool", undefined); } catch { /* ignore */ }
 		}
+		releaseIdentityLease();
 		if (yanoStorage) {
 			try { yanoStorage.close(); } catch { /* ignore */ }
 			yanoStorage = null;

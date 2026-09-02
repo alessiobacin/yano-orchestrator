@@ -5,6 +5,18 @@ crea un ticket solo quando il trace contiene un segnale attribuibile al flusso
 interno di Yano; non trasforma un test applicativo fallito in un bug di Yano.
 I file seguono la convenzione del tracker locale: `01-...`, `02-...`, ecc.
 
+## Controllo delle identità
+
+Ad ogni supervisione il watcher confronta le identità live con la root del
+progetto e segnala agenti duplicati o planner non numerati. La scansione non
+avvia un secondo planner quando trova una collisione: restituisce
+`recovery: "identity_conflict"` e registra `watcher_identity_conflict` nel
+trace. Anche `yano start` applica lo stesso rifiuto prima di creare il processo
+
+```bash
+yano watcher supervise --json
+```
+
 ## Configurazione
 
 Per un'installazione globale, salva la configurazione nel profilo utente:
@@ -178,7 +190,8 @@ anche i run SQLite: se un planner non ha prodotto attività durevole per 15
 minuti e non attende una decisione dell'utente, lo ripristina esclusivamente
 nel workspace Herdr con l'etichetta del progetto (mai in un workspace condiviso
 di uno specialista). I progetti completati, oppure privi di run oltre il breve
-periodo di grazia iniziale, vengono fermati e la loro tab watcher viene chiusa.
+periodo di grazia iniziale, restano comunque visibili: solo `pause` nasconde
+temporaneamente la tab e `leave` rimuove definitivamente il controllo.
 Il job viene installato automaticamente solo dal lifecycle di un'installazione
 globale di Yano, non da `yano start`; un lock impedisce recovery concorrenti.
 `pause`/`resume` sospendono/riattivano senza
@@ -196,7 +209,7 @@ registrati. Se un run è ancora `active`, oppure è `completed` ma non ha ancora
 `finalization_status=finalized`, la perdita di Herdr provoca la ricreazione del
 workspace e di `planner-01`; il planner riceve un prompt di recovery con trace,
 ticket e worktree da verificare. Quando tutti i run risultano finalizzati, la
-tab `watcher-<project>` viene chiusa automaticamente. Una pausa esplicita
+tab `watcher-<project>` resta aperta senza generare recovery. Una pausa esplicita
 resta rispettata. Nella stessa passata il supervisore ripristina anche i worker
 globali con intento durevole: proposte Architect installate, anche nella fase
 `ready_ephemeral`, debugger `running`, analisi Suggester pendenti e lo
@@ -273,6 +286,11 @@ L'avviso di Pi `Using custom model id` è atteso quando Pi conosce il solo
 modello generico `llmproxy`: non equivale a un errore. Il watcher considera
 fallimento solo un 4xx/5xx del modello, ad esempio `is returning: 400`, e in
 quel caso registra `model-runtime-fallback`.
+
+Un watcher registrato resta attivo anche se il progetto non ha ancora
+`orchestrator.db`: la scansione segnala `waiting_for_initialization` e non lo
+disattiva per timeout. Resta aperto anche quando non esistono run attivi,
+finché non viene usato `pause` o `leave`.
 
 Il watcher persistente mantiene anche la sottoscrizione MQTT agli eventi di
 fine turno (`planner_task_completed`) e di fine run (`run_completed`). Ricevuto

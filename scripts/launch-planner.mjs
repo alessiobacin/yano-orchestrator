@@ -78,6 +78,7 @@ import YAML from "yaml";
 import { ensureRolePrerequisites, isSupportedNodeRuntime } from "./doctor.mjs";
 import { globalDataPath } from "./yano-config.mjs";
 import { TRACE_MODES, canonicalProjectScope, getTraceConfig, resolveTraceProject, setTraceMode, slugify, traceRoot } from "./yano-trace-storage.mjs";
+import { assertAgentIdentityAvailable } from "./yano-agent-identity.mjs";
 
 // Le 6 skill vendorizzate destinate al ruolo planner — vedi
 // skills-vendor/mattpocock/VERSION.md per la motivazione di ciascuna
@@ -504,6 +505,25 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 				`Esegui prima \`yano init --name "<nome progetto>"\` (o \`node scripts/create-project.mjs ...\` in locale), poi rilancia da lì.`,
 		);
 		process.exit(1);
+	}
+	// Common gate for every Yano-created role. It runs before a process or a
+	// Herdr tab is created, and therefore rejects concurrent duplicate starts.
+	if (!printOnly) {
+		const instanceIndex = passthrough.indexOf("--instance");
+		const instance = instanceIndex >= 0 ? passthrough[instanceIndex + 1] : null;
+		if (!instance) {
+			console.error("launch-planner: --instance è obbligatorio per un agente Yano.");
+			process.exit(1);
+		}
+		let snapshot = null;
+		try {
+			const result = spawnSync("herdr", ["api", "snapshot"], { encoding: "utf8", maxBuffer: 4_000_000 });
+			if (result.status === 0) {
+				const parsed = JSON.parse(result.stdout || "");
+				snapshot = parsed?.result?.snapshot || parsed?.result || parsed;
+			}
+		} catch { /* A plain terminal launch can work without Herdr. */ }
+		if (snapshot) assertAgentIdentityAvailable({ snapshot, root: cwd, instance, role });
 	}
 
 	// A launcher-created session must have a complete forensic trail unless the

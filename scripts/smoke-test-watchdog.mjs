@@ -39,6 +39,7 @@ import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 import assert from "node:assert/strict";
 import mqtt from "mqtt";
+import { projectKey } from "./yano-trace-storage.mjs";
 
 const execFileP = promisify(execFile);
 const PROJECT_ROOT = path.resolve(new URL(".", import.meta.url).pathname, "..");
@@ -197,7 +198,15 @@ async function runScenario(cwd, project) {
 
 	const runResult = await planner.call("run_create", { objective: "watchdog test objective", domain: "software" });
 	const runId = runResult.details.run.id;
-	await subClient.subscribeAsync(`pi/${project}/runs/${runId}/events`, { qos: 0 });
+	// The real extension publishes run events on the canonical scope
+	// (projectKey(cwd, project), a workspace-<hash> derived from the root —
+	// see extensions/orchestrator.ts:3251's `T = topics(project, ... ?
+	// project : projectKey(cwd, project))`), not the raw human-facing
+	// `project` string. Subscribing to the raw name here silently listens on
+	// the wrong topic forever (found by this audit: this exact assertion
+	// always failed, deterministically, with a real broker measured at 40ms
+	// round-trip latency — not a timing/flakiness issue).
+	await subClient.subscribeAsync(`pi/${projectKey(cwd, project)}/runs/${runId}/events`, { qos: 0 });
 
 	const ticketResult = await planner.call("ticket_create", { run_id: runId, title: "stuck-on-purpose ticket" });
 	const ticketId = ticketResult.details.ticket.id;

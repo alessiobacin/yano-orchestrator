@@ -39,6 +39,7 @@ import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 import assert from "node:assert/strict";
 import mqtt from "mqtt";
+import { projectKey } from "./yano-trace-storage.mjs";
 
 const execFileP = promisify(execFile);
 const PROJECT_ROOT = path.resolve(new URL(".", import.meta.url).pathname, "..");
@@ -370,7 +371,12 @@ async function runScenario(cwd, project) {
 	const approvalAck = await planner.call("playbook_effect_ack", { id: approvalEffect.id, generation: 2, idempotency_key: "approval-ack-v1" });
 	ok(approvalAck.details.effect.status === "dispatched", "human approval effect is acknowledged only after the hold is answered");
 
-	await sub.subscribeAsync(`pi/${project}/runs/${runId}/events`);
+	// See extensions/orchestrator.ts:393's topics(project, scope) — every
+	// topic (including runEvents) is built on `scope`
+	// (projectKey(cwd, project), a workspace-<hash> derived from the root),
+	// not the raw `project` string. Subscribing to the raw name silently
+	// listens on the wrong topic forever.
+	await sub.subscribeAsync(`pi/${projectKey(cwd, project)}/runs/${runId}/events`);
 
 	const specResult = await planner.call("spec_create", { run_id: runId, title: "Batch verification spec", content: "## Objective\nVerify N items in one call.\n" });
 	const specId = specResult.details.spec.id;

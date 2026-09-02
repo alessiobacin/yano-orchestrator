@@ -27,6 +27,7 @@ import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 import assert from "node:assert/strict";
 import mqtt from "mqtt";
+import { projectKey } from "./yano-trace-storage.mjs";
 
 const execFileP = promisify(execFile);
 const PROJECT_ROOT = path.resolve(new URL(".", import.meta.url).pathname, "..");
@@ -175,7 +176,12 @@ async function main() {
 		try { const c = JSON.parse(payload.toString()); if (c?.instance) cardHolder[c.instance] = c; } catch { /* ignore */ }
 	};
 	subClient.on("message", onStatus);
-	await subClient.subscribeAsync("pi/team-smoke/agents/+/status", { qos: 1 });
+	// The real extension publishes retained status on the canonical scope
+	// (projectKey(cwd, project), a workspace-<hash> derived from the root —
+	// see extensions/orchestrator.ts:393's topics(project, scope)), not the
+	// raw "team-smoke" literal. Subscribing to the raw name silently listens
+	// on the wrong topic forever.
+	await subClient.subscribeAsync(`pi/${projectKey(cwd, "team-smoke")}/agents/+/status`, { qos: 1 });
 	await sleep(800);
 	const card1 = cardHolder["planner-01"];
 	const card2 = cardHolder["planner-02"];

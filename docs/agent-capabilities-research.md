@@ -2,17 +2,27 @@
 
 ## Decision
 
-The active core is exactly nine roles: `planner`, `coder`, `reviewer`,
-`frontend-developer`, `frontend-reviewer`, `docs-sync`, `tdd-agent`,
-`architecture-diagrammer`, and `security-evaluator`.
+The active core is exactly eleven roles (updated during the December 2026
+repository audit against the current `agents/roles.yaml`): `planner`, `coder`,
+`reviewer`, `debugger`, `tdd-agent`, `architecture-diagrammer`, `docs-sync`,
+`security-evaluator`, `frontend-developer`, `frontend-reviewer`, and
+`scheduler`. Ten of them have `activation: always`; `scheduler` joins the core
+team (the persistent cron/scheduler worker that supervises recurring jobs and
+keeps `yano-scheduler` alive). The `debugger` role has `activation: always`
+but belongs to the `debugger`/`quality` teams rather than `core`: it is the
+external bug-diagnosis agent behind `yano debugger`, so it is always-on
+infrastructure even though it is not a planner-team member.
 
-The remaining sixteen roles are specialists with `activation: lazy`. They are
-not members of `core`; the planner selects and launches them only when the
-task requires their capability. `postman-collection-creator` was merged into
-`openapi-writer`, because an API contract and its executable collection are
-one delivery surface. `risk-assessor` was removed: its passive observation
-overlapped planner/reviewer and had no deterministic artifact or gate. A
-future risk check should be a planner policy/checklist instead.
+The remaining thirty-two roles are specialists with `activation: lazy`. They
+are not members of `core`; the planner selects and launches them only when the
+task requires their capability. Historical roster decisions that still hold:
+`postman-collection-creator` was merged into `openapi-writer`, because an API
+contract and its executable collection are one delivery surface;
+`risk-assessor` was removed: its passive observation overlapped
+planner/reviewer and had no deterministic artifact or gate — a future risk
+check should be a planner policy/checklist instead. Later additions followed
+the same capability-first rule (for example the `qa-inventory-analyst` /
+`qa-functional-verifier` pair for the `qa-full-audit` playbook).
 
 ## Capability policy
 

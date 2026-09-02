@@ -8,7 +8,7 @@ architettura, guide, quick guide, ADR, note, cheat-sheet e diagramma Mermaid;
 per un backend crea anche una collection Postman JSON. Il report elenca tutte
 le categorie e dichiara Postman non applicabile quando non c'è backend.
 
-This document is the human-readable companion to [`architecture.mmd`](./architecture.mmd), the Mermaid source diagram for the current system. The detailed command flows are split into [`docs/diagramma/`](diagramma/README.md), so each operational path can be read without loading the whole architecture graph.
+This document is the human-readable companion to [`architecture.mmd`](./architecture.mmd), the Mermaid source diagram for the current system. The detailed command flows are split into [`docs/diagram/`](diagram/README.md), so each operational path can be read without loading the whole architecture graph.
 
 ## Purpose
 

@@ -9,7 +9,7 @@
 //
 // `yano debugger serve` exposes the same lifecycle over a local-only REST
 // API (127.0.0.1 by default), for callers that are not a shell — a Postman
-// collection lives in `postman/yano-debugger.postman_collection.json`. The
+// collection lives in `docs/postman/yano-debugger.postman_collection.json`. The
 // REST handlers call the exact same functions as the CLI switch below, so
 // the two surfaces cannot drift apart.
 
@@ -253,7 +253,7 @@ function usage() {
 		"                                                    YANO_DEBUGGER_API_PORT / --port; imposta",
 		"                                                    YANO_DEBUGGER_API_TOKEN per richiedere",
 		"                                                    'Authorization: Bearer <token>'). Collection",
-		"                                                    Postman: postman/yano-debugger.postman_collection.json",
+		"                                                    Postman: docs/postman/yano-debugger.postman_collection.json",
 		"",
 		"Stati diagnostici: reported, triaged, reproducing, not_reproducible, blocked, rejected, duplicate",
 		"Il debugger non corregge, deploya o promuove: il planner apre il normale flusso di sviluppo/deployment.",

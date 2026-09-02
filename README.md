@@ -237,7 +237,7 @@ yano debugger start             # avvia/riusa il worker nel workspace Herdr yano
 yano debugger start --once --json # preflight read-only senza Herdr
 yano debugger status --json     # stato del worker e dei bug del progetto
 yano debugger status --bug-id BUG-... --json # dettaglio bug + eventi diagnostici
-yano debugger serve --port 4177 # API REST (un'unica istanza, molti progetti — postman/yano-debugger.postman_collection.json)
+yano debugger serve --port 4177 # API REST (un'unica istanza, molti progetti — docs/postman/yano-debugger.postman_collection.json)
 yano auto-improve init --project-root /path/progetto --interval 5d --notify auto
 yano auto-improve start --project-root /path/progetto
 yano auto-improve start --project-root /path/progetto --once --dry-run --json

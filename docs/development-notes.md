@@ -5006,3 +5006,29 @@ Ora sia il watchdog interno sia `yano watch` escludono dai controlli di stall e
 offline i run con un `decision_hold` umano aperto. Il ticket resta osservabile
 nel DB e riprende normalmente quando il planner riceve la risposta; non viene
 più fallito o rilanciato durante una pausa deliberatamente richiesta.
+
+## Revisione 63 — allineamento dei percorsi documentali canonici: `docs/postman/` e `docs/diagram/`
+
+Audit `clean-repo` (round repo-curator) con piano approvato dall'utente: le due
+equivalenze documentali volontarie sono state allineate ai nomi canonici della
+matrice in `docs/documentation-sync.md`, preservando la history con `git mv`.
+
+- `postman/` (root) → **`docs/postman/`**: la collection e l'environment del
+  debugger si trovano ora nella posizione canonica della categoria `postman`.
+  Riferimenti aggiornati: `README.md` (albero root + comando `yano debugger
+  serve`), `docs/cheat-sheet/26-debugger.md`, `docs/quick_guides/12-yano-debugger.md`,
+  `docs/yano-debugger.md`, `scripts/yano-debugger.mjs` (commento + output `--help`),
+  `docs/architecture.mmd` (nodo `POSTMAN_COLLECTION`), `playbooks/clean-repo.usage.md`.
+  `scripts/create-project.mjs` verificato: NON copia `postman/` nei progetti
+  scaffoldati, nessun aggiornamento necessario.
+- `docs/diagramma/` → **`docs/diagram/`**: i sei `.mmd` operativi e il loro
+  README vivono ora nel percorso canonico della categoria `diagram` (la regola
+  `docs/diagram` citata da README e quick-start si applica ora anche a questo
+  repo stesso). Riferimenti aggiornati: `scripts/check-documentation-sync.mjs`
+  (path esatti righe 33/64/65), `docs/architecture.md` (link a `diagram/README.md`),
+  `playbooks/clean-repo.usage.md` (sezione equivalenze), `prompts/docs-sync.md`
+  (esempio equivalente rimasto: solo `docs/quick_guides`).
+
+Le note storiche di questo file (Revisioni precedenti) conservano i percorsi
+vecchi: sono registro, non superficie operativa. Nessuna rimozione di file è
+stata eseguita: il piano approvato declinava tutte le voci R del change-plan.

@@ -30,7 +30,7 @@ const requiredDocs = [
 	"docs/quick-start.md",
 	"docs/architecture.md",
 	"docs/architecture.mmd",
-	"docs/diagramma/05-trace-db-gantt.mmd",
+	"docs/diagram/05-trace-db-gantt.mmd",
 	"docs/quick_guides/19-inventario-agenti-e-gantt.md",
 	"skills-vendor/yano/yano-cli/SKILL.md",
 	"skills-vendor/yano/yano-cli/references/command-reference.md",
@@ -61,8 +61,8 @@ requireText("docs/architecture.md", /10000-19999/);
 requireText("docs/architecture.md", /YANO_DATA_DIR>\/gantt\/instances\.json/);
 requireText("docs/architecture.mmd", /10000-19999/);
 requireText("docs/architecture.mmd", /gantt\/instances\.json/);
-requireText("docs/diagramma/05-trace-db-gantt.mmd", /10000-19999/);
-requireText("docs/diagramma/05-trace-db-gantt.mmd", /--persistent/);
+requireText("docs/diagram/05-trace-db-gantt.mmd", /10000-19999/);
+requireText("docs/diagram/05-trace-db-gantt.mmd", /--persistent/);
 requireText("docs/quick_guides/19-inventario-agenti-e-gantt.md", /--persistent --open/);
 requireText("docs/quick_guides/19-inventario-agenti-e-gantt.md", /--links/);
 requireText("docs/quick_guides/19-inventario-agenti-e-gantt.md", /10000-19999/);

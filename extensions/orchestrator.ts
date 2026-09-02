@@ -671,6 +671,70 @@ prossima azione o il destinatario già coinvolto. Se non hai potuto eseguire il
 lavoro, avvisa ugualmente il planner con prerequisito mancante ed evidenza.
 Non terminare il turno finché questo handoff non è stato inviato con successo.`;
 
+// Shared fragments (prompt-optimization audit): these paragraphs were
+// byte-for-byte identical across several role prompt files (coder.md,
+// reviewer.md, specialist.md, docs-sync.md, security-evaluator.md,
+// frontend-developer.md) — duplicated token cost on every single launch of
+// those roles, not a one-time cost. Substituted via {{PLACEHOLDER}} tokens
+// in the .md files themselves, same mechanism already used for
+// {{INSTANCE}}/{{BRIEF}}/{{CAPABILITIES}} below. A file that doesn't contain
+// a given placeholder is completely unaffected (replaceAll is a no-op).
+const SLUG_REMINDER =
+	"**Passa sempre `slug` a `agent_send`**: aggiunge in automatico una riga di\n" +
+	"evento al report con orario e stato di tutti gli agenti in quel momento —\n" +
+	"non serve che tu scriva nulla per questo, ma serve che tu passi `slug`.";
+
+// Only for roles that normally EDIT files themselves (coder, generic
+// specialist, docs-sync, frontend-developer). reviewer.md and
+// security-evaluator.md keep their own distinct tool paragraph inline
+// (they frame file_claim/file_release as an occasional exception, "se devi
+// modificare TU STESSO", since they are read-mostly roles — a real
+// difference in emphasis, not just wording, so not consolidated here).
+const WORKER_TOOLS_INTRO =
+	"Hai a disposizione i tool `agent_list`, `agent_send`, `agent_get`, `agent_await`,\n" +
+	"`agent_publish_event`, `agent_activity` per comunicare con gli altri agenti via MQTT,\n" +
+	"il tool `worktree_create` per creare/riusare il worktree git isolato di un task,\n" +
+	"`report_append` per aggiungere sezioni al file di report senza rischiare di\n" +
+	"cancellare quelle di altri agenti, e `file_claim`/`file_release` per coordinarti sui\n" +
+	"file quando altri agenti lavorano lo stesso worktree in parallelo (vedi sotto),\n" +
+	"oltre ai normali tool per leggere/scrivere file.";
+
+const DIAGRAM_TIP =
+	"## Prima di iniziare: leggi il diagramma, se esiste (Revisione 28)\n\n" +
+	"Prima di esplorare il codice esistente da zero, controlla se esiste\n" +
+	"`.pi/extensions/yano-orchestrator/diagrams/architecture.mmd` (nella\n" +
+	"directory principale del progetto, non nel worktree — è uno stato\n" +
+	"persistente cross-task, aggiornato da `architecture-diagrammer` o da\n" +
+	"`docs-sync`) e leggilo: ti dà un'orientamento immediato sull'architettura\n" +
+	"corrente senza dover ricostruirla leggendo ogni file — risparmia token. Non\n" +
+	"è garantito che esista — se manca, procedi come sempre.";
+
+const TURN_CLOSE_NOTE =
+	"## Prima di concludere il turno: dillo sempre (Revisione 48)\n\n" +
+	"Richiesta esplicita dell'operatore: nella tua ULTIMA risposta di questo\n" +
+	"turno — quella visibile nel pannello/terminale di questa istanza, non solo\n" +
+	"nel messaggio MQTT che mandi con `agent_send` o nella sezione che aggiungi\n" +
+	"con `report_append` — di' sempre, in una riga o poche righe, cosa hai appena\n" +
+	"fatto. Chi guarda il pannello di questa istanza deve poter capire l'esito\n" +
+	"senza dover aprire i log MQTT o il file di report.";
+
+// Near-identical across specialist.md, security-evaluator.md, docs-sync.md.
+// coder.md keeps its own wording (it's about the SAME ticket layer but the
+// surrounding numbered list differs enough — "se manca uno dei due" vs "se
+// manca un ticket_id" framing — not consolidated to avoid renumbering risk
+// in a file with its own distinct step sequence).
+const TICKET_CLAIM_STEP0 =
+	"0. **Se il messaggio che ti ha coinvolto include anche un `ticket_id`\n" +
+	"   (Revisione 26 — layer ticket/DAG persistente)**, chiama subito\n" +
+	"   `ticket_claim({ ticket_id })` prima di iniziare — registra questa\n" +
+	"   istanza come assegnataria sul layer persistente, non solo sul piano a\n" +
+	"   fasi del planner. Se rifiuta (ticket già claimato, o capability\n" +
+	"   mancanti), fermati e segnalalo nel report invece di procedere. **Non\n" +
+	"   chiamare mai tu `ticket_complete`**: è il planner a deciderlo, quando\n" +
+	"   giudica il tuo contributo concluso (vedi `prompts/planner.md`), non\n" +
+	"   appena hai finito. Se il messaggio non include un `ticket_id`, procedi\n" +
+	"   normalmente: quel layer resta opzionale dal tuo punto di vista.";
+
 // primaryDir is consulted FIRST, file by file (<role>.md, then specialist.md
 // if roleCfg has a brief) — fallbackDir (pass null to skip it entirely) is
 // consulted only for whichever specific file primaryDir doesn't have. This
@@ -683,8 +747,15 @@ Non terminare il turno finché questo handoff non è stato inviato con successo.
 // project, not just the (new) default of no local copy at all.
 function loadRolePrompt(primaryDir: string, fallbackDir: string | null, role: string, roleCfg?: RoleConfig): string {
 	// Planner/coder/reviewer have their own deliberate terminal handoff
-	// protocol. Every other configured role is a specialist for this rule.
-	const requiresPlannerHandoff = Boolean(roleCfg?.brief) && !["planner", "coder", "reviewer"].includes(role);
+	// protocol. frontend-reviewer is the frontend equivalent of reviewer
+	// (same "final gate before planner" function in the mandatory
+	// planner -> frontend-developer -> frontend-reviewer -> planner flow,
+	// prompts/frontend-reviewer.md) and was missing from this list — the
+	// generic "this is not a final approval" framing of
+	// MANDATORY_SPECIALIST_PLANNER_HANDOFF below is actively misleading for
+	// an approval message that IS the final gate. Every other configured
+	// role is a specialist for this rule.
+	const requiresPlannerHandoff = Boolean(roleCfg?.brief) && !["planner", "coder", "reviewer", "frontend-reviewer"].includes(role);
 	const fromPrimary = readRolePromptFile(primaryDir, role);
 	if (fromPrimary !== null) return requiresPlannerHandoff ? `${fromPrimary}${MANDATORY_SPECIALIST_PLANNER_HANDOFF}` : fromPrimary;
 	if (fallbackDir) {
@@ -3502,7 +3573,12 @@ export default function (pi: ExtensionAPI) {
 			.replaceAll("{{BRIEF}}", roleCfg?.brief || "")
 			.replaceAll("{{CAPABILITIES}}", roleCapabilitiesPrompt(roleCfg))
 			.replaceAll("{{PROJECT}}", identity.project)
-			.replaceAll("{{TEAM}}", identity.team.join(", ")) + rulesPrompt;
+			.replaceAll("{{TEAM}}", identity.team.join(", "))
+			.replaceAll("{{SLUG_REMINDER}}", SLUG_REMINDER)
+			.replaceAll("{{WORKER_TOOLS_INTRO}}", WORKER_TOOLS_INTRO)
+			.replaceAll("{{DIAGRAM_TIP}}", DIAGRAM_TIP)
+			.replaceAll("{{TURN_CLOSE_NOTE}}", TURN_CLOSE_NOTE)
+			.replaceAll("{{TICKET_CLAIM_STEP0}}", TICKET_CLAIM_STEP0) + rulesPrompt;
 		herdrReportAgent(identity.displayName, "working", identity.instance);
 		// had_pending_inbound:false qui è il segnale diagnostico chiave per "un
 		// agente è partito da solo": significa che questo turno sta iniziando

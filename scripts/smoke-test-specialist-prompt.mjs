@@ -77,6 +77,12 @@ function loadRolePrompt(primaryDir, fallbackDir, role, roleCfg) {
 	return { text: `Sei l'agente ${role}, istanza {{INSTANCE}} nel progetto {{PROJECT}}.`, source: "generic-fallback" };
 }
 
+// Revisione 49 — extensions/orchestrator.ts fills 5 more shared-fragment
+// placeholders unconditionally on every role's prompt (SLUG_REMINDER,
+// WORKER_TOOLS_INTRO, DIAGRAM_TIP, TURN_CLOSE_NOTE, TICKET_CLAIM_STEP0), so
+// this mirror must fill them too or block 2/2b/2c/2d/3's "no leftover {{"
+// assertion would fail for any prompt file using them. Content doesn't need
+// to match the real constants verbatim — only that no {{...}} survives.
 function render(text, identity, roleCfg) {
 	const capabilities = `Skill autorizzate: ${(roleCfg?.skills || []).join(", ") || "nessuna skill dichiarata"}\nCLI autorizzate: ${(roleCfg?.cli || []).join(", ") || "nessuna CLI dichiarata"}\nMCP autorizzati: ${(roleCfg?.mcp || []).join(", ") || "nessun MCP dichiarato"}`;
 	return text
@@ -86,7 +92,12 @@ function render(text, identity, roleCfg) {
 		.replaceAll("{{BRIEF}}", roleCfg?.brief || "")
 		.replaceAll("{{CAPABILITIES}}", capabilities)
 		.replaceAll("{{PROJECT}}", identity.project)
-		.replaceAll("{{TEAM}}", identity.team.join(", "));
+		.replaceAll("{{TEAM}}", identity.team.join(", "))
+		.replaceAll("{{SLUG_REMINDER}}", "[slug reminder]")
+		.replaceAll("{{WORKER_TOOLS_INTRO}}", "[worker tools intro]")
+		.replaceAll("{{DIAGRAM_TIP}}", "[diagram tip]")
+		.replaceAll("{{TURN_CLOSE_NOTE}}", "[turn close note]")
+		.replaceAll("{{TICKET_CLAIM_STEP0}}", "[ticket claim step0]");
 }
 
 function main() {

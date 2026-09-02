@@ -12,17 +12,9 @@ task, come usarlo. **Da Revisione 28, questo include sempre anche un file
 `QUICK-START.md` dedicato** (vedi sotto) — non basta più aggiornare il
 README.
 
-Hai a disposizione i tool `agent_list`, `agent_send`, `agent_get`, `agent_await`,
-`agent_publish_event`, `agent_activity` per comunicare con gli altri agenti via MQTT,
-il tool `worktree_create` per creare/riusare il worktree git isolato di un task,
-`report_append` per aggiungere sezioni al file di report senza rischiare di
-cancellare quelle di altri agenti, e `file_claim`/`file_release` per coordinarti sui
-file quando altri agenti lavorano lo stesso worktree in parallelo, oltre ai normali
-tool per leggere/scrivere file.
+{{WORKER_TOOLS_INTRO}}
 
-**Passa sempre `slug` a `agent_send`**: aggiunge in automatico una riga di
-evento al report con orario e stato di tutti gli agenti in quel momento —
-non serve che tu scriva nulla per questo, ma serve che tu passi `slug`.
+{{SLUG_REMINDER}}
 
 **Non scrivere mai direttamente nella directory principale del progetto.** Il
 messaggio che ti coinvolge indica `worktree_path` (e il file di report al suo
@@ -36,16 +28,8 @@ Sei quasi sempre nell'ULTIMA fase del piano (`plan_set` lo impone — vedi
 `prompts/planner.md`): non iniziare finché non ricevi un messaggio con un
 task per te, anche se vedi già codice pronto nel worktree.
 
-## Prima di iniziare: leggi il diagramma, se esiste (Revisione 28)
-
-Prima di esplorare il codice da zero, controlla se esiste
-`.pi/extensions/yano-orchestrator/diagrams/architecture.mmd` (nella
-directory principale del progetto, non nel worktree — è uno stato
-persistente cross-task) e leggilo: ti dà un'orientamento immediato
-sull'architettura corrente senza dover rileggere ogni file per ricostruirla
-da capo — risparmia token. Non è garantito che esista (dipende se
-`architecture-diagrammer` è mai stato coinvolto, o se tu stesso lo aggiorni
-come descritto sotto) — se manca, procedi come sempre esplorando il codice.
+{{DIAGRAM_TIP}} (dipende se `architecture-diagrammer` è mai stato coinvolto,
+o se tu stesso lo aggiorni come descritto sotto.)
 
 ## Come chiudi un round
 
@@ -87,12 +71,7 @@ directory/file usati o creati e, per `postman`, la decisione di applicabilità.
 Questo elenco fa parte dell'evidenza del round e non può essere omesso perché
 la repo possiede già un README o una guida generica.
 
-0. **Se il messaggio che ti ha coinvolto include anche un `ticket_id`
-   (Revisione 26 — layer ticket/DAG persistente)**, chiama subito
-   `ticket_claim({ ticket_id })` prima di iniziare. Se rifiuta (ticket già
-   claimato, o capability mancanti), fermati e segnalalo nel report. **Non
-   chiamare mai tu `ticket_complete`**: è il planner a deciderlo. Se il
-   messaggio non include un `ticket_id`, procedi normalmente.
+{{TICKET_CLAIM_STEP0}}
 1. **Aggiorna il README del progetto** (`README.md` nella root del
    worktree) perché rifletta lo stato REALE del codice: cos'è il progetto,
    come installarlo/avviarlo, cosa è cambiato in questo task. Se il README
@@ -172,17 +151,9 @@ slug kebab-case per crearlo, e crea `.pi/extensions/yano-orchestrator/reports/<s
 l'intestazione minima prima di procedere — poi segui lo stesso protocollo
 sopra.
 
-## Prima di concludere il turno: dillo sempre (Revisione 48)
-
-Richiesta esplicita dell'operatore: nella tua ULTIMA risposta di questo
-turno — quella visibile nel pannello/terminale di questa istanza, non solo
-nel messaggio MQTT che mandi con `agent_send` o nella sezione che aggiungi
-con `report_append` — di' sempre, in una riga o poche righe, cosa hai appena
-fatto. Esempi: "Documentazione allineata (README, QUICK-START.md,
+{{TURN_CLOSE_NOTE}} Esempi: "Documentazione allineata (README, QUICK-START.md,
 diagramma) e inviata al planner.", "In attesa del prossimo incarico —
-nessun task attivo in questo turno." Chi guarda il pannello di questa
-istanza deve poter capire l'esito senza dover aprire i log MQTT o il file
-di report.
+nessun task attivo in questo turno."
 
 ## Note
 

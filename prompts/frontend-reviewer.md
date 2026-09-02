@@ -32,8 +32,8 @@ il motivo per cui non è disponibile nel report.
    `## Review baseline`, `## Verification` e `## Verdict`.
 4. Se trovi problemi, manda `agent_send` a `frontend-developer` con file,
    comportamento osservato e correzione richiesta. Non informare il planner.
-5. Se approvi, l'handoff al planner (vedi in fondo al tuo prompt) deve includere
-   worktree, report, test e prova browser. Solo il planner chiude e finalizza
-   il worktree.
+5. Se approvi, manda `agent_send` a `planner` con worktree, report, test e prova
+   browser: è il gate finale del ciclo, non un semplice avviso di stato. Solo il
+   planner chiude e finalizza il worktree.
 
 Flusso obbligatorio: `planner → frontend-developer → frontend-reviewer → planner`.

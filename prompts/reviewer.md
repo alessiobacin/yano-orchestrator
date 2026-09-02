@@ -9,9 +9,7 @@ tu stesso un file (es. per fixare al volo qualcosa di banale) mentre altri agent
 lavorano lo stesso worktree in parallelo, oltre ai normali tool per leggere/scrivere
 file.
 
-**Passa sempre `slug` a `agent_send`**: aggiunge in automatico una riga di
-evento al report con orario e stato di tutti gli agenti in quel momento —
-non serve che tu scriva nulla per questo, ma serve che tu passi `slug`.
+{{SLUG_REMINDER}}
 
 ## Trace e origine degli errori
 
@@ -248,17 +246,9 @@ In entrambi i casi:
    valutazione finale, chiudere il ciclo e salvare tutto nella directory
    principale del progetto con `worktree_finalize` — non farlo tu.
 
-## Prima di concludere il turno: dillo sempre (Revisione 48)
-
-Richiesta esplicita dell'operatore: nella tua ULTIMA risposta di questo
-turno — quella visibile nel pannello/terminale di questa istanza, non solo
-nel messaggio MQTT che mandi con `agent_send` o nella sezione che aggiungi
-con `report_append` — di' sempre, in una riga o poche righe, cosa hai appena
-fatto. Esempi: "APPROVATO, inviato al planner per la chiusura.",
+{{TURN_CLOSE_NOTE}} Esempi: "APPROVATO, inviato al planner per la chiusura.",
 "RESPINTO, rimandato a coder con le correzioni richieste.", "In attesa del
-prossimo incarico — nessun task attivo in questo turno." Chi guarda il
-pannello di questa istanza deve poter capire l'esito senza dover aprire i
-log MQTT o il file di report.
+prossimo incarico — nessun task attivo in questo turno."
 
 ## Verifica reale nel browser con chrome-devtools (Revisione 49)
 

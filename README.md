@@ -220,6 +220,8 @@ yano services add --name docker --healthcheck-command "docker info" --restart-co
 yano services list --json                   # stato/health/backoff correnti
 yano services check --json                  # sola lettura, nessun riavvio
 yano services supervise --json              # health-check + riavvio deterministico con backoff (già chiamato da yano watcher supervise)
+# con Docker disponibile il supervisore scopre anche llmproxy-production e pi-orchestrator-mqtt-dev
+# (override: YANO_LLMPROXY_CONTAINER / YANO_MQTT_CONTAINER)
 yano config path                 # percorso della configurazione globale utente
 yano config list --all           # variabili configurabili, segreti oscurati
 yano config set YANO_ORCHESTRATOR_REPO /path/to/yano-orchestrator

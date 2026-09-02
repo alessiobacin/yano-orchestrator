@@ -2995,6 +2995,19 @@ export default function (pi: ExtensionAPI) {
 					reload_ready: reloadReady(),
 					yano_runtime_version: YANO_RUNTIME_PACKAGE_VERSION,
 				};
+				// Application-level liveness. A PID and an MQTT connection can remain
+				// alive while the event loop is wedged; the watcher consumes this
+				// bounded heartbeat file and can distinguish that case without tokens.
+				try {
+					const heartbeatDir = path.join(traceRoot(), "heartbeats", card.project_key);
+					fs.mkdirSync(heartbeatDir, { recursive: true, mode: 0o700 });
+					const heartbeatPath = path.join(heartbeatDir, `${identity.instance}.json`);
+					const temporary = `${heartbeatPath}.${process.pid}.tmp`;
+					fs.writeFileSync(temporary, JSON.stringify({ ...card, observed_at: heartbeat }), { mode: 0o600 });
+					fs.renameSync(temporary, heartbeatPath);
+				} catch {
+					// A diagnostic heartbeat must never break agent work.
+				}
 				try {
 					await client.publishAsync(T.agentStatus(identity.instance), JSON.stringify(card), { qos: 1, retain: true });
 				} catch {

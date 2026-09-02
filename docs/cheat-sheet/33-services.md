@@ -43,3 +43,29 @@ default 5s/5min/6) evita di martellare un target che non può tornare su da
 solo: dopo i tentativi esauriti lo stato diventa `giving_up` e il servizio
 resta solo osservato, non più riavviato, finché non torna sano da solo o
 viene corretto manualmente.
+
+## Prerequisiti Docker integrati
+
+Quando Docker Desktop/Engine è raggiungibile, ogni passata del supervisore
+scopre automaticamente e controlla:
+
+- `llmproxy-production` (override: `YANO_LLMPROXY_CONTAINER`);
+- `pi-orchestrator-mqtt-dev` (override: `YANO_MQTT_CONTAINER`).
+
+Per ciascuno verifica lo stato `Running` e, se necessario, esegue un solo
+`docker restart` rispettando il backoff. Sono visibili senza aggiungerli:
+
+```bash
+yano services list --json
+yano services check --json        # sola lettura
+yano watcher supervise --json    # controllo + eventuale recovery
+```
+
+Su macchine che non usano questi container si può disattivare la scoperta con
+`YANO_DISABLE_BUILTIN_DEPENDENCY_SUPERVISION=1`. Il daemon Docker non viene
+avviato alla cieca: se Docker non risponde, Yano lo segnala; per riavviarlo va
+registrato un servizio `docker` con il comando corretto per il sistema operativo.
+
+I servizi globali Yano pubblicano anche un heartbeat applicativo su disco,
+oltre al controllo di processo/Herdr: un processo vivo ma senza heartbeat
+aggiornato non è considerato sano dopo la fase iniziale di avvio.

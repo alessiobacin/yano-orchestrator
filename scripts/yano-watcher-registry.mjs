@@ -707,7 +707,7 @@ function supervise(db) {
 		// on an unknown machine (GUI app, background service, ...), the
 		// operator declares it once like any other dependency.
 		let external_services;
-		try { external_services = await superviseExternalServices(); } catch (error) { external_services = { error: error instanceof Error ? error.message : String(error) }; }
+		try { external_services = await superviseExternalServices({ includeBuiltIns: true }); } catch (error) { external_services = { error: error instanceof Error ? error.message : String(error) }; }
 		const herdrServiceRegistered = Boolean(getService("herdr"));
 		// herdrSnapshot() itself retries with backoff (ticket #118): a
 		// transient blip — Herdr's server still waking up right after being

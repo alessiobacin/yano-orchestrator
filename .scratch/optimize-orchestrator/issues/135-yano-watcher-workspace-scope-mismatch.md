@@ -3,29 +3,28 @@ type: debugger
 kind: task
 created_by: yano-watcher
 status: open
-severity: high
-category: delegation
-signal: delegation_timeout
-fingerprint: 73b0b1c00b94be3088957449fd3aecd06ad38ba577257bb252c14da9b856245a
-detected_at: 2026-09-02T08:14:53.969Z
-last_seen_at: 2026-09-02T21:16:10.696Z
+severity: critical
+category: isolation
+signal: workspace_scope_mismatch
+fingerprint: ef1cadbe5809dc6c641186be7a4e2e30e14d4b878e2752ba2f7a7768a2cd581a
+detected_at: 2026-09-02T21:42:50.224Z
 source_project: yano-orchestrator
 source_project_root: /Users/alessiobacin/Development/testCode/yano-orchestrator
 source_project_key: workspace-d3dda6a0cb4d
 run_id: unknown
 round: unknown
 task: unknown
-instance: planner-01
+instance: scheduler-service
 evidence_record_id: unknown
 ---
 
-# Yano ha esaurito il timeout durante la delega a un agente.
+# Yano ha osservato una discordanza tra progetto, workspace o presenza degli agenti.
 
 Type: debugger
 Kind: task
 Created-by: yano-watcher
 Status: open
-Fingerprint: 73b0b1c00b94be3088957449fd3aecd06ad38ba577257bb252c14da9b856245a
+Fingerprint: ef1cadbe5809dc6c641186be7a4e2e30e14d4b878e2752ba2f7a7768a2cd581a
 
 ## Sintesi
 
@@ -33,41 +32,27 @@ Il watcher ha rilevato un comportamento attribuibile al flusso interno di Yano, 
 
 ## Evidenza osservabile
 
-- Segnale: `delegation_timeout`
-- Categoria: `delegation`
+- Segnale: `workspace_scope_mismatch`
+- Categoria: `isolation`
 - Progetto osservato: `yano-orchestrator` (/Users/alessiobacin/Development/testCode/yano-orchestrator)
-- Timestamp del record: `2026-09-02T08:14:05.457Z`
+- Timestamp del record: `2026-09-02T21:40:23.693Z`
 - Record di trace: `unknown`
 
 ```json
 {
-  "ts": "2026-09-02T08:14:05.457Z",
-  "seq": 526,
-  "instance": "planner-01",
-  "role": "planner",
-  "project": "yano-orchestrator",
+  "ts": "2026-09-02T21:40:23.693Z",
+  "seq": 4,
+  "instance": "scheduler-service",
+  "role": "scheduler",
+  "project": "yano-scheduler",
   "project_key": "workspace-d3dda6a0cb4d",
   "trace_mode": "full",
-  "type": "notification_dispatch",
-  "ok": true,
-  "detail": "whatsapp: non configurato — variabili mancanti nel .env: EVOLUTION_API_URL, EVOLUTION_API_KEY, EVOLUTION_INSTANCE_NAME, DESTINATION_PHONE_NUMBER; telegram: inviato; email: non configurato — variabili mancanti nel .env: SENDGRID_API_KEY, SENDGRID_FROM_EMAIL, SENDGRID_TO_EMAIL",
-  "channels": {
-    "whatsapp": {
-      "ok": false,
-      "detail": "non configurato — variabili mancanti nel .env: EVOLUTION_API_URL, EVOLUTION_API_KEY, EVOLUTION_INSTANCE_NAME, DESTINATION_PHONE_NUMBER"
-    },
-    "telegram": {
-      "ok": true,
-      "detail": "inviato"
-    },
-    "email": {
-      "ok": false,
-      "detail": "non configurato — variabili mancanti nel .env: SENDGRID_API_KEY, SENDGRID_FROM_EMAIL, SENDGRID_TO_EMAIL"
-    }
-  },
-  "reason": "agent_send_timeout",
-  "assignment_id": "01M1GH6EMDB5N4M8NW99HTBWZ6",
-  "target": "role:debugger"
+  "type": "presence_ignored_scope_mismatch",
+  "topic": "pi/workspace-d3dda6a0cb4d/agents/scheduler-service/status",
+  "card_instance": "scheduler-service",
+  "card_project": "yano-orchestrator",
+  "card_project_key": "workspace-d3dda6a0cb4d",
+  "expected_project": "yano-scheduler"
 }
 ```
 

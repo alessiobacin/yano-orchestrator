@@ -34,6 +34,10 @@ const REGISTRY_VERSION = 1;
 const VALID_HEALTHCHECK_TYPES = new Set(["http", "command"]);
 const VALID_RESTART_TYPES = new Set(["docker", "pm2", "command"]);
 const NAME_PATTERN = /^[a-z0-9][a-z0-9_-]*$/i;
+const BUILTIN_DEPENDENCIES = [
+	{ name: "llmproxy", containerEnv: "YANO_LLMPROXY_CONTAINER", defaultContainer: "llmproxy-production" },
+	{ name: "mqtt", containerEnv: "YANO_MQTT_CONTAINER", defaultContainer: "pi-orchestrator-mqtt-dev" },
+];
 
 export function servicesRegistryPath() {
 	return path.join(globalDataPath({ env: process.env }), "services", "services.json");
@@ -61,8 +65,32 @@ function defaultState() {
 	return { status: "unknown", last_check_at: null, last_ok_at: null, consecutive_failures: 0, last_restart_at: null, restart_attempts_since_ok: 0, last_restart_result: null };
 }
 
-export function listServices() {
-	return readRegistry().services;
+function dockerContainerExists(container) {
+	const result = spawnSync("docker", ["inspect", "--format", "{{.State.Running}}", container], { encoding: "utf8", timeout: 3000 });
+	return result.status === 0;
+}
+
+function builtinServices(registry) {
+	if (String(process.env.YANO_DISABLE_BUILTIN_DEPENDENCY_SUPERVISION || "0") === "1") return [];
+	if (spawnSync("docker", ["version", "--format", "{{.Server.Version}}"], { encoding: "utf8", timeout: 3000 }).status !== 0) return [];
+	return BUILTIN_DEPENDENCIES.map((definition) => {
+		const container = process.env[definition.containerEnv] || definition.defaultContainer;
+		return dockerContainerExists(container) ? {
+			name: definition.name,
+			builtin: true,
+			healthcheck: { type: "command", target: `docker inspect --format '{{.State.Running}}' ${JSON.stringify(container)} | grep -q true`, timeout_ms: 3000 },
+			restart: { type: "docker", target: container },
+			enabled: true,
+			backoff: { base_ms: 5000, max_ms: 300000, max_attempts: 6 },
+			created_at: new Date().toISOString(),
+			state: defaultState(),
+		} : null;
+	}).filter(Boolean).filter((service) => !registry.services.some((existing) => existing.name === service.name));
+}
+
+export function listServices({ includeBuiltIns = false } = {}) {
+	const registry = readRegistry();
+	return includeBuiltIns ? [...registry.services, ...builtinServices(registry)] : registry.services;
 }
 
 export function getService(name) {
@@ -171,11 +199,14 @@ function backoffDueInMs(service, nowMs) {
 // typo'd container name, ...) — a durable `unhealthy`/`giving_up` state is
 // the deterministic signal an operator or a future alert channel can read
 // instead of an infinite silent retry loop.
-export async function superviseExternalServices({ now = new Date() } = {}) {
+export async function superviseExternalServices({ now = new Date(), includeBuiltIns = false } = {}) {
 	const registry = readRegistry();
+	const discovered = includeBuiltIns ? builtinServices(registry) : [];
+	if (discovered.length) registry.services.push(...discovered);
+	const services = registry.services;
 	const results = [];
-	let changed = false;
-	for (const service of registry.services) {
+	let changed = discovered.length > 0;
+	for (const service of services) {
 		if (!service.enabled) { results.push({ name: service.name, enabled: false, skipped: "disabled" }); continue; }
 		service.state ||= defaultState();
 		const check = await runHealthcheck(service);
@@ -218,8 +249,10 @@ export async function superviseExternalServices({ now = new Date() } = {}) {
 
 // Read-only counterpart of `superviseExternalServices`: never restarts
 // anything and never persists state, for a manual/diagnostic check.
-export async function checkExternalServices({ name = null } = {}) {
-	const services = readRegistry().services.filter((service) => !name || service.name === name);
+export async function checkExternalServices({ name = null, includeBuiltIns = false } = {}) {
+	const registry = readRegistry();
+	const services = [...registry.services, ...(includeBuiltIns ? builtinServices(registry) : [])]
+		.filter((service) => !name || service.name === name);
 	const results = [];
 	for (const service of services) {
 		const check = await runHealthcheck(service);
@@ -285,7 +318,7 @@ export async function runYanoServices({ argv = [] } = {}) {
 		return service;
 	}
 	if (sub === "list") {
-		const result = listServices();
+		const result = listServices({ includeBuiltIns: true });
 		print(result, json);
 		return result;
 	}
@@ -300,7 +333,7 @@ export async function runYanoServices({ argv = [] } = {}) {
 		return result;
 	}
 	if (sub === "check") {
-		const result = await checkExternalServices({ name: value(argv, "--name") });
+		const result = await checkExternalServices({ name: value(argv, "--name"), includeBuiltIns: true });
 		print(result, json);
 		return result;
 	}

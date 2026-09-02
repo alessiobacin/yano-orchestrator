@@ -1,7 +1,8 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import path from "node:path";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { globalDataPath, resolveYanoConfig } from "./yano-config.mjs";
 import { materializeAgentMcp } from "./yano-agent-mcp.mjs";
 import { herdrSnapshot as snapshot } from "./yano-herdr-client.mjs";
@@ -17,6 +18,16 @@ const SYSTEM_PROJECT = "yano-scheduler";
 const SYSTEM_SCOPE = "yano-system";
 
 function computerRuntimeRoot() { return path.join(globalDataPath(), "computer-local"); }
+function applicationHeartbeatPath(agent, root, project) {
+	const key = cryptoProjectKey(root, project);
+	return path.join(globalDataPath(), "heartbeats", key, `${agent}.json`);
+}
+function cryptoProjectKey(root, project) {
+	// Keep this dependency-free and identical to Yano's durable root identity.
+	let canonical = root;
+	try { canonical = realpathSync(root); } catch { /* root may be temporarily unavailable */ }
+	return `workspace-${createHash("sha256").update(canonical).digest("hex").slice(0, 12)}`;
+}
 function ensureComputerRuntime() {
 	const root = computerRuntimeRoot();
 	const agents = path.join(root, "agents");
@@ -76,7 +87,7 @@ function isLive(agent, expectedName = null) {
 // stale after a Pi turn ends. Herdr's lifecycle explanation plus the
 // foreground process are the authoritative local signals; no model/MQTT
 // request is made here.
-function probeService(paneId, snapshotAgent) {
+function probeService(paneId, snapshotAgent, { instance = null, root = PACKAGE_ROOT, project = "yano-orchestrator", warmup = false } = {}) {
 	if (!paneId) return { healthy: false, reason: "pane_missing" };
 	const info = run("herdr", ["pane", "process-info", "--pane", paneId]);
 	let processInfo = null;
@@ -88,14 +99,28 @@ function probeService(paneId, snapshotAgent) {
 	try { explanation = JSON.parse(explained.stdout || ""); } catch { /* older Herdr: fall back to snapshot */ }
 	const state = String(explanation?.state || snapshotAgent?.agent_status || "unknown").toLowerCase();
 	const healthyState = ["idle", "working"].includes(state) && explanation?.warning == null && explanation?.visible_blocker !== true;
+	let applicationHeartbeat = { healthy: false, reason: "missing" };
+	if (instance) {
+		try {
+			const heartbeat = JSON.parse(readFileSync(applicationHeartbeatPath(instance, root, project), "utf8"));
+			const observed = Date.parse(heartbeat.observed_at || heartbeat.last_heartbeat || "");
+			const ageMs = Number.isFinite(observed) ? Math.max(0, Date.now() - observed) : Infinity;
+			applicationHeartbeat = { healthy: ageMs <= 60_000, age_ms: ageMs, observed_at: heartbeat.observed_at || heartbeat.last_heartbeat || null, status: heartbeat.status || null };
+		} catch { /* first boot: process health remains useful during warm-up */ }
+	}
+	// A newly launched process gets one bounded grace probe; an already-live
+	// process without an application heartbeat is unhealthy. This prevents a
+	// decorative/stuck PID from remaining accepted forever, while still letting
+	// a fresh Pi session publish its first heartbeat during startup.
 	return {
-		healthy: processHealthy && healthyState,
+		healthy: processHealthy && healthyState && (warmup ? true : applicationHeartbeat.healthy),
 		state,
 		process_pid: Number(foreground?.pid) || null,
 		process: foreground?.argv0 || foreground?.name || null,
 		visible_blocker: explanation?.visible_blocker === true,
 		warning: explanation?.warning || null,
 		status_snapshot: snapshotAgent?.agent_status || null,
+		application_heartbeat: applicationHeartbeat,
 	};
 }
 
@@ -119,13 +144,14 @@ function ensureService(service) {
 		state = snapshot(); workspace = state?.workspaces?.find((item) => item.label === service.workspace);
 	}
 	if (!workspace?.workspace_id) return { service: service.instance, running: false, recovered: false, error: "workspace senza workspace_id" };
-	let tab = state.tabs?.find((item) => item.workspace_id === workspace.workspace_id && item.label === service.tab);
+	const workspaceId = workspace.workspace_id;
+	let tab = state.tabs?.find((item) => item.workspace_id === workspaceId && item.label === service.tab);
 	let pane = tab && state.panes?.find((item) => item.tab_id === tab.tab_id);
 	let agent = pane && state.agents?.find((item) => item.pane_id === pane.pane_id);
 	// A fresh Herdr workspace may contain only its automatic tab `1`. Reuse it
 	// when it is empty instead of opening a second tab for the service.
 	if (!tab) {
-		const initial = state.tabs?.find((item) => item.workspace_id === workspace.workspace_id && /^(1|\d+)$/.test(item.label || ""));
+		const initial = state.tabs?.find((item) => item.workspace_id === workspaceId && /^(1|\d+)$/.test(item.label || ""));
 		const initialPane = initial && state.panes?.find((item) => item.tab_id === initial.tab_id);
 		const initialAgent = initialPane && state.agents?.find((item) => item.pane_id === initialPane.pane_id);
 		if (initial && initialPane && (!initialAgent || ["done", "offline", "unknown"].includes(String(initialAgent.agent_status || "").toLowerCase()))) {
@@ -133,10 +159,10 @@ function ensureService(service) {
 			if (renamed.status === 0) { tab = { ...initial, label: service.tab }; pane = initialPane; agent = initialAgent; }
 		}
 	}
-	const health = pane ? probeService(pane.pane_id, agent) : { healthy: false, reason: "pane_missing" };
+	const health = pane ? probeService(pane.pane_id, agent, { instance: service.instance, root: serviceCwd, project: service.project || "yano-orchestrator" }) : { healthy: false, reason: "pane_missing" };
 	if (isLive(agent) && health.healthy) {
-		closeInitialDuplicates(state, workspace.workspace_id, tab.tab_id, service);
-		return { service: service.instance, running: true, recovered: false, health, workspace_id: workspace.workspace_id, tab_id: tab.tab_id, pane_id: pane.pane_id };
+		closeInitialDuplicates(state, workspaceId, tab.tab_id, service);
+		return { service: service.instance, running: true, recovered: false, health, workspace_id: workspaceId, tab_id: tab.tab_id, pane_id: pane.pane_id };
 	}
 	if (tab && agent) {
 		const closed = run("herdr", ["tab", "close", tab.tab_id]);
@@ -145,10 +171,10 @@ function ensureService(service) {
 		tab = null; pane = null;
 	}
 	if (!tab || !pane) {
-		const created = run("herdr", ["tab", "create", "--workspace", workspace.workspace_id, "--cwd", serviceCwd, "--label", service.tab, "--no-focus"]);
+		const created = run("herdr", ["tab", "create", "--workspace", workspaceId, "--cwd", serviceCwd, "--label", service.tab, "--no-focus"]);
 		if (created.status !== 0) return { service: service.instance, running: false, recovered: false, error: (created.stderr || "tab di servizio non creata").trim() };
 		state = snapshot();
-		tab = state?.tabs?.find((item) => item.workspace_id === workspace.workspace_id && item.label === service.tab);
+		tab = state?.tabs?.find((item) => item.workspace_id === workspaceId && item.label === service.tab);
 		pane = tab && state?.panes?.find((item) => item.tab_id === tab.tab_id);
 	}
 	if (!pane?.pane_id) return { service: service.instance, running: false, recovered: false, error: "pane di servizio non trovata" };
@@ -166,10 +192,10 @@ function ensureService(service) {
 	const command = ["pi", ...args].map(shellQuote).join(" ");
 	const started = run("herdr", ["pane", "run", pane.pane_id, `exec ${command}`], { cwd: serviceCwd });
 	const after = snapshot();
-	closeInitialDuplicates(after, workspace.workspace_id, tab.tab_id, service);
+	closeInitialDuplicates(after, workspaceId, tab.tab_id, service);
 	const live = after?.agents?.find((item) => item.pane_id === pane.pane_id && isLive(item));
-	const afterHealth = pane?.pane_id ? probeService(pane.pane_id, live) : { healthy: false, reason: "pane_missing_after_start" };
-	return { service: service.instance, running: Boolean(live && afterHealth.healthy), recovered: true, health: afterHealth, workspace_id: workspace.workspace_id, tab_id: tab.tab_id, pane_id: pane.pane_id, error: live && afterHealth.healthy || started.status === 0 ? null : (started.stderr || started.stdout || "Herdr non ha avviato l'agente").trim() };
+	const afterHealth = pane?.pane_id ? probeService(pane.pane_id, live, { instance: service.instance, root: serviceCwd, project: service.project || "yano-orchestrator", warmup: true }) : { healthy: false, reason: "pane_missing_after_start" };
+	return { service: service.instance, running: Boolean(live && afterHealth.healthy), recovered: true, health: afterHealth, workspace_id: workspaceId, tab_id: tab.tab_id, pane_id: pane.pane_id, error: live && afterHealth.healthy || started.status === 0 ? null : (started.stderr || started.stdout || "Herdr non ha avviato l'agente").trim() };
 }
 
 export function ensureGlobalYanoServices() { return SERVICES.map(ensureService); }

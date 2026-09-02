@@ -30,16 +30,14 @@ try {
 
 	const started = await call("start", "--foreground", "--json");
 	assert.equal(started.worker_status, "running");
-	assert.equal(started.supervisor, "foreground");
-	assert.match(started.command, /yano watch --project-root/);
-	assert.match(started.command, /--interval-ms 300000/);
-	assert.match(started.command, /--away/);
+	assert.equal(started.already_running, true, "start is idempotent when init already owns a live Herdr watcher");
 
-	// running, but launched --foreground (no Herdr pane): nothing this check
-	// can observe, so it must report "unknown" rather than false drift/heal.
+	// The init-created watcher remains Herdr-managed and observable; the
+	// idempotent start above must not replace it with a duplicate foreground
+	// process.
 	const statusRunning = await call("status", "--json");
 	assert.equal(statusRunning.worker_status, "running");
-	assert.equal(statusRunning.live, "unknown");
+	assert.equal(statusRunning.live, "running");
 	assert.equal(statusRunning.drift, false);
 	assert.equal(statusRunning.recovered, false);
 

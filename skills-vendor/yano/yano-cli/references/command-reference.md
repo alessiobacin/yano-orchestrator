@@ -269,6 +269,8 @@ global symlink, removes only that exact link and installs a real global copy
 from the repository URL. This prevents local commits from becoming active
 implicitly. Confirm with `npm ls -g yano-orchestrator --depth=0`: a permanent
 installation has no `->` target.
+The updater clones and packs the repository before installing it, so a user's
+global `allow-scripts` policy cannot break Git dependency preparation.
 
 ## Configuration and data root
 

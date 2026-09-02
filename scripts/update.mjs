@@ -104,10 +104,13 @@ export function inspectGlobalLinkedInstall({ packageRoot, packageName = "yano-or
 function installPermanentGlobalPackage(repoUrl) {
 	const tempDir = mkdtempSync(path.join(os.tmpdir(), "yano-update-"));
 	try {
-		// Installing a git URL directly can leave npm's temporary git-clone as a
-		// global symlink on some npm versions. Pack first, then install the
-		// resulting tarball, which gives npm an unambiguous real package copy.
-		execFileSync("npm", ["pack", repoUrl, "--pack-destination", tempDir], { stdio: "inherit", shell: process.platform === "win32" });
+		// Do not ask npm to prepare a git dependency: npm 11 applies the user's
+		// allow-scripts policy in that temporary project and can fail with
+		// EALLOWSCRIPTS. Clone with git, pack the local checkout, then install the
+		// tarball; this also prevents npm's git-clone cache from becoming a link.
+		const checkout = path.join(tempDir, "checkout");
+		execFileSync("git", ["clone", "--depth", "1", repoUrl, checkout], { stdio: "inherit", shell: process.platform === "win32" });
+		execFileSync("npm", ["pack", checkout, "--pack-destination", tempDir], { stdio: "inherit", shell: process.platform === "win32" });
 		const tarball = readdirSync(tempDir).find((entry) => entry.endsWith(".tgz"));
 		if (!tarball) throw new Error("npm pack non ha prodotto un tarball");
 		execFileSync("npm", ["install", "-g", path.join(tempDir, tarball), "--ignore-scripts"], { stdio: "inherit", shell: process.platform === "win32" });

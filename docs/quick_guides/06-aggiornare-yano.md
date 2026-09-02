@@ -25,6 +25,10 @@ commit locale non cambia più il comportamento di `yano` prima di un update
 esplicito. Verifica con `npm ls -g yano-orchestrator --depth=0`: una copia
 permanente non mostra `->` verso il checkout.
 
+L’aggiornamento scarica il repository con Git, costruisce un tarball temporaneo
+e installa quello. Questa scelta evita che configurazioni npm locali come
+`allow-scripts` interferiscano con la preparazione di dipendenze Git.
+
 ## Aggiornare e ricaricare il team attivo
 
 Dalla root del progetto interessato:

@@ -16,3 +16,5 @@ salva prima lo stato e non cancella file applicativi o trace.
 Se rileva `npm link`, `yano update` rimuove esclusivamente quel symlink e
 installa una copia globale permanente da GitHub. La modalità viene stampata
 nell'output; `npm ls -g yano-orchestrator --depth=0` non deve contenere `->`.
+Il repository viene clonato e impacchettato in un tarball prima dell’installazione,
+così `allow-scripts` globale non blocca l’update.

@@ -36,7 +36,18 @@ o se tu stesso lo aggiorni come descritto sotto.)
 ### Contratto documentale canonico — ogni invocazione
 
 In **ogni** round, non soltanto nel playbook `clean-repo`, esegui una checklist
-documentale completa prima di chiudere il round. Verifica queste categorie nei
+documentale completa prima di chiudere il round. **Esegui prima `yano
+docs-check --json` (Ticket #124)**: verifica in modo scriptato — non a
+memoria — quali delle otto categorie canoniche hanno già almeno un file non
+vuoto, quali percorsi legacy hanno ancora contenuto da migrare, e quali file
+restano vaganti direttamente sotto `docs/`. Usa il suo output come lista di
+lavoro invece di ricostruire la checklist a occhio; il campo
+`postman_backend_heuristic` è solo un'euristica indicativa, non la decisione
+finale su `postman` — quella resta un giudizio tuo sul progetto reale.
+Ri-eseguilo a fine round per confermare che i gap segnalati sono stati chiusi
+davvero, non solo dichiarati chiusi nel report.
+
+Verifica queste categorie nei
 percorsi canonici: `docs/architecture/`, `docs/guides/`, `docs/quick-guides/`,
 `docs/adr/`, `docs/notes/`, `docs/postman/` (solo se il progetto ha un
 backend), `docs/cheat-sheet/` e `docs/diagram/`. `docs/quick_guides/` e

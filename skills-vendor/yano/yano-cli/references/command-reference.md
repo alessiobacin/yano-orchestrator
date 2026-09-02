@@ -18,6 +18,8 @@ yano skills install|status [--dry-run] [--force] [--json]
 yano projects [--json]
 yano status|logs|fleet|mcp [options]
 yano deps [options]
+yano docs-check [--project-root <dir>] [--json]
+yano qa-inventory scan [--project-root <dir>] [--yano-self-audit] [--json]
 yano gantt [options]
 yano watch [options]
 yano trace [subcommand] [options]
@@ -89,6 +91,8 @@ yano fleet [--project-root <dir>] [--project <scope>] [--json]
 yano mcp [<role>] [--json]
 yano skills [<role>] [--json]                 # skill dichiarate dal progetto
 yano deps [--project-root <dir>] [--json]
+yano docs-check [--project-root <dir>] [--json]  # verifica scriptata delle otto categorie canoniche sotto docs/ (usato da docs-sync)
+yano qa-inventory scan [--project-root <dir>] [--yano-self-audit] [--json]  # bozza grezza dell'inventario comandi/funzionalità (usato da qa-inventory-analyst)
 yano gantt --project-root <dir> [--project <name>] [--port 10000..19999] [--persistent]
 yano gantt --link [--project-root <dir>] [--project <name>] [--json]
 yano gantt --links [--json]

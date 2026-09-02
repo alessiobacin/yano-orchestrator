@@ -19,6 +19,8 @@ yano cron --install
 yano cron --uninstall
 ```
 
-Il supervisore cron gira ogni minuto e ricrea `yano-scheduler` se manca. I job
+Il supervisore gira ogni minuto e ricrea `yano-scheduler` se manca. I job
 sono nel data-root globale e sopravvivono al riavvio. Un job avvia un planner
 nel progetto scelto, senza aggirare i gate del playbook o le approvazioni.
+Su Windows `--install`/`--uninstall` usano Task Scheduler (`schtasks`) invece
+del crontab POSIX, con lo stesso comportamento idempotente.

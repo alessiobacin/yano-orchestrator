@@ -182,6 +182,7 @@ controllo che il cron utente esegue ogni minuto. Installalo una volta:
 yano watcher cron install
 yano watcher cron status
 # per modificare il crontab si usa `crontab -e`, non `cron -e`
+# su Windows lo stesso comando usa Task Scheduler (schtasks) al posto di crontab
 ~~~
 
 Il cron esegue `yano watcher supervise`, che controlla tutti i watcher

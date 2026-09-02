@@ -41,6 +41,7 @@ import { projectDbPath } from "./yano-project.mjs";
 import { ensureGlobalYanoServices } from "./yano-global-services.mjs";
 import { superviseExternalServices, getService } from "./yano-services.mjs";
 import { herdrSnapshot } from "./yano-herdr-client.mjs";
+import { installOneMinuteWindowsJob, removeOneMinuteWindowsJob, statusOneMinuteWindowsJob } from "./yano-os-scheduler.mjs";
 import { findAgentIdentityConflicts, formatAgentIdentityConflicts } from "./yano-agent-identity.mjs";
 
 const require = createRequire(import.meta.url);
@@ -702,29 +703,36 @@ function cronCommand() {
 }
 
 function cronInstall() {
+	const windows = installOneMinuteWindowsJob({ marker: CRON_MARKER, command: cronCommand() });
+	if (windows) return windows;
 	const line = `* * * * * ${cronCommand()}`;
 	const existing = readCrontab().split("\n").filter((item) => item.trim() && !item.includes(CRON_MARKER));
 	const content = [...existing, line].join("\n") + "\n";
 	const result = spawnSync("crontab", ["-"], { input: content, encoding: "utf8", maxBuffer: 1_000_000 });
 	if (result.status !== 0) throw new Error(`yano watcher: impossibile installare il crontab${result.stderr ? `: ${result.stderr.trim()}` : ""}`);
-	return { installed: true, schedule: "* * * * *", command: line, marker: CRON_MARKER };
+	return { installed: true, schedule: "* * * * *", command: line, marker: CRON_MARKER, backend: "crontab" };
 }
 
 function cronStatus() {
-	const line = readCrontab().split("\n").find((item) => item.includes(CRON_MARKER)) || null;
+	const windows = statusOneMinuteWindowsJob({ marker: CRON_MARKER });
 	let heartbeat = null;
 	try { heartbeat = JSON.parse(fs.readFileSync(supervisorHeartbeatPath(), "utf8")); } catch { /* not run yet */ }
 	const heartbeatAt = heartbeat?.checked_at || null;
 	const heartbeatAgeMs = heartbeatAt ? Math.max(0, Date.now() - Date.parse(heartbeatAt)) : null;
-	return { installed: Boolean(line), schedule: line ? "* * * * *" : null, command: line, marker: CRON_MARKER, last_heartbeat_at: heartbeatAt, heartbeat_age_ms: heartbeatAgeMs, healthy: Boolean(line && heartbeatAt && heartbeatAgeMs <= 130_000) };
+	const healthy = Boolean(heartbeatAt && heartbeatAgeMs <= 130_000);
+	if (windows) return { ...windows, installed: windows.installed, last_heartbeat_at: heartbeatAt, heartbeat_age_ms: heartbeatAgeMs, healthy: Boolean(windows.installed && healthy) };
+	const line = readCrontab().split("\n").find((item) => item.includes(CRON_MARKER)) || null;
+	return { installed: Boolean(line), schedule: line ? "* * * * *" : null, command: line, marker: CRON_MARKER, backend: "crontab", last_heartbeat_at: heartbeatAt, heartbeat_age_ms: heartbeatAgeMs, healthy: Boolean(line && healthy) };
 }
 
 function cronRemove() {
+	const windows = removeOneMinuteWindowsJob({ marker: CRON_MARKER });
+	if (windows) return windows;
 	const existing = readCrontab().split("\n").filter((item) => item.trim() && !item.includes(CRON_MARKER));
 	const content = existing.length ? `${existing.join("\n")}\n` : "";
 	const result = spawnSync("crontab", ["-"], { input: content, encoding: "utf8", maxBuffer: 1_000_000 });
 	if (result.status !== 0) throw new Error(`yano watcher: impossibile rimuovere il crontab${result.stderr ? `: ${result.stderr.trim()}` : ""}`);
-	return { installed: false, removed: true, marker: CRON_MARKER };
+	return { installed: false, removed: true, marker: CRON_MARKER, backend: "crontab" };
 }
 
 function print(valueToPrint, machine) {

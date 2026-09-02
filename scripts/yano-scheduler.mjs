@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { globalDataPath } from "./yano-config.mjs";
+import { installOneMinuteWindowsJob, removeOneMinuteWindowsJob, statusOneMinuteWindowsJob } from "./yano-os-scheduler.mjs";
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const CRON_MARKER = "# yano-scheduler-supervisor";
@@ -120,24 +121,30 @@ function readCrontab(spawn = spawnSync) {
 	fail(`impossibile leggere il crontab${result.stderr ? `: ${result.stderr.trim()}` : ""}`);
 }
 function cronCommand() { return `${shellQuote(process.execPath)} ${shellQuote(path.join(PACKAGE_ROOT, "bin", "yano.mjs"))} cron --supervise --json >/dev/null 2>&1 ${CRON_MARKER}`; }
-export function schedulerCronInstall({ spawn = spawnSync } = {}) {
+export function schedulerCronInstall({ spawn = spawnSync, platform = process.platform } = {}) {
+	const windows = installOneMinuteWindowsJob({ marker: CRON_MARKER, command: cronCommand(), platform, spawn });
+	if (windows) return windows;
 	const line = `* * * * * ${cronCommand()}`;
 	const old = readCrontab(spawn).split("\n").filter((entry) => !entry.includes(CRON_MARKER)).filter(Boolean);
 	const result = spawn("crontab", ["-"], { input: `${[...old, line].join("\n")}\n`, encoding: "utf8", maxBuffer: 1_000_000 });
 	if (result.status !== 0) fail(`impossibile installare il crontab${result.stderr ? `: ${result.stderr.trim()}` : ""}`);
-	return { installed: true, schedule: "* * * * *", marker: CRON_MARKER };
+	return { installed: true, schedule: "* * * * *", marker: CRON_MARKER, backend: "crontab" };
 }
-export function schedulerCronStatus({ spawn = spawnSync } = {}) {
+export function schedulerCronStatus({ spawn = spawnSync, platform = process.platform } = {}) {
+	const windows = statusOneMinuteWindowsJob({ marker: CRON_MARKER, platform, spawn });
+	if (windows) return { installed: windows.installed, line: windows.command, schedule: windows.schedule, backend: "schtasks" };
 	const line = readCrontab(spawn).split("\n").find((entry) => entry.includes(CRON_MARKER)) || null;
-	return { installed: Boolean(line), line, schedule: line?.trim().split(/\s+/).slice(0, 5).join(" ") || null };
+	return { installed: Boolean(line), line, schedule: line?.trim().split(/\s+/).slice(0, 5).join(" ") || null, backend: "crontab" };
 }
-export function schedulerCronRemove({ spawn = spawnSync } = {}) {
+export function schedulerCronRemove({ spawn = spawnSync, platform = process.platform } = {}) {
+	const windows = removeOneMinuteWindowsJob({ marker: CRON_MARKER, platform, spawn });
+	if (windows) return { removed: windows.removed, backend: "schtasks" };
 	const old = readCrontab(spawn);
 	const content = old.split("\n").filter((entry) => !entry.includes(CRON_MARKER)).filter(Boolean).join("\n");
-	if (content === old.trim()) return { removed: false };
+	if (content === old.trim()) return { removed: false, backend: "crontab" };
 	const result = spawn("crontab", ["-"], { input: content ? `${content}\n` : "", encoding: "utf8", maxBuffer: 1_000_000 });
 	if (result.status !== 0) fail(`impossibile aggiornare il crontab${result.stderr ? `: ${result.stderr.trim()}` : ""}`);
-	return { removed: true };
+	return { removed: true, backend: "crontab" };
 }
 
 function dispatch(job, now, spawn = spawnSync) {

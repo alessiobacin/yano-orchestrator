@@ -114,8 +114,12 @@ repository configurato: un commit del checkout locale non diventa così attivo
 per effetto collaterale. Docker è consigliato come distribuzione complementare
 per broker MQTT e servizi stateless, con volumi per i dati persistenti; non
 sostituisce la CLI nativa, Herdr, Pi, Git/worktree e i supervisori dell’host.
-Su Windows il supervisore deve usare Task Scheduler o un servizio equivalente,
-non il comando `cron` POSIX.
+Su Windows il supervisore usa Task Scheduler (`schtasks`), non il comando
+`cron` POSIX: `scripts/yano-os-scheduler.mjs` implementa questo ramo per
+entrambi i supervisori globali a cadenza di un minuto (`yano watcher cron
+install`/`yano cron --install`), con lo stesso contratto idempotente
+(`/Create /F` non duplica l'attività) e lo stesso nome derivato in modo
+stabile dal marker POSIX già usato per identificare la riga di crontab.
 
 The operation never deletes application files, worktrees, SQLite state or trace
 history. Once a canonical replacement is ready, it may close only stale

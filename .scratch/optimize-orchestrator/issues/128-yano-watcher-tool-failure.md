@@ -6,12 +6,11 @@ status: open
 severity: high
 category: internal_tool
 signal: tool_failure
-fingerprint: cec9525ba4d5583f0d6789662c41b8b574191dc4c2a1cbe36b6ab04929988f95
-detected_at: 2026-09-02T14:09:54.077Z
-last_seen_at: 2026-09-02T19:09:01.019Z
-source_project: yano-orchestrator
-source_project_root: /Users/alessiobacin/Development/testCode/yano-orchestrator
-source_project_key: workspace-d3dda6a0cb4d
+fingerprint: 49cf7e2e9a2c9c6daea5f125dee1d041ee603b34dfe49d1556710ec66bc4eba3
+detected_at: 2026-09-02T17:07:26.789Z
+source_project: llmproxy
+source_project_root: /Users/alessiobacin/Development/Modules-platform-implementation/llmProxy
+source_project_key: workspace-b83c072cbe03
 run_id: unknown
 round: unknown
 task: unknown
@@ -25,7 +24,7 @@ Type: debugger
 Kind: task
 Created-by: yano-watcher
 Status: open
-Fingerprint: cec9525ba4d5583f0d6789662c41b8b574191dc4c2a1cbe36b6ab04929988f95
+Fingerprint: 49cf7e2e9a2c9c6daea5f125dee1d041ee603b34dfe49d1556710ec66bc4eba3
 
 ## Sintesi
 
@@ -35,22 +34,22 @@ Il watcher ha rilevato un comportamento attribuibile al flusso interno di Yano, 
 
 - Segnale: `tool_failure`
 - Categoria: `internal_tool`
-- Progetto osservato: `yano-orchestrator` (/Users/alessiobacin/Development/testCode/yano-orchestrator)
-- Timestamp del record: `2026-09-02T14:09:47.115Z`
+- Progetto osservato: `llmproxy` (/Users/alessiobacin/Development/Modules-platform-implementation/llmProxy)
+- Timestamp del record: `2026-09-02T17:07:02.215Z`
 - Record di trace: `unknown`
 
 ```json
 {
-  "ts": "2026-09-02T14:09:47.115Z",
-  "seq": 596,
+  "ts": "2026-09-02T17:07:02.215Z",
+  "seq": 604,
   "instance": "planner-01",
   "role": "planner",
-  "project": "yano-orchestrator",
-  "project_key": "workspace-d3dda6a0cb4d",
+  "project": "llmproxy",
+  "project_key": "workspace-b83c072cbe03",
   "trace_mode": "full",
   "type": "tool_execution_end",
-  "tool_call_id": "call_08132393ad5947a6b3231d49",
-  "tool": "plan_advance",
+  "tool_call_id": "call_c590b644da474180b918ac31",
+  "tool": "ticket_complete",
   "ok": false
 }
 ```

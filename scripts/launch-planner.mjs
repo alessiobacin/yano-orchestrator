@@ -79,6 +79,7 @@ import { ensureRolePrerequisites, isSupportedNodeRuntime } from "./doctor.mjs";
 import { globalDataPath } from "./yano-config.mjs";
 import { TRACE_MODES, canonicalProjectScope, getTraceConfig, resolveTraceProject, setTraceMode, slugify, traceRoot } from "./yano-trace-storage.mjs";
 import { assertAgentIdentityAvailable } from "./yano-agent-identity.mjs";
+import { agentMcpConfigPath, materializeAgentMcp } from "./yano-agent-mcp.mjs";
 
 // Le 6 skill vendorizzate destinate al ruolo planner — vedi
 // skills-vendor/mattpocock/VERSION.md per la motivazione di ciascuna
@@ -659,7 +660,10 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 	// provider (`--provider openrouter-glm` is invalid). The explicit flag is
 	// consumed here and becomes the only Pi provider/model pair.
 	const llmproxyFlags = llmproxyPin ? ["--provider", "llmproxy", "--model", llmproxyPin] : [];
-	const piArgs = [...extensionFlags, ...normalizedPassthrough, ...projectScopeFlags, ...legacyConfigDirFlags, ...generatedConfigFlags, ...llmproxyFlags, "--role", role, ...skillFlags];
+	const instanceForMcp = passthrough[passthrough.indexOf("--instance") + 1] || null;
+	const agentMcpPath = instanceForMcp ? materializeAgentMcp(instanceForMcp) : null;
+	const agentMcpFlags = agentMcpPath && !passthrough.includes("--mcp-config") ? ["--mcp-config", agentMcpConfigPath(instanceForMcp)] : [];
+	const piArgs = [...extensionFlags, ...normalizedPassthrough, ...projectScopeFlags, ...legacyConfigDirFlags, ...generatedConfigFlags, ...agentMcpFlags, ...llmproxyFlags, "--role", role, ...skillFlags];
 
 	const printable = ["pi", ...piArgs].map((a) => (a.includes(" ") ? `"${a}"` : a)).join(" ");
 	if (json) console.log(JSON.stringify({ command: herdr ? "herdr agent start" : "pi", args: piArgs, cwd, trace_mode: traceConfig.mode, project: traceProject, proposal_id: proposalId || null, llmproxy_pin: llmproxyPin || null, playbook_path: generatedRole?.playbookPath || null, role_source: ephemeralRole ? "architect-ephemeral" : (generatedRole ? "architect-catalog" : "project") }));
@@ -686,9 +690,22 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 			console.error(`launch-planner: nessun workspace Herdr verificato per ${cwd}; rifiuto di creare ${instance} nel workspace UI corrente.`);
 			process.exit(1);
 		}
-		const tabResult = spawnSync("herdr", ["tab", "create", "--workspace", workspace.workspace_id, "--cwd", cwd, "--label", instance, "--no-focus"], { encoding: "utf8", maxBuffer: 1_000_000 });
-		let paneId;
-		try { paneId = JSON.parse(tabResult.stdout || "")?.result?.root_pane?.pane_id; } catch { /* handled below */ }
+		// Herdr creates an initial tab (often labelled `1`) with a new
+		// workspace. Reuse and rename that empty tab instead of creating a
+		// useless second tab. A tab containing a live agent is never reused.
+		const initialTab = snapshot?.tabs?.find((tab) => tab.workspace_id === workspace.workspace_id && /^(1|\d+)$/.test(tab.label || ""));
+		const initialPane = initialTab && snapshot?.panes?.find((pane) => pane.tab_id === initialTab.tab_id);
+		const initialAgent = initialPane && snapshot?.agents?.find((agent) => agent.pane_id === initialPane.pane_id);
+		let tabResult = null;
+		let paneId = null;
+		if (initialTab && initialPane && (!initialAgent || ["done", "offline", "unknown"].includes(String(initialAgent.agent_status || "").toLowerCase()))) {
+			const renamed = spawnSync("herdr", ["tab", "rename", initialTab.tab_id, instance], { encoding: "utf8", maxBuffer: 1_000_000 });
+			if (renamed.status === 0) paneId = initialPane.pane_id;
+		}
+		if (!paneId) {
+			tabResult = spawnSync("herdr", ["tab", "create", "--workspace", workspace.workspace_id, "--cwd", cwd, "--label", instance, "--no-focus"], { encoding: "utf8", maxBuffer: 1_000_000 });
+			try { paneId = JSON.parse(tabResult.stdout || "")?.result?.root_pane?.pane_id; } catch { /* handled below */ }
+		}
 		if (tabResult.status !== 0 || !paneId) {
 			console.error(`launch-planner: Herdr non ha creato una tab isolata per ${instance}: ${(tabResult.stderr || "risposta senza pane").trim()}`);
 			process.exit(1);

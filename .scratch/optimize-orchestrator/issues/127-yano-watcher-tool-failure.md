@@ -6,12 +6,11 @@ status: open
 severity: high
 category: internal_tool
 signal: tool_failure
-fingerprint: cec9525ba4d5583f0d6789662c41b8b574191dc4c2a1cbe36b6ab04929988f95
-detected_at: 2026-09-02T14:09:54.077Z
-last_seen_at: 2026-09-02T19:09:01.019Z
-source_project: yano-orchestrator
-source_project_root: /Users/alessiobacin/Development/testCode/yano-orchestrator
-source_project_key: workspace-d3dda6a0cb4d
+fingerprint: 369f79eb7e4559b29eae6355eca65eb36f76e34d62801133d3e802acd39b9da1
+detected_at: 2026-09-02T17:07:25.972Z
+source_project: llmproxy
+source_project_root: /Users/alessiobacin/Development/Modules-platform-implementation/llmProxy
+source_project_key: workspace-b83c072cbe03
 run_id: unknown
 round: unknown
 task: unknown
@@ -25,7 +24,7 @@ Type: debugger
 Kind: task
 Created-by: yano-watcher
 Status: open
-Fingerprint: cec9525ba4d5583f0d6789662c41b8b574191dc4c2a1cbe36b6ab04929988f95
+Fingerprint: 369f79eb7e4559b29eae6355eca65eb36f76e34d62801133d3e802acd39b9da1
 
 ## Sintesi
 
@@ -35,21 +34,21 @@ Il watcher ha rilevato un comportamento attribuibile al flusso interno di Yano, 
 
 - Segnale: `tool_failure`
 - Categoria: `internal_tool`
-- Progetto osservato: `yano-orchestrator` (/Users/alessiobacin/Development/testCode/yano-orchestrator)
-- Timestamp del record: `2026-09-02T14:09:47.115Z`
+- Progetto osservato: `llmproxy` (/Users/alessiobacin/Development/Modules-platform-implementation/llmProxy)
+- Timestamp del record: `2026-09-02T17:06:59.567Z`
 - Record di trace: `unknown`
 
 ```json
 {
-  "ts": "2026-09-02T14:09:47.115Z",
-  "seq": 596,
+  "ts": "2026-09-02T17:06:59.567Z",
+  "seq": 599,
   "instance": "planner-01",
   "role": "planner",
-  "project": "yano-orchestrator",
-  "project_key": "workspace-d3dda6a0cb4d",
+  "project": "llmproxy",
+  "project_key": "workspace-b83c072cbe03",
   "trace_mode": "full",
   "type": "tool_execution_end",
-  "tool_call_id": "call_08132393ad5947a6b3231d49",
+  "tool_call_id": "call_d9cf24c4529942079b2ec7ed",
   "tool": "plan_advance",
   "ok": false
 }

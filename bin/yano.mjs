@@ -101,6 +101,7 @@ import { runYanoComputerLocal } from "../scripts/yano-computer-local.mjs";
 import { runYanoServices } from "../scripts/yano-services.mjs";
 import { runYanoDocsCheck } from "../scripts/yano-docs-check.mjs";
 import { runYanoQaInventory } from "../scripts/yano-qa-inventory.mjs";
+import { runYanoAgentMcp } from "../scripts/yano-agent-mcp.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, "..");
@@ -263,6 +264,7 @@ async function main() {
 		return;
 	}
 	if (["status", "logs", "fleet", "mcp"].includes(sub)) {
+		if (sub === "mcp" && rest[0] === "agent") { runYanoAgentMcp({ argv: rest.slice(1) }); return; }
 		await runYanoStatus({ cwd, argv: [sub, ...rest] });
 		return;
 	}

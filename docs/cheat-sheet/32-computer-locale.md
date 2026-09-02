@@ -2,6 +2,11 @@
 
 Servizio globale persistente con MCP Apple, separato dai progetti:
 
+Se configurate, il supervisore aggiunge automaticamente `apple-voice-memos`
+usando `YANO_COMPUTER_LOCAL_ASSEMBLYAI_API_KEY` ed `evolution-api` usando
+`EVOLUTION_API_URL`/`EVOLUTION_API_KEY` dalla configurazione globale.
+Per MCP aggiuntivi usare `yano mcp agent add --agent computer-locale ...`.
+
 ```sh
 yano computer start
 yano computer status

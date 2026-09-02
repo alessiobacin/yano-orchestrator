@@ -2,15 +2,27 @@
 // User-facing bridge to the persistent Computer locale agent. Requests use a
 // dedicated Yano scope, never a project scope.
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import mqtt from "mqtt";
 import { ensureComputerLocalService } from "./yano-global-services.mjs";
+import { globalDataPath } from "./yano-config.mjs";
+import { projectKey } from "./yano-trace-storage.mjs";
 
 const PROJECT = "yano-scheduler";
 const INSTANCE = "computer-locale";
-const SCOPE = "yano-system";
+// The service currently runs with the canonical project scope derived from
+// its runtime project.json. Keep the CLI on that same scope; a human label
+// such as `yano-system` would silently publish to a topic nobody subscribes
+// to after a restart.
+const SCOPE = projectKey(path.join(globalDataPath(), "computer-local"), PROJECT);
 const brokerUrl = () => process.env.PI_ORCH_BROKER_URL || "mqtt://127.0.0.1:1883";
 function value(argv, flag) { const i = argv.indexOf(flag); return i < 0 ? null : argv[i + 1] || null; }
-function usage() { console.log("Uso: yano computer <start|status|ask> [--prompt \"...\"] [--timeout-ms N]"); }
+function pendingRoot() { return path.join(globalDataPath(), "computer-local", "pending"); }
+function savePending(request) { fs.mkdirSync(pendingRoot(), { recursive: true, mode: 0o700 }); fs.writeFileSync(path.join(pendingRoot(), `${request.assignment_id}.json`), JSON.stringify(request, null, 2), { mode: 0o600 }); }
+function removePending(id) { try { fs.unlinkSync(path.join(pendingRoot(), `${id}.json`)); } catch { /* already removed */ } }
+function pendingRequests() { try { return fs.readdirSync(pendingRoot()).filter((name) => name.endsWith(".json")).map((name) => JSON.parse(fs.readFileSync(path.join(pendingRoot(), name), "utf8"))); } catch { return []; } }
+function usage() { console.log("Uso: yano computer <start|status|ask|pending> [--prompt \"...\"] [--timeout-ms N]"); }
 
 export async function askComputerLocal(prompt, { timeoutMs = 120000, broker = brokerUrl(), ensure = ensureComputerLocalService } = {}) {
 	if (!prompt?.trim()) throw new Error("--prompt è obbligatorio.");
@@ -19,6 +31,8 @@ export async function askComputerLocal(prompt, { timeoutMs = 120000, broker = br
 	const requestId = `computer-${crypto.randomUUID()}`;
 	const replyTopic = `pi/${SCOPE}/cli/${requestId}/response`;
 	const commandTopic = `pi/${SCOPE}/agents/${INSTANCE}/commands`;
+	const request = { type: "command", assignment_id: requestId, sender_instance: "yano-cli", sender_role: "user", target_instance: INSTANCE, project: PROJECT, prompt: prompt.trim(), reply_to: replyTopic, hops: 0, timestamp: new Date().toISOString(), response_schema: null };
+	savePending(request);
 	const client = await mqtt.connectAsync(broker, { reconnectPeriod: 0, connectTimeout: 3000 });
 	try {
 		await client.subscribeAsync(replyTopic, { qos: 1 });
@@ -29,8 +43,9 @@ export async function askComputerLocal(prompt, { timeoutMs = 120000, broker = br
 				clearTimeout(timer);
 				try { resolve(JSON.parse(payload.toString())); } catch { resolve({ response: payload.toString() }); }
 			});
-			client.publish(commandTopic, JSON.stringify({ type: "command", assignment_id: requestId, sender_instance: "yano-cli", sender_role: "user", target_instance: INSTANCE, project: PROJECT, prompt: prompt.trim(), reply_to: replyTopic, hops: 0, timestamp: new Date().toISOString(), response_schema: null }), { qos: 1 });
+			client.publish(commandTopic, JSON.stringify(request), { qos: 1 });
 		});
+		removePending(requestId);
 		return result;
 	} finally { await client.endAsync(); }
 }
@@ -39,6 +54,7 @@ export async function runYanoComputerLocal({ argv = [] } = {}) {
 	const [sub] = argv;
 	if (!sub || sub === "--help" || sub === "-h") { usage(); return; }
 	if (sub === "start" || sub === "status") { const result = ensureComputerLocalService(); console.log(JSON.stringify(result, null, 2)); return result; }
+	if (sub === "pending") { const result = pendingRequests(); console.log(JSON.stringify(result, null, 2)); return result; }
 	if (sub === "ask") { const result = await askComputerLocal(value(argv, "--prompt"), { timeoutMs: Number(value(argv, "--timeout-ms") || 120000) }); console.log(JSON.stringify(result, null, 2)); return result; }
 	usage(); throw new Error(`sottocomando sconosciuto: ${sub}`);
 }

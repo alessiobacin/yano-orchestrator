@@ -70,6 +70,16 @@ function slug(valueToSlug) {
 
 function projectTabLabel(projectName) { return `debugger-${slug(projectName)}`.slice(0, 60); }
 
+function closeHerdrTab(tabId) {
+	if (!tabId) return { closed: false, reason: "missing_tab_id" };
+	const result = spawnSync("herdr", ["tab", "close", tabId], { encoding: "utf8" });
+	return {
+		closed: result.status === 0,
+		reason: result.status === 0 ? null : "herdr_tab_close_failed",
+		error: result.status === 0 ? null : String(result.stderr || result.stdout || "").trim().slice(-500),
+	};
+}
+
 function requireSqlite() {
 	try { return process.getBuiltinModule?.("node:sqlite") || require("node:sqlite"); }
 	catch (error) { throw new Error(`yano debugger: node:sqlite non disponibile (${error instanceof Error ? error.message : String(error)}); serve Node >=22.5`); }
@@ -455,7 +465,19 @@ export async function notifyBugReported(db, result) {
 			};
 			return routeAgentMessage({ client, projectRoot: bug.root, project, packageRoot: path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."), message: env, targetRole });
 		};
-		const debuggerRoute = await publishRole("debugger", `Nuovo bug segnalato nel registro yano-debugger: ${bug.bug_id} — "${bug.title}" (severità: ${bug.severity}, fonte: ${bug.source}). Prendilo in carico con \`yano debugger claim --bug-id ${bug.bug_id} --actor <tua-istanza>\`, leggilo con \`${statusCmd}\` e segui il tuo protocollo diagnostico (claim → riproduzione → evidenza → stato → notifica al planner).`);
+		// A project may have both the permanent debugger service and a
+		// project-scoped debugger tab. A role-topic publish is a broadcast, so it
+		// would wake both and let them race on the same bug. Prefer the exact
+		// debugger registered for this project; routing falls back to planner /
+		// watcher if that instance is not live.
+		const registeredDebugger = db.prepare("SELECT worker_instance FROM debugger_projects WHERE project_key = ? AND worker_status NOT IN ('paused','stopped') ORDER BY updated_at DESC LIMIT 1").get(bug.project_key);
+		const debuggerInstance = registeredDebugger?.worker_instance || null;
+		const debuggerRoute = await (debuggerInstance
+			? routeAgentMessage({ client, projectRoot: bug.root, project, packageRoot: path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."), message: {
+				type: "command", assignment_id: crypto.randomUUID(), sender_instance: "yano-debugger-cli", sender_role: "system",
+				target_instance: debuggerInstance, target_role: "debugger", project, prompt: `Nuovo bug segnalato nel registro yano-debugger: ${bug.bug_id} — "${bug.title}" (severità: ${bug.severity}, fonte: ${bug.source}). Prendilo in carico con \`yano debugger claim --bug-id ${bug.bug_id} --actor <tua-istanza>\`, leggilo con \`${statusCmd}\` e segui il tuo protocollo diagnostico (claim → riproduzione → evidenza → stato → notifica al planner).`, reply_to: "", hops: 0, timestamp: now(), response_schema: null,
+			}, targetInstance: debuggerInstance })
+			: await publishRole("debugger", `Nuovo bug segnalato nel registro yano-debugger: ${bug.bug_id} — "${bug.title}" (severità: ${bug.severity}, fonte: ${bug.source}). Prendilo in carico con \`yano debugger claim --bug-id ${bug.bug_id} --actor <tua-istanza>\`, leggilo con \`${statusCmd}\` e segui il tuo protocollo diagnostico (claim → riproduzione → evidenza → stato → notifica al planner).`));
 		if (debuggerRoute.route === "target") {
 			await publishRole("planner", `È stato aperto un nuovo bug (${bug.bug_id}, severità ${bug.severity}) nel registro yano-debugger per questo progetto: "${bug.title}". Se non hai già un'istanza debugger attiva su questo progetto, valuta se avviarne una (\`yano debugger start --project-root ${bug.root}\`) o gestire tu la triage; altrimenti lascialo al debugger, che ti contatterà con l'esito.`);
 		}
@@ -546,7 +568,13 @@ function doLeave(db, info, existing, { dryRun = false } = {}) {
 	const snapshot = herdrSnapshot();
 	const tabExists = Boolean(existing.worker_tab_id && snapshot?.tabs?.some((tab) => tab.tab_id === existing.worker_tab_id));
 	const closed = dryRun || !tabExists ? { closed: false, reason: dryRun ? "dry_run" : "tab_already_absent" } : closeHerdrTab(existing.worker_tab_id);
-	if (!dryRun) db.prepare("DELETE FROM debugger_projects WHERE project_key = ?").run(existing.project_key);
+	if (!dryRun) {
+		// Bugs/events reference the project row. Keep the durable diagnostic
+		// history and mark the worker as left instead of deleting the parent row;
+		// deleting it would fail with SQLITE_FOREIGNKEY as soon as the project had
+		// one reported bug.
+		db.prepare("UPDATE debugger_projects SET workspace_id = NULL, worker_tab_id = NULL, worker_pane_id = NULL, worker_instance = NULL, worker_status = 'stopped', updated_at = ? WHERE project_key = ?").run(now(), existing.project_key);
+	}
 	return { project: info.name, left: !dryRun, dry_run: dryRun, debugger_closed: closed.closed, debugger_close_error: closed.error || null };
 }
 

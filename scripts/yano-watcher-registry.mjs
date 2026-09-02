@@ -42,7 +42,7 @@ import { ensureGlobalYanoServices } from "./yano-global-services.mjs";
 import { superviseExternalServices, getService } from "./yano-services.mjs";
 import { herdrSnapshot } from "./yano-herdr-client.mjs";
 import { installOneMinuteWindowsJob, removeOneMinuteWindowsJob, statusOneMinuteWindowsJob } from "./yano-os-scheduler.mjs";
-import { findAgentIdentityConflicts, formatAgentIdentityConflicts } from "./yano-agent-identity.mjs";
+import { agentTabIdentityAudit, findAgentIdentityConflicts, formatAgentIdentityConflicts } from "./yano-agent-identity.mjs";
 
 const require = createRequire(import.meta.url);
 const WORKSPACE_LABEL = "yano-watcher";
@@ -160,6 +160,31 @@ function closeHerdrTab(tabId) {
 	return result.status === 0
 		? { closed: true, tab_id: tabId }
 		: { closed: false, tab_id: tabId, error: (result.stderr || result.stdout || "Herdr non ha chiuso la tab").trim() };
+}
+
+function repairAgentTabIdentities(snapshot) {
+	const repaired = [];
+	for (const conflict of agentTabIdentityAudit(snapshot)) {
+		if (conflict.type !== "tab_identity_mismatch") continue;
+		try {
+			renameHerdrTab(conflict.tab_id, conflict.actual);
+			repaired.push({ tab_id: conflict.tab_id, from: conflict.label, to: conflict.actual });
+		} catch (error) {
+			repaired.push({ tab_id: conflict.tab_id, from: conflict.label, to: conflict.actual, error: error instanceof Error ? error.message : String(error) });
+		}
+	}
+	// Recovery tabs are implementation artefacts, never durable agents. A
+	// previous race could leave several empty planner recovery tabs behind;
+	// remove only tabs with no live pane/agent, never an active work tab.
+	for (const tab of snapshot?.tabs || []) {
+		if (!/^planner-\d{2}-recovery-/i.test(tab.label || "")) continue;
+		const pane = (snapshot.panes || []).find((item) => item.tab_id === tab.tab_id);
+		const agent = pane && (snapshot.agents || []).find((item) => item.pane_id === pane.pane_id);
+		if (agent && !["done", "offline", "unknown", "stopped"].includes(String(agent.agent_status || "").toLowerCase())) continue;
+		const closed = closeHerdrTab(tab.tab_id);
+		repaired.push({ tab_id: tab.tab_id, action: "close_orphan_recovery_tab", ...closed });
+	}
+	return repaired;
 }
 
 function closeUnusedInitialTab(snapshot, workspaceId, keepTabId) {
@@ -522,6 +547,18 @@ async function withSupervisorLock(callback) {
 
 function externalWorkerRecovery(snapshot) {
 	const results = [];
+	const liveSnapshotAgent = (instance, root, role = null) => {
+		const expectedRoot = path.resolve(root || "");
+		return (snapshot?.agents || []).some((agent) => {
+			if (agent.agent !== "pi" || ["done", "offline", "unknown"].includes(String(agent.agent_status || "").toLowerCase())) return false;
+			const pane = (snapshot?.panes || []).find((candidate) => candidate.pane_id === agent.pane_id);
+			const tab = pane && (snapshot?.tabs || []).find((candidate) => candidate.tab_id === pane.tab_id);
+			const sameInstance = agent.name === instance || pane?.agent === instance || tab?.label === instance;
+			const sameRoot = path.resolve(agent.cwd || pane?.cwd || "") === expectedRoot;
+			const sameRole = !role || String(tab?.label || "").toLowerCase().startsWith(`${role.toLowerCase()}-`) || tab?.label === `${role}-service`;
+			return sameInstance && sameRoot && sameRole;
+		});
+	};
 	const dataRoot = traceRoot();
 	const launch = (args, detail) => {
 		const result = spawnSync(process.execPath, [path.join(PACKAGE_ROOT, "bin", "yano.mjs"), ...args], { encoding: "utf8", maxBuffer: 4_000_000 });
@@ -538,7 +575,7 @@ function externalWorkerRecovery(snapshot) {
 			const rows = externalDb.prepare("SELECT proposal_id, architect_instance, status FROM architect_proposals WHERE architect_instance IS NOT NULL AND status IN ('provisioning','ready_ephemeral','promotion_candidate','revision_required','persistent')").all();
 			externalDb.close();
 			for (const row of rows) {
-				const live = snapshot?.agents?.some((agent) => agent.agent === "pi" && agent.name === row.architect_instance && !["done", "offline", "unknown"].includes(agent.agent_status));
+				const live = liveSnapshotAgent(row.architect_instance, row.root, "architect");
 				if (!live) launch(["architect", "start", "--proposal-id", row.proposal_id, "--json"], { role: "architect", proposal_id: row.proposal_id, proposal_status: row.status, instance: row.architect_instance });
 			}
 		} catch (error) { results.push({ role: "architect", recovered: false, error: error instanceof Error ? error.message : String(error) }); }
@@ -559,7 +596,7 @@ function externalWorkerRecovery(snapshot) {
 					externalDb.prepare("UPDATE debugger_projects SET worker_status = 'stopped', workspace_id = NULL, worker_tab_id = NULL, worker_pane_id = NULL, updated_at = ? WHERE root = ? AND worker_status = 'running'").run(now(), row.root);
 					continue;
 				}
-				const live = snapshot?.agents?.some((agent) => agent.agent === "pi" && agent.name === row.worker_instance && !["done", "offline", "unknown"].includes(agent.agent_status));
+				const live = liveSnapshotAgent(row.worker_instance, row.root, "debugger");
 				if (!live) launch(["debugger", "resume", "--project-root", row.root, "--project", row.name, "--json"], { role: "debugger", project: row.name, instance: row.worker_instance });
 			}
 			externalDb.close();
@@ -575,7 +612,7 @@ function externalWorkerRecovery(snapshot) {
 			const rows = externalDb.prepare("SELECT p.root, p.name, p.worker_instance FROM suggester_projects p WHERE p.worker_status NOT IN ('paused','stopped') AND EXISTS (SELECT 1 FROM suggestions s WHERE s.project_key = p.project_key AND s.status IN ('received','analyzing'))").all();
 			externalDb.close();
 			for (const row of rows) {
-				const live = snapshot?.agents?.some((agent) => agent.agent === "pi" && agent.name === row.worker_instance && !["done", "offline", "unknown"].includes(agent.agent_status));
+				const live = liveSnapshotAgent(row.worker_instance, row.root, "suggester");
 				if (!live) launch(["suggester", "resume", "--project-root", row.root, "--project", row.name, "--json"], { role: "suggester", project: row.name, instance: row.worker_instance });
 			}
 		} catch (error) { results.push({ role: "suggester", recovered: false, error: error instanceof Error ? error.message : String(error) }); }
@@ -625,17 +662,29 @@ function activateDefaultWorkers(db, row) {
 	};
 }
 
-function activateDefaultDebuggers() {
+function activateDefaultDebuggers(snapshot = herdrSnapshot()) {
 	const file = path.join(traceRoot(), "debugger", "debugger.sqlite");
 	if (!fs.existsSync(file)) return [];
 	const results = [];
+	const isLiveProjectDebugger = (instance, root) => (snapshot?.agents || []).some((agent) => {
+		if (agent.agent !== "pi" || ["done", "offline", "unknown"].includes(String(agent.agent_status || "").toLowerCase())) return false;
+		const pane = (snapshot?.panes || []).find((candidate) => candidate.pane_id === agent.pane_id);
+		const tab = pane && (snapshot?.tabs || []).find((candidate) => candidate.tab_id === pane.tab_id);
+		return path.resolve(agent.cwd || pane?.cwd || "") === path.resolve(root || "")
+			&& (agent.name === instance || pane?.agent === instance || tab?.label === instance);
+	});
 	try {
 		const { DatabaseSync } = requireSqlite();
 		const db = new DatabaseSync(file, { readOnly: true });
-		const rows = db.prepare("SELECT root, name, worker_status FROM debugger_projects WHERE worker_status = 'stopped'").all();
+		const rows = db.prepare("SELECT root, name, worker_instance, worker_status FROM debugger_projects WHERE worker_status = 'stopped'").all();
 		db.close();
 		for (const row of rows) {
 			if (!projectHasActiveWork(row.root)) continue;
+			// The registry can lag behind a successful Herdr launch. Never create a
+			// second debugger from a stale `stopped` row: the exact live instance
+			// and canonical project root are authoritative for this decision.
+			const alreadyLive = isLiveProjectDebugger(row.worker_instance || `debugger-${row.name}`, row.root);
+			if (alreadyLive) continue;
 			const args = ["debugger", "start", "--project-root", row.root, "--project", row.name, "--json"];
 			const launched = spawnSync(process.execPath, [path.join(PACKAGE_ROOT, "bin", "yano.mjs"), ...args], { encoding: "utf8", maxBuffer: 4_000_000 });
 			results.push({ role: "debugger", project: row.name, root: row.root, activated: launched.status === 0, error: launched.status === 0 ? null : (launched.stderr || launched.stdout || "debugger start failed").trim() });
@@ -666,13 +715,18 @@ function supervise(db) {
 		// longer needs to wait for the next one-minute cron tick to resolve.
 		const snapshot = herdrSnapshot();
 		const orphan_tabs_removed = pruneOrphanWatcherTabs(snapshot, rows);
-		const identityConflicts = snapshot ? findAgentIdentityConflicts(snapshot) : [];
+		const agent_identity_repaired = snapshot ? repairAgentTabIdentities(snapshot) : [];
+		const repairedSnapshot = agent_identity_repaired.length ? herdrSnapshot() : snapshot;
+		const identityConflicts = repairedSnapshot ? [...findAgentIdentityConflicts(repairedSnapshot), ...agentTabIdentityAudit(repairedSnapshot)] : [];
 		for (const conflict of identityConflicts) {
 			const row = rows.find((candidate) => path.resolve(candidate.root) === path.resolve(conflict.root));
 			if (row) appendRawTraceRecord({ cwd: row.root, project: resolveTraceProject(row.root), record: { type: "watcher_identity_conflict", payload: conflict } });
 		}
 		const global_services = ensureGlobalYanoServices();
-		const activated = [...rows.map((row) => activateDefaultWorkers(db, row)).filter(Boolean), ...activateDefaultDebuggers()];
+		// Refresh after global-service recovery: using the pre-recovery snapshot
+		// can relaunch a project debugger that is already alive.
+		const currentSnapshot = herdrSnapshot();
+		const activated = [...rows.map((row) => activateDefaultWorkers(db, row)).filter(Boolean), ...activateDefaultDebuggers(currentSnapshot)];
 		const result = {
 			checked_at: now(),
 			herdr_reachable: Boolean(snapshot),
@@ -681,8 +735,9 @@ function supervise(db) {
 			activated,
 			global_services,
 			external_services,
-			external_workers: externalWorkerRecovery(snapshot),
+			external_workers: externalWorkerRecovery(currentSnapshot),
 			orphan_tabs_removed,
+			agent_identity_repaired,
 			identity_conflicts: identityConflicts,
 			errors: formatAgentIdentityConflicts(identityConflicts),
 		};

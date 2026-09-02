@@ -2,7 +2,8 @@ import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import path from "node:path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { globalDataPath } from "./yano-config.mjs";
+import { globalDataPath, resolveYanoConfig } from "./yano-config.mjs";
+import { materializeAgentMcp } from "./yano-agent-mcp.mjs";
 import { herdrSnapshot as snapshot } from "./yano-herdr-client.mjs";
 
 const PACKAGE_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
@@ -29,7 +30,8 @@ function ensureComputerRuntime() {
 	if (!roles.includes("yano-planner-trace-analysis")) {
 		writeFileSync(rolesPath, roles.replace("skills: [yano-cli]", "skills: [yano-cli, yano-planner-trace-analysis]"), { mode: 0o600 });
 	}
-	const voiceKey = process.env.YANO_COMPUTER_LOCAL_ASSEMBLYAI_API_KEY;
+	const config = resolveYanoConfig({});
+	const voiceKey = config.YANO_COMPUTER_LOCAL_ASSEMBLYAI_API_KEY || config.ASSEMBLYAI_API_KEY;
 	const servers = {
 		"apple-notes": { command: "npx", args: ["@griches/apple-notes-mcp"] },
 		"apple-messages": { command: "npx", args: ["@griches/apple-messages-mcp"] },
@@ -40,6 +42,9 @@ function ensureComputerRuntime() {
 		"apple-mail": { command: "npx", args: ["@griches/apple-mail-mcp"] },
 	};
 	if (voiceKey) servers["apple-voice-memos"] = { command: "npx", args: ["apple-voice-memos-mcp"], env: { ASSEMBLYAI_API_KEY: voiceKey } };
+	if (config.EVOLUTION_API_URL && config.EVOLUTION_API_KEY) servers["evolution-api"] = { command: "npx", args: ["-y", "mcp-evolution-api"], env: { EVOLUTION_API_URL: config.EVOLUTION_API_URL, EVOLUTION_API_KEY: config.EVOLUTION_API_KEY } };
+	const custom = materializeAgentMcp(COMPUTER_INSTANCE);
+	if (custom) Object.assign(servers, JSON.parse(readFileSync(custom, "utf8")).mcpServers || {});
 	writeFileSync(path.join(root, ".mcp.json"), JSON.stringify({ mcpServers: servers }, null, 2), { mode: 0o600 });
 	return root;
 }
@@ -117,6 +122,17 @@ function ensureService(service) {
 	let tab = state.tabs?.find((item) => item.workspace_id === workspace.workspace_id && item.label === service.tab);
 	let pane = tab && state.panes?.find((item) => item.tab_id === tab.tab_id);
 	let agent = pane && state.agents?.find((item) => item.pane_id === pane.pane_id);
+	// A fresh Herdr workspace may contain only its automatic tab `1`. Reuse it
+	// when it is empty instead of opening a second tab for the service.
+	if (!tab) {
+		const initial = state.tabs?.find((item) => item.workspace_id === workspace.workspace_id && /^(1|\d+)$/.test(item.label || ""));
+		const initialPane = initial && state.panes?.find((item) => item.tab_id === initial.tab_id);
+		const initialAgent = initialPane && state.agents?.find((item) => item.pane_id === initialPane.pane_id);
+		if (initial && initialPane && (!initialAgent || ["done", "offline", "unknown"].includes(String(initialAgent.agent_status || "").toLowerCase()))) {
+			const renamed = run("herdr", ["tab", "rename", initial.tab_id, service.tab]);
+			if (renamed.status === 0) { tab = { ...initial, label: service.tab }; pane = initialPane; agent = initialAgent; }
+		}
+	}
 	const health = pane ? probeService(pane.pane_id, agent) : { healthy: false, reason: "pane_missing" };
 	if (isLive(agent) && health.healthy) {
 		closeInitialDuplicates(state, workspace.workspace_id, tab.tab_id, service);
@@ -157,6 +173,6 @@ function ensureService(service) {
 }
 
 export function ensureGlobalYanoServices() { return SERVICES.map(ensureService); }
-export function ensureComputerLocalService() { return ensureService(SERVICES[2]); }
+export function ensureComputerLocalService() { return ensureService(SERVICES[3]); }
 
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) console.log(JSON.stringify(ensureGlobalYanoServices(), null, 2));

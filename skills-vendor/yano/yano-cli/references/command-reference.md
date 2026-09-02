@@ -8,7 +8,7 @@ surface implemented by the package. Always prefer the installed binary's
 
 ```text
 yano init [--name <name>] [--target <dir>] [--force] [--llmp] [--herdr] [--no-git]
-yano start --instance <id> [--role <role>] [--project <scope>] [--trace-mode <mode>]
+yano start --instance <id> [--role <role>] [--project <scope>] [--project-scope <scope>] [--trace-mode <mode>]
 yano doctor [--json] [--network]
 yano update [--check|--reload] [--dry-run] [--yes] [--timeout <seconds>] [--force]
 yano uninstall [--yes]
@@ -64,6 +64,15 @@ The launcher verifies that a Herdr workspace with the project label also has a
 pane rooted at the current project. It refuses to create a tab in the currently
 focused workspace when that verification fails. Do not substitute raw `herdr
 tab create` / `herdr agent start` for Yano agents.
+
+`yano start --project-scope <scope>` overrides the MQTT scope derived from the
+project root: without the flag the runtime uses `projectKey(cwd)` (canonical
+project slug); with `--project-scope yano-system` the instance
+publishes/subscribes (presence, commands, responses, roles, teams, LWT) on
+`pi/yano-system/**`. It is the stable scope used by the global system services
+(scheduler, watcher, debugger, auto-improver, suggester) to stay visible
+always on the same namespace. The scope string is used verbatim in topic
+names: avoid spaces or `/` unless a nested topic is intended.
 
 ```text
 yano init --name "Project Name"

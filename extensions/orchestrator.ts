@@ -552,6 +552,7 @@ interface CliFlags {
 	instance?: string;
 	role?: string;
 	project?: string;
+	projectScope?: string;
 	brokerUrl?: string;
 	mqttUsername?: string;
 	mqttPassword?: string;
@@ -571,6 +572,7 @@ function readCliFlags(pi: ExtensionAPI): CliFlags {
 		instance: (pi.getFlag("instance") as string | undefined) || undefined,
 		role: (pi.getFlag("role") as string | undefined) || undefined,
 		project: (pi.getFlag("project") as string | undefined) || undefined,
+		projectScope: (pi.getFlag("project-scope") as string | undefined) || undefined,
 		brokerUrl: (pi.getFlag("broker") as string | undefined) || undefined,
 		mqttUsername: (pi.getFlag("mqtt-username") as string | undefined) || undefined,
 		mqttPassword: (pi.getFlag("mqtt-password") as string | undefined) || undefined,

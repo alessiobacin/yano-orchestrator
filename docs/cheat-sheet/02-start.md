@@ -13,3 +13,11 @@ yano start --instance planner-01 --role planner --project /percorso/progetto
 Per i worker esterni usare i comandi dedicati (yano watcher, yano debugger,
 yano auto-improve, yano suggester). Il titolo della tab Herdr coincide con
 l’istanza.
+
+Scope MQTT: di default lo scope è derivato dalla root del progetto
+(projectKey); `--project-scope <scope>` lo sovrascrive sul wire — l’istanza
+pubblica/sottoscrive (presenza, comandi, risposte, team, LWT) su
+`pi/<scope>/**`. Esempio: i servizi di sistema girano su
+`yano start ... --project-scope yano-system` (scope stabile `pi/yano-system/**`).
+Lo scope è usato così com’è nei topic: niente spazi o "/" se non vuoi topic
+nidificati.

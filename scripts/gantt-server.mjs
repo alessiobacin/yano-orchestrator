@@ -236,7 +236,7 @@ export async function runGantt({ cwd, argv, packageRoot }) {
 	const broker = process.env.PI_ORCH_BROKER_URL || "mqtt://127.0.0.1:1883";
 	const client = mqtt.connect(broker, { clean: true, reconnectPeriod: 3000 });
 	mqttClients.add(client);
-	client.on("connect", () => { try { client.subscribe(`pi/${project}/runs/+/events`, { qos: 0 }); } catch {} });
+	client.on("connect", () => { try { client.subscribe(`pi/${projectKey(useCwd, project)}/runs/+/events`, { qos: 0 }); } catch {} });
 	client.on("message", () => { wsBroadcast(wss, buildSnapshot(useCwd, project)); });
 	client.on("error", () => { /* broker optional; HTTP still serves /data */ });
 

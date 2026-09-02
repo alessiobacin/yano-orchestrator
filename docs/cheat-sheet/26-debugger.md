@@ -20,4 +20,4 @@ API REST equivalente (un'unica istanza, molti progetti — vedi
 yano debugger serve --port 4177
 ~~~
 
-Collection Postman: `postman/yano-debugger.postman_collection.json`.
+Collection Postman: `docs/postman/yano-debugger.postman_collection.json`.

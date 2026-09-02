@@ -126,7 +126,7 @@ curl -s -X POST http://127.0.0.1:4177/projects/workspace-a1b2c3d4e5f6/bugs \
 
 Una collection Postman pronta all'uso (con variabili `baseUrl`/`token` e
 salvataggio automatico di `projectId`/`bugId` dalle risposte) è in
-`postman/yano-debugger.postman_collection.json` (+ `postman/yano-debugger.postman_environment.json`).
+`docs/postman/yano-debugger.postman_collection.json` (+ `docs/postman/yano-debugger.postman_environment.json`).
 
 Per l'implementazione completa e i confini di sicurezza, vedere
 [Yano Debugger](../yano-debugger.md).

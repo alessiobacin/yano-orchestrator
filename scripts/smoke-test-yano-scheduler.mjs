@@ -10,17 +10,19 @@ const project = path.join(root, "llmproxy");
 fs.mkdirSync(project);
 let crontab = "MAILTO=test@example.invalid\n";
 let workspaceCreated = false;
-let controlTabCreated = false;
+let schedulerTabCreated = false;
 const launches = [];
 const spawn = (command, args, options = {}) => {
 	if (command === "crontab" && args[0] === "-l") return { status: 0, stdout: crontab, stderr: "" };
 	if (command === "crontab" && args[0] === "-") { crontab = options.input; return { status: 0, stdout: "", stderr: "" }; }
 	if (command === "herdr" && args[0] === "workspace" && args[1] === "create") { workspaceCreated = true; return { status: 0, stdout: "", stderr: "" }; }
-	if (command === "herdr" && args[0] === "tab" && args[1] === "create") { controlTabCreated = true; return { status: 0, stdout: "", stderr: "" }; }
+	if (command === "herdr" && args[0] === "tab" && args[1] === "create") { schedulerTabCreated = true; return { status: 0, stdout: "", stderr: "" }; }
+	if (command === process.execPath && args.includes("launch-planner.mjs")) return { status: 0, stdout: JSON.stringify({ args: ["--instance", "yano-scheduler", "--role", "scheduler"] }), stderr: "" };
 	if (command === "herdr") {
-		const workspace = workspaceCreated ? [{ workspace_id: "w-scheduler", label: "yano-orchestrator" }] : [];
-		const panes = controlTabCreated ? [{ pane_id: "p-control", workspace_id: "w-scheduler", cwd: path.resolve(process.cwd()) }] : [];
-		return { status: 0, stdout: JSON.stringify({ result: { snapshot: { agents: [], workspaces: workspace, panes } } }), stderr: "" };
+		const workspace = workspaceCreated ? [{ workspace_id: "w-scheduler", label: "yano-scheduler" }] : [];
+		const tabs = schedulerTabCreated ? [{ tab_id: "t-scheduler", workspace_id: "w-scheduler", label: "yano-scheduler" }] : [];
+		const panes = schedulerTabCreated ? [{ pane_id: "p-scheduler", tab_id: "t-scheduler", workspace_id: "w-scheduler", cwd: path.resolve(process.cwd()) }] : [];
+		return { status: 0, stdout: JSON.stringify({ result: { snapshot: { agents: [], workspaces: workspace, tabs, panes } } }), stderr: "" };
 	}
 	launches.push({ command, args, cwd: options.cwd }); return { status: 0, stdout: "started", stderr: "" };
 };

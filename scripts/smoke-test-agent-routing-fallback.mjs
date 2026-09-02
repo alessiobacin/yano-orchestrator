@@ -16,6 +16,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 import mqtt from "mqtt";
+import { projectKey } from "./yano-trace-storage.mjs";
 
 const execFileP = promisify(execFile);
 const packageRoot = path.resolve(new URL(".", import.meta.url).pathname, "..");
@@ -78,6 +79,7 @@ async function instance(mod, cwd, project, instance, role) {
 async function main() {
 	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "yano-routing-fallback-"));
 	const project = "routing-fallback-" + path.basename(cwd);
+	const scope = project;
 	await git(["init", "-q"], cwd);
 	fs.mkdirSync(path.join(cwd, "agents"), { recursive: true });
 	fs.writeFileSync(path.join(cwd, "agents", "roles.yaml"), "roles:\n  planner: { teams: [core] }\n  coder: { teams: [core] }\n");
@@ -90,7 +92,7 @@ async function main() {
 	const routeObserver = mqtt.connect(broker, { reconnectPeriod: 0 });
 	const plannerCommands = [];
 	await new Promise((resolve, reject) => { routeObserver.once("connect", resolve); routeObserver.once("error", reject); });
-	await routeObserver.subscribeAsync(`pi/${project}/agents/planner-01/commands`, { qos: 1 });
+	await routeObserver.subscribeAsync(`pi/${scope}/agents/planner-01/commands`, { qos: 1 });
 	routeObserver.on("message", (_topic, payload) => { try { plannerCommands.push(JSON.parse(payload.toString())); } catch { /* ignore */ } });
 
 	console.log("\n=== TEST 1 — target offline, planner live: route to planner ===");
@@ -107,7 +109,7 @@ async function main() {
 		fallback_id: "watcher-forward-1",
 		project,
 		original_target: "debugger-01",
-		original: { type: "command", assignment_id: "watcher-forward-1", sender_instance: "worker-01", sender_role: "coder", project, target_instance: "debugger-01", prompt: "messaggio conservato dal watcher", reply_to: `pi/${project}/agents/worker-01/responses`, hops: 0 },
+		original: { type: "command", assignment_id: "watcher-forward-1", sender_instance: "worker-01", sender_role: "coder", project, project_key: scope, target_instance: "debugger-01", prompt: "messaggio conservato dal watcher", reply_to: `pi/${scope}/agents/worker-01/responses`, hops: 0 },
 	} });
 	ok(plannerCommands.some((message) => message.fallback_for === "debugger-01" && message.assignment_id === "watcher-forward-1"), "watcher forwards a retained fallback to the live planner with original correlation");
 

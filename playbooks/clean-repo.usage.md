@@ -224,12 +224,13 @@ parte della stesura di questa sezione:
 - `docs/quick_guides` (con l'underscore, non il trattino) copre già
   `quick-guides/`.
 - `docs/cheat-sheet` copre già `cheat-sheet`.
-- `docs/diagramma` copre già `diagram` (contiene i `.mmd`, es.
-  `05-trace-db-gantt.mmd`).
-- `postman/` in root (con dentro `yano-debugger.postman_collection.json` e
-  `yano-debugger.postman_environment.json`) copre già `postman/` — e
-  yano-orchestrator ha effettivamente un backend/CLI, quindi la categoria
-  si applica.
+- `docs/diagram` (da dicembre 2026; prima `docs/diagramma`) contiene i diagrammi
+  Mermaid operativi (`.mmd`, es. `05-trace-db-gantt.mmd`) e copre direttamente
+  la categoria canonica `diagram`.
+- `docs/postman/` (da dicembre 2026; prima `postman/` in root) contiene
+  `yano-debugger.postman_collection.json` e `yano-debugger.postman_environment.json`
+  e copre direttamente `postman/` — e yano-orchestrator ha effettivamente un
+  backend/CLI, quindi la categoria si applica.
 - `docs/architecture.md` + `docs/architecture.mmd` coprono già
   `architecture/`, come file invece che come directory dedicata.
 - `docs/development-notes.md` è un candidato ragionevole a coprire

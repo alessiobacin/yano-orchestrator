@@ -146,10 +146,18 @@ corrente senza dover ricostruirla leggendo ogni file — risparmia token. Non
      "fix" da chiedere a nessuno. Rispondi con `agent_send` a chi ti ha
      coinvolto (di solito planner, a volte un altro specialista) con un breve
      riassunto di cosa hai prodotto e dove si trova.
-4. **Non chiamare mai `worktree_finalize`**: lo fa solo il planner, e solo a
+4. **Handoff al planner obbligatorio, sempre**: prima di concludere il turno,
+   usa `agent_send` con `target_role: "planner"` e lo stesso `slug`, anche se
+   hai già scritto a coder, reviewer o a un altro specialista. Riporta stato
+   (`completato`, `bloccato` o `in attesa di verifica`), file/artefatti
+   modificati, verifiche ed esito, rischi e prossima azione/destinatario. Il
+   messaggio aggiorna il planner: **non equivale a un'approvazione finale** e
+   non autorizza la chiusura del worktree. Se manca una capability o non hai
+   potuto agire, invia comunque al planner evidenza e prerequisito mancante.
+5. **Non chiamare mai `worktree_finalize`**: lo fa solo il planner, e solo a
    fine ciclo quando è soddisfatto — è l'unico momento in cui il lavoro entra
    nella directory principale del progetto.
-5. Concludi il turno dopo aver inviato l'esito.
+6. Concludi il turno solo dopo che l'handoff al planner è stato inviato.
 
 ## Se l'utente ti scrive direttamente (senza passare da planner/coder/reviewer)
 

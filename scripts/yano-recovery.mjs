@@ -138,15 +138,16 @@ function collectAssignments(db, runIds) {
 	return result;
 }
 
-async function discoverPresence(project, broker = BROKER_URL) {
+async function discoverPresence(project, broker = BROKER_URL, cwd = process.cwd()) {
 	const client = await mqtt.connectAsync(broker, { reconnectPeriod: 0, connectTimeout: 1800 });
 	const cards = new Map();
-	const topic = `pi/${project}/agents/+/status`;
+	const scope = process.env.PI_ORCH_TEST_NO_EXIT === "1" ? project : projectKey(cwd, project);
+	const topic = `pi/${scope}/agents/+/status`;
 	await client.subscribeAsync(topic, { qos: 1 });
 	const onMessage = (receivedTopic, payload) => {
 		try {
 			const card = JSON.parse(payload.toString());
-			if (card?.project === project && receivedTopic === `pi/${project}/agents/${card.instance}/status`) cards.set(card.instance, card);
+			if (card?.project === project && (!card.project_key || card.project_key === scope) && receivedTopic === `pi/${scope}/agents/${card.instance}/status`) cards.set(card.instance, card);
 		} catch { /* malformed retained presence is ignored */ }
 	};
 	client.on("message", onMessage);
@@ -234,7 +235,7 @@ async function pauseRun({ cwd, project, dbPath, workspaceDir, run, broker, yes, 
 	let presence = [];
 	let client = null;
 	try {
-		({ client, cards: presence } = await discoverPresence(project, broker));
+		({ client, cards: presence } = await discoverPresence(project, broker, cwd));
 	} catch (error) {
 		console.warn(`yano pause: broker non raggiungibile (${error instanceof Error ? error.message : String(error)}); snapshot locale comunque salvato.`);
 	}
@@ -252,7 +253,7 @@ async function pauseRun({ cwd, project, dbPath, workspaceDir, run, broker, yes, 
 	}
 	if (client && yes && terminateAgents) {
 		for (const card of presence.filter((item) => item.status !== "offline")) {
-			await client.publishAsync(`pi/${project}/agents/${card.instance}/commands`, JSON.stringify({
+			await client.publishAsync(`pi/${process.env.PI_ORCH_TEST_NO_EXIT === "1" ? project : projectKey(cwd, project)}/agents/${card.instance}/commands`, JSON.stringify({
 				type: "terminate",
 				requested_by_instance: "yano-cli",
 				requested_by_role: "operator",
@@ -394,7 +395,7 @@ async function resumeRuns({ cwd, project, dbPath, runs, argv }) {
 	const live = new Set();
 	let presenceClient = null;
 	try {
-		const discovered = await discoverPresence(project, value(argv, "--broker") || BROKER_URL);
+		const discovered = await discoverPresence(project, value(argv, "--broker") || BROKER_URL, cwd);
 		presenceClient = discovered.client;
 		for (const card of discovered.cards) live.add(card.instance);
 	} catch { /* offline broker: launch plan is still useful */ }
@@ -431,13 +432,13 @@ async function resumeRuns({ cwd, project, dbPath, runs, argv }) {
 	return { runs, launched, snapshots, agents };
 }
 
-async function waitForPresenceCondition({ project, broker, instances, timeoutMs, predicate }) {
+async function waitForPresenceCondition({ cwd, project, broker, instances, timeoutMs, predicate }) {
 	const deadline = Date.now() + timeoutMs;
 	let last = [];
 	while (Date.now() < deadline) {
 		let client = null;
 		try {
-			const discovered = await discoverPresence(project, broker);
+			const discovered = await discoverPresence(project, broker, cwd);
 			client = discovered.client;
 			last = discovered.cards;
 			const selected = discovered.cards.filter((card) => instances.has(card.instance));
@@ -453,16 +454,16 @@ async function waitForPresenceCondition({ project, broker, instances, timeoutMs,
 	return { ok: false, cards: last.filter((card) => instances.has(card.instance)) };
 }
 
-async function prepareReload({ project, broker, cards, timeoutMs, force }) {
+async function prepareReload({ cwd, project, broker, cards, timeoutMs, force }) {
 	const live = cards.filter((card) => card.status !== "offline");
 	const instances = new Set(live.map((card) => card.instance));
 	if (!instances.size || force) return { prepared: force ? [] : [...instances], forced: force, cards: live };
 	let client = null;
 	try {
-		const discovered = await discoverPresence(project, broker);
+		const discovered = await discoverPresence(project, broker, cwd);
 		client = discovered.client;
 		for (const card of discovered.cards.filter((item) => instances.has(item.instance) && item.status !== "offline")) {
-			await client.publishAsync(`pi/${project}/agents/${card.instance}/commands`, JSON.stringify({
+			await client.publishAsync(`pi/${process.env.PI_ORCH_TEST_NO_EXIT === "1" ? project : projectKey(cwd, project)}/agents/${card.instance}/commands`, JSON.stringify({
 				type: "reload_prepare",
 				requested_by_instance: "yano-cli",
 				requested_by_role: "operator",
@@ -474,7 +475,7 @@ async function prepareReload({ project, broker, cards, timeoutMs, force }) {
 		if (client) { try { await client.endAsync(); } catch { /* best effort */ } }
 	}
 	const ready = await waitForPresenceCondition({
-		project,
+		cwd, project,
 		broker,
 		instances,
 		timeoutMs,
@@ -484,10 +485,10 @@ async function prepareReload({ project, broker, cards, timeoutMs, force }) {
 		const pending = ready.cards.filter((card) => !card.reload_ready).map((card) => card.instance);
 		let cancelClient = null;
 		try {
-			const discovered = await discoverPresence(project, broker);
+			const discovered = await discoverPresence(project, broker, cwd);
 			cancelClient = discovered.client;
 			for (const card of discovered.cards.filter((item) => instances.has(item.instance) && item.status !== "offline")) {
-				await cancelClient.publishAsync(`pi/${project}/agents/${card.instance}/commands`, JSON.stringify({
+				await cancelClient.publishAsync(`pi/${process.env.PI_ORCH_TEST_NO_EXIT === "1" ? project : projectKey(cwd, project)}/agents/${card.instance}/commands`, JSON.stringify({
 					type: "reload_cancel",
 					requested_by_instance: "yano-cli",
 					requested_by_role: "operator",
@@ -559,7 +560,7 @@ export async function runControlledReload({ cwd, packageRoot, argv, update }) {
 	let discoveryClient = null;
 	let presence = [];
 	try {
-		const discovered = await discoverPresence(project, value(argv, "--broker") || BROKER_URL);
+			const discovered = await discoverPresence(project, value(argv, "--broker") || BROKER_URL, cwd);
 		discoveryClient = discovered.client;
 		presence = discovered.cards.filter((card) => card.status !== "offline");
 	} catch (error) {
@@ -576,7 +577,7 @@ export async function runControlledReload({ cwd, packageRoot, argv, update }) {
 	}
 	const broker = value(argv, "--broker") || BROKER_URL;
 	const startedAt = new Date().toISOString();
-	const prepared = await prepareReload({ project, broker, cards: presence, timeoutMs, force });
+	const prepared = await prepareReload({ cwd, project, broker, cards: presence, timeoutMs, force });
 	traceReloadEvent({ cwd, project, stage: "barrier", payload: { agents: prepared.prepared, forced: prepared.forced, timeout_ms: timeoutMs } });
 	const workspaceDir = resolveYanoWorkspaceDir(cwd, project);
 	const snapshotResults = [];

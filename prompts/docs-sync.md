@@ -57,7 +57,8 @@ categorie: `architecture/`,
 `guides/`, `quick-guides/`, `adr/`, `notes/`, `postman/` (solo se il progetto
 ha un backend), `cheat-sheet/` e `diagram/`. Prima di creare una nuova
 directory cerca l'equivalente già adottato dal progetto, anche se ha un nome
-diverso (per esempio `docs/quick_guides` o `docs/diagramma`).
+diverso (per esempio `docs/quick_guides`, che copre `quick-guides` con la
+convenzione storica del progetto).
 
 Per ogni categoria assente, crea la directory nella convenzione del progetto
 e almeno un file utile al suo interno; per ogni categoria esistente, aggiorna

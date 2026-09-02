@@ -5006,3 +5006,13 @@ Ora sia il watchdog interno sia `yano watch` escludono dai controlli di stall e
 offline i run con un `decision_hold` umano aperto. Il ticket resta osservabile
 nel DB e riprende normalmente quando il planner riceve la risposta; non viene
 più fallito o rilanciato durante una pausa deliberatamente richiesta.
+
+## Revisione 64 — handoff universale degli specialisti al planner
+
+Ogni ruolo specialista deve notificare il planner alla fine di qualunque
+round operativo, anche quando il suo flusso prevede prima un passaggio a
+coder, reviewer o a un altro specialista. L'handoff contiene stato, modifiche
+o artefatti, verifiche, rischi e prossimo destinatario; non vale come
+approvazione finale del worktree. Il contratto è iniettato dal loader dei
+prompt in tutti i ruoli configurati con un `brief`, quindi vale anche per ruoli
+con prompt dedicato o introdotti successivamente dall'Architect.

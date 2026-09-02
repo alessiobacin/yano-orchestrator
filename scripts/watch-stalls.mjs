@@ -46,7 +46,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { spawn, spawnSync } from "node:child_process";
 import mqtt from "mqtt";
-import { canonicalProjectScope, readTraceRecords, tracePaths } from "./yano-trace-storage.mjs";
+import { canonicalProjectScope, projectKey, readTraceRecords, tracePaths } from "./yano-trace-storage.mjs";
 import { appendRawTraceRecord } from "./yano-trace-storage.mjs";
 import { processYanoWatcherFindings, resolveYanoRepository, sendTelegramWatcherNotification } from "./yano-watcher-findings.mjs";
 import { missingConfigError, resolveYanoConfig } from "./yano-config.mjs";
@@ -73,7 +73,8 @@ function finalWatcherEvent(payload) {
 function installFinalEventMonitor({ client, cwd, project, argv, packageRoot, runtime }) {
 	if (!client || runtime.finalEventMonitorInstalled) return;
 	runtime.finalEventMonitorInstalled = true;
-	const topics = [`pi/${project}/runs/+/events`, `pi/${project}/agents/+/events`];
+	const scope = projectKey(cwd, project);
+	const topics = [`pi/${scope}/runs/+/events`, `pi/${scope}/agents/+/events`];
 	const onMessage = (topic, payload) => {
 		if (!finalWatcherEvent(payload)) return;
 		let event = {};
@@ -160,9 +161,10 @@ function spawnPlannerForFallback({ cwd, project }) {
 }
 
 export async function handleAgentFallback({ client, cwd, project, packageRoot, payload }) {
-	if (!payload || payload.type !== "agent_route_fallback" || payload.project !== project || !payload.original) return;
+	const scope = process.env.PI_ORCH_TEST_NO_EXIT === "1" ? project : projectKey(cwd, project);
+	if (!payload || payload.type !== "agent_route_fallback" || payload.project !== project || (payload.project_key && payload.project_key !== scope) || !payload.original) return;
 	const original = payload.original;
-	let planners = await discoverLiveAgents(client, project);
+	let planners = await discoverLiveAgents(client, scope, process.env.PI_ORCH_TEST_NO_EXIT === "1" ? null : scope);
 	let livePlanners = planners.filter((agent) => agent.role === "planner");
 	let recovery = null;
 	if (!livePlanners.length) {
@@ -170,7 +172,7 @@ export async function handleAgentFallback({ client, cwd, project, packageRoot, p
 		const deadline = Date.now() + 15_000;
 		while (Date.now() < deadline && !livePlanners.length) {
 			await new Promise((resolve) => setTimeout(resolve, 350));
-			planners = await discoverLiveAgents(client, project);
+			planners = await discoverLiveAgents(client, scope, process.env.PI_ORCH_TEST_NO_EXIT === "1" ? null : scope);
 			livePlanners = planners.filter((agent) => agent.role === "planner");
 		}
 	}
@@ -182,17 +184,17 @@ export async function handleAgentFallback({ client, cwd, project, packageRoot, p
 				target_instance: planner.instance,
 				target_role: "planner",
 				prompt: `[yano-routing] Destinatario originale offline: ${payload.original_target || "?"}. Il watcher ha recuperato il coordinatore: prendi in carico questo messaggio, informa il mittente e decidi se rilanciare o sostituire l'agente.\n\n${original.prompt}`,
-				reply_to: original.reply_to || `pi/${project}/agents/${original.sender_instance}/responses`,
+				reply_to: original.reply_to || `pi/${scope}/agents/${original.sender_instance}/responses`,
 				hops: Number(original.hops || 0),
 				fallback_for: payload.original_target || null,
 				routed_by: "yano-watcher",
 			};
-			await client.publishAsync(`pi/${project}/agents/${planner.instance}/commands`, JSON.stringify(envelope), { qos: 1 });
+			await client.publishAsync(`pi/${scope}/agents/${planner.instance}/commands`, JSON.stringify(envelope), { qos: 1 });
 			delivered++;
 		} catch { /* best effort; next planner or next scan can retry */ }
 	}
 	try {
-		await client.publishAsync(`pi/${project}/system/agent-fallback`, "", { qos: 1, retain: true });
+		await client.publishAsync(`pi/${scope}/system/agent-fallback`, "", { qos: 1, retain: true });
 	} catch { /* best effort */ }
 	try {
 		appendRawTraceRecord({ cwd, project, record: {
@@ -216,7 +218,7 @@ export async function handleAgentFallback({ client, cwd, project, packageRoot, p
 function installAgentFallbackMonitor({ client, cwd, project, packageRoot, runtime }) {
 	if (!client || runtime.agentFallbackMonitorInstalled) return;
 	runtime.agentFallbackMonitorInstalled = true;
-	const topic = `pi/${project}/system/agent-fallback`;
+	const topic = `pi/${projectKey(cwd, project)}/system/agent-fallback`;
 	const onMessage = (_topic, payload) => {
 		try {
 			const parsed = JSON.parse(payload.toString());
@@ -428,7 +430,7 @@ function debateIntentText(record) {
 	return "";
 }
 
-export function inspectProjectScope(records = [], canonicalProject) {
+export function inspectProjectScope(records = [], canonicalProject, canonicalProjectKey = null) {
 	const latestStarts = new Map();
 	for (const record of records) {
 		if (record.source === "yano-watcher" || record.instance === "yano-watcher") continue;
@@ -438,7 +440,8 @@ export function inspectProjectScope(records = [], canonicalProject) {
 	const mismatches = [...latestStarts.values()].filter((record) =>
 		record.project_scope_override === true &&
 		record.default_project === canonicalProject &&
-		record.project && record.project !== canonicalProject,
+		record.project && record.project !== canonicalProject &&
+		!(canonicalProjectKey && record.project_key === canonicalProjectKey),
 	);
 	const findings = mismatches.map((record) => {
 		const identity = `${record.instance}|${record.project}|${canonicalProject}`;
@@ -787,6 +790,7 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 	const startedAt = new Date().toISOString();
 	const watchCwd = opts.projectRoot ? path.resolve(opts.projectRoot) : cwd;
 	const project = canonicalProjectScope(watchCwd, opts.project || resolveProject(watchCwd));
+	const topicScope = process.env.PI_ORCH_TEST_NO_EXIT === "1" ? project : projectKey(watchCwd, project);
 	const effectivePackageRoot = packageRoot || path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 	const config = resolveYanoConfig({ packageRoot: effectivePackageRoot });
 	const yanoRepo = resolveYanoRepository({ packageRoot: effectivePackageRoot });
@@ -827,7 +831,7 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 		installAgentFallbackMonitor({ client, cwd: watchCwd, project, packageRoot: effectivePackageRoot, runtime });
 	}
 	const sharedPersistentClient = Boolean(runtime && runtime.client === client);
-	const liveAgents = await discoverLiveAgents(client, project);
+	const liveAgents = await discoverLiveAgents(client, topicScope, process.env.PI_ORCH_TEST_NO_EXIT === "1" ? null : topicScope);
 	const livePlanners = liveAgents.filter((agent) => agent.role === "planner");
 
 	// A normal persistent watcher is also used by conversation mode, where the
@@ -878,7 +882,7 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 				if (livePlanners.length && client) {
 					for (const planner of livePlanners) {
 						try {
-							await client.publishAsync(`pi/${project}/agents/${planner.instance}/commands`, JSON.stringify({
+							await client.publishAsync(`pi/${topicScope}/agents/${planner.instance}/commands`, JSON.stringify({
 								type: "command",
 								assignment_id: `watcher-${crypto.randomUUID()}`,
 								sender_instance: "yano-watcher",
@@ -933,7 +937,7 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 				let delivered = 0;
 				for (const planner of livePlanners) {
 					try {
-						await client.publishAsync(`pi/${project}/agents/${planner.instance}/commands`, JSON.stringify({
+							await client.publishAsync(`pi/${topicScope}/agents/${planner.instance}/commands`, JSON.stringify({
 							type: "command",
 							assignment_id: `watcher-${crypto.randomUUID()}`,
 							sender_instance: "yano-watcher",
@@ -1035,7 +1039,7 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 		const active = t.assigned_instance ? semanticActive.has(t.assigned_instance) : false;
 		const event = { ts: new Date().toISOString(), type: "stall_watch", project, project_key: tracePaths({ cwd: watchCwd, project }).projectKey, ticket_id: t.id, run_id: t.run_id, assigned_instance: t.assigned_instance, elapsed_ms: elapsedMs, semantic_active: active };
 		if (client) {
-			const topic = `pi/${project}/runs/${t.run_id}/events`;
+			const topic = `pi/${topicScope}/runs/${t.run_id}/events`;
 			try {
 				await client.publishAsync(topic, JSON.stringify({ type: "ticket_stalled", run_id: t.run_id, payload: { ticket_id: t.id, assigned_instance: t.assigned_instance, elapsed_ms: elapsedMs }, timestamp: new Date().toISOString() }), { qos: 0 });
 			} catch { /* best-effort */ }
@@ -1084,11 +1088,11 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 						target_instance: planner.instance,
 						project,
 						prompt: `[yano-watcher] ${summary}\n\nSegnale: ${signal}\n${JSON.stringify(details)}\nVerifica il trace. Se il segnale riguarda un processo o una delega fallita, ripara il percorso e rilancia il processo necessario; poi verifica nuovamente l'esito. Non considerare il watcher autorizzato a modificare ticket o codice.`,
-						reply_to: `pi/${project}/agents/yano-watcher/responses`,
+						reply_to: `pi/${topicScope}/agents/yano-watcher/responses`,
 						hops: 0,
 						timestamp: new Date().toISOString(),
 					};
-					await client.publishAsync(`pi/${project}/agents/${planner.instance}/commands`, JSON.stringify(envelope), { qos: 1 });
+					await client.publishAsync(`pi/${topicScope}/agents/${planner.instance}/commands`, JSON.stringify(envelope), { qos: 1 });
 					delivered++;
 				} catch { /* best effort */ }
 			}
@@ -1119,7 +1123,16 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 		const ratioThreshold = Number.isFinite(opts.contextCompactRatio) && opts.contextCompactRatio > 0 && opts.contextCompactRatio < 1
 			? opts.contextCompactRatio
 			: 0.82;
+		const lastCompactionByInstance = new Map();
+		const allTraceRecords = readTraceRecords({ cwd: watchCwd, project, limit: 100000 });
+		for (const record of allTraceRecords) {
+			if (record.type !== "context_compaction_completed" || !record.instance) continue;
+			const previous = lastCompactionByInstance.get(record.instance);
+			if (!previous || String(record.ts || "") > String(previous.ts || "")) lastCompactionByInstance.set(record.instance, record);
+		}
 		for (const record of latestByInstance.values()) {
+			const completed = lastCompactionByInstance.get(record.instance);
+			if (completed && String(completed.ts || "") >= String(record.ts || "")) continue;
 			const ratio = Number(record.context_ratio ?? (Number(record.context_window_tokens) > 0 ? Number(record.effective_context_tokens) / Number(record.context_window_tokens) : NaN));
 			if (!Number.isFinite(ratio) || ratio < ratioThreshold) continue;
 			const finding = {
@@ -1166,7 +1179,7 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 			let delivered = 0;
 			if (target && client) {
 				try {
-					await client.publishAsync(`pi/${project}/agents/${target.instance}/commands`, JSON.stringify({
+					await client.publishAsync(`pi/${topicScope}/agents/${target.instance}/commands`, JSON.stringify({
 						type: "context_compact_request",
 						request_id: `context-${crypto.randomUUID()}`,
 						requested_by_instance: "yano-watcher",
@@ -1212,7 +1225,7 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 	let scopeFindings = [];
 	try {
 		const traceRecords = readTraceRecords({ cwd: watchCwd, project, since: new Date(Date.now() - Math.max(0, opts.lookbackMs)), limit: 100000 });
-		const scopeCheck = inspectProjectScope(traceRecords, project);
+		const scopeCheck = inspectProjectScope(traceRecords, project, tracePaths({ cwd: watchCwd, project }).projectKey);
 		scopeFindings = scopeCheck.findings;
 		if (scopeCheck.scopeEvidence) {
 			try {
@@ -1440,7 +1453,7 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 		if (livePlanners.length && client) {
 			for (const planner of livePlanners) {
 				try {
-					await client.publishAsync(`pi/${project}/agents/${planner.instance}/commands`, JSON.stringify({
+					await client.publishAsync(`pi/${topicScope}/agents/${planner.instance}/commands`, JSON.stringify({
 						type: "command",
 						assignment_id: `watcher-healthy-${crypto.randomUUID()}`,
 						sender_instance: "yano-watcher",
@@ -1493,10 +1506,10 @@ function awayEnabled(opts) {
 	return opts.away || String(process.env.PI_ORCH_AWAY || "") === "1";
 }
 
-async function discoverLiveAgents(client, project) {
+async function discoverLiveAgents(client, topicScope, expectedProjectKey = null) {
 	if (!client) return [];
 	const agents = new Map();
-	const topic = `pi/${project}/agents/+/status`;
+	const topic = `pi/${topicScope}/agents/+/status`;
 	const onMessage = (_topic, payload) => {
 		try {
 			const card = JSON.parse(payload.toString());
@@ -1506,13 +1519,19 @@ async function discoverLiveAgents(client, project) {
 	try {
 		client.on("message", onMessage);
 		await client.subscribeAsync(topic, { qos: 1 });
-		await new Promise((resolve) => setTimeout(resolve, 250));
+		// Retained MQTT presence normally arrives immediately, but under a busy
+		// broker (for example while the full smoke suite starts/stops sessions)
+		// 250ms can expire before the retained card is dispatched. A watcher
+		// health check must not mistake that scheduling delay for an offline
+		// agent and route a valid request elsewhere.
+		await new Promise((resolve) => setTimeout(resolve, 750));
 	} catch { /* best effort */ }
 	try { client.removeListener("message", onMessage); } catch { /* ignore */ }
 	const staleAfterMs = Number(process.env.PI_ORCH_STALE_AFTER_MS) || 45_000;
 	const now = Date.now();
 	return [...agents.values()].filter((agent) => {
 		if (agent.status === "offline") return false;
+		if (expectedProjectKey && agent.project_key && agent.project_key !== expectedProjectKey) return false;
 		const heartbeat = Date.parse(agent.last_heartbeat || "");
 		return Number.isFinite(heartbeat) && now - heartbeat <= staleAfterMs;
 	});

@@ -15,7 +15,6 @@ import { runWatch } from "./watch-stalls.mjs";
 
 const PACKAGE_ROOT = path.resolve(new URL(".", import.meta.url).pathname, "..");
 const BROKER_URL = process.env.PI_ORCH_BROKER_URL || "mqtt://127.0.0.1:1883";
-const project = "context-compaction-smoke";
 let PASS = 0;
 
 function ok(condition, message) {
@@ -80,9 +79,16 @@ async function waitFor(predicate, message, timeoutMs = 5000) {
 }
 
 async function main() {
+	// This scenario exercises the production routing contract. The suite sets
+	// PI_ORCH_TEST_NO_EXIT for fake-agent tests, but that compatibility switch
+	// intentionally uses the legacy human topic scope; mixing it with the
+	// production watcher would test two different routing contracts in one
+	// process and can make the compaction command miss its target.
+	delete process.env.PI_ORCH_TEST_NO_EXIT;
 	const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "yano-context-data-"));
 	process.env.YANO_DATA_DIR = dataDir;
 	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "yano-context-project-"));
+	const project = `context-compaction-smoke-${path.basename(cwd)}`;
 	fs.mkdirSync(path.join(cwd, "agents"), { recursive: true });
 	fs.writeFileSync(path.join(cwd, "package.json"), JSON.stringify({ name: project }, null, 2));
 	fs.writeFileSync(path.join(cwd, "agents", "roles.yaml"), "roles:\n  planner: {}\n");
@@ -129,4 +135,3 @@ main().catch((error) => {
 	console.error(`smoke-test-context-compaction-e2e: FAIL — ${error.stack || error.message}`);
 	process.exitCode = 1;
 });
-

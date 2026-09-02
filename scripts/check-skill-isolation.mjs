@@ -118,7 +118,10 @@ console.log("6. nessun altro script/prompt referenzia skills-vendor/mattpocock c
 const { execFileSync: exec2 } = await import("node:child_process");
 let grepOut = "";
 try {
-	grepOut = exec2("grep", ["-rl", "skills-vendor/mattpocock", repoRoot, "--include=*.md", "--include=*.mjs", "--include=*.yaml"], {
+	// Git worktrees are independent checkouts, not part of this repository's
+	// discovery surface. Scanning them made the check fail whenever a live
+	// clean-repo planner had a temporary worktree under `.worktrees/`.
+	grepOut = exec2("grep", ["-rl", "--exclude-dir=.worktrees", "skills-vendor/mattpocock", repoRoot, "--include=*.md", "--include=*.mjs", "--include=*.yaml"], {
 		encoding: "utf8",
 	});
 } catch (err) {
@@ -195,7 +198,7 @@ console.log("   OK");
 console.log("11. nessun altro script/prompt referenzia skills-vendor/awesome-copilot con un ruolo diverso da reviewer/frontend-developer...");
 let grepOut2 = "";
 try {
-	grepOut2 = exec2("grep", ["-rl", "skills-vendor/awesome-copilot", repoRoot, "--include=*.md", "--include=*.mjs", "--include=*.yaml"], {
+	grepOut2 = exec2("grep", ["-rl", "--exclude-dir=.worktrees", "skills-vendor/awesome-copilot", repoRoot, "--include=*.md", "--include=*.mjs", "--include=*.yaml"], {
 		encoding: "utf8",
 	});
 } catch (err) {

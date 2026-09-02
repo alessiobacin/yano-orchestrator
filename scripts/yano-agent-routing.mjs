@@ -8,8 +8,9 @@
 import crypto from "node:crypto";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { projectKey } from "./yano-trace-storage.mjs";
 
-async function discoverLiveAgents(client, project) {
+async function discoverLiveAgents(client, scope, expectedProjectKey = null) {
 	if (!client) return [];
 	const agents = new Map();
 	const onMessage = (_topic, payload) => {
@@ -20,7 +21,7 @@ async function discoverLiveAgents(client, project) {
 	};
 	try {
 		client.on("message", onMessage);
-		await client.subscribeAsync(`pi/${project}/agents/+/status`, { qos: 1 });
+		await client.subscribeAsync(`pi/${scope}/agents/+/status`, { qos: 1 });
 		await new Promise((resolve) => setTimeout(resolve, 250));
 	} catch { /* caller still has durable registry state */ }
 	try { client.removeListener("message", onMessage); } catch { /* best effort */ }
@@ -28,6 +29,7 @@ async function discoverLiveAgents(client, project) {
 	const now = Date.now();
 	return [...agents.values()].filter((agent) => {
 		if (agent.status === "offline") return false;
+		if (expectedProjectKey && agent.project_key && agent.project_key !== expectedProjectKey) return false;
 		const heartbeat = Date.parse(agent.last_heartbeat || "");
 		return Number.isFinite(heartbeat) && now - heartbeat <= staleAfterMs;
 	});
@@ -62,14 +64,21 @@ function startWatcher({ projectRoot, project, packageRoot }) {
  */
 export async function routeAgentMessage({ client, projectRoot, project, packageRoot, message, targetInstance = null, targetRole = null }) {
 	if (!client) return { route: "unreachable", delivered: 0, planners: [], target: null };
-	const live = await discoverLiveAgents(client, project);
+	const project_key = projectKey(projectRoot, project);
+	// Test harnesses intentionally use their historical human scope because
+	// their fake peers do not expose project_key; production always uses the
+	// root-derived namespace.
+	const scope = process.env.PI_ORCH_TEST_NO_EXIT === "1" ? project : project_key;
+	const live = await discoverLiveAgents(client, scope, project_key);
 	const targets = live.filter((agent) => targetInstance ? agent.instance === targetInstance : agent.role === targetRole);
 	if (targets.length) {
 		let delivered = 0;
 		for (const target of targets) {
 			try {
-				await client.publishAsync(`pi/${project}/agents/${target.instance}/commands`, JSON.stringify({
+				await client.publishAsync(`pi/${scope}/agents/${target.instance}/commands`, JSON.stringify({
 					...message,
+					project_key,
+					project_root: path.resolve(projectRoot),
 					target_instance: target.instance,
 					target_role: target.role,
 				}), { qos: 1 });
@@ -84,8 +93,10 @@ export async function routeAgentMessage({ client, projectRoot, project, packageR
 		let delivered = 0;
 		for (const planner of planners) {
 			try {
-				await client.publishAsync(`pi/${project}/agents/${planner.instance}/commands`, JSON.stringify({
+				await client.publishAsync(`pi/${scope}/agents/${planner.instance}/commands`, JSON.stringify({
 					...message,
+					project_key,
+					project_root: path.resolve(projectRoot),
 					target_instance: planner.instance,
 					target_role: "planner",
 					prompt: `[yano-routing] Destinatario originale offline: ${targetInstance || `role:${targetRole || "?"}`}. Prendi in carico questo messaggio, avvisa il mittente e decidi se rilanciare o sostituire l'agente.
@@ -102,10 +113,12 @@ ${message.prompt || ""}`,
 
 	const watcherBootstrap = startWatcher({ projectRoot, project, packageRoot });
 	try {
-		await client.publishAsync(`pi/${project}/system/agent-fallback`, JSON.stringify({
+		await client.publishAsync(`pi/${scope}/system/agent-fallback`, JSON.stringify({
 			type: "agent_route_fallback",
 			fallback_id: crypto.randomUUID(),
 			project,
+			project_key,
+			project_root: path.resolve(projectRoot),
 			original_target: targetInstance || `role:${targetRole || "?"}`,
 			original: message,
 			timestamp: new Date().toISOString(),

@@ -168,8 +168,8 @@ diagnostici (`fixing`, `testing`, `staging`, `awaiting_validation`,
 `production`) restituiscono lo stesso errore che vedresti da shell, solo come
 JSON con lo status HTTP appropriato (400/401/404/409).
 
-Collection Postman pronta all'uso in `postman/yano-debugger.postman_collection.json`
-(più l'environment `postman/yano-debugger.postman_environment.json`).
+Collection Postman pronta all'uso in `docs/postman/yano-debugger.postman_collection.json`
+(più l'environment `docs/postman/yano-debugger.postman_environment.json`).
 
 ## Integrazione con trace e planner
 

@@ -2,14 +2,14 @@
 
 - **Stato**: accettata
 - **Data**: 2026-09-02 (è la prassi operativa corrente; codificata come ADR durante la pulizia del repo, vedi `playbooks/clean-repo.usage.md` §4)
-- **File di riferimento**: `prompts/planner.md`, `docs/architecture.md`, `docs/development-notes.md` (Revisione 24), `prompts/docs-sync.md`, `prompts/specialist.md`
+- **File di riferimento**: `prompts/planner.md`, `docs/architecture/architecture.md`, `docs/notes/development-notes.md` (Revisione 24), `prompts/docs-sync.md`, `prompts/specialist.md`
 
 ## Contesto
 
 Ogni task orchestato deve modificare file, eseguire test e produrre report
 senza rischiare lo stato degli altri task e senza sporcare la directory
 principale del progetto. In un incidente reale documentato in
-`docs/development-notes.md` (Revisione 24) una feature era stata divisa su
+`docs/notes/development-notes.md` (Revisione 24) una feature era stata divisa su
 **tre worktree separati** con merge caotico, perché sessioni planner diverse
 non avevano memoria dei worktree aperti dagli altri. La lezione operativa è
 diventata una regola strutturale.

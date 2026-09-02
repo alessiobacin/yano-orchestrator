@@ -129,4 +129,4 @@ salvataggio automatico di `projectId`/`bugId` dalle risposte) è in
 `docs/postman/yano-debugger.postman_collection.json` (+ `docs/postman/yano-debugger.postman_environment.json`).
 
 Per l'implementazione completa e i confini di sicurezza, vedere
-[Yano Debugger](../yano-debugger.md).
+[Yano Debugger](./yano-debugger.md).

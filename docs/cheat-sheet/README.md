@@ -1,8 +1,8 @@
 # Cheat sheet Yano
 
 Raccolta di riferimenti rapidi per i comandi più usati di Yano. Per spiegazioni,
-vincoli e procedure complete usare la [documentazione](../README.md), la
-[quick start](../quick-start.md) e la [reference della skill yano-cli](../../skills-vendor/yano/yano-cli/references/command-reference.md).
+vincoli e procedure complete usare la [documentazione](../../README.md), la
+[quick start](../quick-guides/quick-start.md) e la [reference della skill yano-cli](../../skills-vendor/yano/yano-cli/references/command-reference.md).
 
 ## Indice
 

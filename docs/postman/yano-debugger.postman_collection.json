@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Yano Debugger API",
-    "description": "API REST di `yano debugger serve` — un'unica istanza che gestisce molti progetti registrati (ognuno con un project_key/id deterministico). Avvia il server con `yano debugger serve --port 4177` (o imposta YANO_DEBUGGER_API_PORT/YANO_DEBUGGER_API_TOKEN con `yano config set`), poi usa questa collection per registrare progetti, segnalare bug e seguirne il ciclo di vita diagnostico senza passare dalla CLI. Ogni richiesta qui corrisponde a un sottocomando `yano debugger <...>` — vedi `docs/yano-debugger.md` per i confini di sicurezza (il debugger è sola diagnosi: non corregge, non deploya, non promuove codice).",
+    "description": "API REST di `yano debugger serve` — un'unica istanza che gestisce molti progetti registrati (ognuno con un project_key/id deterministico). Avvia il server con `yano debugger serve --port 4177` (o imposta YANO_DEBUGGER_API_PORT/YANO_DEBUGGER_API_TOKEN con `yano config set`), poi usa questa collection per registrare progetti, segnalare bug e seguirne il ciclo di vita diagnostico senza passare dalla CLI. Ogni richiesta qui corrisponde a un sottocomando `yano debugger <...>` — vedi `docs/quick-guides/yano-debugger.md` per i confini di sicurezza (il debugger è sola diagnosi: non corregge, non deploya, non promuove codice).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {

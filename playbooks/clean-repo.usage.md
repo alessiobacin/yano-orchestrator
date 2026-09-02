@@ -207,7 +207,7 @@ L'invariante `canonical_documentation_categories` impone una regola
 precisa prima di proporre una nuova directory per una di queste categorie:
 usare i percorsi canonici esatti. Una directory equivalente con nome diverso
 è una migrazione da proporre, non una categoria soddisfatta. In particolare
-`docs/quick_guides/` diventa `docs/quick-guides/` e `docs/diagramma/` diventa
+`docs/quick-guides/` diventa `docs/quick-guides/` e `docs/diagramma/` diventa
 `docs/diagram/`; i file direttamente sotto `docs/` vengono classificati e
 spostati nella categoria corretta, aggiornando tutti i riferimenti.
 
@@ -222,18 +222,38 @@ e la decisione esplicita su Postman.
 
 **yano-orchestrator stesso è un caso di migrazione**,
 verificato eseguendo `ls docs/` e `ls .` nella root del repository come
-parte della stesura di questa sezione:
+parte della stesura di questa sezione — la regola è MANDATORY e vale per
+qualunque repository:
 
-- `docs/quick_guides/` deve essere migrata in `docs/quick-guides/`.
+1. **(a) ZERO documenti in root `docs/`**: nessun file (`.md` o altro) può
+   restare direttamente sotto `docs/` — al massimo un `docs/README.md`
+   opzionale come indice.
+2. **(b) Destinazione canonica o folder nuovo pertinente**: ogni file va
+   spostato nella categoria canonica che lo calza (`architecture/`,
+   `guides/`, `quick-guides/`, `adr/`, `notes/`, `postman/`,
+   `cheat-sheet/`, `diagram/`); se nessuna calza, va creato un NUOVO folder
+   con nome pertinente deciso dal curator/docs-sync — mai lasciarlo in
+   root.
+3. **(c) Aggiornamento riferimenti obbligatorio**: se un file veniva letto
+   da un processo, agente, skill, script, prompt, link md o CLI help nel
+   vecchio percorso, è OBBLIGATORIO cercare il riferimento e aggiornarlo al
+   nuovo percorso; la scan repository-wide post-spostamento (grep di tutti
+   i path vecchi) è obbligatoria.
+
+Il caso concreto del repository stesso (stato storico prima di questa
+migrazione):
+
+- `docs/quick_guides/` (underscore) è stata migrata in `docs/quick-guides/`.
 - `docs/cheat-sheet` copre già `cheat-sheet`.
-- `docs/diagramma/` deve essere migrata e consolidata in `docs/diagram/`.
-- `postman/` deve essere spostata in `docs/postman/`, perché la CLI/API è un
+- `docs/diagramma/` è stata migrata e consolidata in `docs/diagram/`.
+- `postman/` è stata spostata in `docs/postman/`, perché la CLI/API è un
   backend documentabile.
-- `docs/architecture.md` e `docs/architecture.mmd` devono diventare artefatti
-  dentro `docs/architecture/` e/o `docs/diagram/` in base al contenuto.
-- `docs/development-notes.md`, `docs/playbook-catalog.md` e gli altri file
-  direttamente sotto `docs/` devono essere classificati in `notes/`,
-  `guides/`, `quick-guides/` o nella categoria pertinente.
+- `docs/architecture.md` e `docs/architecture.mmd` sono diventate artefatti
+  dentro `docs/architecture/` (coppia companion).
+- `docs/development-notes.md`, `docs/quick-start.md`, i reference `yano-*.md`
+  e gli altri file un tempo direttamente sotto `docs/` sono stati
+  classificati in `notes/`, `guides/`, `quick-guides/` o nella categoria
+  pertinente, e tutti i riferimenti sono stati ripercorsi.
 
 Applicando `clean-repo` a yano-orchestrator stesso, l'audit deve quindi
 proporre una migrazione completa e non dichiarare soddisfatte le categorie

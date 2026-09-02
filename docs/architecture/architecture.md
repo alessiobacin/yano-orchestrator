@@ -457,7 +457,7 @@ codice, test, dati, configurazioni, ticket operativi o deployment. FAB/HTTP,
 auth, rate limiting e deduplicazione semantica sono roadmap, non capacità v1.
 
 La distinzione tra v1 e sviluppi successivi di tutti gli agenti esterni è
-registrata in [`docs/agents/external-agents-roadmap.md`](agents/external-agents-roadmap.md).
+registrata in [`docs/notes/agents/external-agents-roadmap.md`](../notes/agents/external-agents-roadmap.md).
 `yano suggester start|submit --once` consente un test bounded; `--dry-run`
 evita l'apertura del worker Herdr.
 

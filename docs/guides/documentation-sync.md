@@ -8,8 +8,12 @@ gli utenti e gli agenti non possono trovarne la descrizione aggiornata.
 
 Ogni invocazione di `docs-sync`, non solo il playbook `clean-repo`, verifica
 questo inventario nei percorsi canonici. I percorsi legacy non sono equivalenti
-validi: vanno migrati e tutti i riferimenti aggiornati. Ogni file direttamente
-sotto `docs/`, escluso un eventuale `docs/README.md`, va ricollocato:
+validi: vanno migrati e tutti i riferimenti aggiornati. **Nessun documento può
+restare direttamente sotto `docs/`**: ogni file va spostato nella categoria
+canonica pertinente oppure, se nessuna calza, in un nuovo folder con nome
+pertinente deciso dal curator/docs-sync; al massimo un `docs/README.md` come
+indice. Dopo ogni spostamento la scan repository-wide dei riferimenti
+(processi, agenti, skill, script, prompt, link md, CLI help) è obbligatoria.
 
 | Categoria | Percorso convenzionale | Artefatto richiesto |
 | --- | --- | --- |
@@ -26,9 +30,7 @@ Directory vuote, TODO e template generici non soddisfano il contratto. Se non
 esiste un backend, `postman` è l'unica categoria che può essere non applicabile:
 la decisione e l'evidenza vanno riportate. Gli altri percorsi devono essere
 creati quando assenti e aggiornati quando il task rende il contenuto obsoleto.
-In particolare, `docs/quick_guides/` va rinominata in `docs/quick-guides/`,
-`docs/diagramma/` va consolidata in `docs/diagram/` e `postman/` va spostata in
-`docs/postman/` durante un `clean-repo` approvato.
+In questo repository la migrazione è già stata eseguita: la directory `quick_guides/` (underscore) è diventata `quick-guides/`, `diagramma/` è confluita in `diagram/` e la `postman/` alla radice è diventata `docs/postman/`. In qualunque altro repository i percorsi legacy `quick_guides/`, `diagramma/` e la `postman/` di root NON chiudono la gap: vanno migrati ai percorsi canonici sopra durante un `clean-repo` approvato, con scan dei riferimenti obbligatoria dopo ogni spostamento.
 
 ## Job ricorrenti
 
@@ -44,10 +46,10 @@ righe cron marcate.
 
 | Modifica | Superfici da verificare |
 | --- | --- |
-| CLI, sottocomando o flag | `bin/yano.mjs`, `README.md`, `docs/quick-start.md`, quick guide pertinente, `skills-vendor/yano/yano-cli/references/command-reference.md`, `skills-vendor/yano/yano-cli/SKILL.md` |
-| Stato, routing, persistenza o data-root | `docs/architecture.md`, `docs/architecture.mmd`, diagramma operativo pertinente, quick guide pertinente |
-| Agente, ruolo, playbook o capability | `agents/`, prompt, `docs/playbook-catalog.md`, documentazione dell'agente, skill CLI se il comando è usabile dagli agenti |
-| Trace, database, indice o registro | `docs/yano-trace.md`, `docs/architecture.md`, diagramma trace pertinente, guide trace/Gantt |
+| CLI, sottocomando o flag | `bin/yano.mjs`, `README.md`, `docs/quick-guides/quick-start.md`, quick guide pertinente, `skills-vendor/yano/yano-cli/references/command-reference.md`, `skills-vendor/yano/yano-cli/SKILL.md` |
+| Stato, routing, persistenza o data-root | `docs/architecture/architecture.md`, `docs/architecture/architecture.mmd`, diagramma operativo pertinente, quick guide pertinente |
+| Agente, ruolo, playbook o capability | `agents/`, prompt, `docs/guides/playbook-catalog.md`, documentazione dell'agente, skill CLI se il comando è usabile dagli agenti |
+| Trace, database, indice o registro | `docs/quick-guides/yano-trace.md`, `docs/architecture/architecture.md`, diagramma trace pertinente, guide trace/Gantt |
 | Installazione, harness o prerequisito | `README.md`, guida installazione, reference CLI, skill CLI, test/lint di installazione |
 
 Quando una superficie non è applicabile, va verificato esplicitamente il
@@ -60,10 +62,10 @@ relazioni e flussi.
 
 1. Cercare il comando, il flag, il ruolo o il percorso modificato con `rg`.
 2. Aggiornare la superficie normativa (`README`, reference CLI e/o
-   `architecture.md`).
+   `docs/architecture/architecture.md`).
 3. Aggiornare il percorso operativo: quick start, quick guide e cheat-sheet.
-4. Aggiornare `architecture.mmd` e il diagramma operativo se cambia un flusso
-   o una relazione.
+4. Aggiornare `docs/architecture/architecture.mmd` e il diagramma operativo se
+   cambia un flusso o una relazione.
 5. Eseguire il controllo deterministico e la suite:
 
    ```bash

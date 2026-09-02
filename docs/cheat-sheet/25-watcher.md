@@ -23,4 +23,4 @@ registrato con quello reale e, salvo `--no-heal`, rilancia da solo un pane
 morto (Mac in sleep, terminale chiuso, Herdr riavviato) — è il comando da
 rilanciare periodicamente (o dopo ogni risveglio del Mac) per essere certi
 che il polling sia ancora vivo. Gli eventi di scansione finiscono nel trace
-del progetto osservato; vedi `docs/quick_guides/10-watcher-falle-yano.md`.
+del progetto osservato; vedi `docs/quick-guides/10-watcher-falle-yano.md`.

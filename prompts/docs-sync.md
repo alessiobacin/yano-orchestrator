@@ -55,12 +55,19 @@ In **ogni** round, non soltanto nel playbook `clean-repo`, esegui una checklist
 documentale completa prima di chiudere il round. Verifica queste categorie nei
 percorsi canonici: `docs/architecture/`, `docs/guides/`, `docs/quick-guides/`,
 `docs/adr/`, `docs/notes/`, `docs/postman/` (solo se il progetto ha un
-backend), `docs/cheat-sheet/` e `docs/diagram/`. `docs/quick_guides/` e
-`docs/diagramma/` sono percorsi legacy e non chiudono la gap: nel playbook
-`clean-repo` devono essere migrate. I file direttamente sotto `docs/` vanno
-spostati nella categoria corretta; è ammesso solo un eventuale
-`docs/README.md` come indice. Dopo ogni spostamento aggiorna tutti i
-riferimenti ai path vecchi.
+backend), `docs/cheat-sheet/` e `docs/diagram/`. I percorsi legacy
+`quick_guides/` (underscore) e `diagramma/` NON chiudono la gap: nel playbook
+`clean-repo` devono essere migrati ai percorsi canonici.
+
+Regola MANDATORY sulla root `docs/`: **nessun documento può restare
+direttamente sotto `docs/`** — ogni file va spostato nella categoria canonica
+pertinente OPPURE, se nessuna categoria canonica calza, in un NUOVO folder con
+nome pertinente deciso da te/curator (mai lasciarlo in root); al massimo può
+restare un eventuale `docs/README.md` come indice. Se il file veniva letto da
+un processo, agente, skill, script, prompt, link md o CLI help nel vecchio
+percorso, è OBBLIGATORIO cercare quel riferimento e aggiornarlo al nuovo
+percorso; la scansione repository-wide dei riferimenti ai path vecchi è
+obbligatoria prima di chiudere il round.
 
 Per ogni categoria applicabile assente, crea la directory canonica
 e almeno un file utile al suo interno; per ogni categoria esistente, aggiorna
@@ -101,7 +108,7 @@ la repo possiede già un README o una guida generica.
    il progetto che stai documentando è quello che il team sta costruendo
    sopra l'estensione, non l'estensione stessa (un errore reale osservato:
    un progetto scaffoldato a mano aveva ereditato il nome/README del
-   pacchetto — vedi `docs/development-notes.md`, Revisione 28).
+   pacchetto — vedi `docs/notes/development-notes.md`, Revisione 28).
 2. **Scrivi/aggiorna `QUICK-START.md`** (root del worktree, accanto al
    README — IMPORTANTISSIMO, Revisione 28): un file breve, pensato per chi
    vuole solo installare e testare il progetto in pochi comandi, senza

@@ -1,7 +1,7 @@
 // REAL functional test of scripts/launch-planner.mjs's Revisione 44
 // generalization — launching ANY role (not just planner) through the same
 // `-e` detection logic, with mattpocock skill flags attached ONLY for
-// planner. Real incident this closes (see docs/development-notes.md,
+// planner. Real incident this closes (see docs/notes/development-notes.md,
 // Revisione 44): the planner's own prompt (prompts/planner.md) hand-composed
 // `pi -e extensions/orchestrator.ts --instance <nome> --role <ruolo>` to
 // launch coder/reviewer/specialist instances via Herdr — stale advice

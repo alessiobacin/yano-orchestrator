@@ -13,7 +13,7 @@ piano unico da approvare; `clean-repo` crea file reali nelle categorie
 esistenti vengono riusati, senza duplicati.
 
 Se cerchi solo i comandi per una singola operazione, usa la raccolta di
-[quick guides](./quick_guides/README.md). Questa pagina resta il percorso
+[quick guides](./README.md). Questa pagina resta il percorso
 completo e ragionato dal primo avvio fino alla diagnosi del risultato.
 
 ## Prerequisiti
@@ -318,8 +318,8 @@ raggiungibile. Il registro conserva anche i link fermi, ma il server resta
 foreground: il dashboard è live finché il processo o la tab Herdr restano
 attivi. Per riavviarlo, esegui di nuovo `yano gantt --persistent --open` dalla
 root del progetto. Per il dettaglio tecnico consulta
-[`docs/architecture.md`](./architecture.md) e la
-[quick guide Gantt](./quick_guides/19-inventario-agenti-e-gantt.md).
+[`docs/architecture/architecture.md`](../architecture/architecture.md) e la
+[quick guide Gantt](./19-inventario-agenti-e-gantt.md).
 
 ## 6. Registra il risultato del round
 
@@ -439,4 +439,4 @@ yano trace clear --all --yes
 
 Per il riferimento completo consulta [`yano-trace.md`](./yano-trace.md). Per
 il flusso di bug applicativi usa [`yano-debugger.md`](./yano-debugger.md) e la
-[guida rapida del debugger](./quick_guides/12-yano-debugger.md).
+[guida rapida del debugger](./12-yano-debugger.md).

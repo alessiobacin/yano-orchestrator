@@ -23,16 +23,16 @@ sta in `scripts/<modulo>.mjs`, che esporta `run<Comando>()` e riceve
 
 ## 2. Il contratto documentale (obbligatorio)
 
-La politica di sincronizzazione è in `docs/documentation-sync.md`; la matrice
+La politica di sincronizzazione è in `docs/guides/documentation-sync.md`; la matrice
 obbligatoria impone che una modifica CLI aggiorni:
 
 | Superficie | File |
 | --- | --- |
-| Normativa | `README.md`, `docs/quick-start.md`, `docs/architecture.md` se cambia stato/routing/persistenza |
-| Operativa | quick guide pertinente (nuova voce in `docs/quick_guides/` + indice in `README.md` del raccoglitore) |
+| Normativa | `README.md`, `docs/quick-guides/quick-start.md`, `docs/architecture/architecture.md` se cambia stato/routing/persistenza |
+| Operativa | quick guide pertinente (nuova voce in `docs/quick-guides/` + indice in `README.md` del raccoglitore) |
 | Cheat-sheet | voce breve in `docs/cheat-sheet/` (es. `31-scheduler.md`) + link nell'indice `docs/cheat-sheet/README.md` |
 | Skill CLI | `skills-vendor/yano/yano-cli/SKILL.md` + `skills-vendor/yano/yano-cli/references/command-reference.md` |
-| Diagramma | `docs/architecture.mmd` e/o `docs/diagram/` se cambia un flusso o una relazione |
+| Diagramma | `docs/architecture/architecture.mmd` e/o `docs/diagram/` se cambia un flusso o una relazione |
 
 `scripts/check-documentation-sync.mjs` verifica deterministicamente le
 superfici fondamentali e la lista di comandi in `command-reference.md`: un
@@ -68,16 +68,16 @@ npm test
 
 Esempi di flag con registro persistente nel data-root globale: `--persistent`
 registra il link Gantt, `--link` lo recupera e `--links` elenca tutte le
-registrazioni (contratto documentato in `docs/documentation-sync.md`, sezione
+registrazioni (contratto documentato in `docs/guides/documentation-sync.md`, sezione
 "Contratto Gantt corrente").
 
 ## 5. Checklist di chiusura
 
 - [ ] `bin/yano.mjs` espone il sottocomando e delega a `scripts/`
-- [ ] `README.md` + `docs/quick-start.md` coprono il comando
-- [ ] `docs/quick_guides/` contiene la procedura breve e il README del raccoglitore la linka
+- [ ] `README.md` + `docs/quick-guides/quick-start.md` coprono il comando
+- [ ] `docs/quick-guides/` contiene la procedura breve e il README del raccoglitore la linka
 - [ ] `docs/cheat-sheet/` contiene la voce rapida e l'indice la linka
 - [ ] `skills-vendor/yano/yano-cli/references/command-reference.md` elenca il comando
 - [ ] `skills-vendor/yano/yano-cli/SKILL.md` spiega come gli agenti lo usano
-- [ ] `docs/architecture.mmd`/`docs/diagram/` aggiornati se cambia un flusso
+- [ ] `docs/architecture/architecture.mmd`/`docs/diagram/` aggiornati se cambia un flusso
 - [ ] `npm run check:docs` passa; `npm test` passa (o motivo esplicito se la suite e2e richiede infrastruttura assente)

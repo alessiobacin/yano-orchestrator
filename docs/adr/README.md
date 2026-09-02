@@ -1,7 +1,7 @@
 # Architecture Decision Records — Yano
 
 Registro delle decisioni architetturali di Yano, in convenzione
-`0001-<slug>.md` (vedi `docs/agents/domain.md`). Ogni ADR riporta stato,
+`0001-<slug>.md` (vedi `docs/notes/agents/domain.md`). Ogni ADR riporta stato,
 contesto con evidenze dal repository, decisione e conseguenze.
 
 ## Indice
@@ -11,5 +11,5 @@ contesto con evidenze dal repository, decisione e conseguenze.
 - [0003 — Prompt dei ruoli letti sempre dall'installazione globale](./0003-prompts-dal-pacchetto-globale.md)
 
 Se un nuovo documento contraddice un ADR esistente, il conflitto va
-segnalato esplicitamente (`docs/agents/domain.md`): "Contraddice ADR-000X —
+segnalato esplicitamente (`docs/notes/agents/domain.md`): "Contraddice ADR-000X —
 ma vale la pena riaprirla perché…".

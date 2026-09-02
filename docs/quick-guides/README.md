@@ -28,13 +28,20 @@ pensate per chi usa Yano per la prima volta e lavora dalla root del progetto.
 21. [CLI semantica per gli agenti Pi](./21-yano-cli-semantica.md)
 22. [Job ricorrenti e Yano Scheduler](./22-job-ricorrenti.md)
 
+Per i riferimenti completi dei comandi (oltre alle controparti compatte qui
+sopra) vedi anche [quick-start](./quick-start.md), [yano-debugger](./yano-debugger.md),
+[yano-auto-improve](./yano-auto-improve.md), [yano-suggester](./yano-suggester.md),
+[yano-model-advisor](./yano-model-advisor.md), [yano-architect](./yano-architect.md),
+[yano-trace](./yano-trace.md), [yano-deployment](./yano-deployment.md) e
+[yano-recovery](./yano-recovery.md).
+
 Per una spiegazione completa del primo task, consulta anche la
-[quick start estesa](../quick-start.md). Per il comportamento dettagliato del
-reload controllato, consulta [yano-recovery](../yano-recovery.md).
+[quick start estesa](./quick-start.md). Per il comportamento dettagliato del
+reload controllato, consulta [yano-recovery](./yano-recovery.md).
 Per trovare il comando minimo per ogni operazione, consulta la raccolta
 [`cheat-sheet`](../cheat-sheet/README.md). La policy per aggiornare sempre i
 documenti insieme al codice è in
-[`documentation-sync.md`](../documentation-sync.md).
+[`documentation-sync.md`](../guides/documentation-sync.md).
 
 ## Regole rapide
 

@@ -23,6 +23,6 @@ assert.match(read("prompts/planner.md"), /due `pinned_id` llmProxy diversi/);
 const docsPrompt = read("prompts/docs-sync.md");
 assert.match(docsPrompt, /In \*\*ogni\*\* round, non soltanto nel playbook `clean-repo`/i);
 for (const category of ["architecture/", "guides/", "quick-guides/", "adr/", "notes/", "postman/", "cheat-sheet/", "diagram/"]) assert.ok(docsPrompt.includes(`\`${category}\``), `docs-sync must cover ${category}`);
-assert.match(read("docs/documentation-sync.md"), /Ogni invocazione di `docs-sync`/);
+assert.match(read("docs/guides/documentation-sync.md"), /Ogni invocazione di `docs-sync`/);
 
 console.log("smoke-test-development-contracts: ok");

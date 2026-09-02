@@ -1,5 +1,5 @@
 // REAL test of the Revisione 42 "instance liveness" hardening — a real
-// incident (progetto "code-mem", see docs/development-notes.md, Revisione 42)
+// incident (progetto "code-mem", see docs/notes/development-notes.md, Revisione 42)
 // where a coder instance was missing (no herdr tab, no `pi` process at all)
 // and the restarted planner just did the coding work itself instead of
 // relaunching one. Three independent fixes are covered here:

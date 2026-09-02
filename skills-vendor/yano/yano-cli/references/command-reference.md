@@ -28,7 +28,7 @@ yano data [subcommand] [options]
 yano cron --add <natural request> [--project-root <dir>]
 yano cron --list|--remove <id>|--enable <id>|--disable <id>|--run <id>|--supervise
 yano architect [subcommand] [options]
-yano watcher init|start|status|pause|resume|leave [options]  # persistent registry — see docs/quick_guides/10-watcher-falle-yano.md
+yano watcher init|start|status|pause|resume|leave [options]  # persistent registry — see docs/quick-guides/10-watcher-falle-yano.md
 yano leave [--project-root <dir>] --yes                # permanently removes only watcher supervision
 yano watcher projects [options]
 yano debugger [subcommand] [options]
@@ -350,13 +350,13 @@ yano debugger report --project-root <dir> --title <text> ...
 yano debugger claim --project-root <dir> --bug-id <id>
 yano debugger transition --project-root <dir> --bug-id <id> --to <state>
 yano debugger pause|resume --project-root <dir>
-yano debugger serve [--port <port>] [--host <host>] [--json]  # REST API — see docs/yano-debugger.md#api-rest-yano-debugger-serve
+yano debugger serve [--port <port>] [--host <host>] [--json]  # REST API — see docs/quick-guides/yano-debugger.md#api-rest-yano-debugger-serve
 
 yano auto-improve init --project-root <dir> --interval 5d --notify auto
 yano auto-improve start|run --project-root <dir> [--dry-run] [--once]
 yano auto-improve status|reports|pause|resume|stop --project-root <dir>
 yano auto-improve complete --audit-id <id> --report-file <temp-file>
-yano auto-improve serve [--port <port>] [--host <host>] [--json]  # REST API — see docs/yano-auto-improve.md#api-rest-yano-auto-improve-serve
+yano auto-improve serve [--port <port>] [--host <host>] [--json]  # REST API — see docs/quick-guides/yano-auto-improve.md#api-rest-yano-auto-improve-serve
 
 yano suggester init --project-root <dir> [--notify auto]
 yano suggester submit --project-root <dir> --title <text> --description <text> [--queue-only] [--once]
@@ -365,11 +365,11 @@ yano suggester status|reports|pause|resume|stop --project-root <dir>
 yano suggester complete --suggestion-id <id> --report-file <temp-file> --category <bug|feature|improvement|ux>
 yano suggester approve --suggestion-id <id> --actor <superadmin> --yes
 yano suggester reject --suggestion-id <id> --actor <superadmin> --reason <text> --yes
-yano suggester serve [--port <port>] [--host <host>] [--json]  # REST API — see docs/yano-suggester.md#api-rest-yano-suggester-serve
+yano suggester serve [--port <port>] [--host <host>] [--json]  # REST API — see docs/quick-guides/yano-suggester.md#api-rest-yano-suggester-serve
 
 yano model-advisor catalog [--json]                             # catalogo llmProxy normalizzato
 yano model-advisor recommend --role-class coordinator|support [--vision] [--json]  # model@provider-id pinnato migliore per la role-class
-yano model-advisor explain --role-class coordinator|support [--vision] [--json]    # come recommend, ma con l'intera classifica motivata — see docs/yano-model-advisor.md
+yano model-advisor explain --role-class coordinator|support [--vision] [--json]    # come recommend, ma con l'intera classifica motivata — see docs/quick-guides/yano-model-advisor.md
 ```
 
 All three external agents have read-only contracts against the reference

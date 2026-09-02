@@ -71,7 +71,7 @@ La registry è condivisa da tutte le directory e si trova sotto
 `<YANO_DATA_DIR>/gantt/instances.json`; `yano gantt --links --json` eseguito da
 una directory qualunque è quindi sufficiente per l'inventario globale. Per
 aggiornare questa guida quando cambia il comando, segui
-[`docs/documentation-sync.md`](../documentation-sync.md).
+[`docs/guides/documentation-sync.md`](../guides/documentation-sync.md).
 
 Il DB può essere presente ma vuoto: Gantt mostrerà `runs=[]` finché il Planner
 non chiama `orchestrator_init` e `run_create`. Questo è diverso da un DB

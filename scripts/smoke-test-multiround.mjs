@@ -8,7 +8,7 @@
 // smoke-test-pipeline.mjs — it does NOT exercise the actual hop-limit logic
 // inside orchestrator.ts's agent_send tool (that requires the real pi
 // ExtensionAPI host, not available outside a real `pi` process; see
-// scripts/../docs/development-notes.md for the standalone reproduction that checks
+// scripts/../docs/notes/development-notes.md for the standalone reproduction that checks
 // the hop math directly). What this DOES verify: that repeated back-and-forth
 // on the same roles/<role>/tasks topics works correctly across more than one
 // hop in each direction, and that a planner receiving a non-final

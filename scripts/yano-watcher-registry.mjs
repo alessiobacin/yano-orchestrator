@@ -39,7 +39,8 @@ import { createRequire } from "node:module";
 import { appendRawTraceRecord, canonicalProjectScope, projectKey, readTraceRecords, resolveTraceProject, traceRoot } from "./yano-trace-storage.mjs";
 import { projectDbPath } from "./yano-project.mjs";
 import { ensureGlobalYanoServices } from "./yano-global-services.mjs";
-import { superviseExternalServices } from "./yano-services.mjs";
+import { superviseExternalServices, getService } from "./yano-services.mjs";
+import { herdrSnapshot } from "./yano-herdr-client.mjs";
 import { findAgentIdentityConflicts, formatAgentIdentityConflicts } from "./yano-agent-identity.mjs";
 
 const require = createRequire(import.meta.url);
@@ -144,12 +145,6 @@ function infoFromRow(row) { return { root: row.root, name: row.name, key: row.pr
 
 function shellQuote(valueToQuote) {
 	return process.platform === "win32" ? `"${String(valueToQuote).replaceAll('"', '\\"')}"` : `'${String(valueToQuote).replaceAll("'", `'"'"'`)}'`;
-}
-
-function herdrSnapshot() {
-	const result = spawnSync("herdr", ["api", "snapshot"], { encoding: "utf8" });
-	if (result.status !== 0) return null;
-	try { const parsed = JSON.parse(result.stdout); return parsed?.result?.snapshot || parsed?.result || parsed; } catch { return null; }
 }
 
 function renameHerdrTab(tabId, label) {
@@ -653,6 +648,21 @@ function activateDefaultDebuggers() {
 function supervise(db) {
 	return withSupervisorLock(async () => {
 		const rows = db.prepare("SELECT * FROM watcher_projects ORDER BY updated_at DESC").all();
+		// User-declared external dependencies (Docker/pm2/llmProxy/...) run
+		// FIRST, before this pass's own Herdr snapshot: if the operator has
+		// registered a service literally named "herdr" (`yano services add
+		// --name herdr --healthcheck-command "..." --restart-command "..."`),
+		// this is what gives Herdr itself a chance to be restarted before the
+		// snapshot below is attempted — Yano does not guess how to start Herdr
+		// on an unknown machine (GUI app, background service, ...), the
+		// operator declares it once like any other dependency.
+		let external_services;
+		try { external_services = await superviseExternalServices(); } catch (error) { external_services = { error: error instanceof Error ? error.message : String(error) }; }
+		const herdrServiceRegistered = Boolean(getService("herdr"));
+		// herdrSnapshot() itself retries with backoff (ticket #118): a
+		// transient blip — Herdr's server still waking up right after being
+		// restarted above, or after the machine itself just rebooted — no
+		// longer needs to wait for the next one-minute cron tick to resolve.
 		const snapshot = herdrSnapshot();
 		const orphan_tabs_removed = pruneOrphanWatcherTabs(snapshot, rows);
 		const identityConflicts = snapshot ? findAgentIdentityConflicts(snapshot) : [];
@@ -661,17 +671,11 @@ function supervise(db) {
 			if (row) appendRawTraceRecord({ cwd: row.root, project: resolveTraceProject(row.root), record: { type: "watcher_identity_conflict", payload: conflict } });
 		}
 		const global_services = ensureGlobalYanoServices();
-		// User-declared external dependencies (Docker/pm2/llmProxy/...): same
-		// one-per-minute cadence as every other recovery in this loop, so the
-		// whole fleet — Yano's own service tabs above, project planners below,
-		// and now the operator's own external services — heals deterministically
-		// after a computer restart or a crashed container/process, not just the
-		// parts Yano happens to own directly.
-		let external_services;
-		try { external_services = await superviseExternalServices(); } catch (error) { external_services = { error: error instanceof Error ? error.message : String(error) }; }
 		const activated = [...rows.map((row) => activateDefaultWorkers(db, row)).filter(Boolean), ...activateDefaultDebuggers()];
 		const result = {
 			checked_at: now(),
+			herdr_reachable: Boolean(snapshot),
+			herdr_service_registered: herdrServiceRegistered,
 			projects: rows.map((row) => doStatusForRow(db, row, { heal: true })),
 			activated,
 			global_services,

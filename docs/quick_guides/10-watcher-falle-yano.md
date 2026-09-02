@@ -192,6 +192,19 @@ nel workspace Herdr con l'etichetta del progetto (mai in un workspace condiviso
 di uno specialista). I progetti completati, oppure privi di run oltre il breve
 periodo di grazia iniziale, restano comunque visibili: solo `pause` nasconde
 temporaneamente la tab e `leave` rimuove definitivamente il controllo.
+Lo snapshot Herdr di ogni passata ritenta con backoff breve invece di
+arrendersi al primo tentativo fallito (`scripts/yano-herdr-client.mjs`); se
+resta irraggiungibile, il supervisore controlla prima se è registrato un
+servizio esterno chiamato esattamente `herdr` (vedi `yano services` sopra) e,
+in tal caso, prova il suo comando di restart dichiarato prima di rinunciare
+per quel giro:
+
+```bash
+yano services add --name herdr \
+  --healthcheck-command "herdr api snapshot >/dev/null 2>&1" \
+  --restart-command "<comando reale di avvio di Herdr sulla tua macchina>"
+```
+
 Il job viene installato automaticamente solo dal lifecycle di un'installazione
 globale di Yano, non da `yano start`; un lock impedisce recovery concorrenti.
 `pause`/`resume` sospendono/riattivano senza

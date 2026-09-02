@@ -8,6 +8,14 @@ yano services add --name mqtt-broker \
   --healthcheck-command "docker inspect -f {{.State.Running}} yano-mqtt-broker | grep -q true" \
   --restart-docker yano-mqtt-broker
 
+# Nome riservato "herdr": se registrato, yano watcher supervise lo
+# riavvia (con il comando dichiarato dall'operatore) PRIMA di tentare lo
+# snapshot Herdr di ogni passata — Yano non indovina come avviare Herdr
+# sulla tua macchina, lo dichiari tu una volta sola.
+yano services add --name herdr \
+  --healthcheck-command "herdr api snapshot >/dev/null 2>&1" \
+  --restart-command "<comando reale di avvio di Herdr>"
+
 # CRUD
 yano services list --json
 yano services enable --name llmproxy

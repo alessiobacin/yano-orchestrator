@@ -620,6 +620,21 @@ or a crashed container/process, instead of the affected role silently
 degrading (for example every `model: llmproxy` role falling back to `auto`
 routing when llmProxy itself is unreachable, with no attempt to bring it back).
 
+Herdr itself — the substrate every Pi agent pane runs inside, including the
+watcher's own supervisor loop — gets the same treatment rather than a
+hardcoded guess: `scripts/yano-herdr-client.mjs` centralizes the previously
+duplicated `herdr api snapshot` call (roughly a dozen independent
+reimplementations before this) with bounded retry/backoff, so a transient
+blip (Herdr's server still waking up) resolves within the same supervisor
+pass instead of waiting for the next one-minute cron tick. If retries are
+exhausted, Yano does not attempt to guess how to start Herdr on an unknown
+machine (GUI app, background/launchd service, CLI daemon — this varies); it
+instead checks whether the operator registered a service literally named
+`herdr` in the external-services registry above, and — because
+`superviseExternalServices()` runs before the pass's own Herdr snapshot —
+that declared restart command gets a chance to bring Herdr back up before the
+snapshot is attempted.
+
 ### Controlled Yano reload
 
 An already-running Pi process has the extension module, tool registry, MQTT

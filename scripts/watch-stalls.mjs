@@ -51,6 +51,7 @@ import { appendRawTraceRecord } from "./yano-trace-storage.mjs";
 import { processYanoWatcherFindings, resolveYanoRepository, sendTelegramWatcherNotification } from "./yano-watcher-findings.mjs";
 import { missingConfigError, resolveYanoConfig } from "./yano-config.mjs";
 import { projectDbPath } from "./yano-project.mjs";
+import { herdrSnapshot } from "./yano-herdr-client.mjs";
 
 const yanoRequire = createRequire(import.meta.url);
 let missingYanoRepoWarned = false;
@@ -107,14 +108,6 @@ function installFinalEventMonitor({ client, cwd, project, argv, packageRoot, run
 	} catch { /* best effort */ }
 }
 
-function herdrSnapshot() {
-	const result = spawnSync("herdr", ["api", "snapshot"], { encoding: "utf8", maxBuffer: 4_000_000 });
-	if (result.status !== 0) return null;
-	try {
-		const parsed = JSON.parse(result.stdout);
-		return parsed?.result?.snapshot || parsed?.result || parsed;
-	} catch { return null; }
-}
 
 function shellQuote(value) {
 	return process.platform === "win32" ? `"${String(value).replaceAll('"', '\\"')}"` : `'${String(value).replaceAll("'", `\'"'"\'`)}'`;

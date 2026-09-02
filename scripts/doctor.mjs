@@ -36,6 +36,7 @@ import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { globalConfigPath, loadConfigFile } from "./yano-config.mjs";
 import { inspectYanoCliSkill } from "./install-yano-cli.mjs";
+import { ensureDockerDaemonRunning, dockerDaemonRestartCommand } from "./yano-docker-daemon.mjs";
 
 const PLAYWRIGHT_CLI_PACKAGE = "@playwright/cli@latest";
 const PLAYWRIGHT_CLI_SKILL_REPO = "https://github.com/microsoft/playwright-cli";
@@ -590,7 +591,19 @@ export async function runDoctor({ cwd = process.cwd(), json = false, autoStartBr
 	rows.push(["embedding probe", embeddings.probe.ok, embeddings.probe.detail]);
 	if (!embeddings.ok) ok = false;
 
-	const dockerOk = dockerDaemonRunning();
+	const dockerInstalled = commandExists("docker");
+	let dockerOk = dockerDaemonRunning();
+	let dockerDaemonAutoStarted = false;
+	// Docker Desktop/Engine has a small, well-known start command per OS
+	// (unlike Herdr, see ticket #118) — deterministic enough for Yano to
+	// attempt it outright when the operator already opted into
+	// `autoStartBroker`, instead of only ever reporting "the daemon isn't
+	// running" and stopping there (ticket #120).
+	if (!dockerOk && autoStartBroker && dockerInstalled) {
+		const attempt = ensureDockerDaemonRunning();
+		dockerOk = attempt.running;
+		dockerDaemonAutoStarted = attempt.running && attempt.attempted_restart;
+	}
 	const hasMosquitto = commandExists("mosquitto", ["-h"]);
 	let brokerUp = await tcpReachable("127.0.0.1", 1883);
 	let brokerAutoStarted = false;
@@ -603,6 +616,7 @@ export async function runDoctor({ cwd = process.cwd(), json = false, autoStartBr
 		}
 	}
 
+	if (dockerDaemonAutoStarted) rows.push(["Docker daemon", true, "non era in esecuzione — riavviato automaticamente in modo deterministico"]);
 	if (brokerUp) {
 		rows.push(["Broker MQTT", true, brokerAutoStarted ? "avviato automaticamente con il compose ufficiale" : "già raggiungibile su 127.0.0.1:1883"]);
 	} else if (dockerOk) {
@@ -610,12 +624,14 @@ export async function runDoctor({ cwd = process.cwd(), json = false, autoStartBr
 	} else if (hasMosquitto) {
 		rows.push(["Mosquitto (nativo)", true, "trovato sul PATH — usa: mosquitto -c mqtt/mosquitto.native.conf"]);
 	} else {
-		const dockerInstalled = commandExists("docker");
+		const restartCommand = dockerDaemonRestartCommand();
 		rows.push([
 			"Broker MQTT",
 			false,
 			dockerInstalled
-				? `Docker è installato ma il daemon non sembra in esecuzione — aprilo, oppure installa Mosquitto nativo: ${osInstallHint("mosquitto")}`
+				? `Docker è installato ma il daemon non è in esecuzione${autoStartBroker ? " (il riavvio automatico è stato tentato e non è riuscito)" : ""} — avvialo con: ${restartCommand}` +
+					` — oppure fallo riavviare da solo a ogni crash: yano services add --name docker --healthcheck-command "docker info" --restart-command ${JSON.stringify(restartCommand)}` +
+					` — in alternativa installa Mosquitto nativo: ${osInstallHint("mosquitto")}`
 				: `nessun broker disponibile — installa Docker Desktop (${osInstallHint("docker")}) oppure Mosquitto nativo (${osInstallHint("mosquitto")})`,
 		]);
 		ok = false;

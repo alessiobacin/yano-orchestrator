@@ -203,6 +203,18 @@ yano cron --add "ogni giorno alle 14 e alle 21 esegui la pulizia del progetto" -
 yano cron --list --json                     # job persistenti; il supervisore riapre yano-scheduler ogni minuto
 yano computer status                         # servizio globale Computer locale
 yano computer ask --prompt "Controlla promemoria e calendario di oggi"
+# yano services: registro di servizi esterni (Docker/pm2/comando) che Yano non possiede ma da cui dipende
+# (broker MQTT, llmProxy, ...); `yano watcher supervise` (cron ogni minuto) li ricontrolla e riavvia da solo
+yano services add --name llmproxy --healthcheck-http http://127.0.0.1:7045/api/providers --restart-pm2 llmproxy
+yano services add --name mqtt-broker --healthcheck-command "docker inspect -f {{.State.Running}} yano-mqtt-broker | grep -q true" --restart-docker yano-mqtt-broker
+# nome riservato "herdr": se registrato, il suo comando di restart viene provato prima dello snapshot Herdr di ogni passata
+# --restart-command qui sotto è un ESEMPIO: sostituiscilo con il comando reale che avvia Herdr sulla tua macchina
+yano services add --name herdr --healthcheck-command "herdr api snapshot >/dev/null 2>&1" --restart-command "<comando reale di avvio di Herdr>"
+# il daemon Docker ha un comando di avvio noto per OS (yano init/doctor lo tenta già da soli); registralo per farlo riavviare anche ogni minuto dal cron
+yano services add --name docker --healthcheck-command "docker info" --restart-command "systemctl start docker || service docker start"  # macOS: open -a Docker
+yano services list --json                   # stato/health/backoff correnti
+yano services check --json                  # sola lettura, nessun riavvio
+yano services supervise --json              # health-check + riavvio deterministico con backoff (già chiamato da yano watcher supervise)
 yano config path                 # percorso della configurazione globale utente
 yano config list --all           # variabili configurabili, segreti oscurati
 yano config set YANO_ORCHESTRATOR_REPO /path/to/yano-orchestrator

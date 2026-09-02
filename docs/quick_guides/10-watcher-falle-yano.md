@@ -190,6 +190,7 @@ controllo che il cron utente esegue ogni minuto. Installalo una volta:
 yano watcher cron install
 yano watcher cron status
 # per modificare il crontab si usa `crontab -e`, non `cron -e`
+# su Windows lo stesso comando usa Task Scheduler (schtasks) al posto di crontab
 ~~~
 
 Il cron esegue `yano watcher supervise`, che controlla tutti i watcher
@@ -200,6 +201,19 @@ nel workspace Herdr con l'etichetta del progetto (mai in un workspace condiviso
 di uno specialista). I progetti completati, oppure privi di run oltre il breve
 periodo di grazia iniziale, restano comunque visibili: solo `pause` nasconde
 temporaneamente la tab e `leave` rimuove definitivamente il controllo.
+Lo snapshot Herdr di ogni passata ritenta con backoff breve invece di
+arrendersi al primo tentativo fallito (`scripts/yano-herdr-client.mjs`); se
+resta irraggiungibile, il supervisore controlla prima se è registrato un
+servizio esterno chiamato esattamente `herdr` (vedi `yano services` sopra) e,
+in tal caso, prova il suo comando di restart dichiarato prima di rinunciare
+per quel giro:
+
+```bash
+yano services add --name herdr \
+  --healthcheck-command "herdr api snapshot >/dev/null 2>&1" \
+  --restart-command "<comando reale di avvio di Herdr sulla tua macchina>"
+```
+
 Il job viene installato automaticamente solo dal lifecycle di un'installazione
 globale di Yano, non da `yano start`; un lock impedisce recovery concorrenti.
 `pause`/`resume` sospendono/riattivano senza
@@ -305,6 +319,24 @@ fine turno (`planner_task_completed`) e di fine run (`run_completed`). Ricevuto
 uno di questi eventi, accoda una sola scansione finale immediata e avvisa il
 planner se trova un problema; poi riprende la cadenza configurata. Il trace
 contiene `yano_watcher_final_scan_requested` e lo scan finale con `once: true`.
+
+## Rumore: fixture di test e ticket senza recidiva
+
+Un progetto il cui nome segue la convenzione delle fixture degli smoke test di
+Yano (`*-smoke`, `manual-e2e-*`/`manual e2e *`, case-insensitive) non apre mai
+un ticket, un alert Telegram o un bug nel registro debugger: il finding resta
+comunque visibile nel trace di quel progetto come
+`yano_watcher_finding_suppressed`. È un'euristica sui nomi, non sul percorso:
+personalizzabile con `YANO_WATCHER_TEST_FIXTURE_PATTERN` (una regex) o
+disattivabile del tutto con `YANO_WATCHER_SKIP_TEST_FIXTURES=0`.
+
+Un ticket aperto dal watcher che non si ripresenta più (stesso fingerprint) per
+`YANO_WATCHER_STALE_TICKET_DAYS` giorni (default 14) viene chiuso in automatico
+come `auto-closed-stale` da una sweep che gira, con un throttle di
+`YANO_WATCHER_STALE_SWEEP_INTERVAL_MS` (default sei ore), dentro la normale
+cadenza di polling — non tocca mai un ticket aperto da una persona o già
+risolto. Se lo stesso guasto si ripresenta dopo la chiusura automatica, il
+ticket viene riaperto al passaggio successivo invece di perdere il segnale.
 
 ## Dove leggere il risultato
 

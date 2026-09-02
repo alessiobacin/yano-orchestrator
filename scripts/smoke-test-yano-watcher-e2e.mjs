@@ -5,7 +5,7 @@ import path from "node:path";
 import http from "node:http";
 import { pathToFileURL } from "node:url";
 import mqtt from "mqtt";
-import { appendRawTraceRecord } from "./yano-trace-storage.mjs";
+import { appendRawTraceRecord, projectKey } from "./yano-trace-storage.mjs";
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "yano-watcher-e2e-"));
 const yanoRepo = path.join(root, "yano-orchestrator");
@@ -131,9 +131,16 @@ try {
 	const observer = mqtt.connect(broker, { reconnectPeriod: 0 });
 	const plannerCommands = [];
 	await new Promise((resolve, reject) => { observer.once("connect", resolve); observer.once("error", reject); });
-	await observer.subscribeAsync("pi/focusboard-trace-test/agents/planner-01/commands", { qos: 1 });
+	// watch-stalls.mjs's runWatch() resolves its own topic scope as
+	// projectKey(cwd, project) (a workspace-<hash>), not the raw project
+	// string, whenever PI_ORCH_TEST_NO_EXIT is unset (see runWatch's
+	// `topicScope = ... projectKey(watchCwd, project)`). Publishing/
+	// subscribing on the raw "focusboard-trace-test" name means the real
+	// watcher never discovers this fake planner as live at all.
+	const scope = projectKey(projectRoot, "focusboard-trace-test");
+	await observer.subscribeAsync(`pi/${scope}/agents/planner-01/commands`, { qos: 1 });
 	observer.on("message", (_topic, payload) => { try { plannerCommands.push(JSON.parse(payload.toString())); } catch { /* ignore */ } });
-	await observer.publishAsync("pi/focusboard-trace-test/agents/planner-01/status", JSON.stringify({
+	await observer.publishAsync(`pi/${scope}/agents/planner-01/status`, JSON.stringify({
 		instance: "planner-01", role: "planner", project: "focusboard-trace-test", status: "idle", last_heartbeat: new Date().toISOString(),
 	}), { qos: 1, retain: true });
 	appendRawTraceRecord({ cwd: projectRoot, project: "focusboard-trace-test", record: {
@@ -144,7 +151,7 @@ try {
 	await new Promise((resolve) => setTimeout(resolve, 150));
 	assert.ok(plannerCommands.some((command) => command.type === "command" && command.sender_instance === "yano-watcher" && /trace_preflight_mismatch/.test(command.prompt)));
 	assert.equal(requests.length, 2, "un planner live evita il Telegram duplicato per il nuovo finding");
-	await observer.publishAsync("pi/focusboard-trace-test/agents/planner-01/status", JSON.stringify({ instance: "planner-01", role: "planner", project: "focusboard-trace-test", status: "offline", last_heartbeat: new Date().toISOString() }), { qos: 1, retain: true });
+	await observer.publishAsync(`pi/${scope}/agents/planner-01/status`, JSON.stringify({ instance: "planner-01", role: "planner", project: "focusboard-trace-test", status: "offline", last_heartbeat: new Date().toISOString() }), { qos: 1, retain: true });
 	observer.end(true);
 
 	console.log("smoke-test-yano-watcher-e2e: ok");

@@ -114,8 +114,12 @@ repository configurato: un commit del checkout locale non diventa così attivo
 per effetto collaterale. Docker è consigliato come distribuzione complementare
 per broker MQTT e servizi stateless, con volumi per i dati persistenti; non
 sostituisce la CLI nativa, Herdr, Pi, Git/worktree e i supervisori dell’host.
-Su Windows il supervisore deve usare Task Scheduler o un servizio equivalente,
-non il comando `cron` POSIX.
+Su Windows il supervisore usa Task Scheduler (`schtasks`), non il comando
+`cron` POSIX: `scripts/yano-os-scheduler.mjs` implementa questo ramo per
+entrambi i supervisori globali a cadenza di un minuto (`yano watcher cron
+install`/`yano cron --install`), con lo stesso contratto idempotente
+(`/Create /F` non duplica l'attività) e lo stesso nome derivato in modo
+stabile dal marker POSIX già usato per identificare la riga di crontab.
 
 The operation never deletes application files, worktrees, SQLite state or trace
 history. Once a canonical replacement is ready, it may close only stale
@@ -301,6 +305,23 @@ override. If a detected Yano defect needs it and it is missing, the command
 returns an actionable configuration error instead of silently losing the
 maintenance ticket. The future `yano-debugger` can consume these files; until
 then they are deliberately ordinary Markdown tickets for an LLM.
+
+Two further guards keep escalation signal rather than noise (`scripts/yano-watcher-findings.mjs`).
+First, a project name matching the fixture convention Yano's own smoke tests
+use (`*-smoke`, `manual-e2e-*`/`manual e2e *`, case-insensitive) never opens a
+maintenance ticket, Telegram alert or debugger-registry bug — the finding
+still lands in that project's own trace as `yano_watcher_finding_suppressed`
+for observability. This is a heuristic, overridable with
+`YANO_WATCHER_TEST_FIXTURE_PATTERN` (a custom regex) and disable-able entirely
+with `YANO_WATCHER_SKIP_TEST_FIXTURES=0`. Second, a watcher-authored ticket
+that never recurs (same fingerprint never seen again, including on a later
+dedup hit) for `YANO_WATCHER_STALE_TICKET_DAYS` (default 14) is automatically
+marked `auto-closed-stale` by a throttled sweep (`YANO_WATCHER_STALE_SWEEP_INTERVAL_MS`,
+default six hours) that runs as part of the ordinary polling pass — it never
+touches a human- or debugger-authored ticket, or one already resolved. Every
+dedup hit on an open ticket also bumps a `last_seen_at` timestamp; if the same
+fault recurs after auto-close, the next dedup hit reopens the ticket instead
+of silently dropping the signal.
 
 Routing is presence-aware: with at least one live planner, the watcher sends a
 direct MQTT command to each live planner instance; if no live planner exists,
@@ -579,6 +600,57 @@ checklist, not a replacement for browser evidence, trace analysis, HTTP
 hygiene or the coder correction loop.
 
 ## Failure and recovery
+
+### External service supervision
+
+Everything above heals components Yano owns directly (Herdr panes, SQLite
+runs, its own bundled MQTT broker). `scripts/yano-services.mjs` extends the
+same one-minute cron loop (`yano watcher supervise`) to services Yano depends
+on operationally but does not own — a local LLM router such as llmProxy, the
+Docker daemon itself, an MQTT broker container, a pm2-managed process, or any
+other declared command/container. `yano services add --name <name>
+(--healthcheck-http <url>|--healthcheck-command <cmd>) (--restart-docker
+<container>|--restart-pm2 <app>|--restart-command <cmd>)` registers one in
+`<YANO_DATA_DIR>/services/services.json`; every enabled entry is health-checked
+on each supervisor pass and, on failure, restarted with bounded exponential
+backoff (`--backoff-base-ms`/`--backoff-max-ms`/`--max-attempts`, default
+5s/5min/6). A service that exhausts its restart attempts is marked
+`giving_up`: it stays health-checked (so an external/manual fix is still
+observed) but Yano stops trying to restart something that structurally cannot
+come back on its own. `yano services check` is the read-only counterpart used
+for manual diagnosis — it never restarts anything or mutates persisted state.
+This is what lets the fleet recover deterministically after a computer restart
+or a crashed container/process, instead of the affected role silently
+degrading (for example every `model: llmproxy` role falling back to `auto`
+routing when llmProxy itself is unreachable, with no attempt to bring it back).
+
+Herdr itself — the substrate every Pi agent pane runs inside, including the
+watcher's own supervisor loop — gets the same treatment rather than a
+hardcoded guess: `scripts/yano-herdr-client.mjs` centralizes the previously
+duplicated `herdr api snapshot` call (roughly a dozen independent
+reimplementations before this) with bounded retry/backoff, so a transient
+blip (Herdr's server still waking up) resolves within the same supervisor
+pass instead of waiting for the next one-minute cron tick. If retries are
+exhausted, Yano does not attempt to guess how to start Herdr on an unknown
+machine (GUI app, background/launchd service, CLI daemon — this varies); it
+instead checks whether the operator registered a service literally named
+`herdr` in the external-services registry above, and — because
+`superviseExternalServices()` runs before the pass's own Herdr snapshot —
+that declared restart command gets a chance to bring Herdr back up before the
+snapshot is attempted.
+
+Docker itself gets the deterministic treatment Herdr deliberately avoids:
+unlike Herdr, Docker Desktop/Engine has one well-known start command per
+major OS (`scripts/yano-docker-daemon.mjs`:
+`open -a Docker`/`systemctl start docker`/a PowerShell `Start-Service`
+equivalent on Windows), so `yano init`/`yano doctor` (when invoked with the
+broker auto-start already in place, ticket #41) attempt it — with a bounded
+poll for the daemon to actually finish starting — before falling back to
+reporting the problem. The exact same command is what the failure message
+suggests registering as `yano services add --name docker
+--healthcheck-command "docker info" --restart-command "<the same command>"`,
+so the one-shot init-time recovery and the continuous cron-driven one never
+drift apart.
 
 ### Controlled Yano reload
 

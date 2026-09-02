@@ -173,6 +173,52 @@ async function main() {
 	process.exit(0);
 }
 
+// Revisione 49 — extensions/orchestrator.ts also fills 5 shared-fragment
+// placeholders (SLUG_REMINDER, WORKER_TOOLS_INTRO, DIAGRAM_TIP,
+// TURN_CLOSE_NOTE, TICKET_CLAIM_STEP0) on every role's prompt, coder.md and
+// reviewer.md included — mirrored here verbatim (not imported, same reason
+// as below) so the exact-render comparisons below still match byte-for-byte.
+const SLUG_REMINDER =
+	"**Passa sempre `slug` a `agent_send`**: aggiunge in automatico una riga di\n" +
+	"evento al report con orario e stato di tutti gli agenti in quel momento —\n" +
+	"non serve che tu scriva nulla per questo, ma serve che tu passi `slug`.";
+const WORKER_TOOLS_INTRO =
+	"Hai a disposizione i tool `agent_list`, `agent_send`, `agent_get`, `agent_await`,\n" +
+	"`agent_publish_event`, `agent_activity` per comunicare con gli altri agenti via MQTT,\n" +
+	"il tool `worktree_create` per creare/riusare il worktree git isolato di un task,\n" +
+	"`report_append` per aggiungere sezioni al file di report senza rischiare di\n" +
+	"cancellare quelle di altri agenti, e `file_claim`/`file_release` per coordinarti sui\n" +
+	"file quando altri agenti lavorano lo stesso worktree in parallelo (vedi sotto),\n" +
+	"oltre ai normali tool per leggere/scrivere file.";
+const DIAGRAM_TIP =
+	"## Prima di iniziare: leggi il diagramma, se esiste (Revisione 28)\n\n" +
+	"Prima di esplorare il codice esistente da zero, controlla se esiste\n" +
+	"`.pi/extensions/yano-orchestrator/diagrams/architecture.mmd` (nella\n" +
+	"directory principale del progetto, non nel worktree — è uno stato\n" +
+	"persistente cross-task, aggiornato da `architecture-diagrammer` o da\n" +
+	"`docs-sync`) e leggilo: ti dà un'orientamento immediato sull'architettura\n" +
+	"corrente senza dover ricostruirla leggendo ogni file — risparmia token. Non\n" +
+	"è garantito che esista — se manca, procedi come sempre.";
+const TURN_CLOSE_NOTE =
+	"## Prima di concludere il turno: dillo sempre (Revisione 48)\n\n" +
+	"Richiesta esplicita dell'operatore: nella tua ULTIMA risposta di questo\n" +
+	"turno — quella visibile nel pannello/terminale di questa istanza, non solo\n" +
+	"nel messaggio MQTT che mandi con `agent_send` o nella sezione che aggiungi\n" +
+	"con `report_append` — di' sempre, in una riga o poche righe, cosa hai appena\n" +
+	"fatto. Chi guarda il pannello di questa istanza deve poter capire l'esito\n" +
+	"senza dover aprire i log MQTT o il file di report.";
+const TICKET_CLAIM_STEP0 =
+	"0. **Se il messaggio che ti ha coinvolto include anche un `ticket_id`\n" +
+	"   (Revisione 26 — layer ticket/DAG persistente)**, chiama subito\n" +
+	"   `ticket_claim({ ticket_id })` prima di iniziare — registra questa\n" +
+	"   istanza come assegnataria sul layer persistente, non solo sul piano a\n" +
+	"   fasi del planner. Se rifiuta (ticket già claimato, o capability\n" +
+	"   mancanti), fermati e segnalalo nel report invece di procedere. **Non\n" +
+	"   chiamare mai tu `ticket_complete`**: è il planner a deciderlo, quando\n" +
+	"   giudica il tuo contributo concluso (vedi `prompts/planner.md`), non\n" +
+	"   appena hai finito. Se il messaggio non include un `ticket_id`, procedi\n" +
+	"   normalmente: quel layer resta opzionale dal tuo punto di vista.";
+
 // Same placeholder substitution the extension itself does, so assertions can
 // compare against an exact expected render rather than a loose substring —
 // intentionally duplicated (not imported) since the real replaceAll chain
@@ -186,7 +232,12 @@ function renderTemplate(text, instance, project) {
 		.replaceAll("{{PROJECT}}", project)
 		// An explicit --role now resolves the role defaults even when the
 		// instance has no agents.yaml entry (including its team membership).
-		.replaceAll("{{TEAM}}", "core");
+		.replaceAll("{{TEAM}}", "core")
+		.replaceAll("{{SLUG_REMINDER}}", SLUG_REMINDER)
+		.replaceAll("{{WORKER_TOOLS_INTRO}}", WORKER_TOOLS_INTRO)
+		.replaceAll("{{DIAGRAM_TIP}}", DIAGRAM_TIP)
+		.replaceAll("{{TURN_CLOSE_NOTE}}", TURN_CLOSE_NOTE)
+		.replaceAll("{{TICKET_CLAIM_STEP0}}", TICKET_CLAIM_STEP0);
 }
 
 main().catch((err) => {

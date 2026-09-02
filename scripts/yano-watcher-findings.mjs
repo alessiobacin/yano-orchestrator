@@ -60,6 +60,24 @@ export function resolveYanoRepository({ packageRoot = PACKAGE_ROOT } = {}) {
 	return fs.existsSync(candidate) ? candidate : null;
 }
 
+// Real evidence (2026-09-02 audit): the watcher wrote several `critical`
+// workspace_scope_mismatch tickets whose `source_project` was a fixture of
+// Yano's own smoke tests (`context-compaction-smoke`, `watch-smoke`,
+// `manual-e2e-08-refactor-playbook`, ...), not a real user project. Those
+// projects follow the naming convention the smoke tests themselves chose
+// (`*-smoke`, `manual-e2e-*`/`manual e2e *`) — narrow enough that a real
+// product name is unlikely to collide, but overridable/disable-able because
+// it is a heuristic, not a structural guarantee.
+const DEFAULT_TEST_FIXTURE_PROJECT_PATTERN = /(^|[-\s_])(smoke|e2e)(?:[-\s_]|$)/i;
+
+export function isTestFixtureProject(name, env = process.env) {
+	if (String(env.YANO_WATCHER_SKIP_TEST_FIXTURES || "1") === "0") return false;
+	const raw = String(env.YANO_WATCHER_TEST_FIXTURE_PATTERN || "");
+	let pattern = DEFAULT_TEST_FIXTURE_PROJECT_PATTERN;
+	if (raw) { try { pattern = new RegExp(raw, "i"); } catch { pattern = DEFAULT_TEST_FIXTURE_PROJECT_PATTERN; } }
+	return pattern.test(String(name || ""));
+}
+
 function isYanoInternalRecord(record) {
 	const tool = String(record.tool || record.tool_name || record.operation || "").toLowerCase();
 	return record.source === "yano" || record.component === "yano" || INTERNAL_TOOLS.has(tool);
@@ -220,6 +238,77 @@ Verificare se il problema ha lasciato il planner senza destinatario, ha perso l�
 `;
 }
 
+// Bumps the recurrence clock on an existing ticket every time the same
+// fingerprint is observed again, and reopens it if a previous sweep
+// (`sweepStaleYanoWatcherTickets`) had auto-closed it for lack of recurrence
+// — a fault that comes back after being marked stale was never actually
+// gone. `detected_at` always stays the original first-seen timestamp.
+export function touchExistingTicketRecurrence(ticketPath, now = new Date()) {
+	let content;
+	try { content = fs.readFileSync(ticketPath, "utf8"); } catch { return { touched: false }; }
+	const iso = now.toISOString();
+	let updated = /^last_seen_at: /m.test(content)
+		? content.replace(/^last_seen_at: .*$/m, `last_seen_at: ${iso}`)
+		: content.replace(/^(detected_at: .*)$/m, `$1\nlast_seen_at: ${iso}`);
+	const wasStale = /^status: auto-closed-stale$/m.test(updated);
+	if (wasStale) {
+		updated = `${updated
+			.replace(/^status: auto-closed-stale$/m, "status: open")
+			.replace(/^Status: auto-closed-stale$/m, "Status: open")}\n## Riaperto\n\nIl fingerprint si è ripresentato il ${iso} dopo l'auto-chiusura per assenza di recidiva: il ticket è stato riaperto automaticamente.\n`;
+	}
+	try { fs.writeFileSync(ticketPath, updated); } catch { return { touched: false }; }
+	return { touched: true, reopened: wasStale };
+}
+
+// A watcher-authored ticket that has not recurred (same fingerprint never
+// seen again, neither at creation nor on any later dedup hit) for
+// `staleDays` is noise, not an open defect: it accumulates forever otherwise
+// (real evidence: 28/29 watcher tickets in this repo were still `status:
+// open` at audit time, none ever closed automatically). Auto-close is
+// reversible: `touchExistingTicketRecurrence` reopens it the moment the same
+// fault is observed again. Only touches tickets this module created
+// (`created_by: yano-watcher`) and currently `open` — never a
+// human/debugger-authored or already-resolved ticket.
+export function sweepStaleYanoWatcherTickets({ ticketsDir, now = new Date(), staleDays = Number(process.env.YANO_WATCHER_STALE_TICKET_DAYS) || 14 } = {}) {
+	if (!ticketsDir || !fs.existsSync(ticketsDir)) return { swept: 0, closed: [] };
+	const thresholdMs = Math.max(0, staleDays) * 24 * 60 * 60 * 1000;
+	const closed = [];
+	for (const file of fs.readdirSync(ticketsDir)) {
+		if (!file.endsWith(".md")) continue;
+		const full = path.join(ticketsDir, file);
+		let content;
+		try { content = fs.readFileSync(full, "utf8"); } catch { continue; }
+		const meta = parseFrontmatter(content);
+		if (meta.created_by !== "yano-watcher" || meta.status !== "open") continue;
+		const lastSeen = Date.parse(meta.last_seen_at || meta.detected_at || "");
+		if (!Number.isFinite(lastSeen) || now.getTime() - lastSeen < thresholdMs) continue;
+		const updated = `${content
+			.replace(/^status: open$/m, "status: auto-closed-stale")
+			.replace(/^Status: open$/m, "Status: auto-closed-stale")}\n## Auto-chiusura per assenza di recidiva\n\nQuesto ticket (fingerprint \`${meta.fingerprint || "unknown"}\`) non si è ripresentato da almeno ${staleDays} giorni: chiuso automaticamente da \`sweepStaleYanoWatcherTickets\` il ${now.toISOString()}. Se il segnale si ripresenta il ticket viene riaperto automaticamente al prossimo passaggio del watcher.\n`;
+		try {
+			fs.writeFileSync(full, updated);
+			closed.push({ path: full, fingerprint: meta.fingerprint || null });
+		} catch { /* best effort; next sweep retries */ }
+	}
+	return { swept: closed.length, closed };
+}
+
+let lastStaleSweepAt = 0;
+
+// Throttled entry point for the periodic watcher pass: a stale sweep is a
+// directory scan, cheap but pointless to repeat on every single pass across
+// every persistent per-project `yano watch` process. Module-level throttle is
+// per-process (each project's persistent watcher is its own process), which
+// is fine — the sweep is idempotent and a rare cross-process double-write
+// race on the same file is harmless (last writer produces the same content).
+export function maybeSweepStaleYanoWatcherTickets({ yanoRepo, ticketsDir = null, now = new Date(), intervalMs = Number(process.env.YANO_WATCHER_STALE_SWEEP_INTERVAL_MS) || 6 * 60 * 60 * 1000 } = {}) {
+	if (!yanoRepo && !ticketsDir) return { swept: 0, closed: [], skipped: "no_target" };
+	if (now.getTime() - lastStaleSweepAt < Math.max(0, intervalMs)) return { swept: 0, closed: [], skipped: "throttled" };
+	lastStaleSweepAt = now.getTime();
+	const targetDir = ticketsDir ? path.resolve(ticketsDir) : path.join(yanoRepo, ".scratch", "optimize-orchestrator", "issues");
+	return sweepStaleYanoWatcherTickets({ ticketsDir: targetDir, now });
+}
+
 export function findExistingTicket(ticketsDir, fingerprint) {
 	if (!fs.existsSync(ticketsDir)) return null;
 	for (const file of fs.readdirSync(ticketsDir)) {
@@ -239,7 +328,10 @@ export function createYanoWatcherTicket({ finding, yanoRepo, projectRoot, projec
 	const targetDir = ticketsDir ? path.resolve(ticketsDir) : path.join(yanoRepo, ".scratch", "optimize-orchestrator", "issues");
 	fs.mkdirSync(targetDir, { recursive: true });
 	const existing = findExistingTicket(targetDir, finding.fingerprint);
-	if (existing) return { created: false, path: existing, finding };
+	if (existing) {
+		touchExistingTicketRecurrence(existing, now);
+		return { created: false, path: existing, finding };
+	}
 	const iso = now.toISOString();
 	const numbers = fs.readdirSync(targetDir)
 		.map((file) => file.match(/^(\d+)-.*\.md$/)?.[1])
@@ -352,8 +444,21 @@ function notificationText(result, sourceProject) {
 export async function processYanoWatcherFindings({ records, projectRoot, project, yanoRepo, ticketsDir = null, traceContext = null, notify = true, env = process.env } = {}) {
 	const findings = detectYanoFindings(records, { project, project_key: traceContext?.project_key });
 	const sourceProject = { name: project || path.basename(path.resolve(projectRoot || process.cwd())), root: path.resolve(projectRoot || process.cwd()) };
+	const isFixture = isTestFixtureProject(sourceProject.name, env);
+	maybeSweepStaleYanoWatcherTickets({ yanoRepo, ticketsDir });
 	const results = [];
 	for (const finding of findings) {
+		if (isFixture) {
+			try {
+				if (traceContext?.cwd) appendRawTraceRecord({ cwd: traceContext.cwd, project: sourceProject.name, record: {
+					type: "yano_watcher_finding_suppressed", record_type: "event", instance: "yano-watcher", fingerprint: finding.fingerprint,
+					signal: finding.signal, category: finding.category, severity: finding.severity,
+					reason: "test_fixture_project", source_record_id: finding.record_id || null,
+				} });
+			} catch { /* ticketing must never stop the watcher */ }
+			results.push({ created: false, skipped: true, reason: "test_fixture_project", finding, telegram: { ok: false, detail: "test_fixture_project" }, debuggerRouting: { routed: false, reason: "test_fixture_project" } });
+			continue;
+		}
 		const result = createYanoWatcherTicket({ finding, yanoRepo, projectRoot: sourceProject.root, project: sourceProject.name, ticketsDir });
 		let telegram = { ok: false, detail: notify ? "not_sent" : "planner_route" };
 		if (!result.skipped && result.created && notify) telegram = await sendTelegramWatcherNotification({ yanoRepo, message: notificationText(result, sourceProject), sender: "yano-watcher", project: sourceProject.name, env });

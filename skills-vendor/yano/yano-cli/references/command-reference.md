@@ -18,6 +18,8 @@ yano skills install|status [--dry-run] [--force] [--json]
 yano projects [--json]
 yano status|logs|fleet|mcp [options]
 yano deps [options]
+yano docs-check [--project-root <dir>] [--json]
+yano qa-inventory scan [--project-root <dir>] [--yano-self-audit] [--json]
 yano gantt [options]
 yano watch [options]
 yano trace [subcommand] [options]
@@ -27,6 +29,8 @@ yano config [subcommand] [options]
 yano data [subcommand] [options]
 yano cron --add <natural request> [--project-root <dir>]
 yano cron --list|--remove <id>|--enable <id>|--disable <id>|--run <id>|--supervise
+yano services add --name <name> (--healthcheck-http <url>|--healthcheck-command <cmd>) (--restart-docker <container>|--restart-pm2 <app>|--restart-command <cmd>) [--timeout-ms|--backoff-base-ms|--backoff-max-ms|--max-attempts|--disabled]
+yano services list|remove|enable|disable|check|supervise [options]  # external Docker/pm2/command dependencies (llmProxy, broker...); supervise runs inside `yano watcher supervise`
 yano architect [subcommand] [options]
 yano watcher init|start|status|pause|resume|leave [options]  # persistent registry — see docs/quick_guides/10-watcher-falle-yano.md
 yano leave [--project-root <dir>] --yes                # permanently removes only watcher supervision
@@ -87,6 +91,8 @@ yano fleet [--project-root <dir>] [--project <scope>] [--json]
 yano mcp [<role>] [--json]
 yano skills [<role>] [--json]                 # skill dichiarate dal progetto
 yano deps [--project-root <dir>] [--json]
+yano docs-check [--project-root <dir>] [--json]  # verifica scriptata delle otto categorie canoniche sotto docs/ (usato da docs-sync)
+yano qa-inventory scan [--project-root <dir>] [--yano-self-audit] [--json]  # bozza grezza dell'inventario comandi/funzionalità (usato da qa-inventory-analyst)
 yano gantt --project-root <dir> [--project <name>] [--port 10000..19999] [--persistent]
 yano gantt --link [--project-root <dir>] [--project <name>] [--json]
 yano gantt --links [--json]

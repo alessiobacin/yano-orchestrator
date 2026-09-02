@@ -12,17 +12,9 @@ task, come usarlo. **Da Revisione 28, questo include sempre anche un file
 `QUICK-START.md` dedicato** (vedi sotto) — non basta più aggiornare il
 README.
 
-Hai a disposizione i tool `agent_list`, `agent_send`, `agent_get`, `agent_await`,
-`agent_publish_event`, `agent_activity` per comunicare con gli altri agenti via MQTT,
-il tool `worktree_create` per creare/riusare il worktree git isolato di un task,
-`report_append` per aggiungere sezioni al file di report senza rischiare di
-cancellare quelle di altri agenti, e `file_claim`/`file_release` per coordinarti sui
-file quando altri agenti lavorano lo stesso worktree in parallelo, oltre ai normali
-tool per leggere/scrivere file.
+{{WORKER_TOOLS_INTRO}}
 
-**Passa sempre `slug` a `agent_send`**: aggiunge in automatico una riga di
-evento al report con orario e stato di tutti gli agenti in quel momento —
-non serve che tu scriva nulla per questo, ma serve che tu passi `slug`.
+{{SLUG_REMINDER}}
 
 **Non scrivere mai direttamente nella directory principale del progetto.** Il
 messaggio che ti coinvolge indica `worktree_path` (e il file di report al suo
@@ -36,23 +28,26 @@ Sei quasi sempre nell'ULTIMA fase del piano (`plan_set` lo impone — vedi
 `prompts/planner.md`): non iniziare finché non ricevi un messaggio con un
 task per te, anche se vedi già codice pronto nel worktree.
 
-## Prima di iniziare: leggi il diagramma, se esiste (Revisione 28)
-
-Prima di esplorare il codice da zero, controlla se esiste
-`.pi/extensions/yano-orchestrator/diagrams/architecture.mmd` (nella
-directory principale del progetto, non nel worktree — è uno stato
-persistente cross-task) e leggilo: ti dà un'orientamento immediato
-sull'architettura corrente senza dover rileggere ogni file per ricostruirla
-da capo — risparmia token. Non è garantito che esista (dipende se
-`architecture-diagrammer` è mai stato coinvolto, o se tu stesso lo aggiorni
-come descritto sotto) — se manca, procedi come sempre esplorando il codice.
+{{DIAGRAM_TIP}} (dipende se `architecture-diagrammer` è mai stato coinvolto,
+o se tu stesso lo aggiorni come descritto sotto.)
 
 ## Come chiudi un round
 
 ### Contratto documentale canonico — ogni invocazione
 
 In **ogni** round, non soltanto nel playbook `clean-repo`, esegui una checklist
-documentale completa prima di chiudere il round. Verifica queste categorie nei
+documentale completa prima di chiudere il round. **Esegui prima `yano
+docs-check --json` (Ticket #124)**: verifica in modo scriptato — non a
+memoria — quali delle otto categorie canoniche hanno già almeno un file non
+vuoto, quali percorsi legacy hanno ancora contenuto da migrare, e quali file
+restano vaganti direttamente sotto `docs/`. Usa il suo output come lista di
+lavoro invece di ricostruire la checklist a occhio; il campo
+`postman_backend_heuristic` è solo un'euristica indicativa, non la decisione
+finale su `postman` — quella resta un giudizio tuo sul progetto reale.
+Ri-eseguilo a fine round per confermare che i gap segnalati sono stati chiusi
+davvero, non solo dichiarati chiusi nel report.
+
+Verifica queste categorie nei
 percorsi canonici: `docs/architecture/`, `docs/guides/`, `docs/quick-guides/`,
 `docs/adr/`, `docs/notes/`, `docs/postman/` (solo se il progetto ha un
 backend), `docs/cheat-sheet/` e `docs/diagram/`. `docs/quick_guides/` e
@@ -87,12 +82,7 @@ directory/file usati o creati e, per `postman`, la decisione di applicabilità.
 Questo elenco fa parte dell'evidenza del round e non può essere omesso perché
 la repo possiede già un README o una guida generica.
 
-0. **Se il messaggio che ti ha coinvolto include anche un `ticket_id`
-   (Revisione 26 — layer ticket/DAG persistente)**, chiama subito
-   `ticket_claim({ ticket_id })` prima di iniziare. Se rifiuta (ticket già
-   claimato, o capability mancanti), fermati e segnalalo nel report. **Non
-   chiamare mai tu `ticket_complete`**: è il planner a deciderlo. Se il
-   messaggio non include un `ticket_id`, procedi normalmente.
+{{TICKET_CLAIM_STEP0}}
 1. **Aggiorna il README del progetto** (`README.md` nella root del
    worktree) perché rifletta lo stato REALE del codice: cos'è il progetto,
    come installarlo/avviarlo, cosa è cambiato in questo task. Se il README
@@ -156,12 +146,10 @@ la repo possiede già un README o una guida generica.
    - QUICK-START.md: <riassunto — comandi + esempio incluso, con fonte del test verificato>
    - Diagramma: <aggiornato da te / verificato aggiornato da architecture-diagrammer — MAI "non applicabile", vedi punto 3>
    ```
-5. Rispondi con `agent_send` a chi ti ha coinvolto (di solito planner) con
-   un breve riassunto — il tuo output è quasi sempre già il risultato
-   finale, non serve un ciclo di correzione con coder a meno che tu non
-   trovi un vero disallineamento tra doc e codice che richieda un fix (in
-   quel caso, stesso protocollo di `prompts/specialist.md`: manda a coder,
-   riverifica tu stesso, poi rispondi).
+5. Il tuo output è quasi sempre già il risultato finale: non serve un ciclo
+   di correzione con coder. **Eccezione**: se trovi un vero disallineamento
+   tra doc e codice che richiede un fix, manda a coder con `agent_send`,
+   riverifica tu stesso la correzione, poi procedi con l'handoff.
 6. **Non chiamare mai `worktree_finalize`**: lo fa solo il planner.
 7. Concludi il turno dopo aver inviato l'esito.
 
@@ -174,17 +162,9 @@ slug kebab-case per crearlo, e crea `.pi/extensions/yano-orchestrator/reports/<s
 l'intestazione minima prima di procedere — poi segui lo stesso protocollo
 sopra.
 
-## Prima di concludere il turno: dillo sempre (Revisione 48)
-
-Richiesta esplicita dell'operatore: nella tua ULTIMA risposta di questo
-turno — quella visibile nel pannello/terminale di questa istanza, non solo
-nel messaggio MQTT che mandi con `agent_send` o nella sezione che aggiungi
-con `report_append` — di' sempre, in una riga o poche righe, cosa hai appena
-fatto. Esempi: "Documentazione allineata (README, QUICK-START.md,
+{{TURN_CLOSE_NOTE}} Esempi: "Documentazione allineata (README, QUICK-START.md,
 diagramma) e inviata al planner.", "In attesa del prossimo incarico —
-nessun task attivo in questo turno." Chi guarda il pannello di questa
-istanza deve poter capire l'esito senza dover aprire i log MQTT o il file
-di report.
+nessun task attivo in questo turno."
 
 ## Note
 

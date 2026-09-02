@@ -39,6 +39,9 @@ import { createRequire } from "node:module";
 import { appendRawTraceRecord, canonicalProjectScope, projectKey, readTraceRecords, resolveTraceProject, traceRoot } from "./yano-trace-storage.mjs";
 import { projectDbPath } from "./yano-project.mjs";
 import { ensureGlobalYanoServices } from "./yano-global-services.mjs";
+import { superviseExternalServices, getService } from "./yano-services.mjs";
+import { herdrSnapshot } from "./yano-herdr-client.mjs";
+import { installOneMinuteWindowsJob, removeOneMinuteWindowsJob, statusOneMinuteWindowsJob } from "./yano-os-scheduler.mjs";
 import { findAgentIdentityConflicts, formatAgentIdentityConflicts } from "./yano-agent-identity.mjs";
 
 const require = createRequire(import.meta.url);
@@ -143,12 +146,6 @@ function infoFromRow(row) { return { root: row.root, name: row.name, key: row.pr
 
 function shellQuote(valueToQuote) {
 	return process.platform === "win32" ? `"${String(valueToQuote).replaceAll('"', '\\"')}"` : `'${String(valueToQuote).replaceAll("'", `'"'"'`)}'`;
-}
-
-function herdrSnapshot() {
-	const result = spawnSync("herdr", ["api", "snapshot"], { encoding: "utf8" });
-	if (result.status !== 0) return null;
-	try { const parsed = JSON.parse(result.stdout); return parsed?.result?.snapshot || parsed?.result || parsed; } catch { return null; }
 }
 
 function renameHerdrTab(tabId, label) {
@@ -495,7 +492,7 @@ function doStatusForRow(db, row, { heal = true } = {}) {
 function supervisorLockPath() { return path.join(traceRoot(), "watcher", "supervisor.lock"); }
 function supervisorHeartbeatPath() { return path.join(traceRoot(), "watcher", "supervisor-heartbeat.json"); }
 
-function withSupervisorLock(callback) {
+async function withSupervisorLock(callback) {
 	const lock = supervisorLockPath();
 	fs.mkdirSync(path.dirname(lock), { recursive: true, mode: 0o700 });
 	let fd;
@@ -516,7 +513,7 @@ function withSupervisorLock(callback) {
 		}
 	}
 	try {
-		return callback();
+		return await callback();
 	} finally {
 		try { if (fd !== undefined) fs.closeSync(fd); } catch { /* best effort */ }
 		try { fs.unlinkSync(lock); } catch { /* best effort */ }
@@ -650,8 +647,23 @@ function activateDefaultDebuggers() {
 }
 
 function supervise(db) {
-	return withSupervisorLock(() => {
+	return withSupervisorLock(async () => {
 		const rows = db.prepare("SELECT * FROM watcher_projects ORDER BY updated_at DESC").all();
+		// User-declared external dependencies (Docker/pm2/llmProxy/...) run
+		// FIRST, before this pass's own Herdr snapshot: if the operator has
+		// registered a service literally named "herdr" (`yano services add
+		// --name herdr --healthcheck-command "..." --restart-command "..."`),
+		// this is what gives Herdr itself a chance to be restarted before the
+		// snapshot below is attempted — Yano does not guess how to start Herdr
+		// on an unknown machine (GUI app, background service, ...), the
+		// operator declares it once like any other dependency.
+		let external_services;
+		try { external_services = await superviseExternalServices(); } catch (error) { external_services = { error: error instanceof Error ? error.message : String(error) }; }
+		const herdrServiceRegistered = Boolean(getService("herdr"));
+		// herdrSnapshot() itself retries with backoff (ticket #118): a
+		// transient blip — Herdr's server still waking up right after being
+		// restarted above, or after the machine itself just rebooted — no
+		// longer needs to wait for the next one-minute cron tick to resolve.
 		const snapshot = herdrSnapshot();
 		const orphan_tabs_removed = pruneOrphanWatcherTabs(snapshot, rows);
 		const identityConflicts = snapshot ? findAgentIdentityConflicts(snapshot) : [];
@@ -663,9 +675,12 @@ function supervise(db) {
 		const activated = [...rows.map((row) => activateDefaultWorkers(db, row)).filter(Boolean), ...activateDefaultDebuggers()];
 		const result = {
 			checked_at: now(),
+			herdr_reachable: Boolean(snapshot),
+			herdr_service_registered: herdrServiceRegistered,
 			projects: rows.map((row) => doStatusForRow(db, row, { heal: true })),
 			activated,
 			global_services,
+			external_services,
 			external_workers: externalWorkerRecovery(snapshot),
 			orphan_tabs_removed,
 			identity_conflicts: identityConflicts,
@@ -688,29 +703,36 @@ function cronCommand() {
 }
 
 function cronInstall() {
+	const windows = installOneMinuteWindowsJob({ marker: CRON_MARKER, command: cronCommand() });
+	if (windows) return windows;
 	const line = `* * * * * ${cronCommand()}`;
 	const existing = readCrontab().split("\n").filter((item) => item.trim() && !item.includes(CRON_MARKER));
 	const content = [...existing, line].join("\n") + "\n";
 	const result = spawnSync("crontab", ["-"], { input: content, encoding: "utf8", maxBuffer: 1_000_000 });
 	if (result.status !== 0) throw new Error(`yano watcher: impossibile installare il crontab${result.stderr ? `: ${result.stderr.trim()}` : ""}`);
-	return { installed: true, schedule: "* * * * *", command: line, marker: CRON_MARKER };
+	return { installed: true, schedule: "* * * * *", command: line, marker: CRON_MARKER, backend: "crontab" };
 }
 
 function cronStatus() {
-	const line = readCrontab().split("\n").find((item) => item.includes(CRON_MARKER)) || null;
+	const windows = statusOneMinuteWindowsJob({ marker: CRON_MARKER });
 	let heartbeat = null;
 	try { heartbeat = JSON.parse(fs.readFileSync(supervisorHeartbeatPath(), "utf8")); } catch { /* not run yet */ }
 	const heartbeatAt = heartbeat?.checked_at || null;
 	const heartbeatAgeMs = heartbeatAt ? Math.max(0, Date.now() - Date.parse(heartbeatAt)) : null;
-	return { installed: Boolean(line), schedule: line ? "* * * * *" : null, command: line, marker: CRON_MARKER, last_heartbeat_at: heartbeatAt, heartbeat_age_ms: heartbeatAgeMs, healthy: Boolean(line && heartbeatAt && heartbeatAgeMs <= 130_000) };
+	const healthy = Boolean(heartbeatAt && heartbeatAgeMs <= 130_000);
+	if (windows) return { ...windows, installed: windows.installed, last_heartbeat_at: heartbeatAt, heartbeat_age_ms: heartbeatAgeMs, healthy: Boolean(windows.installed && healthy) };
+	const line = readCrontab().split("\n").find((item) => item.includes(CRON_MARKER)) || null;
+	return { installed: Boolean(line), schedule: line ? "* * * * *" : null, command: line, marker: CRON_MARKER, backend: "crontab", last_heartbeat_at: heartbeatAt, heartbeat_age_ms: heartbeatAgeMs, healthy: Boolean(line && healthy) };
 }
 
 function cronRemove() {
+	const windows = removeOneMinuteWindowsJob({ marker: CRON_MARKER });
+	if (windows) return windows;
 	const existing = readCrontab().split("\n").filter((item) => item.trim() && !item.includes(CRON_MARKER));
 	const content = existing.length ? `${existing.join("\n")}\n` : "";
 	const result = spawnSync("crontab", ["-"], { input: content, encoding: "utf8", maxBuffer: 1_000_000 });
 	if (result.status !== 0) throw new Error(`yano watcher: impossibile rimuovere il crontab${result.stderr ? `: ${result.stderr.trim()}` : ""}`);
-	return { installed: false, removed: true, marker: CRON_MARKER };
+	return { installed: false, removed: true, marker: CRON_MARKER, backend: "crontab" };
 }
 
 function print(valueToPrint, machine) {
@@ -827,7 +849,7 @@ export async function runYanoWatcherRegistry({ argv = [] } = {}) {
 			return results;
 		}
 		if (opts.sub === "supervise") {
-			const result = supervise(db);
+			const result = await supervise(db);
 			print(result, opts.json);
 			return result;
 		}

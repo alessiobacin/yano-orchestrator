@@ -3,6 +3,7 @@ import { pathToFileURL } from "node:url";
 import path from "node:path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { globalDataPath } from "./yano-config.mjs";
+import { herdrSnapshot as snapshot } from "./yano-herdr-client.mjs";
 
 const PACKAGE_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const COMPUTER_INSTANCE = "computer-locale";
@@ -57,12 +58,6 @@ function run(command, args, options = {}) {
 	return spawnSync(command, args, { encoding: "utf8", maxBuffer: 1_000_000, ...options });
 }
 function shellQuote(value) { return `'${String(value).replaceAll("'", `'\\''`)}'`; }
-
-function snapshot() {
-	const result = run("herdr", ["api", "snapshot"]);
-	if (result.status !== 0) return null;
-	try { const parsed = JSON.parse(result.stdout || ""); return parsed?.result?.snapshot || parsed?.result || parsed; } catch { return null; }
-}
 
 // Herdr versions differ in whether the top-level `agent` field is `pi` or
 // the requested instance name. The authoritative signal here is the owned

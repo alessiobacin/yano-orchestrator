@@ -39,6 +39,7 @@ vincoli e procedure complete usare la [documentazione](../README.md), la
 - [30-agent.md](./30-agent.md)
 - [31-scheduler.md](./31-scheduler.md)
 - [32-computer-locale.md](./32-computer-locale.md)
+- [33-services.md](./33-services.md)
 
 Le modifiche al codice devono aggiornare anche le superfici documentali indicate
 in [documentation-sync.md](../documentation-sync.md).

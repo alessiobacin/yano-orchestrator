@@ -18,8 +18,11 @@ try {
 	const result = await runYanoWatcherRegistry({ argv: ["cron", "install", "--json"] });
 	if (!quiet) console.log(`yano watcher: supervisore globale installato (${result.schedule})`);
 } catch (error) {
-	// A package install must remain usable on systems without user crontab
-	// (Windows, restricted containers, or managed macOS environments). The
-	// operator can still run `yano watcher cron install` later.
+	// A package install must remain usable on systems without a usable
+	// scheduler (restricted containers, managed macOS environments, or a
+	// Windows account without permission to create scheduled tasks — Windows
+	// itself now goes through `schtasks` instead of POSIX crontab, see
+	// yano-os-scheduler.mjs, ticket #119). The operator can still run
+	// `yano watcher cron install` later.
 	if (!quiet) console.warn(`yano watcher: supervisore globale non installato — ${error instanceof Error ? error.message : String(error)}`);
 }

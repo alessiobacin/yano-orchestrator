@@ -34,6 +34,13 @@
 //                        — vedi extensions/orchestrator.ts).
 //   yano status|logs|fleet|mcp|skills  viste read-only del progetto e della flotta
 //   yano deps              capability preflight per CLI, credenziali e auth
+//   yano docs-check        verifica scriptata delle otto categorie canoniche
+//                        sotto docs/ (Ticket #124) — delega a
+//                        scripts/yano-docs-check.mjs (runYanoDocsCheck()).
+//   yano qa-inventory scan raccoglie meccanicamente le fonti (README,
+//                        docs/guides, --help reale) per l'audit QA
+//                        (Ticket #124) — delega a scripts/yano-qa-inventory.mjs
+//                        (runYanoQaInventory()).
 //   yano gantt              dashboard web locale live dei run/ticket
 //   yano watch              watcher dei ticket stalled
 //   yano trace              attiva, consulta, indicizza e cancella il tracing globale
@@ -90,6 +97,9 @@ import { runYanoProjects } from "../scripts/yano-projects.mjs";
 import { runYanoRules } from "../scripts/yano-rules.mjs";
 import { runYanoScheduler } from "../scripts/yano-scheduler.mjs";
 import { runYanoComputerLocal } from "../scripts/yano-computer-local.mjs";
+import { runYanoServices } from "../scripts/yano-services.mjs";
+import { runYanoDocsCheck } from "../scripts/yano-docs-check.mjs";
+import { runYanoQaInventory } from "../scripts/yano-qa-inventory.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, "..");
@@ -123,6 +133,8 @@ function printTopUsage() {
 			"  projects [--json]             Conta i progetti Yano con agenti live in Herdr",
 			"  skills install|status        Installa/verifica yano-cli negli harness globali",
 			"  deps [opzioni]   Verifica CLI, credenziali e autenticazione richieste dal task",
+			"  docs-check [--project-root <dir>] [--json]  Verifica scriptata delle otto categorie canoniche sotto docs/",
+			"  qa-inventory scan [--project-root <dir>] [--yano-self-audit] [--json]  Bozza grezza dell'inventario comandi/funzionalità",
 			"  gantt [opzioni]  Dashboard per progetto; --persistent registra il link, --link/--links lo recuperano",
 			"  watch [opzioni]  Osserva stall e segnala falle Yano ( --once | --project-root | --lookback-ms | --interval-ms )",
 			"  architect projects|watcher projects|debugger projects|auto-improve|auto-improver projects",
@@ -139,6 +151,7 @@ function printTopUsage() {
 			"  schedule [opzioni] Crea job ricorrenti tracciati; cron persistente e ripulibile — `yano schedule --help`",
 			"  cron [opzioni]  CRUD naturale dei job ricorrenti e supervisore yano-scheduler — `yano cron --help`",
 			"  computer start|status|ask  Computer locale persistente con MCP Apple — `yano computer --help`",
+			"  services [opzioni] Registro servizi esterni (Docker/pm2/comando) con health-check e restart deterministico — `yano services --help`",
 			"  data [opzioni]    Mostra o migra il data-root globale — `yano data --help`",
 			"  pause [opzioni]  Salva uno snapshot non distruttivo e mette in pausa i run",
 			"  resume [opzioni] Ripristina uno snapshot e riapre gli agenti mancanti",
@@ -232,6 +245,10 @@ async function main() {
 		else await runYanoScheduler({ argv: ["cron", "status", ...json] });
 		return;
 	}
+	if (sub === "services") {
+		await runYanoServices({ argv: rest });
+		return;
+	}
 	if (sub === "skills") {
 		if (rest[0] === "install" || rest[0] === "status" || rest.includes("--help") || rest.includes("-h") || rest.includes("--dry-run") || rest.includes("--force") || rest.includes("--no-prune-duplicates")) {
 			await runYanoHarnessSkills({ packageRoot, argv: rest });
@@ -246,6 +263,16 @@ async function main() {
 	}
 	if (sub === "deps") {
 		await runYanoDeps({ cwd, argv: rest });
+		return;
+	}
+	if (sub === "docs-check") {
+		const report = await runYanoDocsCheck({ cwd, argv: rest });
+		process.exitCode = report.help || report.ok ? 0 : 1;
+		return;
+	}
+	if (sub === "qa-inventory") {
+		const report = await runYanoQaInventory({ cwd, argv: rest });
+		process.exitCode = report.help || report.ok ? 0 : 1;
 		return;
 	}
 	if (sub === "gantt") {

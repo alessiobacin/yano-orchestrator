@@ -1,26 +1,36 @@
-# Yano Scheduler — job ricorrenti
+# Yano Scheduler — job ricorrenti a script (script-first)
 
 ```bash
-# Crea un job dalla root del progetto: restituisce l'id persistente
+# Registra uno schedule che esegue LO SCRIPT registrato (mode self|planner:<progetto>|computer-locale)
+yano schedule add --name <nome> --project-root "$PWD" --script <path> --mode self --cron '0 14,21 * * *' --expected-consequence "riepilogo inviato"
+yano schedule add --name backuppone-shot --project-root "$PWD" --script <path> --mode self --cron '0 0 * * *' --once
+
+# Test PRIMA di renderlo ricorrente — esegue lo script subito
+yano schedule run <job-id>
+
+# Gestione
+yano schedule list --json            # script_path, mode, expected_consequence, stato
+yano schedule disable --id <job-id>
+yano schedule enable --id <job-id>
+yano schedule remove --id <job-id>
+
+# Bridge deterministico chiamabile DENTRO gli script
+yano invoke --role planner:<progetto> --prompt "riepiloga lo stato" --project-root "$PWD"
+yano invoke --role computer-locale --prompt "promemoria tra 10 minuti: pausa caffè"
+
+# Sintassi storica in linguaggio naturale (job legacy, dispatch planner col testo)
 yano cron --add "ogni giorno alle 14 e alle 21 esegui la pulizia del progetto" --project-root "$PWD"
-yano cron --add "ogni settimana di lunedì alle 13:00 fai partire un resoconto delle risorse del server via Telegram" --project-root "$PWD"
-
-# CRUD e avvio manuale
 yano cron --list --json
-yano cron --disable <job-id>
-yano cron --enable <job-id>
-yano cron --run <job-id>
-yano cron --remove <job-id>
+yano cron --disable <job-id> | --enable <job-id> | --run <job-id> | --remove <job-id>
 
-# Supervisore persistente: controlla cron e tab Herdr yano-scheduler
-yano cron --status --json
-yano cron --supervise --json
-yano cron --install 
-yano cron --uninstall
+# Supervisore persistente: controlla cron di sistema e tab Herdr yano-scheduler
+yano schedule cron status|install|remove
 ```
 
-Il supervisore gira ogni minuto e ricrea `yano-scheduler` se manca. I job
-sono nel data-root globale e sopravvivono al riavvio. Un job avvia un planner
-nel progetto scelto, senza aggirare i gate del playbook o le approvazioni.
-Su Windows `--install`/`--uninstall` usano Task Scheduler (`schtasks`) invece
-del crontab POSIX, con lo stesso comportamento idempotente.
+Al trigger si esegue lo SCRIPT registrato (mai shell; runtime Node, file
+validato nel folder persistente `<data>/scheduler/scripts/`). Se lo script
+manca o fallisce: `enabled:false` + fallback loggato, mai testo libero a un
+planner. Token/credenziali solo da `.env` dentro lo script, mai incorporati.
+Azioni distruttive o che modificano il progetto: sempre planner + gate umani.
+Il supervisore gira ogni minuto e ricrea `yano-scheduler` se manca; i job
+sopravvivono a riavvii di Herdr e del computer.

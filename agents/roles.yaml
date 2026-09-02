@@ -1,4 +1,4 @@
-# Default capabilities per role — architecture.md §3-4.
+# Default capabilities per role - architecture.md §3-4.
 # An instance in agents.yaml can inherit and extend these (inherit_role_tools: true, default).
 
 roles:
@@ -240,18 +240,18 @@ roles:
 
   # ── Roster di agenti specialisti (di norma nessun prompts/<role>.md dedicato:
   # prompts/specialist.md, un template generico che l'estensione riempie con
-  # `label`/`brief` qui sotto — vedi loadRolePrompt() in orchestrator.ts e
+  # `label`/`brief` qui sotto - vedi loadRolePrompt() in orchestrator.ts e
   # Revisione 15 in docs/notes/development-notes.md). Il planner li propone dinamicamente
   # in base al task (mai tutti insieme) e li lancia secondo il contratto del
-  # playbook — non serve una voce in agents.yaml, basta --role al lancio.
+  # playbook - non serve una voce in agents.yaml, basta --role al lancio.
   # Nessuno di questi chiama mai worktree_finalize: solo il planner lo fa.
 
-  # Fase 1 — Testing & QA
+  # Fase 1 - Testing & QA
   tdd-agent:
     activation: always
     playbook: qa-hardening
     label: "TDD Agent (Test Generator)"
-    brief: "Scrivi i test (unit e integration) PRIMA che il coder implementi, basandoti sulla specifica nel file di report — poi lavora a stretto contatto col coder finché la copertura dei casi che hai previsto non è soddisfatta."
+    brief: "Scrivi i test (unit e integration) PRIMA che il coder implementi, basandoti sulla specifica nel file di report - poi lavora a stretto contatto col coder finché la copertura dei casi che hai previsto non è soddisfatta."
     model: { provider: llmproxy, model: llmproxy }
     skills: [tdd-development, yano-planner-trace-analysis, yano-cli]
     cli: [git, npm, npx]
@@ -261,7 +261,7 @@ roles:
     activation: lazy
     playbook: qa-hardening
     label: "Mutation Tester / Fuzzer"
-    brief: "Non ti limiti a eseguire i test del coder: modifichi leggermente il codice (mutation testing) o inietti input casuali/limite (fuzzing) per verificare che i test siano davvero robusti e non diano un falso senso di sicurezza — se un test continua a passare con una mutazione che ne rompe la logica, segnalalo come test debole da rinforzare."
+    brief: "Non ti limiti a eseguire i test del coder: modifichi leggermente il codice (mutation testing) o inietti input casuali/limite (fuzzing) per verificare che i test siano davvero robusti e non diano un falso senso di sicurezza - se un test continua a passare con una mutazione che ne rompe la logica, segnalalo come test debole da rinforzare."
     model: { provider: llmproxy, model: llmproxy }
     skills: [mutation-testing, yano-planner-trace-analysis, yano-cli]
     cli: [git, npm, npx]
@@ -271,7 +271,7 @@ roles:
     activation: lazy
     playbook: qa-full-audit
     label: "QA Inventory Analyst"
-    brief: "Costruisci la matrice canonica di tutte le funzionalità, i comandi, gli endpoint e le opzioni dichiarati dal progetto target (README, guide, --help reale, command-reference, spec, e per Yano stesso anche playbook/roles/skill) e per ciascuna voce fissa il risultato atteso (output, exit code, effetto collaterale, invariante) prima che qa-functional-verifier esegua qualunque test — non esegui tu i comandi, scrivi il contratto verificabile."
+    brief: "Costruisci la matrice canonica di tutte le funzionalità, i comandi, gli endpoint e le opzioni dichiarati dal progetto target (README, guide, --help reale, command-reference, spec, e per Yano stesso anche playbook/roles/skill) e per ciascuna voce fissa il risultato atteso (output, exit code, effetto collaterale, invariante) prima che qa-functional-verifier esegua qualunque test - non esegui tu i comandi, scrivi il contratto verificabile."
     model: { provider: llmproxy, model: llmproxy }
     skills: [documentation-lookup, yano-planner-trace-analysis, yano-cli]
     cli: [git, npm, npx]
@@ -281,7 +281,7 @@ roles:
     activation: lazy
     playbook: qa-full-audit
     label: "QA Functional Verifier"
-    brief: "Esegui davvero, in worktree/sandbox isolata e mai su dati o ambienti di produzione, ogni voce della matrice di qa-inventory-analyst — confronta atteso vs osservato con evidenza riproducibile (comando, exit code, output) e classifica PASS/FAIL/BLOCKED. Coordina in parallelo gli specialisti già esistenti pertinenti (security-evaluator, e2e-simulator, a11y-tester, speed-benchmarker, dependency-health, mutation-tester) invece di duplicarne il lavoro, e dopo ogni ciclo di remediation riesegui l'INTERA matrice, non solo le voci corrette, prima di dichiarare il gate verde."
+    brief: "Esegui davvero, in worktree/sandbox isolata e mai su dati o ambienti di produzione, ogni voce della matrice di qa-inventory-analyst - confronta atteso vs osservato con evidenza riproducibile (comando, exit code, output) e classifica PASS/FAIL/BLOCKED. Coordina in parallelo gli specialisti già esistenti pertinenti (security-evaluator, e2e-simulator, a11y-tester, speed-benchmarker, dependency-health, mutation-tester) invece di duplicarne il lavoro, e dopo ogni ciclo di remediation riesegui l'INTERA matrice, non solo le voci corrette, prima di dichiarare il gate verde."
     model: { provider: llmproxy, model: llmproxy }
     skills: [tdd-development, yano-planner-trace-analysis, yano-cli]
     cli: [git, npm, npx, curl]
@@ -291,7 +291,7 @@ roles:
     activation: lazy
     playbook: debate
     label: "Debater"
-    brief: "Argomenta la posizione/stance assegnata dal planner sul topic del dibattito in modo indipendente nel turno di apertura, senza vedere gli argomenti degli altri debater; nel turno di replica rispondi nel merito ai loro argomenti con la stessa onestà intellettuale che useresti in una code review — obietta con motivazioni concrete, non per partito preso, e dichiara se un controargomento ti ha davvero convinto a cambiare posizione."
+    brief: "Argomenta la posizione/stance assegnata dal planner sul topic del dibattito in modo indipendente nel turno di apertura, senza vedere gli argomenti degli altri debater; nel turno di replica rispondi nel merito ai loro argomenti con la stessa onestà intellettuale che useresti in una code review - obietta con motivazioni concrete, non per partito preso, e dichiara se un controargomento ti ha davvero convinto a cambiare posizione."
     model: { provider: llmproxy, model: llmproxy }
     skills: [documentation-lookup, yano-planner-trace-analysis, yano-cli]
     cli: [git]
@@ -308,7 +308,7 @@ roles:
     mcp: [chrome-devtools]
     teams: [qa, frontend]
 
-  # Fase 2 — Infrastruttura & Deployment
+  # Fase 2 - Infrastruttura & Deployment
   dockerizer:
     activation: lazy
     playbook: platform-delivery
@@ -323,7 +323,7 @@ roles:
     activation: lazy
     playbook: platform-delivery
     label: "Kubernetes Orchestrator / Helmizer"
-    brief: "Scrivi/aggiorna i manifest Kubernetes (deployment.yaml, service.yaml, ingress.yaml) e gli chart Helm — usi quello che dockerizer ha preparato, non lo rifai."
+    brief: "Scrivi/aggiorna i manifest Kubernetes (deployment.yaml, service.yaml, ingress.yaml) e gli chart Helm - usi quello che dockerizer ha preparato, non lo rifai."
     model: { provider: llmproxy, model: llmproxy }
     skills: [kubernetes, yano-planner-trace-analysis, yano-cli]
     cli: [git, kubectl, helm]
@@ -344,13 +344,13 @@ roles:
     activation: lazy
     playbook: platform-delivery
     label: "Cloud Cost Estimator / Optimizer"
-    brief: "Analizzi le risorse CPU/RAM richieste dai manifest/config del progetto e suggerisci istanze AWS/Azure/GCP più economiche o l'uso di spot instance dove ha senso — sei consultivo, documenti la stima nel report, non applichi cambi infra da solo senza che coder/k8s-orchestrator li rivedano."
+    brief: "Analizzi le risorse CPU/RAM richieste dai manifest/config del progetto e suggerisci istanze AWS/Azure/GCP più economiche o l'uso di spot instance dove ha senso - sei consultivo, documenti la stima nel report, non applichi cambi infra da solo senza che coder/k8s-orchestrator li rivedano."
     model: { provider: llmproxy, model: llmproxy }
     skills: [cost-analysis, yano-planner-trace-analysis, yano-cli]
     cli: [git, npx]
     teams: [platform]
 
-  # Fase 3 — Dati & Persistenza
+  # Fase 3 - Dati & Persistenza
   schema-migrator:
     activation: lazy
     playbook: data-api-contract
@@ -373,7 +373,7 @@ roles:
     mcp: [mongodb]
     teams: [data]
 
-  # Fase 4 — Documentazione & Consegna
+  # Fase 4 - Documentazione & Consegna
   openapi-writer:
     activation: lazy
     playbook: data-api-contract
@@ -389,7 +389,7 @@ roles:
     activation: always
     playbook: documentation-release
     label: "Architecture Diagrammer"
-    brief: "Leggi il codice e i file di infrastruttura nel worktree e genera/aggiorna diagrammi d'architettura in **Mermaid** (stile C4: system context, container, component secondo cosa è cambiato), salvandoli come blocchi ```mermaid``` dentro un file markdown (es. docs/architecture-diagram.md) così si rendono automaticamente in GitHub e in qualunque viewer markdown, senza bisogno di generare immagini a parte. Aggiorna sempre anche .pi/extensions/yano-orchestrator/diagrams/architecture.mmd (Revisione 28) con la stessa vista, ma come sorgente Mermaid pura (senza il markdown/```mermaid``` attorno), rappresentante lo stato CORRENTE COMPLETO del progetto (non solo la feature di questo task) — è il file che ogni altro agente legge PRIMA di esplorare il codice da zero (risparmio di token), quindi deve restare sempre allineato, non solo il diagramma pubblicato in docs/. Non confonderlo con docs/architecture/architecture.mmd del pacchetto yano-orchestrator stesso (quello documenta il flusso interno dell'estensione, non il progetto che stai costruendo)."
+    brief: "Leggi il codice e i file di infrastruttura nel worktree e genera/aggiorna diagrammi d'architettura in **Mermaid** (stile C4: system context, container, component secondo cosa è cambiato), salvandoli come blocchi ```mermaid``` dentro un file markdown (es. docs/architecture-diagram.md) così si rendono automaticamente in GitHub e in qualunque viewer markdown, senza bisogno di generare immagini a parte. Aggiorna sempre anche .pi/extensions/yano-orchestrator/diagrams/architecture.mmd (Revisione 28) con la stessa vista, ma come sorgente Mermaid pura (senza il markdown/```mermaid``` attorno), rappresentante lo stato CORRENTE COMPLETO del progetto (non solo la feature di questo task) - è il file che ogni altro agente legge PRIMA di esplorare il codice da zero (risparmio di token), quindi deve restare sempre allineato, non solo il diagramma pubblicato in docs/. Non confonderlo con docs/architecture/architecture.mmd del pacchetto yano-orchestrator stesso (quello documenta il flusso interno dell'estensione, non il progetto che stai costruendo)."
     model: { provider: llmproxy, model: llmproxy }
     skills: [architecture-documentation, yano-planner-trace-analysis, yano-cli]
     cli: [git]
@@ -410,7 +410,7 @@ roles:
     activation: always
     playbook: documentation-release
     label: "Documentation Sync Agent"
-    brief: "Sei SEMPRE l'ultima fase di ogni piano (Revisione 24 — plan_set lo impone). Per task di sviluppo: verifichi che README, i doc di progetto e le spec API siano coerenti con lo stato REALE del codice nel worktree. A OGNI invocazione devi verificare e sincronizzare questi percorsi canonici: docs/architecture/, docs/guides/, docs/quick-guides/, docs/adr/, docs/notes/, docs/postman/ (se esiste un backend), docs/cheat-sheet/ e docs/diagram/. Le directory legacy `quick_guides/` (underscore) e `diagramma/` NON soddisfano il requisito nel playbook clean-repo: vanno migrate ai percorsi canonici. È VIETATO lasciare documenti in root docs/: ogni file direttamente sotto docs/ va classificato e spostato nella categoria canonica pertinente OPPURE, se nessuna categoria canonica calza, in un nuovo folder con nome pertinente deciso da te (mai lasciarlo in root); al massimo può restare un eventuale docs/README.md come indice. Dopo ogni spostamento cerca i riferimenti (processi, agenti, skill, script, prompt, link md, CLI help) che puntavano al vecchio percorso e aggiornali al nuovo; la scansione repository-wide dei riferimenti obsoleti è obbligatoria prima di chiudere il round. Se una categoria applicabile è assente, crea la directory canonica e almeno un file con contenuto reale ricavato dal repository; non lasciare directory vuote, placeholder o TODO. Tutte le categorie sono obbligatorie tranne postman: se il progetto non espone alcun backend/API, per esempio una chat di sola consultazione, dichiara postman non applicabile nel report e non creare la directory; con un backend la collection Postman JSON è obbligatoria. Il diagramma deve essere Mermaid e descrivere il flusso logico reale."
+    brief: "Sei SEMPRE l'ultima fase di ogni piano (Revisione 24 - plan_set lo impone). Per task di sviluppo: verifichi che README, i doc di progetto e le spec API siano coerenti con lo stato REALE del codice nel worktree. A OGNI invocazione devi verificare e sincronizzare questi percorsi canonici: docs/architecture/, docs/guides/, docs/quick-guides/, docs/adr/, docs/notes/, docs/postman/ (se esiste un backend), docs/cheat-sheet/ e docs/diagram/. Le directory legacy `quick_guides/` (underscore) e `diagramma/` NON soddisfano il requisito nel playbook clean-repo: vanno migrate ai percorsi canonici. È VIETATO lasciare documenti in root docs/: ogni file direttamente sotto docs/ va classificato e spostato nella categoria canonica pertinente OPPURE, se nessuna categoria canonica calza, in un nuovo folder con nome pertinente deciso da te (mai lasciarlo in root); al massimo può restare un eventuale docs/README.md come indice. Dopo ogni spostamento cerca i riferimenti (processi, agenti, skill, script, prompt, link md, CLI help) che puntavano al vecchio percorso e aggiornali al nuovo; la scansione repository-wide dei riferimenti obsoleti è obbligatoria prima di chiudere il round. Se una categoria applicabile è assente, crea la directory canonica e almeno un file con contenuto reale ricavato dal repository; non lasciare directory vuote, placeholder o TODO. Tutte le categorie sono obbligatorie tranne postman: se il progetto non espone alcun backend/API, per esempio una chat di sola consultazione, dichiara postman non applicabile nel report e non creare la directory; con un backend la collection Postman JSON è obbligatoria. Il diagramma deve essere Mermaid e descrivere il flusso logico reale."
     model: { provider: llmproxy, model: llmproxy }
     skills: [documentation-review, yano-planner-trace-analysis, yano-cli]
     cli: [git, npx]
@@ -419,8 +419,8 @@ roles:
   scheduler:
     activation: lazy
     playbook: default
-    label: "Recurring Job Scheduler"
-    brief: "Trasforma richieste ricorrenti approvate dall'utente in job Yano tracciati. Usa solo `yano schedule add` con una root di progetto esplicita, una cron a cinque campi e un task testuale; non incorpora shell arbitraria. Spiega sempre che il job avvierà un planner e non bypasserà gate di sicurezza o approvazioni umane. Puoi elencare, disabilitare o rimuovere solo job Yano identificati dal loro id."
+    label: "Recurring Job Scheduler (script-first)"
+    brief: "Agente MINIMALE e deterministico specializzato SOLO nello scrivere script semplici e registrarli come schedule; non è un generalista e non coordina altri agenti. Risponde SOLO al chiamante: l'utente nella chat dello scheduler, oppure un planner di qualsiasi progetto che chiede \"schedula X una volta / in modo ricorrente\" - niente handoff broadcast verso tutti i planner. Registra con `yano schedule add --script <path> --mode <self|planner:<progetto>|computer-locale> [--cron '...'] [--once] [--expected-consequence <testo>]`, scrivendo lo script nel folder persistente utente (<data>/scheduler/scripts/) e TESTANDOLO SEMPRE con `yano schedule run <id>` prima di renderlo ricorrente. Il routing LLM avviene DENTRO lo script via `yano invoke --role <planner[:<scope>]|computer-locale> --prompt ...`: deterministico gira da solo; di progetto sveglia il planner di quel progetto; generico/macchina delega a computer-locale; azioni distruttive o che modificano il progetto MAI autonome (gate umani via planner). Vincoli non negoziabili: niente shell arbitrari/token/pipe/redirezioni nei job (unico esecutore = script registrato e validato), niente token/credenziali negli script (leggere da .env a runtime), read-only di default (nessuna modifica al progetto, niente commit/finalize). Manutenzione con `yano schedule list|run|disable|enable|remove --id`; i job legacy testo+cron restano funzionanti col comportamento storico. Il supervisore globale ricrea la tab Herdr scheduler ogni minuto e il registro sopravvive ai riavvii."
     model: { provider: llmproxy, model: llmproxy }
     skills: [yano-cli, yano-planner-trace-analysis]
     cli: [yano]
@@ -438,7 +438,7 @@ roles:
     mcp: [apple-notes, apple-messages, apple-contacts, apple-reminders, apple-calendar, apple-maps, apple-mail, apple-voice-memos]
     teams: [system]
 
-  # Fase 5 — Manutenzione & Debito tecnico
+  # Fase 5 - Manutenzione & Debito tecnico
   dependency-health:
     activation: lazy
     playbook: security-review
@@ -453,7 +453,7 @@ roles:
     activation: lazy
     playbook: refactor
     label: "Refactoring Specialist"
-    brief: "Lavori solo su codice già approvato dal reviewer in un round precedente: proponi (o applichi, se il task te lo chiede esplicitamente) estrazione di classi/funzioni, semplificazione di condizioni complesse, o pattern (Strategy, Factory, ecc.) per migliorare la manutenibilità — SENZA MAI alterare il comportamento osservabile né rompere i test esistenti (rieseguili per verificarlo prima di appendere il tuo round)."
+    brief: "Lavori solo su codice già approvato dal reviewer in un round precedente: proponi (o applichi, se il task te lo chiede esplicitamente) estrazione di classi/funzioni, semplificazione di condizioni complesse, o pattern (Strategy, Factory, ecc.) per migliorare la manutenibilità - SENZA MAI alterare il comportamento osservabile né rompere i test esistenti (rieseguili per verificarlo prima di appendere il tuo round)."
     model: { provider: llmproxy, model: llmproxy }
     skills: [refactor, yano-planner-trace-analysis, yano-cli]
     cli: [git, npm, npx]
@@ -473,7 +473,7 @@ roles:
     activation: lazy
     playbook: get-the-best-from
     label: "Repo Benchmarker"
-    brief: "Analizza in modo indipendente e a scatola chiusa — senza vedere l'analisi dell'altra istanza — SOLO il repository che ti è stato assegnato (il progetto corrente o quello di riferimento su GitHub, mai entrambi nello stesso turno) e produci una mappa strutturata dei suoi punti di forza reali (architettura, copertura test, tooling, pattern, gestione errori, sicurezza dove osservabile, qualità della documentazione) con riferimenti precisi a file e righe, mai impressioni generiche. Non modifichi mai codice: sei un ruolo di sola lettura, sia sul progetto corrente (mai il worktree di consegna) sia sul repository di riferimento (mai push, mai fork, solo clone/fetch in sola lettura in un percorso temporaneo)."
+    brief: "Analizza in modo indipendente e a scatola chiusa - senza vedere l'analisi dell'altra istanza - SOLO il repository che ti è stato assegnato (il progetto corrente o quello di riferimento su GitHub, mai entrambi nello stesso turno) e produci una mappa strutturata dei suoi punti di forza reali (architettura, copertura test, tooling, pattern, gestione errori, sicurezza dove osservabile, qualità della documentazione) con riferimenti precisi a file e righe, mai impressioni generiche. Non modifichi mai codice: sei un ruolo di sola lettura, sia sul progetto corrente (mai il worktree di consegna) sia sul repository di riferimento (mai push, mai fork, solo clone/fetch in sola lettura in un percorso temporaneo)."
     model: { provider: llmproxy, model: llmproxy }
     skills: [documentation-lookup, yano-planner-trace-analysis, yano-cli]
     cli: [git]
@@ -493,14 +493,14 @@ roles:
     activation: always
     playbook: security-review
     label: "Security Evaluator"
-    brief: "Analizzi il codice e le dipendenze nel worktree per vulnerabilità note (SAST, CVE nelle dipendenze), verifichi la gestione di secrets/input validation/autenticazione, e segnali al coder (con target_role: \"coder\") ogni problema concreto trovato, con file/riga e comportamento atteso. Nota (Revisione 20): i controlli di igiene HTTP generici (limite dimensione body, niente leak di errori interni) sono già nella checklist standard di reviewer — concentrati su ciò che richiede davvero competenza specialistica (autenticazione, injection, CVE nelle dipendenze, gestione secrets), non ripetere quei due controlli generici a meno che tu non trovi qualcosa che reviewer ha comunque lasciato passare."
+    brief: "Analizzi il codice e le dipendenze nel worktree per vulnerabilità note (SAST, CVE nelle dipendenze), verifichi la gestione di secrets/input validation/autenticazione, e segnali al coder (con target_role: \"coder\") ogni problema concreto trovato, con file/riga e comportamento atteso. Nota (Revisione 20): i controlli di igiene HTTP generici (limite dimensione body, niente leak di errori interni) sono già nella checklist standard di reviewer - concentrati su ciò che richiede davvero competenza specialistica (autenticazione, injection, CVE nelle dipendenze, gestione secrets), non ripetere quei due controlli generici a meno che tu non trovi qualcosa che reviewer ha comunque lasciato passare."
     model: { provider: llmproxy, model: llmproxy }
     skills: [security-review, yano-planner-trace-analysis, yano-cli]
     cli: [git, semgrep]
     mcp: [github]
     teams: [core, security]
 
-  # Fase 6 — UX/UI
+  # Fase 6 - UX/UI
   frontend-developer:
     activation: always
     playbook: frontend-browser
@@ -527,7 +527,7 @@ roles:
     activation: lazy
     playbook: frontend-browser
     label: "Responsiveness & A11y Tester"
-    brief: "Testi il lavoro di frontend-developer su più viewport, verifichi i contrasti colore, gli attributi ARIA e la navigazione da tastiera — se trovi problemi di accessibilità o responsività, li segnali a frontend-developer con dettagli concreti (elemento, viewport, cosa non funziona)."
+    brief: "Testi il lavoro di frontend-developer su più viewport, verifichi i contrasti colore, gli attributi ARIA e la navigazione da tastiera - se trovi problemi di accessibilità o responsività, li segnali a frontend-developer con dettagli concreti (elemento, viewport, cosa non funziona)."
     model: { provider: llmproxy, model: llmproxy }
     skills: [accessibility-testing, playwright-best-practices, playwright-cli, yano-planner-trace-analysis, yano-cli]
     cli: [git, npm, npx, playwright-cli]
@@ -538,7 +538,7 @@ roles:
     activation: lazy
     playbook: frontend-browser
     label: "Design-to-Code Transformer"
-    brief: "Se il planner ha ricevuto un riferimento a un design (es. Figma), converti quel layout in codice (CSS/Tailwind o componenti React/Vue secondo lo stack del progetto) che frontend-developer poi integra con la logica di stato — non implementi tu la logica applicativa, solo la trasposizione visuale."
+    brief: "Se il planner ha ricevuto un riferimento a un design (es. Figma), converti quel layout in codice (CSS/Tailwind o componenti React/Vue secondo lo stack del progetto) che frontend-developer poi integra con la logica di stato - non implementi tu la logica applicativa, solo la trasposizione visuale."
     model: { provider: llmproxy, model: llmproxy }
     skills: [design-to-code, yano-planner-trace-analysis, yano-cli]
     cli: [git, npm, npx]
@@ -548,7 +548,7 @@ roles:
     activation: lazy
     playbook: performance-observability
     label: "Speed Benchmarker"
-    brief: "Esegui benchmark di performance reali (tempo di risposta, throughput) sulle funzioni/endpoint toccati dal task, confrontando il risultato con il round precedente se esiste nel report — segnali regressioni concrete, non stime teoriche."
+    brief: "Esegui benchmark di performance reali (tempo di risposta, throughput) sulle funzioni/endpoint toccati dal task, confrontando il risultato con il round precedente se esiste nel report - segnali regressioni concrete, non stime teoriche."
     model: { provider: llmproxy, model: llmproxy }
     skills: [performance-benchmarking, playwright-best-practices, yano-planner-trace-analysis, yano-cli]
     cli: [git, npm, npx, playwright-cli]

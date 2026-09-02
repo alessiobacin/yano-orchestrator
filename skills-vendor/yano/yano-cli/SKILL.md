@@ -396,14 +396,9 @@ not modify project files or finalize a run. To edit the cron entry use
 
 ### Recurring jobs
 
-Use `yano cron --add` for an approved recurring request. It accepts the
-Italian forms `ogni giorno alle 14 e alle 21 esegui <task>` and `ogni settimana
-di lunedì alle 13:00 fai partire <task>`, stores the resulting cron and task in
-the global Yano data-root, and returns a job id. Manage it with `yano cron
---list`, `--disable <id>`, `--enable <id>`, `--run <id>` or `--remove <id>`.
-The global one-minute supervisor restores the `yano-scheduler` Herdr agent
-after a reboot or closed tab, then dispatches due jobs to a planner in the
-job's project. A scheduled task never bypasses playbook approval gates.
+Two modes coexist. **Script-first (current model)** — `yano schedule add --name <nome> --project-root <dir> --script <path> --mode <self|planner:<progetto>|computer-locale> [--cron '...'] [--once]` registers a job that executes the REGISTERED SCRIPT at trigger time (never a shell; the script lives in the persistent per-user folder `<data>/scheduler/scripts/`, so a package upgrade never deletes it). Test every script before making it recurring with `yano schedule run <id>` (runs the script immediately); if the script is missing or fails, the dispatch logs `failed` and disables the job (`enabled:false`) — never free text to a planner from the cron. Manage jobs with `yano schedule list`, `--remove --id`, `--enable --id`, `--disable --id`; `--once` auto-disables a job after its first run. Routing is decided INSIDE the script via `yano invoke`: `yano invoke --role planner:<scope> --prompt "..."` (composes `yano start --herdr --role planner --project <scope> --print-only` to wake that project's planner) or `yano invoke --role computer-locale --prompt "..."` (delegates to the broker-aware `yano computer ask`). Destructive or project-mutating intent always routes through the project planner with human gates.
+
+**Legacy (natural language)** — `yano cron --add` accepts the Italian forms `ogni giorno alle 14 e alle 21 esegui <task>` and `ogni settimana di lunedì alle 13:00 fai partire <task>`, stores the resulting cron and task in the global Yano data-root, and returns a job id. Manage it with `yano cron --list`, `--disable <id>`, `--enable <id>`, `--run <id>` or `--remove <id>`. The global one-minute supervisor restores the `yano-scheduler` Herdr agent after a reboot or closed tab, then dispatches due legacy jobs to a planner in the job's project. A scheduled task never bypasses playbook approval gates; scripts must read secrets from `.env`, never embed tokens.
 
 ### External service supervision
 

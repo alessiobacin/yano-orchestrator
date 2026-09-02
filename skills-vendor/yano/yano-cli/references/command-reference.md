@@ -22,13 +22,17 @@ yano docs-check [--project-root <dir>] [--json]
 yano qa-inventory scan [--project-root <dir>] [--yano-self-audit] [--json]
 yano gantt [options]
 yano watch [options]
+yano schedule add --name <nome> --project-root <dir> --script <path> --mode <self|planner:<progetto>|computer-locale> [--cron '...'] [--once] [--timeout-ms N] [--expected-consequence <testo>] [--json]
+yano schedule run <id>|list [--json]|remove|enable|disable --id <id>  # script-first recurring jobs; run = esegui lo script subito (test)
+yano invoke --role <planner[:<scope>]|computer-locale> --prompt "..." [--project-root <dir>] [--timeout-ms N]  # bridge deterministico dagli script
 yano trace [subcommand] [options]
 yano pause|resume|recovery [subcommand] [options]
 yano repair [options]
 yano config [subcommand] [options]
 yano data [subcommand] [options]
-yano cron --add <natural request> [--project-root <dir>]
-yano cron --list|--remove <id>|--enable <id>|--disable <id>|--run <id>|--supervise
+yano cron --add <natural request> [--project-root <dir>]   # legacy: job testo+cron, dispatch planner col testo
+# script-first: yano schedule add/run/list/remove/enable/disable — vedi sopra; yano cron --list|--remove <id>|--enable <id>|--disable <id>|--run <id>|--supervise
+yano cron --list|--remove <id>|--enable <id>|--disable <id>|--run <id>|--supervise --status
 yano services add --name <name> (--healthcheck-http <url>|--healthcheck-command <cmd>) (--restart-docker <container>|--restart-pm2 <app>|--restart-command <cmd>) [--timeout-ms|--backoff-base-ms|--backoff-max-ms|--max-attempts|--disabled]
 yano services list|remove|enable|disable|check|supervise [options]  # external Docker/pm2/command dependencies (llmProxy, broker...); supervise runs inside `yano watcher supervise`
 yano architect [subcommand] [options]
@@ -150,6 +154,38 @@ yano rule --remove --global --id <RULE-id>
 Rules are stored under `<YANO_DATA_DIR>/rules/rules.json`. Global and
 project-specific rules are injected into planner system prompts; removing a
 rule requires its ID from `--list --json`.
+
+## Scheduler and recurring jobs
+
+```text
+# Script-first (modello corrente): al trigger si esegue LO SCRIPT registrato, mai shell.
+# Esecuzione = runtime Node sul file; fallback loggato + enabled:false se lo script manca.
+# Folder script persistente: <data>/scheduler/scripts/ (un upgrade non lo cancella).
+yano schedule add --name <nome> --project-root <dir> --script <path> --mode <self|planner:<progetto>|computer-locale> [--cron '0 14,21 * * *'] [--once] [--timeout-ms N] [--expected-consequence <testo>] [--json]
+yano schedule run <id> [--json]        # esegue lo script registrato SUBITO (test prima di renderlo ricorrente)
+yano schedule list [--json]            # job con script_path, mode, expected_consequence, enabled, last_status
+yano schedule remove --id <id>|enable --id <id>|disable --id <id>
+yano schedule tick [--json]            # dispatcher one-minute (cron di sistema -> `yano schedule tick`)
+yano schedule supervise [--json]       # supervisor + tick (ricrea la tab Herdr scheduler se manca)
+yano schedule cron <install|status|remove>
+
+# Bridge deterministico chiamabile DENTRO gli script (e da CLI fuori da un agente):
+#   planner[:<scope>]  -> compone `yano start --herdr --role planner --project <scope> --print-only` (wake del planner di progetto)
+#   computer-locale    -> delega a `yano computer ask` (broker-aware, timeout, mai hang)
+yano invoke --role <planner[:<scope>]|computer-locale> --prompt "..." [--project <scope>|--project-root <dir>] [--timeout-ms N]
+
+# Legacy (job testo+cron già esistenti, dispatch planner col testo come in passato):
+yano cron --add <natural request> [--project-root <dir>]
+yano cron --list|--remove <id>|--enable <id>|--disable <id>|--run <id>|--supervise --status [--json]
+```
+
+Sicurezza (non negoziabile): il job non esegue MAI shell arbitrari, token, pipe,
+redirezioni o comandi liberi; l'unico esecutore è lo script registrato e validato
+(runtime Node, mai shell). Token/credenziali solo da `.env` dentro lo script, mai
+incorporati. Azioni distruttive o che modificano il progetto: mai autonome, sempre
+planner di progetto con gate umani. One-shot (`--once`): il job si auto-disabilita
+dopo la prima esecuzione (`one_shot_reason`). Il supervisore globale gira ogni minuto,
+ricrea la tab Herdr `yano-scheduler` se manca e fa tick dei job in scadenza.
 
 ## Watcher and external agents
 

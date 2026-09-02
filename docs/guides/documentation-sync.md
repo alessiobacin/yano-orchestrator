@@ -34,13 +34,25 @@ In questo repository la migrazione è già stata eseguita: la directory `quick_g
 
 ## Job ricorrenti
 
-`yano cron` è il CRUD persistente per job ricorrenti: `--add` accetta una
-frase naturale, mentre `--list`, `--remove <id>`, `--enable <id>`,
-`--disable <id>` e `--run <id>` gestiscono il registro. Il cron di sistema
-esegue ogni minuto `yano cron --supervise`: avvia le scadenze e ricrea
-`yano-scheduler` se la tab Herdr è stata chiusa. Il registro è nel data-root
-globale e sopravvive a riavvii; l'uninstall di Yano rimuove soltanto le sue
-righe cron marcate.
+Lo scheduler è **script-first**: `yano schedule add --name <nome> --project-root
+<dir> --script <path> --mode <self|planner:<progetto>|computer-locale>
+[--cron '...'] [--once] [--timeout-ms N] [--expected-consequence <testo>]`
+registra un job che al trigger esegue LO SCRIPT registrato (mai shell; folder
+persistente utente `<data>/scheduler/scripts/`). `yano schedule run <id>` testa
+lo script subito (obbligatorio prima di renderlo ricorrente); `yano schedule
+list` mostra i campi del job (script_path, mode, expected_consequence, stato).
+Il routing LLM avviene DENTRO lo script via `yano invoke --role
+<planner[:<scope>]|computer-locale> --prompt "..."` (planner di progetto o
+computer-locale). `yano cron` resta il CRUD legacy per i job testo+cron
+(`--add` frase naturale, `--list`, `--remove <id>`, `--enable <id>`,
+`--disable <id>`, `--run <id>`): dispatch planner col testo come in passato.
+Il cron di sistema esegue ogni minuto `yano schedule tick|supervise` (o
+`yano cron --supervise`): avvia le scadenze e ricrea `yano-scheduler` se la
+tab Herdr è stata chiusa. Il registro è nel data-root globale e sopravvive a
+riavvii; l'uninstall di Yano rimuove soltanto le sue righe cron marcate.
+Vincoli non negoziabili: niente shell/token/pipe/redirezioni nei job (unico
+esecutore = script validato), token solo da `.env`, azioni distruttive sempre
+mediate dal planner con gate umani.
 
 ## Matrice obbligatoria
 

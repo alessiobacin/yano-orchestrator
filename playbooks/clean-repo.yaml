@@ -210,30 +210,36 @@ invariants:
       dangling and never discovered only by the user later.
   - id: canonical_documentation_categories
     description: >-
-      The documentation-completeness audit checks for these categories,
-      recognizing an existing equivalent directory the project already
-      uses under a different name or location (e.g. `docs/quick_guides`
-      for quick-guides) before proposing a
-      new one — it never creates a duplicate parallel directory for a
-      category that already has a home: architecture/ (architecture
-      documents), guides/ (development guides), quick-guides/ (quick
-      guides with complete flows/examples of commands and options for the
-      user), adr/ (Architecture Decision Records), notes/ (technical and
-      working notes), postman/ (Postman collection — only if the project
-      is detected to have a backend; otherwise explicitly declared not
-      applicable, never silently skipped), cheat-sheet (command list),
-      diagram (mermaid diagram of the logical flow, stored in `docs/diagram`).
+      The documentation-completeness audit requires these exact canonical
+      directories below `docs/`: `architecture/`, `guides/`,
+      `quick-guides/`, `adr/`, `notes/`, `postman/` (when a backend exists),
+      `cheat-sheet/`, and `diagram/`. A differently named or misplaced
+      directory is a migration candidate, not a satisfied category:
+      `quick_guides/` must become `quick-guides/`, `diagramma/` must become
+      `diagram/`, and files directly below `docs/` must be classified into
+      the matching category. Only an optional `docs/README.md` may remain
+      directly below `docs/`.
   - id: every_missing_category_gets_a_real_file
     description: >-
       A clean-repo documentation plan is itemized for every canonical
-      category. If no equivalent directory or file exists, docs-sync creates
-      the directory in the repository's convention and at least one real,
+      category. If no directory or file exists, docs-sync creates the exact
+      canonical directory and at least one real,
       useful file inside it: Markdown for architecture, guides, quick-guides,
       ADRs, notes and cheat-sheet; Mermaid source for diagram; and an
       importable Postman collection JSON when a backend is detected. Empty
       directories, TODO-only placeholders and generic invented examples do
       not satisfy the playbook. If no backend is detected, the plan and final
-      report explicitly mark postman as not applicable.
+      report explicitly mark postman as not applicable and do not create it.
+  - id: legacy_documentation_paths_are_migrated
+    description: >-
+      The plan lists every legacy documentation path and its canonical
+      destination, moves files (not only directories) when a legacy folder
+      mixes categories, and updates Markdown links, scripts, tests, CLI help
+      and agent prompts after each move. A clean-repo run is incomplete while
+      `docs/diagramma/`, `docs/quick_guides/`, root-level `docs/*.md` other
+      than `docs/README.md`, or a root `postman/` directory remains without
+      an explicitly approved exception. A repository-wide reference scan is
+      mandatory after the migration.
   - id: clean_repo_documentation_inventory_is_complete
     description: >-
       The repo-curator report and the docs-sync closing report list all eight

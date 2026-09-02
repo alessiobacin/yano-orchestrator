@@ -205,8 +205,11 @@ categorie:
 
 L'invariante `canonical_documentation_categories` impone una regola
 precisa prima di proporre una nuova directory per una di queste categorie:
-riconoscere una directory equivalente che il progetto usa già, sotto un
-nome o una posizione diversa, ed evitare di creare un doppione parallelo.
+usare i percorsi canonici esatti. Una directory equivalente con nome diverso
+è una migrazione da proporre, non una categoria soddisfatta. In particolare
+`docs/quick_guides/` diventa `docs/quick-guides/` e `docs/diagramma/` diventa
+`docs/diagram/`; i file direttamente sotto `docs/` vengono classificati e
+spostati nella categoria corretta, aggiornando tutti i riferimenti.
 
 Ogni categoria realmente mancante deve diventare un deliverable, non solo una
 voce nel piano: `docs-sync` crea la directory secondo la convenzione del
@@ -217,32 +220,24 @@ Directory vuote, stub, TODO o esempi inventati non soddisfano il playbook.
 L'inventario finale deve elencare tutte le categorie, i percorsi usati/creati
 e la decisione esplicita su Postman.
 
-**yano-orchestrator stesso è un esempio dal vivo di questa regola**,
+**yano-orchestrator stesso è un caso di migrazione**,
 verificato eseguendo `ls docs/` e `ls .` nella root del repository come
 parte della stesura di questa sezione:
 
-- `docs/quick_guides` (con l'underscore, non il trattino) copre già
-  `quick-guides/`.
+- `docs/quick_guides/` deve essere migrata in `docs/quick-guides/`.
 - `docs/cheat-sheet` copre già `cheat-sheet`.
-- `docs/diagram` (da dicembre 2026; prima `docs/diagramma`) contiene i diagrammi
-  Mermaid operativi (`.mmd`, es. `05-trace-db-gantt.mmd`) e copre direttamente
-  la categoria canonica `diagram`.
-- `docs/postman/` (da dicembre 2026; prima `postman/` in root) contiene
-  `yano-debugger.postman_collection.json` e `yano-debugger.postman_environment.json`
-  e copre direttamente `postman/` — e yano-orchestrator ha effettivamente un
-  backend/CLI, quindi la categoria si applica.
-- `docs/architecture.md` + `docs/architecture.mmd` coprono già
-  `architecture/`, come file invece che come directory dedicata.
-- `docs/development-notes.md` è un candidato ragionevole a coprire
-  `notes/` (è già un log di note tecniche/di lavoro per revisione).
+- `docs/diagramma/` deve essere migrata e consolidata in `docs/diagram/`.
+- `postman/` deve essere spostata in `docs/postman/`, perché la CLI/API è un
+  backend documentabile.
+- `docs/architecture.md` e `docs/architecture.mmd` devono diventare artefatti
+  dentro `docs/architecture/` e/o `docs/diagram/` in base al contenuto.
+- `docs/development-notes.md`, `docs/playbook-catalog.md` e gli altri file
+  direttamente sotto `docs/` devono essere classificati in `notes/`,
+  `guides/`, `quick-guides/` o nella categoria pertinente.
 
-Applicando `clean-repo` a yano-orchestrator stesso, l'audit dovrebbe
-riconoscere tutte queste equivalenze e **non** proporre `docs/architecture/`,
-`docs/quick-guides/` (con il trattino), `docs/cheat-sheet-new/` o simili
-come nuove directory duplicate. Al momento della stesura di questa
-sezione non è emersa nel repository una directory o un file equivalente
-per `guides/` o per `adr/`: un audit reale probabilmente le segnalerebbe
-come gap genuini, non come falsi positivi da silenziare.
+Applicando `clean-repo` a yano-orchestrator stesso, l'audit deve quindi
+proporre una migrazione completa e non dichiarare soddisfatte le categorie
+solo perché esistono equivalenti storici.
 
 ## 5. Cosa NON aspettarti da questo playbook
 

@@ -52,15 +52,17 @@ come descritto sotto) — se manca, procedi come sempre esplorando il codice.
 ### Contratto documentale canonico — ogni invocazione
 
 In **ogni** round, non soltanto nel playbook `clean-repo`, esegui una checklist
-documentale completa prima di chiudere il round. Verifica separatamente queste
-categorie: `architecture/`,
-`guides/`, `quick-guides/`, `adr/`, `notes/`, `postman/` (solo se il progetto
-ha un backend), `cheat-sheet/` e `diagram/`. Prima di creare una nuova
-directory cerca l'equivalente già adottato dal progetto, anche se ha un nome
-diverso (per esempio `docs/quick_guides`, che copre `quick-guides` con la
-convenzione storica del progetto).
+documentale completa prima di chiudere il round. Verifica queste categorie nei
+percorsi canonici: `docs/architecture/`, `docs/guides/`, `docs/quick-guides/`,
+`docs/adr/`, `docs/notes/`, `docs/postman/` (solo se il progetto ha un
+backend), `docs/cheat-sheet/` e `docs/diagram/`. `docs/quick_guides/` e
+`docs/diagramma/` sono percorsi legacy e non chiudono la gap: nel playbook
+`clean-repo` devono essere migrate. I file direttamente sotto `docs/` vanno
+spostati nella categoria corretta; è ammesso solo un eventuale
+`docs/README.md` come indice. Dopo ogni spostamento aggiorna tutti i
+riferimenti ai path vecchi.
 
-Per ogni categoria assente, crea la directory nella convenzione del progetto
+Per ogni categoria applicabile assente, crea la directory canonica
 e almeno un file utile al suo interno; per ogni categoria esistente, aggiorna
 i file pertinenti quando il task ha cambiato il relativo stato del progetto.
 Usa documenti Markdown per architettura,
@@ -75,6 +77,10 @@ backend, scrivi nel report che `postman` è esplicitamente non applicabile.
 Il diagramma deve rappresentare il flusso logico corrente in Mermaid, non un
 placeholder. Nel report includi sempre una tabella o un elenco con tutte le
 otto categorie, i percorsi aggiornati/creati e l'applicabilità di `postman`.
+
+Tutte le categorie sono obbligatorie tranne `postman`: se il progetto non
+espone alcun backend/API (per esempio una chat di sola consultazione),
+dichiara `postman` non applicabile nel report e non creare quella directory.
 
 Nel report includi una tabella o un elenco con tutte le otto categorie,
 directory/file usati o creati e, per `postman`, la decisione di applicabilità.
@@ -186,3 +192,6 @@ di report.
   modo: è comunque un round da documentare nel report.
 - Sii concreto: chi legge QUICK-START.md deve poter copiare-incollare i
   comandi e ottenere esattamente il risultato descritto, senza indovinare.
+riferimento alle otto categorie logiche resta esplicito: `architecture/`,
+`guides/`, `quick-guides/`, `adr/`, `notes/`, `postman/`, `cheat-sheet/` e
+`diagram/`.

@@ -73,3 +73,25 @@ Verificare se il problema ha lasciato il planner senza destinatario, ha perso l�
 - Esiste un test di regressione.
 - Il caso non produce più il segnale errato in un nuovo round.
 - La notifica e la deduplicazione del watcher restano funzionanti.
+
+## Annotazione yano-debugger (BUG-20260902-5C07FC3F)
+
+Status: **duplicate** — confermato dal debugger con confronto dell'evidenza.
+
+Questo ticket è la **stessa identica osservazione** del ticket
+`134-yano-watcher-workspace-scope-mismatch.md` (BUG-20260902-317715D8):
+
+- Fingerprint di ambiente identico: `ef1cadbe5809dc6c641186be7a4e2e30e14d4b878e2752ba2f7a7768a2cd581a`
+- Stesso record di trace citato (ts `2026-09-02T21:40:23.693Z`, seq 4,
+  `presence_ignored_scope_mismatch` su `pi/workspace-d3dda6a0cb4d/agents/scheduler-service/status`)
+- Stesso `instance: scheduler-service`, stesso `project_key: workspace-d3dda6a0cb4d`
+- `created_at` a 40 ms di distanza (21:42:50.462Z vs 21:42:50.502Z): doppia
+  segnalazione watcher dello stesso evento, non due occorrenze distinte.
+
+Causa radice (già riprodotta e documentata su 134): `--project-scope` registrato
+in `extensions/orchestrator.ts` ma MAI letto da `readCliFlags()` → lo scope MQTT
+di `scheduler-service` degenera su `projectKey(cwd)` = workspace-d3dda6a0cb4d
+(stesso albero del progetto). Fix in corso nel flusso planner→coder
+(slug `fix-workspace-scope-mismatch`, status bug originale: `reproducing`).
+
+Chiusura: questo ticket si chiude quando si chiude 134 (stessa checklist).

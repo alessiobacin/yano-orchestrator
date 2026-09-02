@@ -208,6 +208,8 @@ yano services add --name mqtt-broker --healthcheck-command "docker inspect -f {{
 # nome riservato "herdr": se registrato, il suo comando di restart viene provato prima dello snapshot Herdr di ogni passata
 # --restart-command qui sotto è un ESEMPIO: sostituiscilo con il comando reale che avvia Herdr sulla tua macchina
 yano services add --name herdr --healthcheck-command "herdr api snapshot >/dev/null 2>&1" --restart-command "<comando reale di avvio di Herdr>"
+# il daemon Docker ha un comando di avvio noto per OS (yano init/doctor lo tenta già da soli); registralo per farlo riavviare anche ogni minuto dal cron
+yano services add --name docker --healthcheck-command "docker info" --restart-command "systemctl start docker || service docker start"  # macOS: open -a Docker
 yano services list --json                   # stato/health/backoff correnti
 yano services check --json                  # sola lettura, nessun riavvio
 yano services supervise --json              # health-check + riavvio deterministico con backoff (già chiamato da yano watcher supervise)

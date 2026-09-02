@@ -16,6 +16,13 @@ yano services add --name herdr \
   --healthcheck-command "herdr api snapshot >/dev/null 2>&1" \
   --restart-command "<comando reale di avvio di Herdr>"
 
+# Il daemon Docker ha invece un comando noto per sistema operativo — yano
+# init/doctor lo tenta già da solo una volta (ticket #120); registrarlo qui
+# lo fa ricontrollare e riavviare a ogni passata del cron.
+yano services add --name docker \
+  --healthcheck-command "docker info" \
+  --restart-command "systemctl start docker || service docker start"  # macOS: open -a Docker
+
 # CRUD
 yano services list --json
 yano services enable --name llmproxy

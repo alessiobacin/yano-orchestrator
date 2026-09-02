@@ -639,6 +639,19 @@ instead checks whether the operator registered a service literally named
 that declared restart command gets a chance to bring Herdr back up before the
 snapshot is attempted.
 
+Docker itself gets the deterministic treatment Herdr deliberately avoids:
+unlike Herdr, Docker Desktop/Engine has one well-known start command per
+major OS (`scripts/yano-docker-daemon.mjs`:
+`open -a Docker`/`systemctl start docker`/a PowerShell `Start-Service`
+equivalent on Windows), so `yano init`/`yano doctor` (when invoked with the
+broker auto-start already in place, ticket #41) attempt it — with a bounded
+poll for the daemon to actually finish starting — before falling back to
+reporting the problem. The exact same command is what the failure message
+suggests registering as `yano services add --name docker
+--healthcheck-command "docker info" --restart-command "<the same command>"`,
+so the one-shot init-time recovery and the continuous cron-driven one never
+drift apart.
+
 ### Controlled Yano reload
 
 An already-running Pi process has the extension module, tool registry, MQTT

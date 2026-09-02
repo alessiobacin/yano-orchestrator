@@ -9,6 +9,7 @@ import { globalDataPath, resolveYanoConfig } from "./yano-config.mjs";
 
 const filePath = () => path.join(globalDataPath(), "mcp", "agents.json");
 const configPath = (agent) => path.join(globalDataPath(), "mcp", "agents", `${safe(agent)}.json`);
+const runtimePath = (agent) => agent === "computer-locale" ? path.join(globalDataPath(), "computer-local", ".mcp.json") : null;
 const safe = (value) => String(value || "agent").replace(/[^A-Za-z0-9_.-]+/g, "-").slice(0, 100);
 const json = (argv, flag) => { const i = argv.indexOf(flag); return i < 0 ? null : argv[i + 1] || null; };
 const has = (argv, flag) => argv.includes(flag);
@@ -26,6 +27,19 @@ function resolve(value) {
 	const cfg = resolveYanoConfig({});
 	return Object.fromEntries(Object.entries(value || {}).map(([k, v]) => [k, v.replace(/^\$\{YANO_CONFIG:([^}]+)\}$/, (_, key) => cfg[key] || "")]));
 }
+function safeDisplay(value) {
+	if (!value || typeof value !== "object") return value;
+	return { ...value, ...(value.env ? { env: Object.fromEntries(Object.keys(value.env).map((key) => [key, "[configured]"])) } : {}) };
+}
+function effectiveMcp(agent, db) {
+	const added = db.agents?.[agent] || {};
+	let runtime = {};
+	try { runtime = JSON.parse(fs.readFileSync(runtimePath(agent), "utf8")).mcpServers || {}; } catch { /* no built-in runtime */ }
+	const builtIn = Object.fromEntries(Object.entries(runtime).filter(([name]) => !Object.prototype.hasOwnProperty.call(added, name)).map(([name, value]) => [name, safeDisplay(value)]));
+	const addedDisplay = Object.fromEntries(Object.entries(added).map(([name, value]) => [name, safeDisplay(value)]));
+	const effective = Object.fromEntries(Object.entries({ ...runtime, ...added }).map(([name, value]) => [name, safeDisplay(value)]));
+	return { built_in: builtIn, added: addedDisplay, effective, runtime_config: runtimePath(agent) };
+}
 export function agentMcpConfigPath(agent) { return configPath(agent); }
 export function materializeAgentMcp(agent) {
 	const db = read(); const servers = db.agents?.[agent] || {};
@@ -35,12 +49,19 @@ export function materializeAgentMcp(agent) {
 	fs.writeFileSync(configPath(agent), JSON.stringify(output, null, 2) + "\n", { mode: 0o600 });
 	return configPath(agent);
 }
-export function agentMcpUsage() { return ["Uso: yano mcp agent <list|show|add|update|remove>", "", "  --agent <nome|id>   agente destinatario, es. computer-locale", "  add/update --name <server> --config '<JSON>'", "  remove --name <server>", "  --json"].join("\n"); }
+export function agentMcpUsage() { return ["Uso: yano mcp agent <list|show|add|update|remove>", "", "  list [--agent <nome|id>] mostra built-in, aggiunti ed effective", "  --agent <nome|id>   agente destinatario, es. computer-locale", "  add/update --name <server> --config '<JSON>'", "  remove --name <server>", "  --json"].join("\n"); }
 export function runYanoAgentMcp({ argv = [] } = {}) {
 	const sub = argv[0]; if (!sub || has(argv, "--help") || has(argv, "-h")) { console.log(agentMcpUsage()); return; }
 	const agent = json(argv, "--agent") || json(argv, "--instance");
 	const db = read(); db.agents ||= {};
-	if (sub === "list") { const result = agent ? (db.agents[agent] || {}) : db.agents; if (has(argv, "--json")) console.log(JSON.stringify({ agent: agent || null, servers: result }, null, 2)); else console.log(JSON.stringify(result, null, 2)); return result; }
+	if (sub === "list") {
+		const agents = new Set(Object.keys(db.agents));
+		if (runtimePath("computer-locale") && fs.existsSync(runtimePath("computer-locale"))) agents.add("computer-locale");
+		const result = agent ? { [agent]: effectiveMcp(agent, db) } : Object.fromEntries([...agents].sort().map((name) => [name, effectiveMcp(name, db)]));
+		const output = { agent: agent || null, servers: result, note: "built_in = MCP materializzati automaticamente; added = MCP aggiunti con yano mcp agent add/update; effective = configurazione realmente disponibile" };
+		if (has(argv, "--json")) console.log(JSON.stringify(output, null, 2)); else console.log(JSON.stringify(output, null, 2));
+		return output;
+	}
 	if (!agent) throw new Error("--agent è obbligatorio");
 	db.agents[agent] ||= {};
 	const name = json(argv, "--name");

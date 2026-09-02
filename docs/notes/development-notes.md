@@ -133,7 +133,7 @@ readiness, claim, watchdog, recovery e completamento: i file Markdown sono
 documentazione del piano e materiale di audit, non un secondo scheduler.
 
 Questo pacchetto è il livello di **trasporto + identità + presenza + pub/sub +
-comportamento di ruolo** descritto in `docs/architecture.md`, §22-24 e §37 —
+comportamento di ruolo** descritto in `docs/architecture/architecture.md`, §22-24 e §37 —
 l'equivalente diretto di `coms.ts`/`coms-net.ts` del repo
 `disler/pi-vs-claude-code`, ma su MQTT 5 e con il paradigma role/instance al
 posto della chat P2P piatta.
@@ -2440,7 +2440,7 @@ Nuovo file convenzionale (non ancora esistente prima di questa revisione):
 `.pi/extensions/yano-orchestrator/diagrams/architecture.mmd` — sorgente
 Mermaid puro (senza wrapper markdown), **a livello di intero progetto, non
 per singolo task**, che rappresenta lo stato architetturale CORRENTE
-completo, aggiornato continuamente. Distinto da `docs/architecture.mmd` del
+completo, aggiornato continuamente. Distinto da `docs/architecture/architecture.mmd` del
 pacchetto stesso (che documenta l'architettura dell'ESTENSIONE, non del
 progetto orchestrato — i due file rispondono a domande diverse). Mantenuto
 da `architecture-diagrammer` se nel team (brief esteso in
@@ -2632,7 +2632,7 @@ nessuna traccia, non solo un dependency non collegata.
 (già esistente, usata da ogni tool) risolve skills/cli/mcp/model SOLO dal
 campo `role:` che l'istanza ha in `agents.yaml` — non consulta MAI il flag
 `--role` passato da riga di comando. Per un'istanza SENZA voce in
-`agents.yaml` (esattamente lo scenario che `docs/architecture.md` §40
+`agents.yaml` (esattamente lo scenario che `docs/architecture/architecture.md` §40
 descrive come già funzionante: "non serve una voce in agents.yaml... la
 risoluzione delle capability applica già i default di roles.yaml a
 un'istanza sconosciuta, purché --role sia passato esplicitamente"), questo
@@ -3082,7 +3082,7 @@ Deliberatamente **non** vendorizzate: `research` e `prototype`, referenziate
 da `wayfinder` ma solo condizionatamente (solo se un ticket di quel tipo
 specifico viene creato) — vendorizzarle avrebbe ampliato lo scope ben oltre
 le due skill richieste. Limite noto documentato in
-`skills-vendor/mattpocock/VERSION.md`, `docs/agents/issue-tracker.md` e
+`skills-vendor/mattpocock/VERSION.md`, `docs/notes/agents/issue-tracker.md` e
 `prompts/planner.md`: un ticket `research`/`prototype` generato da
 wayfinder non è risolvibile in questo repo, il planner lo segnala
 all'utente invece di tentare.

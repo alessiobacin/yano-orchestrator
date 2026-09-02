@@ -1,8 +1,8 @@
 # Cheat sheet Yano
 
 Raccolta di riferimenti rapidi per i comandi più usati di Yano. Per spiegazioni,
-vincoli e procedure complete usare la [documentazione](../README.md), la
-[quick start](../quick-start.md) e la [reference della skill yano-cli](../../skills-vendor/yano/yano-cli/references/command-reference.md).
+vincoli e procedure complete usare la [documentazione](../../README.md), la
+[quick start](../quick-guides/quick-start.md) e la [reference della skill yano-cli](../../skills-vendor/yano/yano-cli/references/command-reference.md).
 
 ## Indice
 
@@ -42,4 +42,4 @@ vincoli e procedure complete usare la [documentazione](../README.md), la
 - [33-services.md](./33-services.md)
 
 Le modifiche al codice devono aggiornare anche le superfici documentali indicate
-in [documentation-sync.md](../documentation-sync.md).
+in [documentation-sync.md](../guides/documentation-sync.md).

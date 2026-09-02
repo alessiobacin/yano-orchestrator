@@ -8,7 +8,7 @@ architettura, guide, quick guide, ADR, note, cheat-sheet e diagramma Mermaid;
 per un backend crea anche una collection Postman JSON. Il report elenca tutte
 le categorie e dichiara Postman non applicabile quando non c'è backend.
 
-This document is the human-readable companion to [`architecture.mmd`](./architecture.mmd), the Mermaid source diagram for the current system. The detailed command flows are split into [`docs/diagram/`](diagram/README.md), so each operational path can be read without loading the whole architecture graph.
+This document is the human-readable companion to [`architecture.mmd`](./architecture.mmd), the Mermaid source diagram for the current system. The detailed command flows are split into [`docs/diagram/`](../diagram/README.md), so each operational path can be read without loading the whole architecture graph.
 
 ## Purpose
 
@@ -478,7 +478,7 @@ codice, test, dati, configurazioni, ticket operativi o deployment. FAB/HTTP,
 auth, rate limiting e deduplicazione semantica sono roadmap, non capacità v1.
 
 La distinzione tra v1 e sviluppi successivi di tutti gli agenti esterni è
-registrata in [`docs/agents/external-agents-roadmap.md`](agents/external-agents-roadmap.md).
+registrata in [`docs/notes/agents/external-agents-roadmap.md`](../notes/agents/external-agents-roadmap.md).
 `yano suggester start|submit --once` consente un test bounded; `--dry-run`
 evita l'apertura del worker Herdr.
 
@@ -682,7 +682,7 @@ for an explicit `yano resume`.
 
 ## Security boundaries
 
-The bundled Docker broker is local-development-only and binds its host port to loopback. Native Mosquitto uses [`mqtt/mosquitto.native.conf`](../mqtt/mosquitto.native.conf), which also binds to loopback. Any shared or remote broker must add TLS, authentication and project-scoped ACLs; anonymous MQTT is not a production configuration. For remote TLS, launch Pi with `--mqtt-tls-ca` (and optionally `--mqtt-tls-cert`/`--mqtt-tls-key` for mutual TLS); `--mqtt-allow-insecure` is intentionally an explicit development escape hatch.
+The bundled Docker broker is local-development-only and binds its host port to loopback. Native Mosquitto uses [`mqtt/mosquitto.native.conf`](../../mqtt/mosquitto.native.conf), which also binds to loopback. Any shared or remote broker must add TLS, authentication and project-scoped ACLs; anonymous MQTT is not a production configuration. For remote TLS, launch Pi with `--mqtt-tls-ca` (and optionally `--mqtt-tls-cert`/`--mqtt-tls-key` for mutual TLS); `--mqtt-allow-insecure` is intentionally an explicit development escape hatch.
 
 MCP servers are currently project-wide because Pi does not scope MCP servers per role. Role prompts and capability checks limit intended usage, but this is not equivalent to a network security boundary.
 

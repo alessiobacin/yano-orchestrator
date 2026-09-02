@@ -18,7 +18,7 @@
 // MCP che quella skill presuppone NON lo è (limite di pi-mcp-adapter/Pi,
 // non di questo script) — va dichiarato project-wide in .mcp.json.
 //
-// PERCHÉ QUESTO SCRIPT ESISTE (Revisione 22, vedi docs/development-notes.md):
+// PERCHÉ QUESTO SCRIPT ESISTE (Revisione 22, vedi docs/notes/development-notes.md):
 // extensions/orchestrator.ts non compone MAI il comando che lancia un nuovo
 // processo `pi` — l'unico uso di execFile() nell'estensione è per le
 // chiamate di self-report/rename verso herdr e per `git` (vedi
@@ -38,7 +38,7 @@
 //   yano start --instance planner-01   # dopo `npm install -g`/`npm link` (Revisione 31, vedi bin/yano.mjs)
 //
 // Revisione 44 — generalizzato a QUALUNQUE ruolo, non solo planner (incidente
-// reale, vedi docs/development-notes.md): prima di questa revisione, questo
+// reale, vedi docs/notes/development-notes.md): prima di questa revisione, questo
 // script si rifiutava con un --role diverso da "planner" e rimandava a "usa
 // `pi -e extensions/orchestrator.ts --role <ruolo>` direttamente" — un
 // consiglio diventato STALE dalla Revisione 33 (un progetto scaffoldato non
@@ -571,7 +571,7 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 	}
 	const looksLikePackageRepo = cwdPkgName === "yano-orchestrator";
 
-	// Revisione 38 — bug reale trovato in produzione (docs/development-notes.md,
+	// Revisione 38 — bug reale trovato in produzione (docs/notes/development-notes.md,
 	// Revisione 38): fino a qui questo script si limitava ad AVVISARE del
 	// rischio di conflitto ("Tool ... conflicts with ...") ma continuava
 	// comunque a comporre `-e extensions/orchestrator.ts` anche nel caso
@@ -589,7 +589,7 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 		console.warn(
 			`launch-planner: trovato "${orchestratorPath}" residuo, ma IGNORATO (non aggiunto a -e) — è quasi certamente\n` +
 				`un residuo di uno scaffold creato da una versione di \`yano init\` precedente alla Revisione 33 (che non copia\n` +
-				`più extensions/ — vedi docs/development-notes.md). L'estensione installata globalmente (pi extension install /\n` +
+				`più extensions/ — vedi docs/notes/development-notes.md). L'estensione installata globalmente (pi extension install /\n` +
 				`npm install -g) viene usata al suo posto, come per qualunque altro progetto scaffoldato di recente — questa\n` +
 				`cartella residua è ormai inerte e sicura da cancellare quando vuoi:\n` +
 				`  ${process.platform === "win32" ? "Remove-Item -Recurse -Force" : "rm -rf"} "${path.join(cwd, "extensions")}"\n`,

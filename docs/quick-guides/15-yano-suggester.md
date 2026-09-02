@@ -56,5 +56,5 @@ POST /suggestions/:suggestionId/reject  rifiuta — { actor, reason, yes: true }
 shell: senza, la richiesta viene rifiutata con `400`.
 
 Per i limiti, i percorsi globali, i dettagli dell'API REST e il futuro
-HTTP/FAB vedere [`docs/yano-suggester.md`](../yano-suggester.md) e la
-[roadmap degli agenti esterni](../agents/external-agents-roadmap.md).
+HTTP/FAB vedere [`yano-suggester.md`](./yano-suggester.md) e la
+[roadmap degli agenti esterni](../notes/agents/external-agents-roadmap.md).

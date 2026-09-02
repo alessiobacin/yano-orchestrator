@@ -106,7 +106,7 @@ Su richiesta esplicita dell'utente, nessuna dipendenza da GitHub Issues.
 scegliendo il tracker **"Local Markdown"** (`issue-tracker-local.md`) —
 mappa e ticket di wayfinder vivono come file in `.scratch/<effort>/` nel
 repo di lavoro del task (dentro il worktree del task, non nel repo di
-`yano-orchestrator` stesso — vedi Revisione 22 in `docs/development-notes.md`
+`yano-orchestrator` stesso — vedi Revisione 22 in `docs/notes/development-notes.md`
 per il dettaglio). Nessun CLI `gh`/`glab` richiesto.
 
 ## Aggiornare il pin in futuro
@@ -123,4 +123,4 @@ consapevolmente:
    sono comparse nuove dipendenze da altre skill del repo sorgente).
 3. Aggiornare commit hash e data in questo file.
 4. Rieseguire la suite di smoke test e il controllo di isolamento per-ruolo
-   (vedi Revisione 22 in `docs/development-notes.md`).
+   (vedi Revisione 22 in `docs/notes/development-notes.md`).

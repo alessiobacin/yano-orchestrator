@@ -27,14 +27,14 @@ function requireText(relative, pattern, description = pattern) {
 
 const requiredDocs = [
 	"README.md",
-	"docs/quick-start.md",
-	"docs/architecture.md",
-	"docs/architecture.mmd",
+	"docs/quick-guides/quick-start.md",
+	"docs/architecture/architecture.md",
+	"docs/architecture/architecture.mmd",
 	"docs/diagram/05-trace-db-gantt.mmd",
-	"docs/quick_guides/19-inventario-agenti-e-gantt.md",
+	"docs/quick-guides/19-inventario-agenti-e-gantt.md",
 	"skills-vendor/yano/yano-cli/SKILL.md",
 	"skills-vendor/yano/yano-cli/references/command-reference.md",
-	"docs/documentation-sync.md",
+	"docs/guides/documentation-sync.md",
 ];
 
 for (const file of requiredDocs) {
@@ -54,25 +54,25 @@ requireText("README.md", /yano gantt --links/);
 requireText("README.md", /10000-19999/);
 requireText("README.md", /35 optional specialist roles/);
 requireText("README.md", /documentation-sync\.md/);
-requireText("docs/quick-start.md", /yano gantt --persistent --open/);
-requireText("docs/quick-start.md", /yano gantt --links/);
-requireText("docs/quick-start.md", /10000-19999/);
-requireText("docs/architecture.md", /10000-19999/);
-requireText("docs/architecture.md", /YANO_DATA_DIR>\/gantt\/instances\.json/);
-requireText("docs/architecture.mmd", /10000-19999/);
-requireText("docs/architecture.mmd", /gantt\/instances\.json/);
+requireText("docs/quick-guides/quick-start.md", /yano gantt --persistent --open/);
+requireText("docs/quick-guides/quick-start.md", /yano gantt --links/);
+requireText("docs/quick-guides/quick-start.md", /10000-19999/);
+requireText("docs/architecture/architecture.md", /10000-19999/);
+requireText("docs/architecture/architecture.md", /YANO_DATA_DIR>\/gantt\/instances\.json/);
+requireText("docs/architecture/architecture.mmd", /10000-19999/);
+requireText("docs/architecture/architecture.mmd", /gantt\/instances\.json/);
 requireText("docs/diagram/05-trace-db-gantt.mmd", /10000-19999/);
 requireText("docs/diagram/05-trace-db-gantt.mmd", /--persistent/);
-requireText("docs/quick_guides/19-inventario-agenti-e-gantt.md", /--persistent --open/);
-requireText("docs/quick_guides/19-inventario-agenti-e-gantt.md", /--links/);
-requireText("docs/quick_guides/19-inventario-agenti-e-gantt.md", /10000-19999/);
+requireText("docs/quick-guides/19-inventario-agenti-e-gantt.md", /--persistent --open/);
+requireText("docs/quick-guides/19-inventario-agenti-e-gantt.md", /--links/);
+requireText("docs/quick-guides/19-inventario-agenti-e-gantt.md", /10000-19999/);
 requireText("skills-vendor/yano/yano-cli/SKILL.md", /yano gantt --persistent --open/);
 requireText("skills-vendor/yano/yano-cli/SKILL.md", /yano gantt --links --json/);
 requireText("skills-vendor/yano/yano-cli/references/command-reference.md", /yano gantt --links/);
 requireText("skills-vendor/yano/yano-cli/references/command-reference.md", /10000-19999/);
-requireText("docs/documentation-sync.md", /Ogni invocazione di `docs-sync`/);
+requireText("docs/guides/documentation-sync.md", /Ogni invocazione di `docs-sync`/);
 for (const category of ["docs/architecture/", "docs/guides/", "docs/quick-guides/", "docs/adr/", "docs/notes/", "docs/postman/", "docs/cheat-sheet/", "docs/diagram/"]) {
-	requireText("docs/documentation-sync.md", new RegExp(category.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), category);
+	requireText("docs/guides/documentation-sync.md", new RegExp(category.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), category);
 }
 
 const cheatDir = path.join(root, "docs", "cheat-sheet");

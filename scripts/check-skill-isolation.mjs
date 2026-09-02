@@ -1,10 +1,10 @@
 // Verifica che le skill vendorizzate in skills-vendor/mattpocock/ (wayfinder,
 // to-spec, to-tickets, grilling, domain-modeling, setup-matt-pocock-skills — Revisione
-// 22, vedi docs/development-notes.md) siano cablate SOLO per il ruolo planner, mai
+// 22, vedi docs/notes/development-notes.md) siano cablate SOLO per il ruolo planner, mai
 // per coder/reviewer/specialisti. Controlli statici (file di config, testo
 // dei prompt, comportamento di scripts/launch-planner.mjs) — non lancia un
 // vero `pi` (non installato in questo sandbox, vedi Revisione 22 in
-// docs/development-notes.md per il limite dichiarato: verificato solo a livello di
+// docs/notes/development-notes.md per il limite dichiarato: verificato solo a livello di
 // logica/lettura del codice, mai contro un binario pi reale).
 //
 // Revisione 49 — stessi identici controlli (7-11 sotto), seconda skill
@@ -113,7 +113,7 @@ console.log("   OK");
 console.log("6. nessun altro script/prompt referenzia skills-vendor/mattpocock con un ruolo diverso da planner...");
 // Cerca ogni occorrenza di "skills-vendor/mattpocock" fuori da: la cartella
 // stessa, launch-planner.mjs, check-skill-isolation.mjs (questo file),
-// README.md, docs/development-notes.md, AGENTS.md, docs/agents/*.md, e la sezione
+// README.md, docs/notes/development-notes.md, AGENTS.md, docs/notes/agents/*.md, e la sezione
 // "planner" di prompts/planner.md (l'unico prompt che deve nominarle).
 const { execFileSync: exec2 } = await import("node:child_process");
 let grepOut = "";
@@ -134,11 +134,11 @@ const allowedFiles = new Set(
 		"scripts/launch-planner.mjs",
 		"scripts/check-skill-isolation.mjs",
 		"README.md",
-		"docs/development-notes.md",
+		"docs/notes/development-notes.md",
 		"AGENTS.md",
-		"docs/architecture.md",
-		"docs/agents/issue-tracker.md",
-		"docs/agents/domain.md",
+		"docs/architecture/architecture.md",
+		"docs/notes/agents/issue-tracker.md",
+		"docs/notes/agents/domain.md",
 		"prompts/planner.md",
 	].map((p) => path.join(repoRoot, p)),
 );
@@ -147,7 +147,7 @@ const offenders = grepOut
 	.filter(Boolean)
 	.filter((f) => !f.startsWith(path.join(repoRoot, "skills-vendor")))
 	.filter((f) => !allowedFiles.has(f))
-	.filter((f) => !f.startsWith(path.join(repoRoot, "docs", "agents"))); // seed-derived docs, informational only
+	.filter((f) => !f.startsWith(path.join(repoRoot, "docs", "notes", "agents"))); // seed-derived docs, informational only
 assert.deepEqual(offenders, [], `file inattesi che referenziano skills-vendor/mattpocock: ${offenders.join(", ")}`);
 console.log("   OK");
 
@@ -206,7 +206,7 @@ try {
 	grepOut2 = "";
 }
 const allowedFiles2 = new Set(
-	["scripts/launch-planner.mjs", "scripts/check-skill-isolation.mjs", "README.md", "docs/development-notes.md", "AGENTS.md", "prompts/reviewer.md", "prompts/frontend-developer.md"].map(
+	["scripts/launch-planner.mjs", "scripts/check-skill-isolation.mjs", "README.md", "docs/notes/development-notes.md", "AGENTS.md", "prompts/reviewer.md", "prompts/frontend-developer.md"].map(
 		(p) => path.join(repoRoot, p),
 	),
 );

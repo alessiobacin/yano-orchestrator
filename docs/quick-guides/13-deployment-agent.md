@@ -43,5 +43,5 @@ Se healthcheck o smoke test production falliscono, blocca il rilascio o fai
 rollback, conserva le evidenze e informa il planner. Non usare Kubernetes o
 CLI cloud senza assegnazione esplicita dello specialista e capability verificata.
 
-Vedi [la guida completa](../yano-deployment.md) e la skill
+Vedi [la guida completa](./yano-deployment.md) e la skill
 `skills-vendor/yano/yano-deployment/SKILL.md`.

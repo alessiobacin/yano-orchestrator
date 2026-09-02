@@ -79,7 +79,7 @@ parallelo — tutti nello STESSO worktree. Due cose da tenere a mente:
   non serve essere sicuri al 100% che qualcun altro stia per toccare lo
   stesso file, basta che sia plausibile. Con la Revisione 24 i task correlati
   riusano lo stesso worktree tra sessioni diverse invece di aprirne uno
-  nuovo ogni volta (vedi `docs/development-notes.md`), quindi è ancora più probabile
+  nuovo ogni volta (vedi `docs/notes/development-notes.md`), quindi è ancora più probabile
   lavorare in parallelo con agenti di round o sessioni diverse sugli stessi
   file — non dare per scontato di essere l'unico ad averci messo mano di
   recente solo perché non hai visto nessun altro agente nel round corrente.

@@ -11,7 +11,7 @@
 // actually read it and propose a pinned model per task (with user
 // confirmation, and "model became unavailable mid-round → fallback to auto"
 // handling) is a later increment in prompts/planner.md — see
-// docs/yano-model-advisor.md.
+// docs/quick-guides/yano-model-advisor.md.
 //
 // ---------------------------------------------------------------------------
 // Ground-truth note on llmProxy's HTTP surface (read before touching the
@@ -175,7 +175,7 @@ export function parseProviderListText(text) {
 		// like opencode-*, which report `price=n/a`), fall back to the best
 		// known market price for the same model (`best=...`) as an estimate —
 		// this is what makes the worked example's numbers line up (see
-		// docs/yano-model-advisor.md).
+		// docs/quick-guides/yano-model-advisor.md).
 		const priceIn = price.in ?? best.in;
 		const priceOut = price.out ?? best.out;
 		const benchIsError = bench.ms === null && Boolean(bench.error);
@@ -489,7 +489,7 @@ function usage() {
 		"  --api-key <key>       default: YANO_LLMPROXY_API_KEY (yano config set YANO_LLMPROXY_API_KEY --stdin)",
 		"",
 		"Questo incremento è solo libreria + CLI: nessun server REST (a differenza di",
-		"yano debugger/auto-improve/suggester) — vedi docs/yano-model-advisor.md.",
+		"yano debugger/auto-improve/suggester) — vedi docs/quick-guides/yano-model-advisor.md.",
 	].join("\n");
 }
 

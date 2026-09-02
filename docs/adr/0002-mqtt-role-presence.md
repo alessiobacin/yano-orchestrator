@@ -2,7 +2,7 @@
 
 - **Stato**: accettata
 - **Data**: 2026-09-02 (prassi corrente; codificata come ADR durante la pulizia del repo)
-- **File di riferimento**: `docs/architecture.md` (sezioni "Runtime boundaries" e "Project repair and reconciliation"), `prompts/planner.md`, `extensions/orchestrator.ts`
+- **File di riferimento**: `docs/architecture/architecture.md` (sezioni "Runtime boundaries" e "Project repair and reconciliation"), `prompts/planner.md`, `extensions/orchestrator.ts`
 
 ## Contesto
 
@@ -20,7 +20,7 @@ confondere evidenza storica e presenza attuale.
   `yano start` risolve l'identità dalla root e passa lo slug canonico
   esplicitamente al processo `pi` figlio, così un'estensione caricata da
   un'installazione diversa non può scegliere in silenzio un namespace
-  condiviso (docs/architecture.md, "Runtime boundaries").
+  condiviso (docs/architecture/architecture.md, "Runtime boundaries").
 - **Identity a quattro campi**: ogni istanza ha `instance`, `role`, `project`
   e `team`. La delega `agent_send` avviene per istanza esatta (1:1) o per
   ruolo (fan-out a tutte le istanze vive di quel ruolo); le risposte si
@@ -31,7 +31,7 @@ confondere evidenza storica e presenza attuale.
   worker si unisce al namespace sbagliato.
 - **Evidenza storica ≠ agente vivo**: nelle operazioni di inventario e repair,
   le card MQTT `offline` o con heartbeat stantio sono trattate come evidenza
-  storica, mai come agenti live (`docs/architecture.md`, "Project repair and
+  storica, mai come agenti live (`docs/architecture/architecture.md`, "Project repair and
   reconciliation").
 - **Sicurezza anti-loop**: ogni send eredita un hop count dal task in entrata
   e viene scartata oltre 24 hop; `new_round: true` azzera il contatore per un

@@ -328,7 +328,7 @@ function findOrCreateWatcherWorkspace(snapshot, root, dryRun = false) {
 	return { workspace, created: true };
 }
 
-// Same shared-tab convention documented in docs/quick_guides/10-watcher-falle-yano.md
+// Same shared-tab convention documented in docs/quick-guides/10-watcher-falle-yano.md
 // for the Architect ephemeral-proposal flow (workspace `yano-watcher`, tab
 // `watcher-<project-name>`): a project watched through either path lands on
 // the same pane, so there is exactly one continuous watcher per project,

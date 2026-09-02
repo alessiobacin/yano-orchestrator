@@ -3,7 +3,7 @@
 Questa cartella raccoglie guide operative per chi sviluppa Yano stesso
 (estensione, CLI `yano`, agenti e playbook), ricavate dall'implementazione
 reale del repository. Per le procedure d'uso di Yano da parte dell'utente
-vedi invece [`docs/quick_guides/`](../quick_guides/README.md); per riferimenti
+vedi invece [`docs/quick-guides/`](../quick-guides/README.md); per riferimenti
 rapidi ai comandi vedi [`docs/cheat-sheet/`](../cheat-sheet/README.md).
 
 ## Indice
@@ -14,4 +14,4 @@ rapidi ai comandi vedi [`docs/cheat-sheet/`](../cheat-sheet/README.md).
 
 Le decisioni architetturali di Yano sono registrate in
 [`docs/adr/`](../adr/README.md); la storia ingegneristica dettagliata per
-revisione sta in [`docs/development-notes.md`](../development-notes.md).
+revisione sta in [`docs/notes/development-notes.md`](../notes/development-notes.md).

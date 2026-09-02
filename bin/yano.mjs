@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // `yano` — CLI unificata di yano-orchestrator (Revisione 31, vedi
-// docs/development-notes.md). Sostituisce il vecchio binario a sé
+// docs/notes/development-notes.md). Sostituisce il vecchio binario a sé
 // `pi-orchestrator-init` con questi sottocomandi:
 //
 //   yano init [opzioni]    scaffolda l'estensione nella directory CORRENTE

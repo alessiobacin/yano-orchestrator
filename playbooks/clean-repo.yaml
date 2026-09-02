@@ -215,10 +215,14 @@ invariants:
       `quick-guides/`, `adr/`, `notes/`, `postman/` (when a backend exists),
       `cheat-sheet/`, and `diagram/`. A differently named or misplaced
       directory is a migration candidate, not a satisfied category:
-      `quick_guides/` must become `quick-guides/`, `diagramma/` must become
-      `diagram/`, and files directly below `docs/` must be classified into
-      the matching category. Only an optional `docs/README.md` may remain
-      directly below `docs/`.
+      `quick_guides/` (underscore) must become `quick-guides/`, `diagramma/`
+      must become `diagram/`. ZERO documents may remain directly below
+      `docs/`: no `.md` (or other) file is allowed in the `docs/` root —
+      every file is moved into its matching canonical category, or, when no
+      canonical category fits, into a NEW folder with a pertinent name
+      decided by repo-curator/docs-sync (never left in the root). Only an
+      optional `docs/README.md` may remain directly below `docs/` as an
+      index.
   - id: every_missing_category_gets_a_real_file
     description: >-
       A clean-repo documentation plan is itemized for every canonical
@@ -236,10 +240,15 @@ invariants:
       destination, moves files (not only directories) when a legacy folder
       mixes categories, and updates Markdown links, scripts, tests, CLI help
       and agent prompts after each move. A clean-repo run is incomplete while
-      `docs/diagramma/`, `docs/quick_guides/`, root-level `docs/*.md` other
-      than `docs/README.md`, or a root `postman/` directory remains without
-      an explicitly approved exception. A repository-wide reference scan is
-      mandatory after the migration.
+      `docs/diagramma/`, `docs/quick_guides/` (underscore), root-level
+      `docs/*` files other than an optional `docs/README.md`, or a root
+      `postman/` directory remains without an explicitly approved exception.
+      When a file is moved out of a legacy folder or the `docs/` root, every
+      process/agent/skill/script/prompt/link that read or referenced it in
+      the OLD location MUST be found and updated to the new path: the
+      repository-wide reference scan is mandatory after the migration and
+      any residual old-path reference found by grep is a failure unless
+      explicitly documented as an allowed historical mention.
   - id: clean_repo_documentation_inventory_is_complete
     description: >-
       The repo-curator report and the docs-sync closing report list all eight

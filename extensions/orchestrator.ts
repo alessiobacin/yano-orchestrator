@@ -1,7 +1,7 @@
 /**
  * orchestrator — MQTT-based agent bus for Pi, replacing coms.ts's socket
  * transport and flat peer-to-peer paradigm with the role/instance/capability
- * model from docs/architecture.md.
+ * model from docs/architecture/architecture.md.
  *
  * What changes vs coms.ts / coms-net.ts:
  *
@@ -26,7 +26,7 @@
  *                                        addressed directly (pub/sub, not
  *                                        just request/response)
  *
- * Explicitly NOT implemented here (see docs/development-notes.md): the Scheduler
+ * Explicitly NOT implemented here (see docs/notes/development-notes.md): the Scheduler
  * Engine, DAG/playbook execution, the scored Agent Router, review-loop
  * composite nodes, budget enforcement, TLS/ACL hardening. This file is only
  * the transport + identity + presence + pub/sub layer described in
@@ -120,7 +120,7 @@ const WATCHDOG_STALL_MS = Number(process.env.PI_ORCH_WATCHDOG_STALL_MS) || 900_0
 // ticket/DAG layer does automatically. If the planner's own turn-taking stops
 // making progress right around when the last ticket completes (observed
 // cause in this incident: an LLM proxy container restarted mid-session — see
-// docs/development-notes.md), the run sits "completed" forever with no
+// docs/notes/development-notes.md), the run sits "completed" forever with no
 // worktree merged and no human notified, and yanoFindStalledTickets() above
 // finds nothing wrong because there is no ticket left in "running" status to
 // flag. This is a DIFFERENT heuristic — "the DAG layer says done, but nothing
@@ -180,7 +180,7 @@ type CommandEnvelope = {
 	sender_role: string;
 	target_instance?: string; // 1:1 addressing
 	target_role?: string;     // fan-out to every live instance of a role (no
-	                          // claim arbitration at this stage — see docs/development-notes.md)
+	                          // claim arbitration at this stage — see docs/notes/development-notes.md)
 	project: string;
 	prompt: string;
 	reply_to: string; // topic the response must be published to
@@ -499,7 +499,7 @@ function slugify(s: string): string {
 	);
 }
 
-// Revisione 38 (see docs/development-notes.md) — a real incident: the
+// Revisione 38 (see docs/notes/development-notes.md) — a real incident: the
 // operator scaffolded a second project and, without ever passing
 // `--project`, its planner immediately saw the FIRST project's agents on
 // the same local broker. Root cause: `--project` (registerFlag below)
@@ -839,7 +839,7 @@ function herdrReportAgent(label: string, state: "idle" | "working" | "blocked" |
 // explicit, user-confirmed fallback (from herdr's own CLI help on their
 // machine) for when herdrReportAgent()'s state-reporting protocol above
 // doesn't change what's shown there (e.g. because that list is a saved
-// launch-profile name, not live per-turn state — see docs/development-notes.md
+// launch-profile name, not live per-turn state — see docs/notes/development-notes.md
 // Revisione 7/10). herdr exposes this as `herdr agent rename <pane_id>
 // <name>` in some versions and `herdr pane rename <pane_id> <name>` in
 // others; since I can't confirm which one exists on any given install from
@@ -910,7 +910,7 @@ function herdrRenameTab(name: string): void {
 }
 
 // paseo (https://paseo.sh) — client-daemon tool for managing agent
-// sessions. NOTE (Revisione 23, see docs/development-notes.md): confirmed in a
+// sessions. NOTE (Revisione 23, see docs/notes/development-notes.md): confirmed in a
 // real user test that `paseo run --provider <x> -- <text>` treats
 // everything after `--provider` as a natural-language PROMPT for the
 // agent, not literal argv to exec — there's no documented exec/shell
@@ -1001,7 +1001,7 @@ async function ensureWorktreesGitignored(projectCwd: string): Promise<void> {
 	// has gitignored wholesale since Revisione 31, so it no longer needs its
 	// own entry here.
 	const patterns: Array<{ dir: string; comment: string }> = [
-		{ dir: ".worktrees/", comment: "# yano-orchestrator: per-task git worktrees (see docs/development-notes.md)" },
+		{ dir: ".worktrees/", comment: "# yano-orchestrator: per-task git worktrees (see docs/notes/development-notes.md)" },
 	];
 	const gitignorePath = path.join(projectCwd, ".gitignore");
 	let existing = "";
@@ -1071,7 +1071,7 @@ async function findExistingWorktree(projectCwd: string, wtPath: string): Promise
 //
 // First vertical slice of the ticket/DAG/SQLite orchestration layer agreed
 // with the operator on top of the existing MQTT+worktree+roster+phase-gate
-// system (see docs/development-notes.md). Deliberate split, as specified by the
+// system (see docs/notes/development-notes.md). Deliberate split, as specified by the
 // operator:
 //
 //   MQTT   -> "something happened" — fast pub/sub signals (ticket_ready,
@@ -1093,7 +1093,7 @@ async function findExistingWorktree(projectCwd: string, wtPath: string): Promise
 // full crash/timeout retry with fencing tokens (a ticket left "running"
 // when its process dies is surfaced as such by run_status/tickets_ready,
 // not automatically requeued yet), budget enforcement, the architecture
-// map/index generator, and vendoring To-Tickets. See docs/development-notes.md,
+// map/index generator, and vendoring To-Tickets. See docs/notes/development-notes.md,
 // Revisione 26, for the full list and rationale.
 //
 // Honest limit: node:sqlite (DatabaseSync) is used directly, verified only
@@ -1164,7 +1164,7 @@ function yanoWorkspaceDir(projectCwd: string, explicitProject?: string): string 
 // gitignored by every scaffolded project since Revisione 31, makes "not
 // tracked, not pushed, stays only on the machine where the project was
 // developed" the default with zero extra configuration. See
-// docs/development-notes.md, Revisione 37, for the full rationale
+// docs/notes/development-notes.md, Revisione 37, for the full rationale
 // (including why prompts/ is NOT meant to be edited per-project in the
 // first place — role prompts are customized in the extension itself, once,
 // for every project, not forked per scaffold).
@@ -2757,7 +2757,7 @@ export default function (pi: ExtensionAPI) {
 	// long-since-fulfilled (or never-held) inbound entry, which is exactly the
 	// mismatch an operator caught in production: docs-sync-02 showed "idle" in
 	// the MQTT presence widget while its own pane was actively editing files for
-	// minutes (Revisione 40, docs/development-notes.md). Presence "busy" now
+	// minutes (Revisione 40, docs/notes/development-notes.md). Presence "busy" now
 	// reflects EITHER signal, not just inboundQueue.
 	const activeTicketIds = new Set<string>();
 	function refreshActiveTicketIdsFromStorage(): void {
@@ -3266,7 +3266,7 @@ export default function (pi: ExtensionAPI) {
 			const obj = JSON.parse(payload.toString("utf-8"));
 			if (obj && obj.type === "command") {
 				// Role-broadcast task: delivered to every live instance of that role.
-				// No claim/first-wins arbitration at this stage — see docs/development-notes.md.
+				// No claim/first-wins arbitration at this stage — see docs/notes/development-notes.md.
 				if (identity && obj.target_role === identity.role && obj.sender_instance !== identity.instance) {
 					handleCommand(obj as CommandEnvelope);
 				}
@@ -4784,7 +4784,7 @@ export default function (pi: ExtensionAPI) {
 	// validation) split across THREE separate worktrees/branches, created by
 	// three separate planner sessions that each had no way to know an earlier
 	// one had already opened (and never finalized) a worktree for what was
-	// arguably the same task — see docs/development-notes.md, Revisione 24, and
+	// arguably the same task — see docs/notes/development-notes.md, Revisione 24, and
 	// claude/e2e-codice-fiscale-analysis.md for the full transcript. Nothing
 	// in this codebase persists cross-session task memory (each planner
 	// session starts cold), so the fix is a cheap, always-available lookup:
@@ -4800,7 +4800,7 @@ export default function (pi: ExtensionAPI) {
 			"new request MIGHT be a continuation of, or overlap with, something already in flight — especially across separate " +
 			"planner sessions, which have no memory of each other's unfinished worktrees otherwise (this is exactly how one " +
 			"feature ended up split across 3 separate worktrees/branches in a real incident — Revisione 24, see " +
-			"docs/development-notes.md). If anything here looks like the same feature as the new request, ask the user explicitly " +
+			"docs/notes/development-notes.md). If anything here looks like the same feature as the new request, ask the user explicitly " +
 			"whether to continue in that existing worktree (reuse its slug) instead of creating a new one — don't guess either way.",
 		parameters: Type.Object({}),
 		async execute(_callId, _params) {
@@ -5399,7 +5399,7 @@ export default function (pi: ExtensionAPI) {
 	// `git checkout <branch> -- <files>`, entirely bypassing worktree_finalize
 	// — which meant nothing ever ran `git worktree remove` or `git branch -D`,
 	// leaving an orphaned worktree/branch sitting around indefinitely (see
-	// docs/development-notes.md, Revisione 24). This tool is the cleanup step for
+	// docs/notes/development-notes.md, Revisione 24). This tool is the cleanup step for
 	// exactly that path: once a human (or the planner, told by a human) has
 	// confirmed the work already landed in main some other way, this closes
 	// the loop — preserves the report, removes the worktree, optionally
@@ -5416,7 +5416,7 @@ export default function (pi: ExtensionAPI) {
 			"reports/<slug>.md first if it isn't already there, so the record of what happened isn't lost) and removes the " +
 			"worktree (and, by default, the branch). Refuses outright if the worktree still has UNCOMMITTED changes, to avoid " +
 			"silently discarding work — commit or discard them first, or use worktree_finalize instead if this should actually " +
-			"be merged normally. Exists because of a real incident (Revisione 24, see docs/development-notes.md) where a manual merge- " +
+			"be merged normally. Exists because of a real incident (Revisione 24, see docs/notes/development-notes.md) where a manual merge- " +
 			"conflict resolution bypassed worktree_finalize entirely and left an orphaned worktree with nothing to ever clean " +
 			"it up.",
 		parameters: Type.Object({
@@ -5741,7 +5741,7 @@ export default function (pi: ExtensionAPI) {
 			"unlocked yet is refused outright, for any sender, not just you. Phase 1 MUST include \"coder\" for the general " +
 			"backend-change playbook, \"refactoring-specialist\" for the refactor playbook, or \"repo-curator\" for clean-repo (their reviewer follows in a later " +
 			"phase) — this is what stops a plan from " +
-			"ever scheduling a specialist BEFORE coder, which happened in a real test (see docs/development-notes.md, Revisione 20). " +
+			"ever scheduling a specialist BEFORE coder, which happened in a real test (see docs/notes/development-notes.md, Revisione 20). " +
 			"ONE exception: phase 1 may be [\"tdd-agent\"] alone (genuine TDD — tests written before implementation), but only " +
 			"if \"coder\" is then in phase 2. The LAST phase MUST include \"docs-sync\" (Revisione 24) — every task plan ends " +
 			"with a documentation pass, not just optionally. A role may appear in only one phase. " +
@@ -5775,7 +5775,7 @@ export default function (pi: ExtensionAPI) {
 			// riding along) so this can't be stretched into the exact loophole the
 			// original rule was hardened against (an arbitrary specialist arguing
 			// it "doesn't depend on the new code" to justify a phase before coder
-			// — see docs/development-notes.md, Revisione 20) — and coder must then be the
+			// — see docs/notes/development-notes.md, Revisione 20) — and coder must then be the
 			// very next phase, so it's never more than one phase away.
 			const phase1Roles = params.phases[0].roles.map((r) => r.trim().toLowerCase());
 			const isTddOnlyPhase1 = phase1Roles.length === 1 && phase1Roles[0] === "tdd-agent";
@@ -6574,7 +6574,7 @@ export default function (pi: ExtensionAPI) {
 			"Claim a READY ticket to work on it — sets it to running and assigns it to this instance. Refuses if the " +
 			"ticket isn't READY (blocked on dependencies, already running, done, etc.), or if it declares " +
 			"required_capabilities this instance's role+skills don't cover. Planner-EXCLUDED (Revisione 42): the planner " +
-			"never claims ticket work itself — see docs/development-notes.md Revisione 42 for the real incident (a missing " +
+			"never claims ticket work itself — see docs/notes/development-notes.md Revisione 42 for the real incident (a missing " +
 			"coder led the planner to just do the coding itself instead of relaunching one) this closes structurally, not " +
 			"just by instruction. If no live instance of the required role exists, relaunch one — never claim its ticket.",
 		parameters: Type.Object({ ticket_id: Type.String() }),
@@ -6657,7 +6657,7 @@ export default function (pi: ExtensionAPI) {
 			"closing, not just whichever instance woke you last). On \"done\", recomputes which dependent tickets just " +
 			"became READY and publishes ticket_ready for each; if every ticket in the run is now done, the run itself is " +
 			"marked completed. On \"failed\", dependents stay blocked — no automatic cascade (replanning to route around a " +
-			"failure is deferred, see docs/development-notes.md Revisione 26).",
+			"failure is deferred, see docs/notes/development-notes.md Revisione 26).",
 		parameters: Type.Object({
 			ticket_id: Type.String(),
 			status: Type.Union([Type.Literal("done"), Type.Literal("failed")]),
@@ -6988,7 +6988,7 @@ export default function (pi: ExtensionAPI) {
 			"runs automatically for the planner). This is the resumability surface: after a crash/restart, a fresh planner " +
 			"session calls this instead of regenerating the plan, to see exactly what's done, what's in flight, and " +
 			"what's next. A ticket left \"running\" from a dead process is surfaced as running here, not silently treated " +
-			"as done or auto-requeued (automatic crash retry is deferred, see docs/development-notes.md Revisione 26).",
+			"as done or auto-requeued (automatic crash retry is deferred, see docs/notes/development-notes.md Revisione 26).",
 		parameters: Type.Object({ run_id: Type.String() }),
 		async execute(_callId, params) {
 			if (!identity) throw new Error("orchestrator not initialised");
@@ -7112,7 +7112,7 @@ export default function (pi: ExtensionAPI) {
 	// "fine turno" anche da altro, es. il prompt di shell che ritorna) — il
 	// fallback confermato dalla documentazione è personalizzare
 	// `[ui.sound.agents]`/`[ui.sound]` nel tuo config.toml di herdr (vedi
-	// docs/development-notes.md, Revisione 48).
+	// docs/notes/development-notes.md, Revisione 48).
 	pi.on("agent_end", async (_event, ctx) => {
 		if (identity && identity.role === "planner") herdrReportAgent(identity.displayName, "idle", identity.instance);
 		const inbound = [...inboundQueue.values()].reverse().find((i) => !i.fulfilled);

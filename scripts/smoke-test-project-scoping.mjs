@@ -1,5 +1,5 @@
 // REAL functional test of resolveDefaultProject() / the `--project` MQTT
-// topic-scope default (Revisione 38, see docs/development-notes.md) — a
+// topic-scope default (Revisione 38, see docs/notes/development-notes.md) — a
 // real incident: the operator scaffolded a second project and, without
 // ever passing `--project`, its planner immediately saw the FIRST
 // project's agents on the same local broker, because `--project` used to

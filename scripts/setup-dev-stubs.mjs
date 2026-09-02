@@ -5,7 +5,7 @@
 // smoke-test-response-wakeup.mjs, smoke-test-worktree-cwd-guard.mjs,
 // smoke-test-ticket-engine.mjs, e2e-full-flow.mjs) fuori dal runtime reale
 // di `pi`, dove il pacchetto vero è invece disponibile — vedi Revisione 25
-// in docs/development-notes.md per la spiegazione completa.
+// in docs/notes/development-notes.md per la spiegazione completa.
 //
 // PERCHÉ QUESTO SCRIPT ESISTE (Revisione 31): lo stub vive dentro
 // node_modules/ (gitignored, MAI committato — sarebbe scorretto spacciare
@@ -46,7 +46,7 @@ const stubComment =
 	'NOT a real published package — a minimal local stub so extensions/orchestrator.ts\'s ' +
 	'import { Text, visibleWidth, truncateToWidth } from "@mariozechner/pi-tui" resolves under plain Node ' +
 	"(outside the real pi runtime, where the real package is provided). Recreated by scripts/setup-dev-stubs.mjs " +
-	"after every clean npm install — see docs/development-notes.md, Revisione 25 and Revisione 31, and " +
+	"after every clean npm install — see docs/notes/development-notes.md, Revisione 25 and Revisione 31, and " +
 	"scripts/e2e-full-flow.mjs's header comment for why this exists and why it's safe: the code paths that use " +
 	"Text/visibleWidth/truncateToWidth (renderPool/renderCall/renderResult, TUI rendering only) are never invoked " +
 	"by any test harness in this repo, so a naive stub is sufficient — it only needs to make the import resolve, " +

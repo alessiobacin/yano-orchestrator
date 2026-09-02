@@ -15,7 +15,7 @@ yano debugger leave --project-root "$PWD" --yes
 Il planner riceve il problema e decide il successivo lavoro di sviluppo.
 
 API REST equivalente (un'unica istanza, molti progetti — vedi
-[Yano Debugger](../yano-debugger.md#api-rest-yano-debugger-serve)):
+[Yano Debugger](../quick-guides/yano-debugger.md#api-rest-yano-debugger-serve)):
 
 ~~~bash
 yano debugger serve --port 4177

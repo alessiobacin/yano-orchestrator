@@ -406,7 +406,7 @@ async function test1FullFlow(cwd, project, evo) {
 	ok(advanced.details.plan.phases[1].status === "unlocked", "plan_advance: phase 2 unlocked after phase 1 marked complete");
 
 	// 7. planner fans out to BOTH final-phase roles in parallel (this is the
-	// scenario docs/development-notes.md/architecture.mmd describe as W12).
+	// scenario docs/notes/development-notes.md/architecture.mmd describe as W12).
 	const sendSec = await planner.call("agent_send", { target_role: "security-evaluator", prompt: `Verifica isPalindrome. worktree_path=${wtPath} report=${reportRel}`, slug, new_round: true });
 	const sendDocs = await planner.call("agent_send", { target_role: "docs-sync", prompt: `Allinea la documentazione. worktree_path=${wtPath} report=${reportRel}`, slug, new_round: true });
 	ok(!!sendSec.details.assignment_id && !!sendDocs.details.assignment_id, "agent_send: both final-phase roles reachable once phase 2 unlocked");
@@ -529,7 +529,7 @@ async function test3OverlapDetection(cwd, project) {
 
 	// "Prior session": a planner instance creates a worktree and a report,
 	// then goes away (shuts down) without finalizing — exactly the real
-	// incident this feature exists to prevent (docs/development-notes.md, Rev. 24).
+	// incident this feature exists to prevent (docs/notes/development-notes.md, Rev. 24).
 	const priorPlanner = await makeInstance("planner-prior", "planner-01", "planner", cwd, project);
 	const created = await priorPlanner.call("worktree_create", { slug });
 	writeReportHeader(created.details.worktree_path, slug, `# Report: ${slug}\n\n- Task: validazione codice fiscale italiano\n- Stato: in corso\n`);

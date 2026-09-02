@@ -32,7 +32,7 @@ The `architect` role is global rather than project-scoped. It stages generated
 playbooks and roles under `<YANO_DATA_DIR>/architect/proposals/`, validates every declared
 skill/CLI/MCP before operation, and promotes immutable versions only into the
 global `<YANO_DATA_DIR>/catalog/` after a healthy watcher round and positive planner/user
-feedback. See [`yano-architect.md`](yano-architect.md).
+feedback. See [`yano-architect.md`](../quick-guides/yano-architect.md).
 
 ## Universal gates
 
@@ -105,7 +105,7 @@ files directly.
   a FAIL, not a pass with a caveat.
 
 The detailed source research is maintained in
-`docs/agent-capabilities-research.md`; the gates are based on first-party
+`docs/notes/agent-capabilities-research.md`; the gates are based on first-party
 documentation for [Playwright](https://playwright.dev/docs/running-tests),
 [Docker](https://docs.docker.com/reference/cli/docker/),
 [Kubernetes](https://kubernetes.io/docs/reference/kubectl/),

@@ -36,7 +36,7 @@ comando standard dall'assenza effettiva di test. Ogni audit usa inoltre un
 transcript Pi nuovo, anche quando riusa la tab Herdr del progetto, e una
 allow-list runtime che esclude `bash`, `edit` e `write` dal worker.
 - **User suggestion observer** — `yano suggester` raccoglie proposte in un workspace Herdr globale, le deduplica e notifica il planner solo dopo approvazione del superadmin
-- **Model advisor** — `yano model-advisor` propone un pin llmProxy `model@provider-id` per role-class (coordinator/support) in base a costo/coding/latenza live di llmProxy, con fallback ad auto-routing (`llmproxy`) quando i dati non sono disponibili — vedi `docs/yano-model-advisor.md`
+- **Model advisor** — `yano model-advisor` propone un pin llmProxy `model@provider-id` per role-class (coordinator/support) in base a costo/coding/latenza live di llmProxy, con fallback ad auto-routing (`llmproxy`) quando i dati non sono disponibili — vedi `docs/quick-guides/yano-model-advisor.md`
 - **Global playbook/role architect** — `yano architect` crea proposte ephemeral, verifica skill/CLI/MCP, avvia il watcher di validazione e promuove versioni immutabili solo dopo feedback positivo; `yano playbook|agent` consulta il catalogo
 - **Controlled deployment agent** — `deployment-agent` uses the `deployment-delivery` Playbook and `yano-deployment` skill to keep development source-based, dockerize staging/production, preserve paired ports and require rollback evidence plus explicit production approval
 - **Shared trace-analysis skill** for planner, coder, reviewer and specialists — workers can inspect the filtered origin of a mismatch, while the planner records cross-project opinions and systemic interventions
@@ -166,7 +166,7 @@ to capture the maximum observable detail, and `yano trace clear --all --yes`
 to remove the global Yano data store. Existing project-local reports and the
 operational SQLite database remain workspace state used by the orchestrator;
 they are not the forensic trace. The complete command reference is in
-[`docs/yano-trace.md`](docs/yano-trace.md).
+[`docs/quick-guides/yano-trace.md`](docs/quick-guides/yano-trace.md).
 
 ### Closing out a project
 
@@ -289,7 +289,7 @@ yano model-advisor recommend --role-class support --json          # model@provid
 yano start --instance debater-01 --role debater --llmproxy-pin 'z-ai/glm-5.3-flash@openrouter-glm' --print-only
 ```
 
-A run (the ticket/DAG layer's top-level container for one objective — see "Layer ticket/DAG persistente" in `docs/development-notes.md`, Revisione 26) normally closes itself once every one of its tickets is marked done. `yano end` is for when that doesn't happen — a session ended before every ticket was formally completed, the goal changed, or you're simply satisfied with where things landed and want to declare it done. It never touches tickets, worktrees, or any file outside this project's own `orchestrator.db` — closing a run just changes its own status and records the change in its event history, visible later via `run_status` from inside a planner session.
+A run (the ticket/DAG layer's top-level container for one objective — see "Layer ticket/DAG persistente" in `docs/notes/development-notes.md`, Revisione 26) normally closes itself once every one of its tickets is marked done. `yano end` is for when that doesn't happen — a session ended before every ticket was formally completed, the goal changed, or you're simply satisfied with where things landed and want to declare it done. It never touches tickets, worktrees, or any file outside this project's own `orchestrator.db` — closing a run just changes its own status and records the change in its event history, visible later via `run_status` from inside a planner session.
 
 ### Optional: local llmproxy config
 
@@ -298,15 +298,15 @@ If you run `pi` against a local LLM proxy instead of a cloud provider directly, 
 ## Quickstart
 
 Per il percorso completo, inclusa l'inizializzazione dei log con `yano trace`,
-vedi [`docs/quick-start.md`](docs/quick-start.md).
+vedi [`docs/quick-guides/quick-start.md`](docs/quick-guides/quick-start.md).
 
 Per mantenere la documentazione sincronizzata con ogni modifica al codice,
-segui [`docs/documentation-sync.md`](docs/documentation-sync.md) e usa anche la
+segui [`docs/guides/documentation-sync.md`](docs/guides/documentation-sync.md) e usa anche la
 raccolta di [cheat-sheet](docs/cheat-sheet/README.md). Esegui
 `npm run check:docs` prima dei test.
 
 Per le procedure brevi, scegli una singola operazione nella raccolta
-[`docs/quick_guides/`](docs/quick_guides/README.md): installazione, init di
+[`docs/quick-guides/`](docs/quick-guides/README.md): installazione, init di
 una repository esistente, avvio con Herdr, update normale o reload, recovery,
 trace e troubleshooting.
 
@@ -453,7 +453,7 @@ mcp.json.example                  chrome-devtools MCP server configuration templ
 
 ## Contributing
 
-Contributions are welcome — open an issue or a pull request. `docs/development-notes.md` has the detailed engineering history and design rationale behind each part of the system, if you want the full context before diving in.
+Contributions are welcome — open an issue or a pull request. `docs/notes/development-notes.md` has the detailed engineering history and design rationale behind each part of the system, if you want the full context before diving in.
 
 ## License
 

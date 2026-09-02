@@ -9,7 +9,7 @@ versione di `yano-orchestrator`, esattamente come `conversation` o
 
 ## 1. Perché esiste
 
-Fino a `yano model-advisor` (vedi `docs/yano-model-advisor.md`), ogni ruolo
+Fino a `yano model-advisor` (vedi `docs/quick-guides/yano-model-advisor.md`), ogni ruolo
 in `agents/roles.yaml` dichiarava un `model` fisso (`reasoning-model` o
 `coding-model`, un'alias sempre uguale): far parlare due istanze dello
 stesso ruolo su un topic controverso significava, di fatto, far parlare lo

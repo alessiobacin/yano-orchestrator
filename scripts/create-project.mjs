@@ -11,7 +11,7 @@
 // revisione) causa un doppio caricamento: stessi tool/flag registrati due
 // volte, `pi` si rifiuta con "Tool ... conflicts with ...". Scoperto da un
 // test reale dell'operatore su una macchina Windows nuova — vedi Revisione
-// 33 in docs/development-notes.md per il traceback completo e l'analisi. Un
+// 33 in docs/notes/development-notes.md per il traceback completo e l'analisi. Un
 // progetto scaffoldato contiene solo CONFIGURAZIONE (agents/roles.yaml,
 // mqtt/, .env.example), mai il codice dell'estensione.
 //
@@ -42,14 +42,14 @@
 // sottocomandi. Inventare `pi orchestrator init` come comando shell reale
 // sarebbe una funzionalità non verificata — esattamente il tipo di cosa che
 // questo progetto evita di documentare come se funzionasse (vedi la
-// disciplina "verificato / non verificato" in docs/development-notes.md). Questo
+// disciplina "verificato / non verificato" in docs/notes/development-notes.md). Questo
 // script è l'equivalente reale, verificato, dello stesso bisogno: un
 // comando a riga di comando che prepara un progetto nuovo pronto all'uso.
 //
 // Revisione 31: la logica qui sotto è ora esportata come runCreateProject()
 // e chiamata dal binario globale unificato `yano init` (bin/yano.mjs, campo
 // "bin" di package.json) invece di essere un binario a sé
-// (`pi-orchestrator-init`, rinominato — vedi docs/development-notes.md Revisione
+// (`pi-orchestrator-init`, rinominato — vedi docs/notes/development-notes.md Revisione
 // 31). Restano invariati sia l'uso diretto via `node scripts/create-project.mjs`
 // sia tutta la logica di scaffolding.
 //
@@ -447,7 +447,7 @@ export async function runCreateProject({ packageRoot, cwd, argv, preflightTools 
 	//    pacchetto stesso (motivo per cui questo script esiste: evitare che
 	//    un progetto nuovo erediti l'identità/il nome del pacchetto invece
 	//    del proprio, il problema reale osservato in yano-test-project — vedi
-	//    docs/development-notes.md, Revisione 28).
+	//    docs/notes/development-notes.md, Revisione 28).
 	const agentsDestination = resolveAgentsDestination(targetDir);
 	for (const dir of ["mqtt"]) {
 		const src = path.join(packageRoot, dir);
@@ -581,7 +581,7 @@ export async function runCreateProject({ packageRoot, cwd, argv, preflightTools 
 	}
 
 	// 4. .gitignore minimo (worktree/node_modules), git init se non è già un
-	//    repo — richiesto per l'isolamento in worktree (docs/development-notes.md,
+	//    repo — richiesto per l'isolamento in worktree (docs/notes/development-notes.md,
 	//    Revisioni 13/14). Conversation mode può optare per --no-git perché non
 	//    deve creare worktree o repository per un consulto.
 	// .pi/ qui è la workspace runtime dell'estensione nel progetto scaffoldato
@@ -640,7 +640,7 @@ export async function runCreateProject({ packageRoot, cwd, argv, preflightTools 
 	console.log("`yano start` è l'unico modo in cui le skill vendorizzate di mattpocock (Wayfinder/To-Spec/To-Tickets, più grilling/domain-modeling");
 	console.log("che invocano) vengono cablate nella sessione, dall'installazione globale del pacchetto (non dal progetto scaffoldato —");
 	console.log("questo scaffold non le include). Lanciato a mano, il planner parte comunque ma senza quelle skill: usa in automatico un");
-	console.log("metodo di scoping equivalente ma più semplice, integrato nel suo prompt (vedi Revisione 38 in docs/development-notes.md).");
+	console.log("metodo di scoping equivalente ma più semplice, integrato nel suo prompt (vedi Revisione 38 in docs/notes/development-notes.md).");
 	console.log("coder/specialisti non hanno bisogno di questo — per loro basta `yano start --instance <nome> --role <ruolo>` (Revisione 44");
 	console.log("— nessun `-e` a mano, funziona per qualunque ruolo esattamente come per planner, senza le skill mattpocock). reviewer e");
 	console.log("Frontend Developer e frontend-reviewer invece SI: `yano start` cabla la skill chrome-devtools e la CLI Playwright —");

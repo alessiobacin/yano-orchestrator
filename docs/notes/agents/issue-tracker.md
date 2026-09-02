@@ -5,7 +5,7 @@ Issues and specs for this repo live as markdown files in `.scratch/`.
 Scelto esplicitamente per evitare qualunque dipendenza da GitHub Issues (o
 GitLab) — nessun CLI `gh`/`glab` richiesto, nessun remote necessario. Vedi
 `skills-vendor/mattpocock/VERSION.md` per il contesto completo di questa
-scelta (Revisione 22 in `docs/development-notes.md`).
+scelta (Revisione 22 in `docs/notes/development-notes.md`).
 
 ## Conventions
 

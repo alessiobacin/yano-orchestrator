@@ -1,5 +1,5 @@
 // REAL functional test of scripts/launch-planner.mjs's "stale legacy scaffold"
-// handling (Revisione 38, see docs/development-notes.md) — a real incident:
+// handling (Revisione 38, see docs/notes/development-notes.md) — a real incident:
 // an operator's project scaffolded before Revisione 33 still had its own
 // leftover extensions/orchestrator.ts on disk. launch-planner.mjs detected
 // it, printed a warning explaining the impending "Tool ... conflicts with

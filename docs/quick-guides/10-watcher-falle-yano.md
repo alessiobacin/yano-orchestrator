@@ -161,7 +161,7 @@ sotto), non "dovrebbe essere attivo ma non lo è più".
 
 `yano watcher init|start|status|pause|resume|leave` chiude questo buco con un
 piccolo registro persistente (stessa logica già in uso per
-`yano debugger init|start|pause|resume`, vedi `docs/yano-debugger.md`):
+`yano debugger init|start|pause|resume`, vedi `docs/quick-guides/yano-debugger.md`):
 
 ~~~bash
 yano watcher init --project-root /path/progetto --interval-ms 300000 --lookback-ms 3600000
@@ -368,7 +368,7 @@ yano debugger status --project-root "$YANO_ORCHESTRATOR_REPO" --mode yano-mainte
 
 Questo dà al difetto "Yano su Yano" lo stesso ciclo di vita, la stessa
 deduplicazione e lo stesso risveglio automatico di un debugger/planner live
-(vedi "Chi guarda il bug appena aperto" in `docs/yano-debugger.md`) che ha
+(vedi "Chi guarda il bug appena aperto" in `docs/quick-guides/yano-debugger.md`) che ha
 qualunque altro bug — senza sostituire il file markdown, che resta il
 meccanismo primario. Un fallimento nell'instradamento (registro non
 raggiungibile, sqlite non disponibile) non blocca mai la creazione del

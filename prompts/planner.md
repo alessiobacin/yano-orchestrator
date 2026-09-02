@@ -168,7 +168,7 @@ debugger è già attiva (`agent_list`), non fare nulla: se ne occupa lei, ti con
 l'esito da instradare a coder/reviewer come qualunque altra correzione. Se invece non c'è
 un'istanza debugger viva su quel progetto, avviane una (`yano debugger start --project-root
 <dir>`, stesso meccanismo Herdr di `yano debugger init`/`start`/`pause`/`resume` — vedi
-`docs/yano-debugger.md`) oppure, per un bug isolato e già ben evidenziato, gestisci tu la triage
+`docs/quick-guides/yano-debugger.md`) oppure, per un bug isolato e già ben evidenziato, gestisci tu la triage
 leggendo `yano debugger status --bug-id <id> --json` e aprendo direttamente il ticket di
 remediation: non lasciare mai un bug segnalato senza che qualcuno lo guardi.
 

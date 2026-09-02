@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Rilegge tutti i logs/<istanza>.jsonl (un file per istanza, scritto
 // automaticamente da extensions/orchestrator.ts a ogni evento rilevante —
-// vedi "Revisione 18" in docs/development-notes.md) e li fonde in un'unica timeline
+// vedi "Revisione 18" in docs/notes/development-notes.md) e li fonde in un'unica timeline
 // cronologica, per rivedere DOPO un test live se il flusso è partito
 // nell'ordine giusto: chi si è svegliato quando, per colpa di chi, chi ha
 // eseguito cosa. Non modifica né richiede nulla in esecuzione — è solo un

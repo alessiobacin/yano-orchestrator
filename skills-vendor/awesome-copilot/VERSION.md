@@ -6,7 +6,7 @@ Vive FUORI da `.pi/skills/`, `~/.pi/agent/skills/` e `.agents/skills/`
 deliberatamente, per non attivare la discovery automatica di Pi su tutti i
 ruoli — viene caricata esplicitamente solo per i ruoli `reviewer` e
 `frontend-developer` (vedi `scripts/launch-planner.mjs` e Revisione 49 in
-`docs/development-notes.md`), esattamente come `skills-vendor/mattpocock/`
+`docs/notes/development-notes.md`), esattamente come `skills-vendor/mattpocock/`
 è cablata solo per `planner` (Revisione 22).
 
 - **Repo sorgente**: https://github.com/github/awesome-copilot

@@ -24,7 +24,7 @@
 //
 // What this does NOT verify: the Playbook engine, replanning, the
 // integration phase, budget enforcement, or automatic crash/timeout retry
-// with fencing tokens — all explicitly deferred, see docs/development-notes.md
+// with fencing tokens — all explicitly deferred, see docs/notes/development-notes.md
 // Revisione 26. Also does not touch the existing plan_set/plan_advance
 // phase gate (already covered by scripts/smoke-test-plan-gate.mjs) — the
 // two mechanisms are independent and this script only exercises the new one.

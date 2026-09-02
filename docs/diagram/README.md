@@ -4,8 +4,8 @@ Il flusso `clean-repo` comprende l'audit delle categorie documentali e la
 creazione approvata dei file mancanti, inclusa la collection Postman quando il
 progetto ha un backend.
 
-`architecture.mmd` resta il diagramma complessivo. Questa cartella contiene
-viste più piccole, utili durante diagnosi e onboarding:
+`docs/architecture/architecture.mmd` resta il diagramma complessivo. Questa
+cartella contiene viste più piccole, utili durante diagnosi e onboarding:
 
 - [`01-inventario-agenti.mmd`](./01-inventario-agenti.mmd) — stato dei cinque
   agenti esterni e del Planner;
@@ -27,6 +27,6 @@ preview Mermaid o renderizzati con uno strumento Mermaid compatibile.
 
 Quando cambia un flusso, aggiorna sia `architecture.mmd` sia la vista operativa
 interessata e verifica la matrice in
-[`docs/documentation-sync.md`](../documentation-sync.md). Il Gantt persistente
+[`docs/guides/documentation-sync.md`](../guides/documentation-sync.md). Il Gantt persistente
 è descritto in `05-trace-db-gantt.mmd`: porte `10000-19999`, registro globale e
 comandi `--persistent`, `--link`, `--links`.

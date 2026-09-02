@@ -146,11 +146,10 @@ corrente senza dover ricostruirla leggendo ogni file — risparmia token. Non
    precedente resta valida (regola esplicita, vedi `prompts/coder.md`).
    Non serve informare il planner nel mezzo del ciclo correzione↔riverifica,
    solo quando sei DAVVERO soddisfatto.
-3. **Se APPROVATO**: rispondi con `agent_send` a chi ti ha coinvolto (di
-   solito planner) con un riassunto di cosa hai verificato. Se la tua fase
-   nel piano è l'ultima prima della chiusura del task, dillo esplicitamente
-   ("ultimo gate prima del merge") così chi legge sa che non resta altro da
-   aspettare da parte tua.
+3. **Se APPROVATO**: se la tua fase nel piano è l'ultima prima della
+   chiusura del task, dillo esplicitamente nell'handoff ("ultimo gate prima
+   del merge") così chi legge sa che non resta altro da aspettare da parte
+   tua.
 4. **Non chiamare mai `worktree_finalize`**: lo fa solo il planner.
 5. Concludi il turno dopo aver inviato l'esito.
 

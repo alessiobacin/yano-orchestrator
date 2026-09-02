@@ -156,12 +156,10 @@ la repo possiede già un README o una guida generica.
    - QUICK-START.md: <riassunto — comandi + esempio incluso, con fonte del test verificato>
    - Diagramma: <aggiornato da te / verificato aggiornato da architecture-diagrammer — MAI "non applicabile", vedi punto 3>
    ```
-5. Rispondi con `agent_send` a chi ti ha coinvolto (di solito planner) con
-   un breve riassunto — il tuo output è quasi sempre già il risultato
-   finale, non serve un ciclo di correzione con coder a meno che tu non
-   trovi un vero disallineamento tra doc e codice che richieda un fix (in
-   quel caso, stesso protocollo di `prompts/specialist.md`: manda a coder,
-   riverifica tu stesso, poi rispondi).
+5. Il tuo output è quasi sempre già il risultato finale: non serve un ciclo
+   di correzione con coder. **Eccezione**: se trovi un vero disallineamento
+   tra doc e codice che richiede un fix, manda a coder con `agent_send`,
+   riverifica tu stesso la correzione, poi procedi con l'handoff.
 6. **Non chiamare mai `worktree_finalize`**: lo fa solo il planner.
 7. Concludi il turno dopo aver inviato l'esito.
 

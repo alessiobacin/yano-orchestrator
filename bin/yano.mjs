@@ -295,8 +295,12 @@ async function main() {
 		return;
 	}
 	if (sub === "watcher") {
-		if (rest[0] === "projects" || rest.includes("--projects")) {
-			await runExternalStatus({ role: "watcher", argv: rest });
+		if (rest[0] === "projects" || rest[0] === "list" || rest.includes("--projects")) {
+			await runYanoWatcherRegistry({ argv: [rest[0] === "--projects" ? "projects" : rest[0], ...rest.slice(rest[0] === "--projects" ? 0 : 1)] });
+			return;
+		}
+		if (rest.length === 1 && rest[0] === "--json") {
+			await runYanoWatcherRegistry({ argv: ["status", "--json"] });
 			return;
 		}
 		if (rest.includes("--help") || rest.includes("-h")) {
@@ -307,7 +311,7 @@ async function main() {
 			await runYanoWatcherRegistry({ argv: rest });
 			return;
 		}
-		console.error("Uso: yano watcher <init|start|status|pause|resume|leave|supervise|cron> [opzioni] | yano watcher projects [--all] [--json] [--project-root <dir>]");
+	console.error("Uso: yano watcher <init|start|status|pause|resume|leave|supervise|cron|projects|list> [opzioni]");
 		process.exit(1);
 	}
 	if (sub === "leave") {

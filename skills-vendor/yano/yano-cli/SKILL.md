@@ -57,7 +57,7 @@ Use the smallest command that answers the request. Typical translations are:
 | Investigate a specific failure | `yano trace context ... --json`, then `yano trace search ... --mode hybrid --json` | filtered evidence before broad history |
 | Pause and resume work | `yano pause ... --yes`, then `yano resume ... --yes` | checkpoint, assignments, missing agents; never use `end` as pause |
 | Reconcile stale or missing agents | `yano repair --dry-run`, then `yano repair --yes` | proposed snapshot/restart/cleanup plan before applying it |
-| Apply a Yano update to live instances | `yano update --reload --dry-run`, then `yano update --reload --yes` | controlled checkpoint restart, not in-process hot reload |
+| Apply a Yano update to live instances | `yano update --reload --dry-run`, then `yano update --reload --yes` | controlled checkpoint restart; converts an accidental npm link to a permanent global copy |
 | Find or inspect a playbook | `yano playbook list`, `show`, `candidates`, `agent show` | catalog source, requirements, roles and missing credentials |
 | Configure a missing requirement | `yano config set <KEY> <value>` or `... --stdin` | global per-user config path, never application `.env` for global installs |
 | Check/install this skill in local harnesses | `yano skills status --json`, then `yano skills install` | Claude Code/Codex/Pi catalogs and Pi's shared discovery roots |
@@ -120,6 +120,10 @@ the project-local Pi skill, and its best-effort recall/capture hook. Every
 Yano-launched role also receives the bundled `yano-code-mem` skill. Query
 memory with `cm recall "<goal>" --level 2 --mode hybrid` from the project root
 and never record secrets in it.
+
+The global package must be a real npm installation. If `npm ls -g
+yano-orchestrator --depth=0` shows `->` to a development checkout, `yano update`
+converts that exact link to a permanent copy before continuing.
 
 ## External worker status
 
@@ -399,3 +403,9 @@ the global Yano data-root, and returns a job id. Manage it with `yano cron
 The global one-minute supervisor restores the `yano-scheduler` Herdr agent
 after a reboot or closed tab, then dispatches due jobs to a planner in the
 job's project. A scheduled task never bypasses playbook approval gates.
+### Identità degli agenti
+
+Prima di creare un agente, Yano verifica la coppia canonica `project-root` +
+`instance` e rifiuta i duplicati. I planner multipli devono essere numerati
+(`planner-01`, `planner-02`, ...). Per audit e collisioni già presenti:
+`yano watcher supervise --json`.

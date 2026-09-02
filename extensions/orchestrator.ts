@@ -251,6 +251,7 @@ interface PresenceCard {
 	instance: string;
 	role: string;
 	project: string;
+	project_key: string;
 	team: string[];
 	model: string;
 	skills: string[];
@@ -389,20 +390,20 @@ function resolveCapabilities(
 
 // ━━ Topic hierarchy (architecture.md §23) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-function topics(project: string) {
+function topics(project: string, scope = project) {
 	return {
-		agentCommands: (id: string) => `pi/${project}/agents/${id}/commands`,
-		agentResponses: (id: string) => `pi/${project}/agents/${id}/responses`,
-		agentStatus: (id: string) => `pi/${project}/agents/${id}/status`,
-		agentEvents: (id: string) => `pi/${project}/agents/${id}/events`,
-		agentStatusWildcard: () => `pi/${project}/agents/+/status`,
-		roleTasks: (role: string) => `pi/${project}/roles/${role}/tasks`,
+		agentCommands: (id: string) => `pi/${scope}/agents/${id}/commands`,
+		agentResponses: (id: string) => `pi/${scope}/agents/${id}/responses`,
+		agentStatus: (id: string) => `pi/${scope}/agents/${id}/status`,
+		agentEvents: (id: string) => `pi/${scope}/agents/${id}/events`,
+		agentStatusWildcard: () => `pi/${scope}/agents/+/status`,
+		roleTasks: (role: string) => `pi/${scope}/roles/${role}/tasks`,
 		// A durable hand-off channel for the one case a normal role topic cannot
 		// solve: the requested recipient is not live and there is no live planner
 		// to receive the escalation. The continuous watcher subscribes here and
 		// either forwards the original command to a planner or starts one first.
-		agentFallback: () => `pi/${project}/system/agent-fallback`,
-		teamEvents: (team: string) => `pi/${project}/teams/${team}/events`,
+		agentFallback: () => `pi/${scope}/system/agent-fallback`,
+		teamEvents: (team: string) => `pi/${scope}/teams/${team}/events`,
 		// YanoOrchestrator ticket/dependency layer (see below): "something
 		// happened" signals only — SQLite (orchestratorStorage/orchestrator.db)
 		// is the source of truth for what's actually true, this topic is just
@@ -410,7 +411,7 @@ function topics(project: string) {
 		// QoS 0, not retained: a client that (re)connects always reads the real
 		// state from SQLite via run_status/tickets_ready, never from a replayed
 		// MQTT message.
-		runEvents: (runId: string) => `pi/${project}/runs/${runId}/events`,
+		runEvents: (runId: string) => `pi/${scope}/runs/${runId}/events`,
 	};
 }
 
@@ -651,7 +652,24 @@ function readRolePromptFile(dir: string, name: string): string | null {
 const BUILTIN_SPECIALIST_PROMPT =
 	"Sei un agente specialista di ruolo {{ROLE}} ({{ROLE_LABEL}}), istanza {{INSTANCE}} nel progetto {{PROJECT}} (team: {{TEAM}}).\n" +
 	"La tua missione specifica in questo ruolo: {{BRIEF}}\n{{CAPABILITIES}}\n" +
-	"Lavora sempre dentro worktree_path (mai nella directory principale del progetto — usa worktree_create con lo slug indicato se manca). Usa report_append (non il tool generico di scrittura file) per aggiungere una sezione \"## Round N — {{ROLE}}\" al report, e file_claim/file_release prima di modificare un file che altri agenti dello stesso team potrebbero toccare in parallelo. Quando hai finito rispondi con agent_send a chi ti ha coinvolto (o a target_role: \"coder\" se hai trovato un problema che richiede una modifica al codice). Non chiamare mai worktree_finalize: lo fa solo il planner a fine ciclo.";
+	"Lavora sempre dentro worktree_path (mai nella directory principale del progetto — usa worktree_create con lo slug indicato se manca). Usa report_append (non il tool generico di scrittura file) per aggiungere una sezione \"## Round N — {{ROLE}}\" al report, e file_claim/file_release prima di modificare un file che altri agenti dello stesso team potrebbero toccare in parallelo. Non chiamare mai worktree_finalize: lo fa solo il planner a fine ciclo.";
+
+// Appended to every configured specialist, including roles with a dedicated
+// prompt file: the planner owns final task state and must observe each result.
+const MANDATORY_SPECIALIST_PLANNER_HANDOFF = `
+
+## Handoff obbligatorio al planner
+
+Prima di concludere **ogni** round operativo, invia sempre un messaggio con
+\`agent_send\` a \`target_role: "planner"\` e lo stesso \`slug\` del task,
+anche se hai già mandato il lavoro a coder, reviewer o a un altro specialista.
+Questo messaggio non è un'approvazione finale e non autorizza il planner a
+finalizzare il worktree: gli permette di rivalutare il task dopo la tua
+modifica. Includi: stato (completato/bloccato/in attesa di verifica), cosa e
+dove hai modificato o prodotto, verifiche con esito, rischi/blocchi e la
+prossima azione o il destinatario già coinvolto. Se non hai potuto eseguire il
+lavoro, avvisa ugualmente il planner con prerequisito mancante ed evidenza.
+Non terminare il turno finché questo handoff non è stato inviato con successo.`;
 
 // primaryDir is consulted FIRST, file by file (<role>.md, then specialist.md
 // if roleCfg has a brief) — fallbackDir (pass null to skip it entirely) is
@@ -664,20 +682,23 @@ const BUILTIN_SPECIALIST_PROMPT =
 // revision exists to close, but now impossible even for a customized
 // project, not just the (new) default of no local copy at all.
 function loadRolePrompt(primaryDir: string, fallbackDir: string | null, role: string, roleCfg?: RoleConfig): string {
+	// Planner/coder/reviewer have their own deliberate terminal handoff
+	// protocol. Every other configured role is a specialist for this rule.
+	const requiresPlannerHandoff = Boolean(roleCfg?.brief) && !["planner", "coder", "reviewer"].includes(role);
 	const fromPrimary = readRolePromptFile(primaryDir, role);
-	if (fromPrimary !== null) return fromPrimary;
+	if (fromPrimary !== null) return requiresPlannerHandoff ? `${fromPrimary}${MANDATORY_SPECIALIST_PLANNER_HANDOFF}` : fromPrimary;
 	if (fallbackDir) {
 		const fromFallback = readRolePromptFile(fallbackDir, role);
-		if (fromFallback !== null) return fromFallback;
+		if (fromFallback !== null) return requiresPlannerHandoff ? `${fromFallback}${MANDATORY_SPECIALIST_PLANNER_HANDOFF}` : fromFallback;
 	}
 	if (roleCfg?.brief) {
 		const specialistFromPrimary = readRolePromptFile(primaryDir, "specialist");
-		if (specialistFromPrimary !== null) return specialistFromPrimary;
+		if (specialistFromPrimary !== null) return `${specialistFromPrimary}${MANDATORY_SPECIALIST_PLANNER_HANDOFF}`;
 		if (fallbackDir) {
 			const specialistFromFallback = readRolePromptFile(fallbackDir, "specialist");
-			if (specialistFromFallback !== null) return specialistFromFallback;
+			if (specialistFromFallback !== null) return `${specialistFromFallback}${MANDATORY_SPECIALIST_PLANNER_HANDOFF}`;
 		}
-		return BUILTIN_SPECIALIST_PROMPT;
+		return `${BUILTIN_SPECIALIST_PROMPT}${MANDATORY_SPECIALIST_PLANNER_HANDOFF}`;
 	}
 	return DEFAULT_ROLE_PROMPTS[role] || `Sei l'agente ${role}, istanza {{INSTANCE}} nel progetto {{PROJECT}}. Usa agent_list/agent_send/agent_get/agent_await per collaborare con gli altri agenti.`;
 }
@@ -2584,6 +2605,38 @@ export default function (pi: ExtensionAPI) {
 		capacity: number;
 		skills: string[]; // resolved role+instance skills (architecture.md §3-4) — used by ticket_claim's capability match
 	} | null = null;
+	let identityLeasePath: string | null = null;
+	function acquireIdentityLease(root: string, project: string, instance: string): void {
+		const key = crypto.createHash("sha256").update(`${projectKey(root, project)}\0${instance}`).digest("hex");
+		const dir = path.join(traceRoot(), "agent-identities");
+		fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+		const leasePath = path.join(dir, `${key}.lock`);
+		try {
+			const fd = fs.openSync(leasePath, "wx", 0o600);
+			fs.writeFileSync(fd, JSON.stringify({ pid: process.pid, root, project, instance, created_at: nowIso() }));
+			fs.closeSync(fd);
+			identityLeasePath = leasePath;
+			return;
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+		}
+		let stale = false;
+		try {
+			const lease = JSON.parse(fs.readFileSync(leasePath, "utf8"));
+			try { process.kill(Number(lease.pid), 0); } catch { stale = true; }
+		} catch { stale = true; }
+		if (!stale) throw new Error(`identità già in uso nel progetto: ${instance} (${root}); avvio rifiutato per evitare due agenti con lo stesso nome`);
+		try { fs.unlinkSync(leasePath); } catch { /* another supervisor may have repaired it */ }
+		const fd = fs.openSync(leasePath, "wx", 0o600);
+		fs.writeFileSync(fd, JSON.stringify({ pid: process.pid, root, project, instance, created_at: nowIso() }));
+		fs.closeSync(fd);
+		identityLeasePath = leasePath;
+	}
+	function releaseIdentityLease(): void {
+		if (!identityLeasePath) return;
+		try { fs.unlinkSync(identityLeasePath); } catch { /* best effort */ }
+		identityLeasePath = null;
+	}
 	let client: MqttClient | null = null;
 	let T: ReturnType<typeof topics> | null = null;
 	const presence = new Map<string, PresenceCard>();
@@ -2816,6 +2869,7 @@ export default function (pi: ExtensionAPI) {
 					instance: identity.instance,
 					role: identity.role,
 					project: identity.project,
+					project_key: projectKey(identity.cwd, identity.project),
 					team: identity.team,
 					model: identity.model,
 					skills: [],
@@ -3079,11 +3133,12 @@ export default function (pi: ExtensionAPI) {
 			// session, or a broker wildcard mistake must never be allowed to put a
 			// different project's agent in this roster. Validate both the payload
 			// identity and the exact topic before storing it.
-			if (!identity || !T || card.project !== identity.project || topicStr !== T.agentStatus(card.instance)) {
+			if (!identity || !T || card.project !== identity.project || card.project_key !== projectKey(identity.cwd, identity.project) || topicStr !== T.agentStatus(card.instance)) {
 				logEvent("presence_ignored_scope_mismatch", {
 					topic: topicStr,
 					card_instance: card.instance,
 					card_project: card.project ?? null,
+					card_project_key: card.project_key ?? null,
 					expected_project: identity?.project ?? null,
 				});
 				return;
@@ -3186,7 +3241,14 @@ export default function (pi: ExtensionAPI) {
 			capacity: resolved.capacity,
 			skills: resolved.skills,
 		};
-		T = topics(project);
+		try {
+			acquireIdentityLease(cwd, project, flags.instance);
+		} catch (error) {
+			ctx.ui?.notify?.(`orchestrator: avvio rifiutato — ${error instanceof Error ? error.message : String(error)}`, "error");
+			identity = null;
+			return;
+		}
+		T = topics(project, process.env.PI_ORCH_TEST_NO_EXIT === "1" ? project : projectKey(cwd, project));
 
 		// `yano start` supplies an expected mode. Enforce it at the extension
 		// boundary too, so an old project config cannot silently downgrade a new
@@ -3276,7 +3338,7 @@ export default function (pi: ExtensionAPI) {
 				connectTimeout: 10_000,
 				will: {
 					topic: T.agentStatus(identity.instance),
-					payload: JSON.stringify({ instance: identity.instance, role, project, status: "offline", last_heartbeat: nowIso() }),
+					payload: JSON.stringify({ instance: identity.instance, role, project, project_key: projectKey(cwd, project), status: "offline", last_heartbeat: nowIso() }),
 					qos: 1,
 					retain: true,
 				},
@@ -7021,7 +7083,7 @@ export default function (pi: ExtensionAPI) {
 				// solely on the broker's LWT (which only fires on ungraceful drop).
 				// Bounded to 2s — best-effort, never allowed to block shutdown.
 				await withTimeout(
-					client.publishAsync(T.agentStatus(identity.instance), JSON.stringify({ instance: identity.instance, role: identity.role, project: identity.project, status: "offline", last_heartbeat: nowIso() }), { qos: 1, retain: true }),
+					client.publishAsync(T.agentStatus(identity.instance), JSON.stringify({ instance: identity.instance, role: identity.role, project: identity.project, project_key: projectKey(identity.cwd, identity.project), status: "offline", last_heartbeat: nowIso() }), { qos: 1, retain: true }),
 					2000,
 				);
 			} catch { /* best-effort */ }
@@ -7035,6 +7097,7 @@ export default function (pi: ExtensionAPI) {
 		if (currentCtx?.hasUI) {
 			try { currentCtx.ui.setWidget("orchestrator-pool", undefined); } catch { /* ignore */ }
 		}
+		releaseIdentityLease();
 		if (yanoStorage) {
 			try { yanoStorage.close(); } catch { /* ignore */ }
 			yanoStorage = null;

@@ -9,6 +9,7 @@ yano debugger start --project-root "$PWD" --once
 yano debugger status --project-root "$PWD"
 yano debugger report --project-root "$PWD" --title "Bug" --description "Dettagli"
 yano debugger transition --project-root "$PWD" --bug-id BUG_ID --to triaged
+yano debugger leave --project-root "$PWD" --yes
 ~~~
 
 Il planner riceve il problema e decide il successivo lavoro di sviluppo.

@@ -5032,3 +5032,13 @@ matrice in `docs/documentation-sync.md`, preservando la history con `git mv`.
 Le note storiche di questo file (Revisioni precedenti) conservano i percorsi
 vecchi: sono registro, non superficie operativa. Nessuna rimozione di file è
 stata eseguita: il piano approvato declinava tutte le voci R del change-plan.
+
+## Revisione 64 — handoff universale degli specialisti al planner
+
+Ogni ruolo specialista deve notificare il planner alla fine di qualunque
+round operativo, anche quando il suo flusso prevede prima un passaggio a
+coder, reviewer o a un altro specialista. L'handoff contiene stato, modifiche
+o artefatti, verifiche, rischi e prossimo destinatario; non vale come
+approvazione finale del worktree. Il contratto è iniettato dal loader dei
+prompt in tutti i ruoli configurati con un `brief`, quindi vale anche per ruoli
+con prompt dedicato o introdotti successivamente dall'Architect.

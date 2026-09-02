@@ -108,3 +108,13 @@ L’operazione include i worker esterni registrati per progetto (`debugger`,
 `auto-improver` e `suggester`) e non riattiva worker esplicitamente in pausa o
 fermati. Ogni progetto riceve uno snapshot separato; il comando non indovina
 la root di un semplice scope MQTT sconosciuto e non modifica il codice.
+
+Il cron globale controlla ogni minuto watcher e scheduler. Dopo uno stop
+completo o un riavvio della macchina, il comando unico per riallineare tutti i
+progetti con run non conclusi è:
+
+~~~
+yano repair --all-projects --yes --update
+~~~
+
+I run già `completed` e finalizzati non vengono riaperti.

@@ -10,7 +10,13 @@ import { globalDataPath } from "./yano-config.mjs";
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const CRON_MARKER = "# yano-scheduler-supervisor";
-const SCHEDULER_INSTANCE = "yano-scheduler";
+// The workspace remains `yano-scheduler`; the runtime instance uses a neutral
+// name because Herdr classifies names beginning with `yano-` as legacy kinds.
+const SCHEDULER_INSTANCE = "scheduler-service";
+const SCHEDULER_WORKSPACE_LABEL = "yano-scheduler";
+// Keep the workspace name canonical, but avoid the legacy `yano-scheduler`
+// tab title: Herdr can infer a non-Pi kind from that title during agent start.
+const SCHEDULER_TAB_LABEL = "scheduler-service";
 const SCHEDULER_AGENT_NAME = `${SCHEDULER_INSTANCE}-${path.basename(PACKAGE_ROOT).replace(/[^a-zA-Z0-9]+/g, "-").toLowerCase()}`.slice(0, 32);
 const DEFAULT_DB = { version: 1, jobs: [], supervisor: { instance: SCHEDULER_INSTANCE, workspace: null, tab_id: null, last_seen_at: null, last_recovered_at: null } };
 
@@ -149,7 +155,7 @@ function herdrSnapshot(spawn = spawnSync) {
 function ensureSchedulerWorkspace(spawn = spawnSync) {
 	let snapshot = herdrSnapshot(spawn);
 	if (!snapshot) fail("Herdr non raggiungibile: impossibile supervisionare yano-scheduler.");
-	const label = path.basename(PACKAGE_ROOT);
+	const label = SCHEDULER_WORKSPACE_LABEL;
 	let workspace = snapshot.workspaces?.find((item) => item.label === label);
 	if (!workspace) {
 		const created = spawn("herdr", ["workspace", "create", "--cwd", PACKAGE_ROOT, "--label", label, "--focus"], { encoding: "utf8", maxBuffer: 1_000_000 });
@@ -157,23 +163,81 @@ function ensureSchedulerWorkspace(spawn = spawnSync) {
 		snapshot = herdrSnapshot(spawn); workspace = snapshot?.workspaces?.find((item) => item.label === label);
 	}
 	if (!workspace?.workspace_id) fail("Herdr non ha restituito il workspace di yano-scheduler.");
-	const rootPane = snapshot?.panes?.find((pane) => pane.workspace_id === workspace.workspace_id && path.resolve(pane.cwd || "") === PACKAGE_ROOT);
-	if (!rootPane) {
-		const created = spawn("herdr", ["tab", "create", "--workspace", workspace.workspace_id, "--cwd", PACKAGE_ROOT, "--label", "scheduler-control", "--no-focus"], { encoding: "utf8", maxBuffer: 1_000_000 });
-		if (created.status !== 0) fail(`Herdr non ha creato la tab di controllo scheduler${created.stderr ? `: ${created.stderr.trim()}` : ""}`);
+	// Never reuse a generic root pane: it may already contain an unrelated or stale
+	// agent. The scheduler owns one explicitly labelled tab in its own workspace.
+	let tab = snapshot?.tabs?.find((item) => item.workspace_id === workspace.workspace_id && item.label === SCHEDULER_TAB_LABEL);
+	let pane = tab ? snapshot?.panes?.find((item) => item.tab_id === tab.tab_id) : null;
+	const occupant = pane ? snapshot?.agents?.find((agent) => agent.pane_id === pane.pane_id) : null;
+	if (tab && occupant) {
+		// The owned tab contains a stale/foreign agent. Do not start another agent in
+		// the same pane: replace the dedicated scheduler tab instead.
+		const closed = spawn("herdr", ["tab", "close", tab.tab_id], { encoding: "utf8", maxBuffer: 1_000_000 });
+		if (closed.status !== 0) fail(`Herdr non ha chiuso la tab scheduler non valida${closed.stderr ? `: ${closed.stderr.trim()}` : ""}`);
+		tab = null;
+		pane = null;
+		// Closing the only tab also removes its workspace in Herdr. Refresh state
+		// before creating the replacement tab, otherwise its old workspace id fails.
+		snapshot = herdrSnapshot(spawn);
+		workspace = snapshot?.workspaces?.find((item) => item.label === label);
+		if (!workspace) {
+			const recreated = spawn("herdr", ["workspace", "create", "--cwd", PACKAGE_ROOT, "--label", label, "--focus"], { encoding: "utf8", maxBuffer: 1_000_000 });
+			if (recreated.status !== 0) fail(`Herdr non ha ricreato il workspace scheduler${recreated.stderr ? `: ${recreated.stderr.trim()}` : ""}`);
+			snapshot = herdrSnapshot(spawn);
+			workspace = snapshot?.workspaces?.find((item) => item.label === label);
+		}
+		if (!workspace?.workspace_id) fail("Herdr non ha restituito il workspace ricreato di yano-scheduler.");
 	}
+	if (!tab || !pane?.pane_id) {
+		const created = spawn("herdr", ["tab", "create", "--workspace", workspace.workspace_id, "--cwd", PACKAGE_ROOT, "--label", SCHEDULER_TAB_LABEL, "--no-focus"], { encoding: "utf8", maxBuffer: 1_000_000 });
+		if (created.status !== 0) fail(`Herdr non ha creato la tab yano-scheduler${created.stderr ? `: ${created.stderr.trim()}` : ""}`);
+		try {
+			const result = JSON.parse(created.stdout || "");
+			tab = result?.root_pane?.tab_id ? { tab_id: result.root_pane.tab_id } : tab;
+			pane = result?.root_pane?.pane_id ? result.root_pane : pane;
+		} catch { /* Read the authoritative snapshot below. */ }
+		if (!pane?.pane_id) {
+			snapshot = herdrSnapshot(spawn);
+			tab = snapshot?.tabs?.find((item) => item.workspace_id === workspace.workspace_id && item.label === SCHEDULER_TAB_LABEL);
+			pane = tab ? snapshot?.panes?.find((item) => item.tab_id === tab.tab_id) : null;
+		}
+	}
+	if (!pane?.pane_id) fail("Herdr non ha restituito il pane della tab yano-scheduler.");
+	snapshot = herdrSnapshot(spawn) || snapshot;
+	const initial = snapshot?.tabs?.find((item) => item.workspace_id === workspace.workspace_id && item.tab_id !== tab.tab_id && /^(1|\d+)$/.test(item.label || ""));
+	if (initial) spawn("herdr", ["tab", "close", initial.tab_id], { encoding: "utf8", maxBuffer: 1_000_000 });
+	return { workspace, tab, pane };
 }
 function superviseAgent(store, now, spawn = spawnSync) {
 	const snapshot = herdrSnapshot(spawn);
-	const live = snapshot?.agents?.find((agent) => agent.agent === "pi" && agent.name === SCHEDULER_AGENT_NAME && !["done", "offline", "unknown"].includes(agent.agent_status));
-	if (live) {
-		store.supervisor = { ...store.supervisor, instance: SCHEDULER_INSTANCE, workspace: live.workspace || store.supervisor.workspace || null, tab_id: live.tab_id || store.supervisor.tab_id || null, last_seen_at: nowIso(now) };
+	// Pi's orchestrator extension exposes the instance (`yano-scheduler`) as the
+	// detected agent name, rather than retaining Herdr's requested display name.
+	const isLivePi = (agent) => agent && !["done", "offline", "unknown"].includes(String(agent.agent_status || "").toLowerCase()) && (agent.agent === "pi" || agent.agent_session?.agent === "pi");
+	const schedulerWorkspace = snapshot?.workspaces?.find((workspace) => workspace.label === SCHEDULER_WORKSPACE_LABEL);
+	const schedulerTab = schedulerWorkspace && snapshot?.tabs?.find((tab) => tab.workspace_id === schedulerWorkspace.workspace_id && tab.label === SCHEDULER_TAB_LABEL);
+	const schedulerPane = schedulerTab && snapshot?.panes?.find((pane) => pane.tab_id === schedulerTab.tab_id);
+	const live = schedulerPane && snapshot?.agents?.find((agent) => agent.pane_id === schedulerPane.pane_id && isLivePi(agent));
+	const liveWorkspace = live?.workspace_id ? snapshot?.workspaces?.find((workspace) => workspace.workspace_id === live.workspace_id) : null;
+	if (live && liveWorkspace?.label === SCHEDULER_WORKSPACE_LABEL) {
+		store.supervisor = { ...store.supervisor, instance: SCHEDULER_INSTANCE, workspace: SCHEDULER_WORKSPACE_LABEL, tab_id: live.tab_id || store.supervisor.tab_id || null, last_seen_at: nowIso(now) };
 		return { running: true, recovered: false, instance: SCHEDULER_INSTANCE, workspace: store.supervisor.workspace, tab_id: store.supervisor.tab_id };
 	}
-	try { ensureSchedulerWorkspace(spawn); } catch (error) { return { running: false, recovered: true, instance: SCHEDULER_INSTANCE, status: 1, error: error.message }; }
-	const result = spawn(process.execPath, [path.join(PACKAGE_ROOT, "bin", "yano.mjs"), "start", "--herdr", "--instance", SCHEDULER_INSTANCE, "--role", "scheduler", "Persistent scheduler service: manage only Yano cron jobs from the durable registry."], { cwd: PACKAGE_ROOT, encoding: "utf8", maxBuffer: 1_000_000, env: process.env });
-	store.supervisor = { ...store.supervisor, instance: SCHEDULER_INSTANCE, last_recovered_at: nowIso(now), last_seen_at: result.status === 0 ? nowIso(now) : store.supervisor.last_seen_at };
-	return { running: result.status === 0, recovered: true, instance: SCHEDULER_INSTANCE, status: result.status ?? 1, error: String(result.stderr || "").trim().slice(0, 500) || null };
+	if (live?.tab_id) spawn("herdr", ["tab", "close", live.tab_id], { encoding: "utf8", maxBuffer: 1_000_000 });
+	let target;
+	try { target = ensureSchedulerWorkspace(spawn); } catch (error) { return { running: false, recovered: true, instance: SCHEDULER_INSTANCE, status: 1, error: error.message }; }
+	const composed = spawn(process.execPath, [path.join(PACKAGE_ROOT, "scripts", "launch-planner.mjs"), "--instance", SCHEDULER_INSTANCE, "--role", "scheduler", "--json", "--print-only"], { cwd: PACKAGE_ROOT, encoding: "utf8", maxBuffer: 1_000_000, env: process.env });
+	let args;
+	try { args = JSON.parse(composed.stdout || "").args; } catch { return { running: false, recovered: true, instance: SCHEDULER_INSTANCE, status: 1, error: `impossibile comporre il comando Pi scheduler: ${(composed.stderr || composed.stdout || "risposta vuota").trim()}` }; }
+	// Do not use `herdr agent start` here: Herdr infers the agent kind from the
+	// tab label and can classify scheduler-service as a legacy non-Pi kind.
+	// Starting Pi explicitly in the owned pane is the same reliable path used by
+	// the global watcher/debugger services.
+	const command = ["pi", ...args].map(shellQuote).join(" ");
+	const result = spawn("herdr", ["pane", "run", target.pane.pane_id, `exec ${command}`], { cwd: PACKAGE_ROOT, encoding: "utf8", maxBuffer: 1_000_000, env: process.env });
+	const after = herdrSnapshot(spawn);
+	const started = after?.agents?.find((agent) => agent.pane_id === target.pane.pane_id && isLivePi(agent));
+	const running = result.status === 0 || Boolean(started);
+	store.supervisor = { ...store.supervisor, instance: SCHEDULER_INSTANCE, workspace: SCHEDULER_WORKSPACE_LABEL, tab_id: target.tab?.tab_id || null, last_recovered_at: nowIso(now), last_seen_at: running ? nowIso(now) : store.supervisor.last_seen_at };
+	return { running, recovered: true, instance: SCHEDULER_INSTANCE, workspace: SCHEDULER_WORKSPACE_LABEL, tab_id: target.tab?.tab_id || null, status: running ? 0 : (result.status ?? 1), error: running ? null : (String(result.stderr || "").trim().slice(0, 500) || null) };
 }
 export function tick({ env = process.env, now = new Date(), spawn = spawnSync } = {}) {
 	const { file, store } = readStore(env); const slot = minuteSlot(now); const results = [];

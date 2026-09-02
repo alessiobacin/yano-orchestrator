@@ -106,6 +106,17 @@ historical evidence, not live agents. Herdr can also retain an old `pane.name`
 after a restart, so repair prefers the current terminal title and MQTT card for
 the displayed instance while preserving old labels as aliases for cleanup.
 
+### Installazione permanente e portabilità
+
+`npm link` è riservato allo sviluppo. Se viene rilevato durante `yano update`,
+Yano rimuove solo il symlink globale esatto e installa la copia reale dal
+repository configurato: un commit del checkout locale non diventa così attivo
+per effetto collaterale. Docker è consigliato come distribuzione complementare
+per broker MQTT e servizi stateless, con volumi per i dati persistenti; non
+sostituisce la CLI nativa, Herdr, Pi, Git/worktree e i supervisori dell’host.
+Su Windows il supervisore deve usare Task Scheduler o un servizio equivalente,
+non il comando `cron` POSIX.
+
 The operation never deletes application files, worktrees, SQLite state or trace
 history. Once a canonical replacement is ready, it may close only stale
 duplicate singleton tabs for the same project (`planner`, `architect` or

@@ -167,8 +167,9 @@ yano suggester projects [--all] [--project-root <dir>] [--json]
 planner; when no planner is live, the persistent watcher receives a retained
 fallback envelope, starts/reopens `planner-01`, and forwards the original
 message with its sender and assignment correlation intact. The persistent
-watcher exists only for projects explicitly registered through watcher
-commands; `yano start` does not create one.
+watcher exists for projects registered by `yano init` and is activated when
+that project has an active run. An explicit `yano watcher leave` or pause is
+an operator opt-out; `yano start` does not create an unrelated watcher.
 The debugger, suggester and auto-improver registry handoffs use this same
 liveness check and fallback channel.
 
@@ -264,9 +265,12 @@ or `--all-projects` broadens scope and therefore needs extra care. `--force`
 can interrupt an uncooperative process.
 
 For a development installation made with `npm link`, `yano update` detects the
-global symlink and never invokes `npm install -g` on it. It fast-forwards the
-linked Git checkout only when clean; with local changes it skips the pull and
-reports that the linked code already remains active.
+global symlink, removes only that exact link and installs a real global copy
+from the repository URL. This prevents local commits from becoming active
+implicitly. Confirm with `npm ls -g yano-orchestrator --depth=0`: a permanent
+installation has no `->` target.
+The updater clones and packs the repository before installing it, so a user's
+global `allow-scripts` policy cannot break Git dependency preparation.
 
 ## Configuration and data root
 
@@ -391,3 +395,5 @@ The watcher supervisor also reconciles registered project SQLite runs. After a
 Herdr/process loss it recreates the workspace and `planner-01` for every
 non-finalized run, then sends a recovery prompt with trace, ticket and worktree
 context. Once all runs are finalized it closes that project's watcher tab.
+yano watcher supervise --json
+# verifica collisioni di identità e planner duplicati senza crearne altri

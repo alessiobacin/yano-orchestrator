@@ -20,7 +20,7 @@ import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 import assert from "node:assert/strict";
 import mqtt from "mqtt";
-import { readTraceRecords, tracePaths } from "../scripts/yano-trace-storage.mjs";
+import { projectKey, readTraceRecords, tracePaths } from "../scripts/yano-trace-storage.mjs";
 
 const execFileP = promisify(execFile);
 const PROJECT_ROOT = path.resolve(new URL(".", import.meta.url).pathname, "..");
@@ -116,6 +116,9 @@ async function backdateTicket(dbPath, ticketId, msAgo) {
 }
 
 async function main() {
+	// Exercise the production routing contract even when invoked by the suite,
+	// which enables the no-exit seam for other fake-agent tests.
+	delete process.env.PI_ORCH_TEST_NO_EXIT;
 	console.log("Watch-stalls smoke test — scripts/watch-stalls.mjs (Ticket 04).\n");
 	const cwd = await bootstrapScratchRepo();
 	console.log(`scratch repo: ${cwd}\n`);
@@ -149,7 +152,7 @@ async function main() {
 	const sub = mqtt.connect(BROKER_URL);
 	await new Promise((res, rej) => { sub.on("connect", res); sub.on("error", rej); });
 	const stalledEvents = [];
-	const topic = `pi/watch-smoke/runs/${run.id}/events`;
+	const topic = `pi/${projectKey(cwd, "watch-smoke")}/runs/${run.id}/events`;
 	await sub.subscribeAsync(topic, { qos: 0 });
 	sub.on("message", (t, payload) => {
 		try { const o = JSON.parse(payload.toString()); if (o.type === "ticket_stalled") stalledEvents.push(o); } catch { /* ignore */ }

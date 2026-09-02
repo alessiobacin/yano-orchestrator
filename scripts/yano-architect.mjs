@@ -789,6 +789,12 @@ function launchAgentTab({ label, cwd, workspaceId, instance, role, project, prom
 	// its agent protocol once Pi has been detected as ready.
 	const started = spawnSync("herdr", ["agent", "start", agentName, "--kind", "pi", "--pane", pane.pane_id, "--timeout", "120000", "--", ...startupArgs], { cwd, encoding: "utf8", maxBuffer: 2_000_000 });
 	if (started.status !== 0) throw new Error(`yano architect: agente Herdr ${agentName} non avviato${started.stderr ? `: ${started.stderr.trim()}` : (started.stdout ? `: ${started.stdout.trim()}` : "")}`);
+	const initial = herdrSnapshot()?.tabs?.find((item) => item.workspace_id === workspaceId && item.tab_id !== tab.tab_id && /^(1|\d+)$/.test(item.label || ""));
+	if (initial) {
+		const initialPane = herdrSnapshot()?.panes?.find((item) => item.tab_id === initial.tab_id);
+		const initialAgent = initialPane && herdrSnapshot()?.agents?.find((item) => item.pane_id === initialPane.pane_id);
+		if (!initialAgent || ["done", "offline", "unknown"].includes(String(initialAgent.agent_status || "").toLowerCase())) spawnSync("herdr", ["tab", "close", initial.tab_id], { encoding: "utf8" });
+	}
 	if (initialPrompt) {
 		// Herdr requires --wait whenever --timeout is supplied. Wait only until
 		// the agent becomes active: waiting for the whole LLM turn would make

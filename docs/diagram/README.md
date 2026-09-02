@@ -19,6 +19,8 @@ viste più piccole, utili durante diagnosi e onboarding:
   globale, DB operativo e dashboard Gantt;
 - [`06-agenti-esterni.mmd`](./06-agenti-esterni.mmd) — confini read-only e
   consegna al Planner.
+- [`07-update-installazione.mmd`](./07-update-installazione.mmd) — distinzione
+  tra checkout dev, copia npm permanente, clone Pi e Docker complementare.
 
 I file `.mmd` sono sorgenti Mermaid: possono essere aperti in VS Code con una
 preview Mermaid o renderizzati con uno strumento Mermaid compatibile.

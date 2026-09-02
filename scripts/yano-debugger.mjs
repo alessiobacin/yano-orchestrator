@@ -237,7 +237,7 @@ function parseCommand(argv) {
 
 function usage() {
 	return [
-		"Uso: yano debugger <init|start|status|report|claim|transition|pause|resume|serve> [opzioni]",
+		"Uso: yano debugger <init|start|status|report|claim|transition|pause|resume|leave|serve> [opzioni]",
 		"",
 		"  init --project-root <dir>                         registra un progetto",
 		"  start --project-root <dir> [--dry-run]            apre/riusa la tab Herdr del debugger",
@@ -247,6 +247,7 @@ function usage() {
 		"  claim --project-root <dir> --bug-id <id>          assegna il bug al debugger",
 		"  transition --project-root <dir> --bug-id <id> --to <stato>",
 		"  pause|resume --project-root <dir>                sospende/riattiva il worker logico",
+		"  leave --project-root <dir> --yes                 rimuove il debugger dal progetto e chiude la tab",
 		"  serve [--port <porta>] [--host <host>] [--json]  avvia l'API REST del debugger",
 		"                                                    (un'unica istanza per tutti i progetti registrati;",
 		"                                                    default 127.0.0.1:4177, override con",
@@ -330,6 +331,14 @@ function findOrCreateDebuggerWorkspace(snapshot, root, dryRun = false) {
 	return { workspace, created: true };
 }
 
+function closeUnusedInitialTab(snapshot, workspaceId, keepTabId) {
+	const tab = (snapshot?.tabs || []).find((item) => item.workspace_id === workspaceId && item.tab_id !== keepTabId && /^(1|\d+)$/.test(item.label || ""));
+	if (!tab) return;
+	const pane = (snapshot?.panes || []).find((item) => item.tab_id === tab.tab_id);
+	const agent = pane && (snapshot?.agents || []).find((item) => item.pane_id === pane.pane_id);
+	if (!agent || ["done", "offline", "unknown"].includes(String(agent.agent_status || "").toLowerCase())) spawnSync("herdr", ["tab", "close", tab.tab_id], { encoding: "utf8" });
+}
+
 function launchHerdrWorker({ project, root, db, row, intervalMs, dryRun }) {
 	const workspaceRoot = path.join(traceRoot(), "agent-workspaces", "yano-debugger");
 	fs.mkdirSync(workspaceRoot, { recursive: true, mode: 0o700 });
@@ -367,6 +376,7 @@ function launchHerdrWorker({ project, root, db, row, intervalMs, dryRun }) {
 	const timestamp = now();
 	db.prepare("UPDATE debugger_projects SET workspace_id = ?, worker_tab_id = ?, worker_pane_id = ?, worker_instance = ?, worker_status = ?, interval_ms = ?, updated_at = ? WHERE project_key = ?")
 		.run(workspace.workspace_id, tab.tab_id, pane.pane_id, instance, "running", intervalMs, timestamp, project.key);
+	closeUnusedInitialTab(herdrSnapshot(), workspace.workspace_id, tab.tab_id);
 	return { workspace_id: workspace.workspace_id, tab_id: tab.tab_id, pane_id: pane.pane_id, instance, command, dry_run: dryRun };
 }
 
@@ -529,6 +539,15 @@ function doPause(db, info, existing) {
 	const result = { project: info.name, worker_status: "paused", note: "pausa logica; nessuna tab Herdr viene chiusa e lo stato resta ripristinabile" };
 	try { appendRawTraceRecord({ cwd: info.root, project: info.name, record: { type: "debugger_pause", record_type: "event", source: "yano-debugger", instance: "yano-debugger", worker_status: "paused" } }); } catch { /* best effort */ }
 	return result;
+}
+
+function doLeave(db, info, existing, { dryRun = false } = {}) {
+	if (!existing) return { project: info.name, left: false, reason: "not_registered" };
+	const snapshot = herdrSnapshot();
+	const tabExists = Boolean(existing.worker_tab_id && snapshot?.tabs?.some((tab) => tab.tab_id === existing.worker_tab_id));
+	const closed = dryRun || !tabExists ? { closed: false, reason: dryRun ? "dry_run" : "tab_already_absent" } : closeHerdrTab(existing.worker_tab_id);
+	if (!dryRun) db.prepare("DELETE FROM debugger_projects WHERE project_key = ?").run(existing.project_key);
+	return { project: info.name, left: !dryRun, dry_run: dryRun, debugger_closed: closed.closed, debugger_close_error: closed.error || null };
 }
 
 async function doResume(db, info, existing, opts = {}) {
@@ -730,12 +749,14 @@ export async function runYanoDebugger({ argv = [] } = {}) {
 			print(updated, opts.json);
 			return updated;
 		}
-		if (opts.sub === "pause" || opts.sub === "resume") {
+		if (opts.sub === "pause" || opts.sub === "resume" || opts.sub === "leave") {
 			const info = projectInfo(opts.projectRoot, opts.project, opts.mode);
 			const existing = getProject(db, info);
-			if (!existing) throw new Error("yano debugger: progetto non inizializzato; esegui prima `yano debugger init`");
+			if (opts.sub === "leave" && !opts.yes && !opts.dryRun) throw new Error("yano debugger leave: aggiungi --yes per rimuovere definitivamente il progetto dal debugger");
+			if (!existing && opts.sub !== "leave") throw new Error("yano debugger: progetto non inizializzato; esegui prima `yano debugger init`");
 			const result = opts.sub === "pause"
 				? doPause(db, info, existing)
+				: opts.sub === "leave" ? doLeave(db, info, existing, { dryRun: opts.dryRun })
 				: await doResume(db, info, existing, { dryRun: opts.dryRun, force: opts.force, basePort: opts.basePort, intervalMs: opts.intervalMs, foreground: opts.foreground });
 			print(result, opts.json);
 			return result;

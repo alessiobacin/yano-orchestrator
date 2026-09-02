@@ -15,7 +15,7 @@ yano cron --remove <job-id>
 # Supervisore persistente: controlla cron e tab Herdr yano-scheduler
 yano cron --status --json
 yano cron --supervise --json
-yano cron --install
+yano cron --install 
 yano cron --uninstall
 ```
 

@@ -28,6 +28,7 @@ import * as net from "node:net";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { parse as parseYaml } from "yaml";
+import { projectKey } from "./yano-trace-storage.mjs";
 import mqtt from "mqtt";
 import { slugify, tracePaths } from "./yano-trace-storage.mjs";
 import { projectConfig, projectDbPath, resolveYanoWorkspaceDir } from "./yano-project.mjs";
@@ -118,6 +119,7 @@ function runStatus(cwd, argv) {
 	const db = new DatabaseSync(dbPath, { readOnly: true });
 	const runId = optionValue(argv, "--run");
 	const project = resolveProject(effectiveCwd, argv);
+	const scope = projectKey(effectiveCwd, project);
 	const runs = runId
 		? (db.prepare("SELECT * FROM runs WHERE id = ?").get(runId) ? [db.prepare("SELECT * FROM runs WHERE id = ?").get(runId)] : [])
 		: db.prepare("SELECT * FROM runs WHERE project = ? ORDER BY created_at DESC").all(project);
@@ -158,6 +160,7 @@ function runFleet(cwd, argv) {
 	const projectRoot = optionValue(argv, "--project-root");
 	const effectiveCwd = projectRoot ? path.resolve(projectRoot) : cwd;
 	const project = resolveProject(effectiveCwd, argv);
+	const scope = process.env.PI_ORCH_TEST_NO_EXIT === "1" ? project : projectKey(effectiveCwd, project);
 	const broker = process.env.PI_ORCH_BROKER_URL || "mqtt://127.0.0.1:1883";
 	const staleAfterMs = Number(process.env.PI_ORCH_STALE_AFTER_MS) || 45_000;
 	return new Promise((resolve) => {
@@ -167,7 +170,7 @@ function runFleet(cwd, argv) {
 			clearTimeout(timeout);
 			const agents = new Map();
 			client.on("message", (_t, payload) => { try { const c = JSON.parse(payload.toString()); if (c?.instance) agents.set(c.instance, c); } catch { /* ignore */ } });
-			client.subscribe(`pi/${project}/agents/+/status`, { qos: 0 }, () => {
+			client.subscribe(`pi/${scope}/agents/+/status`, { qos: 0 }, () => {
 				setTimeout(() => {
 					const now = Date.now();
 					const herdrStatuses = herdrProjectStatuses(effectiveCwd);

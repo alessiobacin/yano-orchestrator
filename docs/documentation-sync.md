@@ -7,8 +7,9 @@ gli utenti e gli agenti non possono trovarne la descrizione aggiornata.
 ## Contratto dell'agente `docs-sync`
 
 Ogni invocazione di `docs-sync`, non solo il playbook `clean-repo`, verifica
-questo inventario. Riusa un equivalente già adottato dal progetto; altrimenti
-crea il percorso sotto `docs/`, con almeno un artefatto reale e aggiornato:
+questo inventario nei percorsi canonici. I percorsi legacy non sono equivalenti
+validi: vanno migrati e tutti i riferimenti aggiornati. Ogni file direttamente
+sotto `docs/`, escluso un eventuale `docs/README.md`, va ricollocato:
 
 | Categoria | Percorso convenzionale | Artefatto richiesto |
 | --- | --- | --- |
@@ -25,6 +26,9 @@ Directory vuote, TODO e template generici non soddisfano il contratto. Se non
 esiste un backend, `postman` è l'unica categoria che può essere non applicabile:
 la decisione e l'evidenza vanno riportate. Gli altri percorsi devono essere
 creati quando assenti e aggiornati quando il task rende il contenuto obsoleto.
+In particolare, `docs/quick_guides/` va rinominata in `docs/quick-guides/`,
+`docs/diagramma/` va consolidata in `docs/diagram/` e `postman/` va spostata in
+`docs/postman/` durante un `clean-repo` approvato.
 
 ## Job ricorrenti
 

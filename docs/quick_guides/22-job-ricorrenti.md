@@ -38,3 +38,7 @@ yano cron --supervise --json
 L'installazione globale di Yano aggiunge una sola riga cron marcata. Controlla
 lo stato con `yano cron --status`; `yano cron --uninstall` rimuove solo quella
 riga. `yano uninstall` pulisce automaticamente i cron posseduti da Yano.
+Il supervisore del scheduler, dopo un riavvio di Herdr o del computer, ricrea
+la tab `scheduler-service` nel workspace `yano-scheduler` e avvia Pi
+direttamente nella pane posseduta. Questo evita l'errore Herdr
+`agent_kind_mismatch` causato da `herdr agent start`.

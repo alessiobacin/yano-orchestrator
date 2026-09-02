@@ -20,9 +20,14 @@ continuano a usare il codice caricato in memoria; applica il nuovo codice al
 prossimo avvio.
 
 Se Yano è stato installato in sviluppo con `npm link`, il comando rileva il
-symlink e non esegue `npm install -g` (npm non può rinominarlo). Con checkout
-Git pulito usa `git pull --ff-only`; con modifiche locali salta il pull per non
-sovrascriverle, ma mantiene il collegamento già attivo.
+symlink, lo rimuove e installa una copia globale permanente da GitHub. Così un
+commit locale non cambia più il comportamento di `yano` prima di un update
+esplicito. Verifica con `npm ls -g yano-orchestrator --depth=0`: una copia
+permanente non mostra `->` verso il checkout.
+
+L’aggiornamento scarica il repository con Git, costruisce un tarball temporaneo
+e installa quello. Questa scelta evita che configurazioni npm locali come
+`allow-scripts` interferiscano con la preparazione di dipendenze Git.
 
 ## Aggiornare e ricaricare il team attivo
 

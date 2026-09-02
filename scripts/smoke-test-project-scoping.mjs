@@ -30,6 +30,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { pathToFileURL } from "node:url";
 import mqtt from "mqtt";
+import { projectKey } from "./yano-trace-storage.mjs";
 
 const PROJECT_ROOT = path.resolve(new URL(".", import.meta.url).pathname, "..");
 const BROKER_URL = process.env.PI_ORCH_BROKER_URL || "mqtt://127.0.0.1:1883";
@@ -166,6 +167,10 @@ async function resolvedProjectFor(cwd, instance, projectFlag) {
 }
 
 async function main() {
+	// The suite enables the no-exit seam for fake Pi instances. This test is
+	// specifically the production routing contract, so use the same
+	// root-derived topic scope as real Yano processes.
+	delete process.env.PI_ORCH_TEST_NO_EXIT;
 	console.log("\n=== TEST 1 — cross-project isolation (the real regression) ===");
 	const dirAlpha = scratchDir("yano-scope-alpha");
 	const dirBeta = scratchDir("yano-scope-beta");
@@ -174,8 +179,8 @@ async function main() {
 
 	const projectAlpha = await resolvedProjectFor(dirAlpha, "scope-alpha-01", undefined);
 	const projectBeta = await resolvedProjectFor(dirBeta, "scope-beta-01", undefined);
-	ok(projectAlpha === "alpha-widgets", `alpha project resolves to its own package.json name (got "${projectAlpha}")`);
-	ok(projectBeta === "beta-widgets", `beta project resolves to its own package.json name (got "${projectBeta}")`);
+	ok(projectAlpha === projectKey(dirAlpha, "alpha-widgets"), `alpha uses its canonical root project_key (got "${projectAlpha}")`);
+	ok(projectBeta === projectKey(dirBeta, "beta-widgets"), `beta uses its canonical root project_key (got "${projectBeta}")`);
 	ok(projectAlpha !== projectBeta, "the two projects resolve to DIFFERENT MQTT topic scopes — no cross-talk");
 
 	console.log("\n=== TEST 2 — fallback priority chain ===");
@@ -184,13 +189,13 @@ async function main() {
 	// back to slugify(basename(cwd)).
 	const dirBare = scratchDir("yano-scope-bare");
 	const projectBare = await resolvedProjectFor(dirBare, "scope-bare-01", undefined);
-	ok(projectBare === slugify(path.basename(dirBare)), `no package.json/config -> slugify(basename(cwd)) (got "${projectBare}")`);
+	ok(projectBare === projectKey(dirBare, slugify(path.basename(dirBare))), `bare project uses a root-derived project_key (got "${projectBare}")`);
 
 	// 2b. Only package.json -> its "name" wins.
 	const dirPkgOnly = scratchDir("yano-scope-pkg");
 	fs.writeFileSync(path.join(dirPkgOnly, "package.json"), JSON.stringify({ name: "pkg-only-slug" }, null, 2));
 	const projectPkgOnly = await resolvedProjectFor(dirPkgOnly, "scope-pkg-01", undefined);
-	ok(projectPkgOnly === "pkg-only-slug", `package.json name alone wins over the directory name (got "${projectPkgOnly}")`);
+	ok(projectPkgOnly === projectKey(dirPkgOnly, "pkg-only-slug"), `package.json project uses its root-derived project_key (got "${projectPkgOnly}")`);
 
 	// 2c. Both config/project.json AND package.json -> config/project.json
 	// wins (the operator's own chosen name, possibly renamed since scaffold —
@@ -204,12 +209,12 @@ async function main() {
 		JSON.stringify({ schema_version: 1, extension_version: "test", project: "Human Chosen Name", created_at: "x", updated_at: "x" }, null, 2),
 	);
 	const projectBoth = await resolvedProjectFor(dirBoth, "scope-both-01", undefined);
-	ok(projectBoth === slugify("Human Chosen Name"), `config/project.json wins over package.json, slugified (got "${projectBoth}")`);
+	ok(projectBoth === projectKey(dirBoth, "Human Chosen Name"), `config/project.json keeps the display identity while the wire scope stays root-derived (got "${projectBoth}")`);
 
 	// 2d. Explicit --project always wins over everything, verbatim (no
 	// slugify applied — matches the pre-Revisione-38 override behavior).
 	const projectExplicit = await resolvedProjectFor(dirBoth, "scope-explicit-01", "Explicit-Override-Value");
-	ok(projectExplicit === "Explicit-Override-Value", `explicit --project always wins, unslugified (got "${projectExplicit}")`);
+	ok(projectExplicit === projectKey(dirBoth, "Explicit-Override-Value"), `explicit --project cannot change the canonical root scope (got "${projectExplicit}")`);
 
 	console.log(`\n${PASS} assertions passed.`);
 }

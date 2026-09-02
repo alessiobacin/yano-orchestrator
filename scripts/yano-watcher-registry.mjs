@@ -38,6 +38,8 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { appendRawTraceRecord, canonicalProjectScope, projectKey, readTraceRecords, resolveTraceProject, traceRoot } from "./yano-trace-storage.mjs";
 import { projectDbPath } from "./yano-project.mjs";
+import { ensureGlobalYanoServices } from "./yano-global-services.mjs";
+import { findAgentIdentityConflicts, formatAgentIdentityConflicts } from "./yano-agent-identity.mjs";
 
 const require = createRequire(import.meta.url);
 const WORKSPACE_LABEL = "yano-watcher";
@@ -163,6 +165,15 @@ function closeHerdrTab(tabId) {
 		: { closed: false, tab_id: tabId, error: (result.stderr || result.stdout || "Herdr non ha chiuso la tab").trim() };
 }
 
+function closeUnusedInitialTab(snapshot, workspaceId, keepTabId) {
+	const initial = (snapshot?.tabs || []).find((tab) => tab.workspace_id === workspaceId && tab.tab_id !== keepTabId && /^(1|\d+)$/.test(tab.label || ""));
+	if (!initial) return null;
+	const pane = (snapshot?.panes || []).find((item) => item.tab_id === initial.tab_id);
+	const agent = pane && (snapshot?.agents || []).find((item) => item.pane_id === pane.pane_id);
+	if (agent && !["done", "offline", "unknown"].includes(String(agent.agent_status || "").toLowerCase())) return null;
+	return closeHerdrTab(initial.tab_id);
+}
+
 function projectRuns(root) {
 	const db = openProjectDatabase(root);
 	if (!db) return { available: false, runs: [] };
@@ -182,6 +193,10 @@ function projectRuns(root) {
 	finally { try { db.close(); } catch { /* best effort */ } }
 }
 
+function projectHasActiveWork(root) {
+	return projectRuns(root).runs.some(runNeedsPlanner);
+}
+
 function runNeedsPlanner(run) {
 	return run.status === "active" || (run.status === "completed" && !["finalized", "not_applicable"].includes(run.finalization_status));
 }
@@ -198,8 +213,17 @@ function plannerAgentsInWorkspace(snapshot, workspaceId, root) {
 	return (snapshot?.agents || []).filter((agent) =>
 		agent.workspace_id === workspaceId &&
 		path.resolve(agent.cwd || "") === path.resolve(root) &&
-		/planner/i.test(`${agent.terminal_title_stripped || ""} ${agent.terminal_title || ""} ${agent.name || ""}`),
+		(plannerLabelForAgent(snapshot, agent) || /planner/i.test(`${agent.terminal_title_stripped || ""} ${agent.terminal_title || ""} ${agent.name || ""}`)),
 	);
+}
+
+// Herdr can expose a live Pi pane without copying Pi's instance name into
+// `agent.name` (notably after a restart). The tab label is the durable Yano
+// identity in that case; ignoring it made every healthy planner look missing
+// and caused a new recovery tab to be created on every supervisor pass.
+function plannerLabelForAgent(snapshot, agent) {
+	const tab = snapshot?.tabs?.find((item) => item.tab_id === agent.tab_id);
+	return Boolean(tab && /^planner(?:-\d+)?$/i.test(tab.label || ""));
 }
 
 function plannerStalled(run) {
@@ -259,13 +283,18 @@ function recoverPlanner({ row, snapshot, run, reason }) {
 }
 
 function reconcileProjectRun(db, row, snapshot) {
-	const { available, runs } = projectRuns(row.root);
-	if (!available || !runs.length) {
-		const created = Date.parse(row.created_at || "");
-		const oldEnough = Number.isFinite(created) && Date.now() - created >= (Number(process.env.YANO_IDLE_WATCHER_GRACE_MS) || IDLE_WATCHER_GRACE_MS);
-		if (!oldEnough) return { recovery: "not_applicable" };
-		return stopCompletedWatcher(db, row, snapshot, available ? "project_without_runs" : "project_not_initialized");
+	const identityConflicts = snapshot ? findAgentIdentityConflicts(snapshot).filter((conflict) => path.resolve(conflict.root) === path.resolve(row.root)) : [];
+	if (identityConflicts.length) {
+		return { recovery: "identity_conflict", watcher_kept: true, identity_conflicts: identityConflicts, recovery_error: formatAgentIdentityConflicts(identityConflicts).join("; ") };
 	}
+	const { available, runs } = projectRuns(row.root);
+	// Registration is explicit user intent. A project can exist before its
+	// first Yano run (or while its checkout is temporarily unavailable), so a
+	// missing DB must not silently disable a running watcher after the idle
+	// grace period. The zero-token scan reports `not_initialized`; closure is
+	// reserved for initialized projects with no active runs or explicit leave.
+	if (!available) return { recovery: "waiting_for_initialization", watcher_kept: true };
+	if (!runs.length) return { recovery: "project_idle", watcher_kept: true };
 	const incomplete = runs.filter(runNeedsPlanner);
 	if (incomplete.length) {
 		const workspace = findProjectWorkspace(snapshot, row.root, row.name);
@@ -284,7 +313,7 @@ function reconcileProjectRun(db, row, snapshot) {
 			return { recovery: "planner_recovery_failed", incomplete_runs: incomplete.map((run) => run.id), recovery_error: error instanceof Error ? error.message : String(error) };
 		}
 	}
-	return stopCompletedWatcher(db, row, snapshot, "project_completed");
+	return { recovery: "project_completed", watcher_kept: true };
 }
 
 function findOrCreateWatcherWorkspace(snapshot, root, dryRun = false) {
@@ -344,6 +373,7 @@ function launchHerdrWorker({ project, root, db, row, intervalMs, lookbackMs, dry
 	const timestamp = now();
 	db.prepare("UPDATE watcher_projects SET workspace_id = ?, worker_tab_id = ?, worker_pane_id = ?, worker_instance = ?, worker_status = ?, interval_ms = ?, lookback_ms = ?, updated_at = ? WHERE project_key = ?")
 		.run(workspace.workspace_id, tab.tab_id, pane.pane_id, instance, "running", intervalMs, lookbackMs, timestamp, project.key);
+	closeUnusedInitialTab(herdrSnapshot(), workspace.workspace_id, tab.tab_id);
 	return { workspace_id: workspace.workspace_id, tab_id: tab.tab_id, pane_id: pane.pane_id, instance, command, dry_run: dryRun };
 }
 
@@ -371,7 +401,13 @@ function watcherOnce(info, project) {
 
 function doInit(db, info, opts = {}) {
 	const project = ensureProject(db, info, { intervalMs: Math.max(1000, Number(opts.intervalMs || DEFAULT_INTERVAL_MS)), lookbackMs: Math.max(1000, Number(opts.lookbackMs || DEFAULT_LOOKBACK_MS)) });
-	return { project, db_path: dbPath() };
+	// Registration means visible-by-default. `pause`/`leave` are the explicit
+	// opt-out commands; init must not leave a project in a permanently hidden
+	// stopped state that the minute supervisor silently respects.
+	const started = project.worker_status === "paused"
+		? { worker_status: "paused", hidden: true, note: "progetto già messo in pausa esplicitamente" }
+		: launchHerdrWorker({ project: info, root: info.root, db, row: project, intervalMs: project.interval_ms, lookbackMs: project.lookback_ms, dryRun: false });
+	return { project: { ...project, ...(started.worker_status ? { worker_status: started.worker_status } : { worker_status: "running", ...started }) }, db_path: dbPath() };
 }
 
 function doStart(db, info, opts = {}) {
@@ -391,8 +427,11 @@ function doStart(db, info, opts = {}) {
 }
 
 function doPause(db, info, existing) {
+	const snapshot = herdrSnapshot();
+	const closed = existing.worker_tab_id && snapshot?.tabs?.some((tab) => tab.tab_id === existing.worker_tab_id)
+		? closeHerdrTab(existing.worker_tab_id) : { closed: false, reason: "tab_already_absent" };
 	db.prepare("UPDATE watcher_projects SET worker_status = ?, updated_at = ? WHERE project_key = ?").run("paused", now(), existing.project_key);
-	const result = { project: info.name, worker_status: "paused", note: "pausa logica; nessuna tab Herdr viene chiusa e lo stato resta ripristinabile" };
+	const result = { project: info.name, worker_status: "paused", hidden: true, watcher_closed: closed.closed, note: "pausa esplicita: la tab viene nascosta e il supervisore non la riapre" };
 	try { appendRawTraceRecord({ cwd: info.root, project: info.name, record: { type: "watcher_registry_pause", record_type: "event", source: "yano-watcher-registry", instance: "yano-watcher", worker_status: "paused" } }); } catch { /* best effort */ }
 	return result;
 }
@@ -438,9 +477,10 @@ function doStatusForRow(db, row, { heal = true } = {}) {
 	if (!row.worker_pane_id) return { ...base, live: "unknown", drift: false }; // e.g. started with --foreground: not Herdr-managed, nothing this check can observe
 	const snapshot = herdrSnapshot();
 	if (!snapshot) return { ...base, live: "unknown", note: "Herdr non raggiungibile: impossibile verificare lo stato reale" };
+	const identity_conflicts = findAgentIdentityConflicts(snapshot).filter((conflict) => path.resolve(conflict.root) === path.resolve(row.root));
 	const tab = snapshot.tabs?.find((item) => item.tab_id === row.worker_tab_id);
 	const pane = tab && snapshot.panes?.find((item) => item.pane_id === row.worker_pane_id);
-	if (tab && pane) return { ...base, live: "running", ...reconcileProjectRun(db, row, snapshot) };
+	if (tab && pane) return { ...base, live: "running", identity_conflicts, ...reconcileProjectRun(db, row, snapshot) };
 	const drifted = { ...base, live: "not_found", drift: true };
 	if (!heal) return drifted;
 	try {
@@ -512,13 +552,20 @@ function externalWorkerRecovery(snapshot) {
 	if (fs.existsSync(debuggerDb)) {
 		try {
 			const { DatabaseSync } = requireSqlite();
-			const externalDb = new DatabaseSync(debuggerDb, { readOnly: true });
+			const externalDb = new DatabaseSync(debuggerDb);
 			const rows = externalDb.prepare("SELECT root, name, worker_instance FROM debugger_projects WHERE worker_status = 'running'").all();
-			externalDb.close();
 			for (const row of rows) {
+				// A stale running flag is not a request to resurrect a debugger on a
+				// completed project. Debugger follows the same active-run boundary as
+				// watcher; completed/finalized projects must stay closed.
+				if (!projectHasActiveWork(row.root)) {
+					externalDb.prepare("UPDATE debugger_projects SET worker_status = 'stopped', workspace_id = NULL, worker_tab_id = NULL, worker_pane_id = NULL, updated_at = ? WHERE root = ? AND worker_status = 'running'").run(now(), row.root);
+					continue;
+				}
 				const live = snapshot?.agents?.some((agent) => agent.agent === "pi" && agent.name === row.worker_instance && !["done", "offline", "unknown"].includes(agent.agent_status));
 				if (!live) launch(["debugger", "resume", "--project-root", row.root, "--project", row.name, "--json"], { role: "debugger", project: row.name, instance: row.worker_instance });
 			}
+			externalDb.close();
 		} catch (error) { results.push({ role: "debugger", recovered: false, error: error instanceof Error ? error.message : String(error) }); }
 	}
 	// A suggester gets an LLM tab only for a pending analysis. Never recreate an
@@ -551,14 +598,78 @@ function externalWorkerRecovery(snapshot) {
 	return results;
 }
 
+function pruneOrphanWatcherTabs(snapshot, rows) {
+	if (!snapshot) return [];
+	const knownRoots = new Set(rows.map((row) => path.resolve(row.root)));
+	const removed = [];
+	for (const tab of snapshot.tabs || []) {
+		if (!/^watcher-/i.test(tab.label || "")) continue;
+		const pane = (snapshot.panes || []).find((item) => item.tab_id === tab.tab_id);
+		const root = pane?.cwd ? path.resolve(pane.cwd) : null;
+		if (!root || (root !== path.resolve(traceRoot()) && !knownRoots.has(root) && !fs.existsSync(root))) {
+			const closed = closeHerdrTab(tab.tab_id);
+			removed.push({ tab_id: tab.tab_id, label: tab.label, root, ...closed });
+		}
+	}
+	return removed;
+}
+
+function activateDefaultWorkers(db, row) {
+	// Every registered project is visible by default. Only `paused` is an
+	// explicit per-project opt-out; `stopped` is a recoverable stale state.
+	if (row.worker_status !== "stopped" || !fs.existsSync(row.root)) return null;
+	const info = infoFromRow(row);
+	const watcher = doStart(db, info, { intervalMs: row.interval_ms, lookbackMs: row.lookback_ms });
+	return {
+		project: row.name,
+		root: row.root,
+		activated: true,
+		watcher: { worker_status: watcher.worker_status, instance: watcher.instance || null },
+	};
+}
+
+function activateDefaultDebuggers() {
+	const file = path.join(traceRoot(), "debugger", "debugger.sqlite");
+	if (!fs.existsSync(file)) return [];
+	const results = [];
+	try {
+		const { DatabaseSync } = requireSqlite();
+		const db = new DatabaseSync(file, { readOnly: true });
+		const rows = db.prepare("SELECT root, name, worker_status FROM debugger_projects WHERE worker_status = 'stopped'").all();
+		db.close();
+		for (const row of rows) {
+			if (!projectHasActiveWork(row.root)) continue;
+			const args = ["debugger", "start", "--project-root", row.root, "--project", row.name, "--json"];
+			const launched = spawnSync(process.execPath, [path.join(PACKAGE_ROOT, "bin", "yano.mjs"), ...args], { encoding: "utf8", maxBuffer: 4_000_000 });
+			results.push({ role: "debugger", project: row.name, root: row.root, activated: launched.status === 0, error: launched.status === 0 ? null : (launched.stderr || launched.stdout || "debugger start failed").trim() });
+		}
+	} catch (error) {
+		results.push({ role: "debugger", activated: false, error: error instanceof Error ? error.message : String(error) });
+	}
+	return results;
+}
+
 function supervise(db) {
 	return withSupervisorLock(() => {
 		const rows = db.prepare("SELECT * FROM watcher_projects ORDER BY updated_at DESC").all();
 		const snapshot = herdrSnapshot();
+		const orphan_tabs_removed = pruneOrphanWatcherTabs(snapshot, rows);
+		const identityConflicts = snapshot ? findAgentIdentityConflicts(snapshot) : [];
+		for (const conflict of identityConflicts) {
+			const row = rows.find((candidate) => path.resolve(candidate.root) === path.resolve(conflict.root));
+			if (row) appendRawTraceRecord({ cwd: row.root, project: resolveTraceProject(row.root), record: { type: "watcher_identity_conflict", payload: conflict } });
+		}
+		const global_services = ensureGlobalYanoServices();
+		const activated = [...rows.map((row) => activateDefaultWorkers(db, row)).filter(Boolean), ...activateDefaultDebuggers()];
 		const result = {
 			checked_at: now(),
 			projects: rows.map((row) => doStatusForRow(db, row, { heal: true })),
+			activated,
+			global_services,
 			external_workers: externalWorkerRecovery(snapshot),
+			orphan_tabs_removed,
+			identity_conflicts: identityConflicts,
+			errors: formatAgentIdentityConflicts(identityConflicts),
 		};
 		try { fs.writeFileSync(supervisorHeartbeatPath(), JSON.stringify({ checked_at: result.checked_at, pid: process.pid, project_count: rows.length, external_recoveries: result.external_workers }, null, 2), { mode: 0o600 }); } catch { /* best effort */ }
 		return result;
@@ -633,7 +744,7 @@ function usage() {
 		"Uso: yano watcher <init|start|status|pause|resume|leave|supervise|cron|projects> [opzioni]",
 		"",
 		"  init --project-root <dir> [--interval-ms 300000] [--lookback-ms 3600000]",
-		"                                                     registra un progetto nel registro persistente",
+		"                                                     registra e apre subito la tab del watcher",
 		"  start --project-root <dir> [--dry-run]            apre/riusa la tab Herdr del watcher continuo (yano-watcher)",
 		"  start --project-root <dir> --once                 esegue una sola preflight read-only senza avviare Herdr",
 		"  status [--project-root <dir>] [--no-heal] [--json]",
@@ -643,7 +754,7 @@ function usage() {
 		"  leave --project-root <dir> --yes                  rimuove definitivamente il progetto dal registro e chiude la tab se presente",
 		"  supervise [--json]                                controllo globale idempotente; rilancia ogni watcher atteso ma morto",
 		"  cron install|status|remove                        installa/verifica/rimuove il controllo globale ogni minuto",
-		"  projects [--all] [--json]                         presenza Herdr/Pi effettiva (vedi yano watcher projects)",
+		"  projects|list [--json]                             registro persistente, stato e presenza di ogni watcher",
 		"",
 		"`start`/`resume` lanciano il comando bounded/zero-token già esistente",
 		"(`yano watch --interval-ms ... --away`, vedi scripts/watch-stalls.mjs) in una",
@@ -656,9 +767,16 @@ function usage() {
 
 export async function runYanoWatcherRegistry({ argv = [] } = {}) {
 	const opts = parseCommand(argv);
+	if (opts.sub === "list") opts.sub = "projects";
 	if (!opts.sub || opts.sub === "--help" || opts.sub === "-h" || opts.help) { console.log(usage()); return { help: true }; }
 	const db = openDatabase();
 	try {
+		if (opts.sub === "projects") {
+			const rows = db.prepare("SELECT * FROM watcher_projects ORDER BY name, root").all();
+			const result = rows.map((row) => doStatusForRow(db, row, { heal: false }));
+			print(result, opts.json);
+			return result;
+		}
 		if (opts.sub === "init") {
 			const info = projectInfo(opts.projectRoot, opts.project);
 			const result = doInit(db, info, { intervalMs: opts.intervalMs, lookbackMs: opts.lookbackMs });
@@ -672,8 +790,21 @@ export async function runYanoWatcherRegistry({ argv = [] } = {}) {
 			return result;
 		}
 		if (["pause", "resume", "leave"].includes(opts.sub)) {
-			const info = projectInfo(opts.projectRoot, opts.project);
-			const existing = getProject(db, info);
+			// `leave` must also clean stale registrations whose temporary checkout
+			// was deleted (common after smoke tests). Resolve the persisted row by
+			// canonical root before applying the normal directory validation used by
+			// pause/resume/start.
+			let info;
+			let existing;
+			if (opts.sub === "leave" && opts.projectRoot) {
+				const requestedRoot = path.resolve(opts.projectRoot);
+				existing = db.prepare("SELECT * FROM watcher_projects WHERE root = ?").get(requestedRoot);
+				if (existing) info = { root: existing.root, name: existing.name, key: existing.project_key };
+			}
+			if (!info) {
+				info = projectInfo(opts.projectRoot, opts.project);
+				existing ||= getProject(db, info);
+			}
 			if (opts.sub === "leave" && !opts.yes && !opts.dryRun) throw new Error("yano watcher leave: aggiungi --yes per rimuovere definitivamente il progetto dal watcher");
 			if (!existing && opts.sub !== "leave") throw new Error("yano watcher: progetto non registrato; esegui prima `yano watcher init`");
 			const result = opts.sub === "pause" ? doPause(db, info, existing) : opts.sub === "leave" ? doLeave(db, info, existing, { dryRun: opts.dryRun }) : doResume(db, info, existing, { dryRun: opts.dryRun, force: opts.force, intervalMs: opts.intervalMs, lookbackMs: opts.lookbackMs, foreground: opts.foreground });

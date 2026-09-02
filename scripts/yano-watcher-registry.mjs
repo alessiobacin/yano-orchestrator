@@ -38,6 +38,7 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { appendRawTraceRecord, canonicalProjectScope, projectKey, readTraceRecords, resolveTraceProject, traceRoot } from "./yano-trace-storage.mjs";
 import { projectDbPath } from "./yano-project.mjs";
+import { ensureGlobalYanoServices } from "./yano-global-services.mjs";
 
 const require = createRequire(import.meta.url);
 const WORKSPACE_LABEL = "yano-watcher";
@@ -602,11 +603,13 @@ function supervise(db) {
 	return withSupervisorLock(() => {
 		const rows = db.prepare("SELECT * FROM watcher_projects ORDER BY updated_at DESC").all();
 		const snapshot = herdrSnapshot();
+		const global_services = ensureGlobalYanoServices();
 		const activated = [...rows.map((row) => activateDefaultWorkers(db, row)).filter(Boolean), ...activateDefaultDebuggers()];
 		const result = {
 			checked_at: now(),
 			projects: rows.map((row) => doStatusForRow(db, row, { heal: true })),
 			activated,
+			global_services,
 			external_workers: externalWorkerRecovery(snapshot),
 		};
 		try { fs.writeFileSync(supervisorHeartbeatPath(), JSON.stringify({ checked_at: result.checked_at, pid: process.pid, project_count: rows.length, external_recoveries: result.external_workers }, null, 2), { mode: 0o600 }); } catch { /* best effort */ }

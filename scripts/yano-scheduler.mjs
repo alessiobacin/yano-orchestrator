@@ -10,9 +10,13 @@ import { globalDataPath } from "./yano-config.mjs";
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const CRON_MARKER = "# yano-scheduler-supervisor";
-const SCHEDULER_INSTANCE = "yano-scheduler";
+// The workspace remains `yano-scheduler`; the runtime instance uses a neutral
+// name because Herdr classifies names beginning with `yano-` as legacy kinds.
+const SCHEDULER_INSTANCE = "scheduler-service";
 const SCHEDULER_WORKSPACE_LABEL = "yano-scheduler";
-const SCHEDULER_TAB_LABEL = "yano-scheduler";
+// Keep the workspace name canonical, but avoid the legacy `yano-scheduler`
+// tab title: Herdr can infer a non-Pi kind from that title during agent start.
+const SCHEDULER_TAB_LABEL = "scheduler-service";
 const SCHEDULER_AGENT_NAME = `${SCHEDULER_INSTANCE}-${path.basename(PACKAGE_ROOT).replace(/[^a-zA-Z0-9]+/g, "-").toLowerCase()}`.slice(0, 32);
 const DEFAULT_DB = { version: 1, jobs: [], supervisor: { instance: SCHEDULER_INSTANCE, workspace: null, tab_id: null, last_seen_at: null, last_recovered_at: null } };
 
@@ -204,8 +208,11 @@ function superviseAgent(store, now, spawn = spawnSync) {
 	const snapshot = herdrSnapshot(spawn);
 	// Pi's orchestrator extension exposes the instance (`yano-scheduler`) as the
 	// detected agent name, rather than retaining Herdr's requested display name.
-	const isSchedulerAgent = (agent) => (agent.name === SCHEDULER_AGENT_NAME || agent.agent === SCHEDULER_INSTANCE) && !["done", "offline", "unknown"].includes(agent.agent_status);
-	const live = snapshot?.agents?.find(isSchedulerAgent);
+	const isLivePi = (agent) => agent && !["done", "offline", "unknown"].includes(String(agent.agent_status || "").toLowerCase()) && (agent.agent === "pi" || agent.agent_session?.agent === "pi");
+	const schedulerWorkspace = snapshot?.workspaces?.find((workspace) => workspace.label === SCHEDULER_WORKSPACE_LABEL);
+	const schedulerTab = schedulerWorkspace && snapshot?.tabs?.find((tab) => tab.workspace_id === schedulerWorkspace.workspace_id && tab.label === SCHEDULER_TAB_LABEL);
+	const schedulerPane = schedulerTab && snapshot?.panes?.find((pane) => pane.tab_id === schedulerTab.tab_id);
+	const live = schedulerPane && snapshot?.agents?.find((agent) => agent.pane_id === schedulerPane.pane_id && isLivePi(agent));
 	const liveWorkspace = live?.workspace_id ? snapshot?.workspaces?.find((workspace) => workspace.workspace_id === live.workspace_id) : null;
 	if (live && liveWorkspace?.label === SCHEDULER_WORKSPACE_LABEL) {
 		store.supervisor = { ...store.supervisor, instance: SCHEDULER_INSTANCE, workspace: SCHEDULER_WORKSPACE_LABEL, tab_id: live.tab_id || store.supervisor.tab_id || null, last_seen_at: nowIso(now) };
@@ -219,7 +226,7 @@ function superviseAgent(store, now, spawn = spawnSync) {
 	try { args = JSON.parse(composed.stdout || "").args; } catch { return { running: false, recovered: true, instance: SCHEDULER_INSTANCE, status: 1, error: `impossibile comporre il comando Pi scheduler: ${(composed.stderr || composed.stdout || "risposta vuota").trim()}` }; }
 	const result = spawn("herdr", ["agent", "start", SCHEDULER_AGENT_NAME, "--kind", "pi", "--pane", target.pane.pane_id, "--", ...args], { cwd: PACKAGE_ROOT, encoding: "utf8", maxBuffer: 1_000_000, env: process.env });
 	const after = herdrSnapshot(spawn);
-	const started = after?.agents?.find((agent) => agent.pane_id === target.pane.pane_id && isSchedulerAgent(agent));
+	const started = after?.agents?.find((agent) => agent.pane_id === target.pane.pane_id && isLivePi(agent));
 	const running = result.status === 0 || Boolean(started);
 	store.supervisor = { ...store.supervisor, instance: SCHEDULER_INSTANCE, workspace: SCHEDULER_WORKSPACE_LABEL, tab_id: target.tab?.tab_id || null, last_recovered_at: nowIso(now), last_seen_at: running ? nowIso(now) : store.supervisor.last_seen_at };
 	return { running, recovered: true, instance: SCHEDULER_INSTANCE, workspace: SCHEDULER_WORKSPACE_LABEL, tab_id: target.tab?.tab_id || null, status: running ? 0 : (result.status ?? 1), error: running ? null : (String(result.stderr || "").trim().slice(0, 500) || null) };

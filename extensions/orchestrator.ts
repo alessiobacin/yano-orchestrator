@@ -2551,6 +2551,11 @@ export default function (pi: ExtensionAPI) {
 		type: "string",
 		default: undefined,
 	});
+	pi.registerFlag("project-scope", {
+		description: "Stable MQTT scope override for Yano system services; use only for an explicitly shared service namespace.",
+		type: "string",
+		default: undefined,
+	});
 	pi.registerFlag("broker", {
 		description: "MQTT broker URL, e.g. mqtt://localhost:1883 or mqtts://host:8883",
 		type: "string",
@@ -2644,6 +2649,10 @@ export default function (pi: ExtensionAPI) {
 	const inboundQueue = new Map<string, InboundContext>();
 	const seenAssignments = new Map<string, number>(); // assignment_id -> seenAt, QoS1 redelivery dedupe
 	const activityLog: ActivityEvent[] = [];
+	// Live tool inventory for the bottom widget. Entries exist only between the
+	// Pi tool start/end hooks, so the panel describes what is happening now,
+	// not a stale history of previous calls.
+	const activeOperations = new Map<string, { kind: string; label: string; started_at: number }>();
 	let heartbeatTimer: NodeJS.Timeout | null = null;
 	let staleSweepTimer: NodeJS.Timeout | null = null;
 	let watchdogTimer: NodeJS.Timeout | null = null;
@@ -2722,6 +2731,36 @@ export default function (pi: ExtensionAPI) {
 	function pushActivity(ev: ActivityEvent) {
 		activityLog.push(ev);
 		if (activityLog.length > ACTIVITY_LOG_CAP) activityLog.shift();
+	}
+	function operationId(event: any): string {
+		return String(event?.toolCallId ?? event?.tool_call_id ?? event?.id ?? `tool-${Date.now()}-${Math.random()}`);
+	}
+	function operationLabel(event: any): { kind: string; label: string } {
+		const raw = event?.toolName ?? event?.tool_name ?? event?.name;
+		const args = event?.args ?? event?.input ?? event?.parameters ?? {};
+		const mcpDetail = typeof args === "object" && args
+			? [args.server, args.server_name, args.mcp_server, args.tool, args.tool_name].filter(Boolean).join("/")
+			: "";
+		const name = mcpDetail || String(raw || "tool");
+		if (name === "agent_send" || name === "agent_await" || name === "agent_get" || name === "agent_list") return { kind: "AGENT", label: name };
+		if (/^(mcp__|mcp[-_:]|[A-Za-z0-9_-]+\.)/.test(name) || name.includes("mcp")) return { kind: "MCP", label: name.replace(/^mcp__/, "") };
+		if (["bash", "read", "write", "edit", "grep", "find", "ls", "command", "shell"].includes(name)) return { kind: "CLI", label: name };
+		if (/playbook|plan_/i.test(name)) return { kind: "PLAYBOOK", label: name };
+		return { kind: "TOOL", label: name };
+	}
+	function beginOperation(event: any): void {
+		const operation = operationLabel(event);
+		activeOperations.set(operationId(event), { ...operation, started_at: Date.now() });
+		requestPoolRedraw();
+	}
+	function endOperation(event: any): void {
+		const id = operationId(event);
+		if (activeOperations.has(id)) activeOperations.delete(id);
+		else {
+			const tool = String(event?.toolName ?? event?.tool_name ?? event?.name ?? "");
+			for (const [key, operation] of activeOperations) if (operation.label === tool) activeOperations.delete(key);
+		}
+		requestPoolRedraw();
 	}
 
 	// ━━ Global trace store ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -3248,7 +3287,7 @@ export default function (pi: ExtensionAPI) {
 			identity = null;
 			return;
 		}
-		T = topics(project, process.env.PI_ORCH_TEST_NO_EXIT === "1" ? project : projectKey(cwd, project));
+		T = topics(project, process.env.PI_ORCH_TEST_NO_EXIT === "1" ? project : (flags.projectScope || projectKey(cwd, project)));
 
 		// `yano start` supplies an expected mode. Enforce it at the extension
 		// boundary too, so an old project config cannot silently downgrade a new
@@ -3557,6 +3596,7 @@ export default function (pi: ExtensionAPI) {
 	// best-effort so older Pi builds can still load the extension; when present
 	// they provide the tool inventory needed by `yano trace --mode full`.
 	pi.on("tool_execution_start", async (event: any) => {
+		beginOperation(event);
 		// A tool call is observable progress for every running ticket owned by
 		// this instance. Refresh the SQLite progress clock so a long but active
 		// implementation/review cycle is not mistaken for a stalled ticket.
@@ -3574,6 +3614,7 @@ export default function (pi: ExtensionAPI) {
 		tracePayload("tool_execution_start_payload", { tool_call_id: event?.toolCallId ?? event?.tool_call_id ?? null, args: event?.args ?? null }, "standard");
 	});
 	pi.on("tool_execution_end", async (event: any) => {
+		endOperation(event);
 		logEvent("tool_execution_end", {
 			tool_call_id: event?.toolCallId ?? event?.tool_call_id ?? null,
 			tool: event?.toolName ?? event?.tool_name ?? event?.name ?? null,
@@ -3632,7 +3673,7 @@ export default function (pi: ExtensionAPI) {
 		const pad = Math.max(0, w - visibleWidth(left) - visibleWidth(right));
 		const header = truncateToWidth(`${left}${" ".repeat(pad)}${right}`, w);
 
-		const rows = mqttConnected
+		const presenceRows = mqttConnected
 			? [...presence.values()].map((c) => {
 				const dotColor = c.status === "idle" ? "success" : c.status === "busy" ? "warning" : "error";
 				const modelPart = c.model ? theme.fg("dim", ` · ${c.model}`) : "";
@@ -3640,8 +3681,30 @@ export default function (pi: ExtensionAPI) {
 				return truncateToWidth(line, w);
 			})
 			: [];
-		if (mqttConnected && rows.length === 0) {
-			rows.push(truncateToWidth(theme.fg("dim", "  (nessun altro agente online per ora)"), w));
+		if (mqttConnected && presenceRows.length === 0) {
+			presenceRows.push(truncateToWidth(theme.fg("dim", "  (nessun altro agente online per ora)"), w));
+		}
+
+		// The widget itself spans the bottom area exposed by Pi. Reserve a
+		// right-hand column inside it for transient operations while retaining
+		// the peer roster on the left. Every rendered line is truncated to the
+		// safety-budgeted width to keep Pi's TUI crash guard satisfied.
+		const operations = [...activeOperations.values()].slice(-8);
+		if (operations.length === 0) return [header, ...presenceRows];
+		const rightWidth = Math.min(52, Math.max(30, Math.floor(w * 0.42)));
+		const leftWidth = Math.max(0, w - rightWidth - 3);
+		const rightRows = operations.map((operation) => {
+			const playbook = identity.playbook ? ` · ${identity.playbook}` : "";
+			const text = `${operation.kind} ${operation.label}${operation.kind !== "PLAYBOOK" ? playbook : ""}`;
+			return theme.fg(operation.kind === "MCP" ? "accent" : operation.kind === "AGENT" ? "warning" : "muted", text);
+		});
+		const rows = [];
+		const count = Math.max(presenceRows.length, rightRows.length);
+		for (let index = 0; index < count; index++) {
+			const left = truncateToWidth(presenceRows[index] || "", leftWidth);
+			const right = rightRows[index] ? truncateToWidth(rightRows[index], rightWidth) : "";
+			const gap = " ".repeat(Math.max(1, w - visibleWidth(left) - visibleWidth(right)));
+			rows.push(truncateToWidth(`${left}${gap}${right}`, w));
 		}
 		return [header, ...rows];
 	}
@@ -3753,7 +3816,14 @@ export default function (pi: ExtensionAPI) {
 			} catch {
 				// best-effort — never let a logging failure hide a real stall from the other channels below
 			}
-			void yanoPublishEvent(s.run_id, "ticket_stalled", { ticket_id: s.ticket_id, title: s.title, assigned_instance: s.assigned_instance, elapsed_ms: s.elapsed_ms });
+			// Await the publish (with a bound) before completing this sweep. A
+			// fire-and-forget publish could be overtaken by the next turn or by
+			// shutdown, leaving the planner notified locally while peers never
+			// receive the durable `ticket_stalled` signal.
+			await withTimeout(
+				yanoPublishEvent(s.run_id, "ticket_stalled", { ticket_id: s.ticket_id, title: s.title, assigned_instance: s.assigned_instance, elapsed_ms: s.elapsed_ms }),
+				2000,
+			);
 			logEvent("watchdog_stall_detected", { run_id: s.run_id, ticket_id: s.ticket_id, assigned_instance: s.assigned_instance, elapsed_ms: s.elapsed_ms, threshold_level: thresholdLevel });
 
 			const waMessage =

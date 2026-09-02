@@ -1,0 +1,55 @@
+schema_version: 1
+id: computer-local-operations
+label: Computer locale — operazioni Apple
+description: Consultazione e gestione controllata delle risorse Apple locali tramite MCP.
+states:
+  - id: received
+    owner: computer-local
+    terminal: false
+  - id: consulting
+    owner: computer-local
+    terminal: false
+  - id: awaiting_confirmation
+    owner: user
+    terminal: false
+  - id: completed
+    owner: computer-local
+    terminal: true
+  - id: blocked
+    owner: computer-local_and_user
+    terminal: true
+transitions:
+  - id: consult
+    from: received
+    to: consulting
+    actor: computer-local
+    requires: [request_scoped]
+  - id: ask_confirmation
+    from: consulting
+    to: awaiting_confirmation
+    actor: computer-local
+    requires: [mutation_or_external_send]
+  - id: complete_read_only
+    from: consulting
+    to: completed
+    actor: computer-local
+    requires: [response_with_source_and_time]
+  - id: complete_confirmed
+    from: awaiting_confirmation
+    to: completed
+    actor: computer-local
+    requires: [user_confirmation, action_result_reported]
+invariants:
+  - id: isolated_scope
+    description: The service never uses an application project scope.
+  - id: confirm_mutations
+    description: Writes, deletes and external messages require explicit confirmation.
+  - id: no_secret_echo
+    description: Credentials are never included in reports or responses.
+failure_routes:
+  - condition: mcp_unavailable
+    action: report_unavailable_capability_and_stop
+    terminal: true
+  - condition: confirmation_missing
+    action: keep_request_pending_without_mutation
+    terminal: false

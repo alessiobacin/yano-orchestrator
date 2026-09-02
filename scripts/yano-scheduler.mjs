@@ -224,7 +224,7 @@ function superviseAgent(store, now, spawn = spawnSync) {
 	if (live?.tab_id) spawn("herdr", ["tab", "close", live.tab_id], { encoding: "utf8", maxBuffer: 1_000_000 });
 	let target;
 	try { target = ensureSchedulerWorkspace(spawn); } catch (error) { return { running: false, recovered: true, instance: SCHEDULER_INSTANCE, status: 1, error: error.message }; }
-	const composed = spawn(process.execPath, [path.join(PACKAGE_ROOT, "scripts", "launch-planner.mjs"), "--instance", SCHEDULER_INSTANCE, "--role", "scheduler", "--json", "--print-only"], { cwd: PACKAGE_ROOT, encoding: "utf8", maxBuffer: 1_000_000, env: process.env });
+	const composed = spawn(process.execPath, [path.join(PACKAGE_ROOT, "scripts", "launch-planner.mjs"), "--instance", SCHEDULER_INSTANCE, "--role", "scheduler", "--project", "yano-scheduler", "--project-scope", "yano-system", "--json", "--print-only"], { cwd: PACKAGE_ROOT, encoding: "utf8", maxBuffer: 1_000_000, env: process.env });
 	let args;
 	try { args = JSON.parse(composed.stdout || "").args; } catch { return { running: false, recovered: true, instance: SCHEDULER_INSTANCE, status: 1, error: `impossibile comporre il comando Pi scheduler: ${(composed.stderr || composed.stdout || "risposta vuota").trim()}` }; }
 	// Do not use `herdr agent start` here: Herdr infers the agent kind from the

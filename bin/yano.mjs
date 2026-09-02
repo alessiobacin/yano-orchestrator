@@ -89,6 +89,7 @@ import { runYanoHarnessSkills } from "../scripts/install-yano-cli.mjs";
 import { runYanoProjects } from "../scripts/yano-projects.mjs";
 import { runYanoRules } from "../scripts/yano-rules.mjs";
 import { runYanoScheduler } from "../scripts/yano-scheduler.mjs";
+import { runYanoComputerLocal } from "../scripts/yano-computer-local.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, "..");
@@ -137,6 +138,7 @@ function printTopUsage() {
 			"  rule [opzioni]   Gestisce regole globali e per-progetto — `yano rule --help`",
 			"  schedule [opzioni] Crea job ricorrenti tracciati; cron persistente e ripulibile — `yano schedule --help`",
 			"  cron [opzioni]  CRUD naturale dei job ricorrenti e supervisore yano-scheduler — `yano cron --help`",
+			"  computer start|status|ask  Computer locale persistente con MCP Apple — `yano computer --help`",
 			"  data [opzioni]    Mostra o migra il data-root globale — `yano data --help`",
 			"  pause [opzioni]  Salva uno snapshot non distruttivo e mette in pausa i run",
 			"  resume [opzioni] Ripristina uno snapshot e riapre gli agenti mancanti",
@@ -207,6 +209,10 @@ async function main() {
 	}
 	if (sub === "schedule") {
 		await runYanoScheduler({ argv: rest });
+		return;
+	}
+	if (sub === "computer") {
+		await runYanoComputerLocal({ argv: rest });
 		return;
 	}
 	if (sub === "cron") {

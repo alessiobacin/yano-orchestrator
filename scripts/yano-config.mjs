@@ -41,6 +41,7 @@ export const CONFIG_SPECS = Object.freeze([
 	{ key: "DESTINATION_PHONE_NUMBER", description: "numero WhatsApp destinatario" },
 	{ key: "TELEGRAM_BOT_TOKEN", secret: true, description: "token del bot Telegram" },
 	{ key: "TELEGRAM_DESTINATION_CHAT_ID", description: "chat Telegram destinataria" },
+	{ key: "YANO_COMPUTER_LOCAL_ASSEMBLYAI_API_KEY", secret: true, description: "chiave AssemblyAI per il MCP dei memo vocali del Computer locale" },
 	{ key: "SENDGRID_API_KEY", secret: true, description: "chiave API SendGrid" },
 	{ key: "SENDGRID_FROM_EMAIL", description: "mittente SendGrid verificato" },
 	{ key: "SENDGRID_TO_EMAIL", description: "destinatario/i SendGrid separati da virgola" },

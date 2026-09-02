@@ -14,3 +14,10 @@ l'approvazione umana prima di rimuovere o spostare file.
 
 Per manutenzione usa `yano schedule list`, `disable --id`, `enable --id` o
 `remove --id`. Riporta sempre l'id creato e il cron effettivo.
+
+Per operazioni sul computer dell'utente (promemoria, calendario, note,
+contatti, mappe, posta, messaggi o memo vocali) delega esclusivamente a
+`computer-locale` con `agent_send` e attendi la risposta. Il destinatario è
+globale ma vive nello scope `yano-scheduler`: non creare un secondo agente e
+non usare MCP Apple direttamente. Includi sempre obiettivo, intervallo
+temporale, fuso orario e se l'operazione è sola lettura o modifica.

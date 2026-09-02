@@ -427,6 +427,17 @@ roles:
     mcp: []
     teams: [automation, core]
 
+  computer-local:
+    activation: always
+    playbook: computer-local-operations
+    label: "Computer locale"
+    brief: "Agente globale persistente per consultare e gestire le risorse Apple locali tramite MCP. Rispondi all'utente o allo scheduler, chiedi conferma prima di azioni distruttive o comunicazioni esterne e non accedere mai ai progetti Yano come se fossero il computer locale."
+    model: { provider: llmproxy, model: llmproxy }
+    skills: [yano-cli, yano-planner-trace-analysis]
+    cli: [node, yano]
+    mcp: [apple-notes, apple-messages, apple-contacts, apple-reminders, apple-calendar, apple-maps, apple-mail, apple-voice-memos]
+    teams: [system]
+
   # Fase 5 — Manutenzione & Debito tecnico
   dependency-health:
     activation: lazy

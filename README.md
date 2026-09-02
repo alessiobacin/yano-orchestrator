@@ -201,6 +201,8 @@ yano watcher projects --all --json          # tutti i progetti registrati, anche
 yano watcher resume --project-root /path/progetto  # riattiva esplicitamente un progetto idle
 yano cron --add "ogni giorno alle 14 e alle 21 esegui la pulizia del progetto" --project-root "$PWD"
 yano cron --list --json                     # job persistenti; il supervisore riapre yano-scheduler ogni minuto
+yano computer status                         # servizio globale Computer locale
+yano computer ask --prompt "Controlla promemoria e calendario di oggi"
 yano config path                 # percorso della configurazione globale utente
 yano config list --all           # variabili configurabili, segreti oscurati
 yano config set YANO_ORCHESTRATOR_REPO /path/to/yano-orchestrator

@@ -127,6 +127,14 @@ per una revisione semantica approfondita il Watcher deve ricevere un round o
 un controllo esplicito e deve riportare evidenze, non dichiarare il flusso sano
 solo perché il processo di polling è vivo.
 
+Ad ogni passata il supervisore esegue inoltre un health check deterministico dei
+servizi persistenti (`watcher-service`, `debugger-service` e `scheduler-service`):
+verifica workspace/tab/pane, processo Pi foreground e stato effettivo Herdr con
+`agent explain`. Questo controllo non usa token né chiama un modello. Se uno dei
+segnali non è coerente, il supervisore chiude e ricrea soltanto il servizio
+interessato, registrando il recupero; l’agente viene coinvolto solo dopo questa
+anomalia locale.
+
 Ogni passata lascia nel trace un evento `yano_watcher_scan`, con data e ora di
 inizio (`started_at`), fine (`completed_at`), durata, esito, numero di finding e
 stall. Per controllare la ricorrenza:

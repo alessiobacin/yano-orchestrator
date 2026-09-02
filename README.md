@@ -199,8 +199,13 @@ yano watcher supervise --json              # verifica anche collisioni di identi
 yano leave --yes                            # dalla root: rimuove definitivamente solo il watcher del progetto
 yano watcher projects --all --json          # tutti i progetti registrati, anche senza task attivi
 yano watcher resume --project-root /path/progetto  # riattiva esplicitamente un progetto idle
-yano cron --add "ogni giorno alle 14 e alle 21 esegui la pulizia del progetto" --project-root "$PWD"
-yano cron --list --json                     # job persistenti; il supervisore riapre yano-scheduler ogni minuto
+yano schedule add --name <nome> --project-root "$PWD" --script <path> --mode self --cron '0 14,21 * * *' --expected-consequence "riepilogo inviato"  # script-first: al trigger esegue LO SCRIPT registrato
+yano schedule run <id>                              # testa lo script subito, prima di renderlo ricorrente
+yano schedule list --json                           # job con script_path, mode, expected_consequence, stato
+yano invoke --role planner:<progetto> --prompt "riepiloga lo stato" --project-root "$PWD"   # bridge deterministico dagli script (wake planner)
+yano invoke --role computer-locale --prompt "promemoria tra 10 minuti"                      # delega a computer-locale
+yano cron --add "ogni giorno alle 14 e alle 21 esegui la pulizia del progetto" --project-root "$PWD"  # legacy testo+cron (dispatch planner col testo)
+yano cron --list --json                     # legacy; il supervisore riapre yano-scheduler ogni minuto
 yano computer status                         # servizio globale Computer locale
 yano computer ask --prompt "Controlla promemoria e calendario di oggi"
 # yano services: registro di servizi esterni (Docker/pm2/comando) che Yano non possiede ma da cui dipende

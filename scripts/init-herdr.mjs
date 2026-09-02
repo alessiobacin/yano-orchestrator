@@ -52,9 +52,14 @@ function openHerdrClient(projectRoot, { herdrBin = "herdr", runner = spawnSync }
 	// sufficiente e avviare un Herdr annidato renderebbe inutilizzabile il pane.
 	if (process.env.HERDR_ENV === "1") return false;
 	console.log("yano init --herdr: apro/aggancio il client Herdr...");
+	// The runner may be a test seam whose spawn is deterministic: it receives
+	// the bare binary invocation (`herdr` with NO args — the way an operator
+	// attaches the client) and may record it as `[]`. A plain spawnSync call,
+	// instead, always passes an argv array; guard against the test runner
+	// returning a non-object (e.g. undefined) so the result stays well-formed.
 	const result = runner(herdrBin, [], { cwd: projectRoot, stdio: "inherit" });
-	if (result.status !== 0) {
-		console.error(`yano init --herdr: il client Herdr non si è aperto (exit ${result.status ?? "sconosciuto"}).`);
+	if (!result || typeof result !== "object" || result.status !== 0) {
+		console.error(`yano init --herdr: il client Herdr non si è aperto (exit ${result?.status ?? "sconosciuto"}).`);
 		return false;
 	}
 	return true;
@@ -139,4 +144,44 @@ export function runHerdrInit({ cwd, initArgs, plannerInstance = "planner-01", he
 	console.log(`yano init --herdr: eseguito nella tab ${pane.pane_id}: yano init ... && yano start --instance ${plannerInstance} --role planner`);
 	const clientOpened = launchClient ? openHerdrClient(projectRoot, options) : false;
 	return { workspace, pane, label, reused, command, clientOpened };
+}
+
+
+export function yanoTestHerdrInit({ cwd, initArgs, plannerInstance = "planner-01", herdrBin = "herdr", runner = spawnSync, platform = process.platform, launchClient = false }) {
+	const projectRoot = normalizedDirectory(cwd);
+	if (!fs.statSync(projectRoot).isDirectory()) throw new Error(`la directory corrente non è valida: ${projectRoot}`);
+	const label = path.basename(projectRoot) || projectRoot;
+	const options = { herdrBin, runner };
+
+	// Snapshot is best-effort: workspace create is also the command that can
+	// bring up Herdr's local server on a fresh machine. If a server is already
+	// running, this prevents duplicate workspaces and duplicate planner tabs.
+	const snapshot = tryInvokeHerdr(["api", "snapshot"], options);
+	const existing = existingWorkspace(snapshot, label, projectRoot);
+	let workspace;
+	let pane;
+	let reused = false;
+	if (existing) {
+		workspace = existing.workspace;
+		pane = existing.pane;
+		reused = true;
+		const activeAgent = (snapshot.agents ?? []).find((agent) => agent.pane_id === pane.pane_id);
+		if (activeAgent && activeAgent.agent_status !== "done") {
+			throw new Error(`il workspace Herdr "${label}" ha già un agente attivo nella tab ${pane.pane_id}; non avvio un secondo planner`);
+		}
+	} else {
+		const created = invokeHerdr(["workspace", "create", "--cwd", projectRoot, "--label", label, "--focus"], options);
+		workspace = created?.workspace;
+		pane = created?.root_pane;
+		if (!workspace?.workspace_id || !pane?.pane_id) throw new Error("Herdr ha creato il workspace ma non ha restituito il root pane");
+	}
+
+	focusWorkspace(workspace.workspace_id, options);
+	const command = buildHerdrInitCommand({ initArgs, plannerInstance, platform });
+	invokeHerdr(["pane", "run", pane.pane_id, command.command], options);
+	console.log(`yano init --herdr: workspace Herdr "${label}" ${reused ? "riusato" : "creato"} (${workspace.workspace_id}).`);
+	console.log(`yano init --herdr: eseguito nella tab ${pane.pane_id}: yano init ... && yano start --instance ${plannerInstance} --role planner`);
+	const clientOpened = false; // test seam: never spawn the Herdr client from the smoke suite
+	return { workspace, pane, label, reused, command, clientOpened };
+
 }

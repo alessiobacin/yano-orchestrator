@@ -96,6 +96,7 @@ import { runYanoHarnessSkills } from "../scripts/install-yano-cli.mjs";
 import { runYanoProjects } from "../scripts/yano-projects.mjs";
 import { runYanoRules } from "../scripts/yano-rules.mjs";
 import { runYanoScheduler } from "../scripts/yano-scheduler.mjs";
+import { runYanoInvoke } from "../scripts/yano-invoke.mjs";
 import { runYanoComputerLocal } from "../scripts/yano-computer-local.mjs";
 import { runYanoServices } from "../scripts/yano-services.mjs";
 import { runYanoDocsCheck } from "../scripts/yano-docs-check.mjs";
@@ -148,7 +149,7 @@ function printTopUsage() {
 			"  playbook|agent [opzioni] Catalogo read-only di playbook, ruoli e capability",
 			"  config [opzioni] Gestisce la configurazione globale utente — `yano config --help`",
 			"  rule [opzioni]   Gestisce regole globali e per-progetto — `yano rule --help`",
-			"  schedule [opzioni] Crea job ricorrenti tracciati; cron persistente e ripulibile — `yano schedule --help`",
+			"  schedule [opzioni] Crea job ricorrenti a script; cron persistente e ripulibile — `yano schedule --help`",
 			"  cron [opzioni]  CRUD naturale dei job ricorrenti e supervisore yano-scheduler — `yano cron --help`",
 			"  computer start|status|ask  Computer locale persistente con MCP Apple — `yano computer --help`",
 			"  services [opzioni] Registro servizi esterni (Docker/pm2/comando) con health-check e restart deterministico — `yano services --help`",
@@ -222,6 +223,10 @@ async function main() {
 	}
 	if (sub === "schedule") {
 		await runYanoScheduler({ argv: rest });
+		return;
+	}
+	if (sub === "invoke") {
+		await runYanoInvoke({ argv: rest });
 		return;
 	}
 	if (sub === "computer") {

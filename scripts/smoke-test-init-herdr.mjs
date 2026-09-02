@@ -22,7 +22,10 @@ const runner = (_binary, args) => {
 	throw new Error(`unexpected Herdr call: ${args.join(" ")}`);
 };
 
-const result = runHerdrInit({ cwd: root, initArgs: ["--name", "Focus 'Board'", "--llmp"], runner, herdrBin: "herdr", platform: "linux", launchClient: true });
+const saveHerdrEnv = process.env.HERDR_ENV;
+		delete process.env.HERDR_ENV; // test seam: runHerdrInit must see a plain shell, not the agent harness env
+		const result = runHerdrInit({ cwd: root, initArgs: ["--name", "Focus 'Board'", "--llmp"], runner, herdrBin: "herdr", platform: "linux", launchClient: true });
+		if (saveHerdrEnv) process.env.HERDR_ENV = saveHerdrEnv;
 assert.equal(result.workspace.workspace_id, "w-smoke");
 assert.equal(result.pane.pane_id, "w-smoke:p1");
 assert.equal(calls[1][0], "workspace");
@@ -62,6 +65,7 @@ const reuseRunner = (_binary, args) => {
 	if (args.length === 0) return { status: 0, stdout: "", stderr: "" };
 	throw new Error(`unexpected reuse Herdr call: ${args.join(" ")}`);
 };
+delete process.env.HERDR_ENV; // test seam (same as first call block)
 const reused = runHerdrInit({ cwd: root, initArgs: ["--name", "Focus Board"], runner: reuseRunner, herdrBin: "herdr", platform: "linux", launchClient: true });
 assert.equal(reused.reused, true);
 assert.equal(reuseCalls.filter((args) => args[0] === "workspace" && args[1] === "create").length, 0);

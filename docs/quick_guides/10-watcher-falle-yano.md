@@ -298,6 +298,24 @@ uno di questi eventi, accoda una sola scansione finale immediata e avvisa il
 planner se trova un problema; poi riprende la cadenza configurata. Il trace
 contiene `yano_watcher_final_scan_requested` e lo scan finale con `once: true`.
 
+## Rumore: fixture di test e ticket senza recidiva
+
+Un progetto il cui nome segue la convenzione delle fixture degli smoke test di
+Yano (`*-smoke`, `manual-e2e-*`/`manual e2e *`, case-insensitive) non apre mai
+un ticket, un alert Telegram o un bug nel registro debugger: il finding resta
+comunque visibile nel trace di quel progetto come
+`yano_watcher_finding_suppressed`. È un'euristica sui nomi, non sul percorso:
+personalizzabile con `YANO_WATCHER_TEST_FIXTURE_PATTERN` (una regex) o
+disattivabile del tutto con `YANO_WATCHER_SKIP_TEST_FIXTURES=0`.
+
+Un ticket aperto dal watcher che non si ripresenta più (stesso fingerprint) per
+`YANO_WATCHER_STALE_TICKET_DAYS` giorni (default 14) viene chiuso in automatico
+come `auto-closed-stale` da una sweep che gira, con un throttle di
+`YANO_WATCHER_STALE_SWEEP_INTERVAL_MS` (default sei ore), dentro la normale
+cadenza di polling — non tocca mai un ticket aperto da una persona o già
+risolto. Se lo stesso guasto si ripresenta dopo la chiusura automatica, il
+ticket viene riaperto al passaggio successivo invece di perdere il segnale.
+
 ## Dove leggere il risultato
 
 I ticket sono nel repository Yano e sono pensati per essere presi da un LLM:

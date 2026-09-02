@@ -302,6 +302,23 @@ returns an actionable configuration error instead of silently losing the
 maintenance ticket. The future `yano-debugger` can consume these files; until
 then they are deliberately ordinary Markdown tickets for an LLM.
 
+Two further guards keep escalation signal rather than noise (`scripts/yano-watcher-findings.mjs`).
+First, a project name matching the fixture convention Yano's own smoke tests
+use (`*-smoke`, `manual-e2e-*`/`manual e2e *`, case-insensitive) never opens a
+maintenance ticket, Telegram alert or debugger-registry bug — the finding
+still lands in that project's own trace as `yano_watcher_finding_suppressed`
+for observability. This is a heuristic, overridable with
+`YANO_WATCHER_TEST_FIXTURE_PATTERN` (a custom regex) and disable-able entirely
+with `YANO_WATCHER_SKIP_TEST_FIXTURES=0`. Second, a watcher-authored ticket
+that never recurs (same fingerprint never seen again, including on a later
+dedup hit) for `YANO_WATCHER_STALE_TICKET_DAYS` (default 14) is automatically
+marked `auto-closed-stale` by a throttled sweep (`YANO_WATCHER_STALE_SWEEP_INTERVAL_MS`,
+default six hours) that runs as part of the ordinary polling pass — it never
+touches a human- or debugger-authored ticket, or one already resolved. Every
+dedup hit on an open ticket also bumps a `last_seen_at` timestamp; if the same
+fault recurs after auto-close, the next dedup hit reopens the ticket instead
+of silently dropping the signal.
+
 Routing is presence-aware: with at least one live planner, the watcher sends a
 direct MQTT command to each live planner instance; if no live planner exists,
 it sends the alert to Telegram. A project with no agents and no detected fault

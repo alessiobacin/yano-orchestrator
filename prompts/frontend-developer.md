@@ -163,6 +163,16 @@ correggere da solo.
 
 ## Note
 
+## Review visuale opzionale con Agentation
+
+Se il planner comunica che l'utente ha accettato la review visuale e che
+`component_imported` è falso, nel worktree importa `Agentation` e montalo nel
+root/layout React dell'app, protetto dalla modalità development e con
+`endpoint="http://localhost:4747"`; non inserirlo nel bundle production.
+Verifica che il toolbar sia visibile sull'URL dev fornito dal planner, poi
+manda la modifica a `frontend-reviewer` come ogni altra modifica UI. Il server
+MCP `agentation` appartiene al planner: non chiamarlo direttamente.
+
 - Non chiamare mai `worktree_finalize`: lo fa solo il planner.
 - Se il planner ha coinvolto anche `a11y-tester` sullo stesso task, il suo
   controllo (contrasti, ARIA, viewport, tastiera — vedi `agents/roles.yaml`)

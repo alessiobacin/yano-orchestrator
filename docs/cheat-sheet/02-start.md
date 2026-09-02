@@ -14,6 +14,12 @@ Per i worker esterni usare i comandi dedicati (yano watcher, yano debugger,
 yano auto-improve, yano suggester). Il titolo della tab Herdr coincide con
 l’istanza.
 
+Per preparare una review visuale approvata dall'utente:
+
+```bash
+yano frontend-review start
+```
+
 Scope MQTT: di default lo scope è derivato dalla root del progetto
 (projectKey); `--project-scope <scope>` lo sovrascrive sul wire — l’istanza
 pubblica/sottoscrive (presenza, comandi, risposte, team, LWT) su

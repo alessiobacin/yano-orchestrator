@@ -102,6 +102,7 @@ import { runYanoServices } from "../scripts/yano-services.mjs";
 import { runYanoDocsCheck } from "../scripts/yano-docs-check.mjs";
 import { runYanoQaInventory } from "../scripts/yano-qa-inventory.mjs";
 import { runYanoAgentMcp } from "../scripts/yano-agent-mcp.mjs";
+import { runFrontendReview } from "../scripts/yano-frontend-review.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, "..");
@@ -131,6 +132,7 @@ function printTopUsage() {
 			'  end [opzioni]    Chiude i run "active" del progetto nella directory corrente — `yano end --help`',
 			'  leave [--project-root <dir>] --yes Rimuove definitivamente il progetto corrente dal registro watcher',
 			"  copy-prompts     Copia prompts/ dal pacchetto installato nel progetto corrente, per personalizzarli",
+			"  frontend-review setup|start  Prepara Agentation e avvia il frontend dev con URL inferito",
 			"  status|logs|fleet|mcp          Viste read-only del progetto e della flotta",
 			"  projects [--json]             Conta i progetti Yano con agenti live in Herdr",
 			"  skills install|status        Installa/verifica yano-cli negli harness globali",
@@ -212,6 +214,10 @@ async function main() {
 	}
 	if (sub === "copy-prompts") {
 		runCopyPrompts({ packageRoot, cwd });
+		return;
+	}
+	if (sub === "frontend-review") {
+		await runFrontendReview({ cwd, argv: rest });
 		return;
 	}
 	if (sub === "projects") {

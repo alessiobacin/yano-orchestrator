@@ -16,7 +16,7 @@ roles:
       - yano-planner-trace-analysis
       - yano-cli
     cli: [git, npm, npx]
-    mcp: [github]
+    mcp: [github, agentation]
     teams:
       - core
 

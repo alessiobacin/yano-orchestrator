@@ -627,7 +627,7 @@ export async function runCreateProject({ packageRoot, cwd, argv, preflightTools 
 	console.log(`Fatto. Prossimi passi${inPlace ? "" : ` (cd ${targetDir})`}:`);
 	console.log(`  ${copyEnvCmd}   # facoltativo, per la notifica WhatsApp di fine task`);
 	console.log(
-		"  .mcp.json è già attivo: chrome-devtools e GitHub MCP sono stati dichiarati automaticamente; autentica GitHub alla prima connessione",
+		"  .mcp.json è già attivo: chrome-devtools, Agentation e GitHub MCP sono stati dichiarati automaticamente; autentica GitHub alla prima connessione",
 	);
 	console.log("  docker compose -f mqtt/compose.yaml up -d   # broker MQTT locale (Docker Desktop su Windows), oppure punta --broker a uno esistente");
 	if (isWindows) {

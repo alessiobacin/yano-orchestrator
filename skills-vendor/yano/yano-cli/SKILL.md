@@ -53,6 +53,7 @@ Use the smallest command that answers the request. Typical translations are:
 | Initialize a new or existing repository | `yano init --name "<name>"` (or `--no-git` for a conversation-only folder) | Requires `cm`; initializes Code Mem with `cm init pi`, then preserves application files while adding missing Yano infrastructure |
 | Initialize and open Herdr with planner | `yano init --name "<name>" --herdr` | Herdr workspace, root pane, and `planner-01` launch |
 | Start an agent in Herdr | `yano start --herdr --instance <id> --role <role>` | verifies workspace label + project root before tab creation |
+| Prepare a visual frontend review | `yano frontend-review start` | installs project-local React `agentation`, infers the dev script/URL and starts the development app after user consent |
 | Start an instance on a STABLE MQTT scope (global services) | `yano start --instance scheduler-service --role scheduler --project yano-scheduler --project-scope yano-system` | the runtime reads `--project-scope` (readCliFlags): the instance publishes/subscribes on `pi/<scope>/**` (presence, commands, responses, teams, LWT); without the flag the scope is derived from the project root (`projectKey(cwd)`) |
 | Check or change trace capture | `yano trace status`, `yano trace enable --mode full` | global per-user data root and effective mode |
 | Investigate a specific failure | `yano trace context ... --json`, then `yano trace search ... --mode hybrid --json` | filtered evidence before broad history |

@@ -37,3 +37,11 @@ il motivo per cui non è disponibile nel report.
    planner chiude e finalizza il worktree.
 
 Flusso obbligatorio: `planner → frontend-developer → frontend-reviewer → planner`.
+
+Quando Agentation è stato attivato dal planner, verifica anche che il toolbar
+dev non copra o alteri l'interfaccia in modo permanente e che il componente
+resti escluso dalla produzione. Le annotazioni dell'utente vengono gestite
+dal planner tramite il server MCP `agentation`; non considerare una
+annotazione come approvazione automatica e non risolverla autonomamente. Il
+server MCP `agentation` appartiene al planner e non va chiamato da questo
+ruolo.

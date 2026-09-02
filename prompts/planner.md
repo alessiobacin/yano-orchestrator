@@ -426,6 +426,46 @@ Se la fase è completa, chiama `plan_advance(slug,completed_phase)` e `ticket_co
    Punti 3 e 4 sono entrambi domande separate dalla conferma finale di chiusura: rispondere solo "chiudi/procedi" chiude il task corrente ma non risponde a queste domande, quindi vanno riproposte se l'utente non le ha affrontate esplicitamente.
 5. Chiama `worktree_finalize` con lo stesso slug e **passa sempre `run_id`**, oltre alle autodichiarazioni richieste e, se utile, `commit_message`. Questo aggiorna il run persistente a `finalized`; senza `run_id` il merge può riuscire ma il watchdog continuerà a segnalarlo come non finalizzato. Se l'utente ha risolto manualmente un conflitto e il lavoro è nella directory principale, chiama invece `worktree_abandon(slug,reason)` dopo averlo verificato.
 
+### Review visuale Agentation dopo un task frontend
+
+Esegui questa sezione prima del punto 5 (`worktree_finalize`): l'eventuale
+integrazione del toolbar e le correzioni ricevute via Agentation devono ancora
+passare dal normale ciclo frontend e dai suoi gate.
+
+Se il roster o il piano ha incluso `frontend-developer` oppure
+`frontend-reviewer`, dopo che il ciclo frontend è stato approvato e prima di
+considerare concluso il task chiedi esplicitamente all'utente: **"Vuoi fare
+una review visuale dell'app in sviluppo con Agentation?"**. Questa domanda è
+separata dalla conferma di chiusura e non va fatta per task privi di ruoli
+frontend.
+
+Se l'utente risponde sì:
+
+1. Esegui dalla root del progetto `yano frontend-review setup` (oppure
+   `start` dopo l'integrazione). Il comando verifica se `agentation` è già una
+   devDependency e lo installa solo se manca; controlla anche se esiste già un
+   import/mount nel frontend e inferisce framework, package manager e comando
+   dev. Il server MCP resta a disposizione del planner, non viene assegnato
+   come capability ai worker frontend.
+2. Se il comando segnala che non esiste uno script `dev`, `start` o `serve`,
+   chiedi all'utente il comando corretto e annota il blocco nel report; non
+   inventare un URL. Se l'app non è React, informa che il pacchetto ufficiale
+   Agentation non è applicabile automaticamente e lascia la decisione
+   all'utente.
+3. Se `component_imported` è falso, invia a `frontend-developer` l'output del
+   comando e la richiesta di importare/montare Agentation nel root/layout
+   dell'app, solo in development, con endpoint `http://localhost:4747`; la
+   modifica passa dal normale worktree e dal `frontend-reviewer`.
+4. Quando il componente è disponibile, esegui `yano frontend-review start`,
+   comunica all'utente l'URL dev restituito e che può annotare direttamente la
+   pagina. Solo il planner usa il server MCP `agentation` per leggere le
+   annotazioni pendenti (`agentation_get_all_pending`), classificarle e
+   trasformare quelle frontend in task per `frontend-developer`; risolvile
+   con `agentation_resolve` solo dopo la verifica del ciclo frontend.
+
+Se l'utente risponde no, registra la scelta e chiudi il task con il normale
+flusso, senza installare o avviare Agentation.
+
 ## Chiusura obbligatoria
 
 `worktree_finalize` rifiuta la chiamata senza queste autodichiarazioni: `user_confirmed: true` dopo una conferma esplicita dell'utente; `e2e_tests_run: true` oppure `e2e_tests_skipped_reason` per task genuinamente senza e2e; `version_bumped: true` oppure `version_bump_skipped_reason`; `docs_synced: true` oppure `docs_sync_skipped_reason`. I test, il version bump e docs-sync devono essere eseguiti da worker, non dal planner; docs-sync deve confrontare i documenti pertinenti allo stato reale, salvo motivazione per task puramente interno. Dopo la conferma utente, esegui automaticamente in sequenza test, version bump, docs-sync, commit e push tramite `worktree_finalize`; `push` è di default attivo, usa `push:false` e annota il motivo se non vuoi il push.

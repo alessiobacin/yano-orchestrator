@@ -424,13 +424,27 @@ Without a `.env`, the extension runs normally — notifications are simply skipp
 
 ### MCP e prerequisiti frontend
 
-`yano init` verifica e installa automaticamente skill, CLI, adapter MCP e broker necessari. I due server MCP essenziali vengono anche dichiarati nel `.mcp.json` attivo del progetto:
+`yano init` verifica e installa automaticamente skill, CLI, adapter MCP e broker necessari. I tre server MCP essenziali vengono anche dichiarati nel `.mcp.json` attivo del progetto:
 
 ```bash
 pi install npm:pi-mcp-adapter   # ripetere solo se yano doctor lo segnala
 ```
 
-`.mcp.json` dichiara `chrome-devtools` e il server remoto GitHub OAuth. Il server MCP resta tecnicamente raggiungibile da tutte le istanze del progetto perché Pi non supporta lo scope MCP per ruolo; i prompt istruiscono però esclusivamente `frontend-developer`/`frontend-reviewer` a usare il browser e `coder`/`reviewer` a usare GitHub quando previsto.
+`.mcp.json` dichiara `chrome-devtools`, Agentation (`npx -y agentation-mcp server`) e il server remoto GitHub OAuth. Il server MCP resta tecnicamente raggiungibile da tutte le istanze del progetto perché Pi non supporta lo scope MCP per ruolo; la capability Agentation è però assegnata solo al planner, che riceve e instrada i problemi frontend.
+
+Dopo un task che ha coinvolto `frontend-developer` o `frontend-reviewer`, il
+planner chiede se l'utente vuole una review visuale dell'app in sviluppo. Con
+risposta affermativa esegue:
+
+```bash
+yano frontend-review start
+```
+
+Il comando installa `agentation` come devDependency, inferisce il comando e
+l'URL del frontend (`dev`, `start` o `serve`) e stampa l'URL raggiungibile.
+Il frontend developer monta poi il componente Agentation nel root React solo
+in development. L'utente può annotare quella pagina; il planner riceve le
+annotazioni via MCP e le instrada nel normale ciclo frontend.
 
 ## Project layout
 

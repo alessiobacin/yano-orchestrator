@@ -30,3 +30,9 @@ Riavvia l'agente dopo una modifica.
 `list` distingue `built_in` (MCP materializzati automaticamente), `added`
 (aggiunti con CRUD CLI) ed `effective` (configurazione realmente disponibile).
 I valori delle variabili segrete sono mascherati.
+
+Il template di progetto dichiara sempre anche `agentation`:
+`npx -y agentation-mcp server`. La capability è assegnata al planner, che
+riceve le annotazioni e le inoltra al frontend developer quando sono problemi
+frontend. Per preparare una review visuale usa `yano frontend-review start`;
+il planner lo esegue solo dopo il consenso dell'utente.

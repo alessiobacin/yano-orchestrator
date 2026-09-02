@@ -1,7 +1,7 @@
 %%{init: {"flowchart": {"defaultRenderer": "elk"}} }%%
 flowchart TD
     USER["👤 User"] --> CLI["yano CLI"]
-    CLI --> INIT["init / doctor / start"]
+    CLI --> INIT["init / doctor / start / frontend-review"]
     INIT --> HERDR_INIT["init --herdr\nHerdr workspace + root pane"]
     CLI --> OBS["status / fleet / deps / gantt / watch / trace"]
     OBS --> GANTT_PORTS["Gantt per progetto\nporta automatica libera\n10000-19999"]
@@ -40,6 +40,7 @@ flowchart TD
     REVIEWER --> REVIEW_SKILL
     FRONTEND_REVIEWER --> REVIEW_SKILL
     PLANNER --> MCP
+    PLANNER --> AGENTATION["Agentation MCP\nproject-wide server\nhttp://localhost:4747"]
 
     subgraph BUS["MQTT 5 — pi/<project>/..."]
         PRESENCE["retained presence + LWT"]
@@ -70,6 +71,7 @@ flowchart TD
     REVIEWER --> RESPONSES
     FRONTEND_DEV --> RESPONSES
     FRONTEND_REVIEWER --> RESPONSES
+    AGENTATION --> PLANNER
     SPECIALISTS --> RESPONSES
     CODER --> PRESENCE
     REVIEWER --> PRESENCE

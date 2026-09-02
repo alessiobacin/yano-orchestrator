@@ -46,3 +46,12 @@ yano logs
 Se un agente deve collaborare con il planner, deve usare lo stesso progetto e
 lo stesso broker. Uno scope diverso produce intenzionalmente una flotta MQTT
 separata.
+
+## Review visuale Agentation
+
+Dopo un task frontend il planner chiede se vuoi una review dell'app in
+development. Se accetti, il planner esegue `yano frontend-review start`, che
+installa la devDependency `agentation`, avvia lo script dev inferito e stampa
+l'URL. Il frontend developer monta il toolbar nel root React in modalità
+development; puoi quindi annotare la pagina e il planner riceve le
+annotazioni tramite il server MCP `agentation`.

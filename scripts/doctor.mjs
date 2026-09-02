@@ -53,7 +53,7 @@ const ESSENTIAL_SKILLS = [
 	{ name: "chrome-devtools", repo: CHROME_SKILLS_REPO },
 	{ name: "playwright-cli", repo: PLAYWRIGHT_CLI_SKILL_REPO },
 ];
-const ESSENTIAL_MCP_SERVERS = ["chrome-devtools", "github"];
+const ESSENTIAL_MCP_SERVERS = ["chrome-devtools", "github", "agentation"];
 const LAZY_SKILL_SOURCES = {
 	"playwright-cli": PLAYWRIGHT_CLI_SKILL_REPO,
 	"chrome-devtools": CHROME_SKILLS_REPO,
@@ -300,6 +300,13 @@ function checkMcpServerPackage() {
 	} catch { return false; }
 }
 
+function checkAgentationMcpPackage() {
+	try {
+		const result = spawnSync("npx", ["-y", "agentation-mcp", "help"], { stdio: "ignore", timeout: 30_000 });
+		return result.status === 0;
+	} catch { return false; }
+}
+
 function checkHttpEndpoint(url) {
 	try {
 		const result = spawnSync("curl", ["-sS", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "10", url], { encoding: "utf8", timeout: 15_000 });
@@ -318,7 +325,7 @@ function readMcpConfig(cwd) {
 function ensureDeclaredMcp(cwd, packageRoot, server) {
 	const current = readMcpConfig(cwd);
 	if (Object.hasOwn(current.servers, server)) return true;
-	if (!packageRoot || !["github", "chrome-devtools"].includes(server)) return false;
+	if (!packageRoot || !ESSENTIAL_MCP_SERVERS.includes(server)) return false;
 	const example = path.join(packageRoot, "mcp.json.example");
 	try {
 		const template = JSON.parse(fs.readFileSync(example, "utf8"));
@@ -348,13 +355,14 @@ export function ensureCorePrerequisites({ packageRoot, cwd, install = false } = 
 		adapter = runInstall("pi", ["install", "npm:pi-mcp-adapter"]) && checkPiMcpAdapter();
 	}
 	const chromePackage = checkMcpServerPackage();
+	const agentationPackage = checkAgentationMcpPackage();
 	const githubEndpoint = checkHttpEndpoint("https://api.githubcopilot.com/mcp/");
 	const mcp = readMcpConfig(cwd ?? process.cwd());
 	const declared = ESSENTIAL_MCP_SERVERS.filter((name) => Object.hasOwn(mcp.servers, name));
 	return {
-		ok: afterSkills.every((skill) => skill.ok) && adapter && chromePackage && githubEndpoint && (!mcp.file || declared.length === ESSENTIAL_MCP_SERVERS.length || install),
+		ok: afterSkills.every((skill) => skill.ok) && adapter && chromePackage && agentationPackage && githubEndpoint && (!mcp.file || declared.length === ESSENTIAL_MCP_SERVERS.length || install),
 		skills: afterSkills,
-		mcp: { adapter, chromePackage, githubEndpoint, config: mcp.file, declared, missing: ESSENTIAL_MCP_SERVERS.filter((name) => !declared.includes(name)) },
+		mcp: { adapter, chromePackage, agentationPackage, githubEndpoint, config: mcp.file, declared, missing: ESSENTIAL_MCP_SERVERS.filter((name) => !declared.includes(name)) },
 	};
 }
 
@@ -574,8 +582,9 @@ export async function runDoctor({ cwd = process.cwd(), json = false, autoStartBr
 	}
 	rows.push(["pi-mcp-adapter", core.mcp.adapter, core.mcp.adapter ? "installato" : "mancante — pi install npm:pi-mcp-adapter"]);
 	rows.push(["MCP chrome-devtools", core.mcp.chromePackage, core.mcp.chromePackage ? "pacchetto risolvibile" : "mancante — npx -y chrome-devtools-mcp@latest --help"]);
+	rows.push(["MCP Agentation", core.mcp.agentationPackage, core.mcp.agentationPackage ? "pacchetto risolvibile" : "mancante — npx -y agentation-mcp help"]);
 	rows.push(["MCP GitHub endpoint", core.mcp.githubEndpoint, core.mcp.githubEndpoint ? "raggiungibile; OAuth al primo uso" : "non raggiungibile — verifica rete/GitHub OAuth"]);
-	if (!core.mcp.adapter || !core.mcp.chromePackage || !core.mcp.githubEndpoint) ok = false;
+	if (!core.mcp.adapter || !core.mcp.chromePackage || !core.mcp.agentationPackage || !core.mcp.githubEndpoint) ok = false;
 	if (core.mcp.config) {
 		for (const server of ESSENTIAL_MCP_SERVERS) {
 			const present = core.mcp.declared.includes(server);

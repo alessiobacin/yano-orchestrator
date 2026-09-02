@@ -516,13 +516,20 @@ function externalWorkerRecovery(snapshot) {
 	if (fs.existsSync(debuggerDb)) {
 		try {
 			const { DatabaseSync } = requireSqlite();
-			const externalDb = new DatabaseSync(debuggerDb, { readOnly: true });
+			const externalDb = new DatabaseSync(debuggerDb);
 			const rows = externalDb.prepare("SELECT root, name, worker_instance FROM debugger_projects WHERE worker_status = 'running'").all();
-			externalDb.close();
 			for (const row of rows) {
+				// A stale running flag is not a request to resurrect a debugger on a
+				// completed project. Debugger follows the same active-run boundary as
+				// watcher; completed/finalized projects must stay closed.
+				if (!projectHasActiveWork(row.root)) {
+					externalDb.prepare("UPDATE debugger_projects SET worker_status = 'stopped', workspace_id = NULL, worker_tab_id = NULL, worker_pane_id = NULL, updated_at = ? WHERE root = ? AND worker_status = 'running'").run(now(), row.root);
+					continue;
+				}
 				const live = snapshot?.agents?.some((agent) => agent.agent === "pi" && agent.name === row.worker_instance && !["done", "offline", "unknown"].includes(agent.agent_status));
 				if (!live) launch(["debugger", "resume", "--project-root", row.root, "--project", row.name, "--json"], { role: "debugger", project: row.name, instance: row.worker_instance });
 			}
+			externalDb.close();
 		} catch (error) { results.push({ role: "debugger", recovered: false, error: error instanceof Error ? error.message : String(error) }); }
 	}
 	// A suggester gets an LLM tab only for a pending analysis. Never recreate an

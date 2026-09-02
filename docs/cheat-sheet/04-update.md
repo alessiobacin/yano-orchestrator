@@ -13,5 +13,6 @@ yano update --reload --yes --timeout 180
 Usare --reload quando le istanze devono eseguire il nuovo codice. Il processo
 salva prima lo stato e non cancella file applicativi o trace.
 
-Con installazione di sviluppo `npm link`, `yano update` aggiorna il checkout
-Git solo se è pulito; non prova a reinstallare sopra il symlink.
+Se rileva `npm link`, `yano update` rimuove esclusivamente quel symlink e
+installa una copia globale permanente da GitHub. La modalità viene stampata
+nell'output; `npm ls -g yano-orchestrator --depth=0` non deve contenere `->`.

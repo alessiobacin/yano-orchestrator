@@ -13,7 +13,7 @@
 // Revisione 34, da un traceback reale dell'operatore — non più solo un
 // limite dichiarato "non verificato" come nelle revisioni precedenti):
 //
-//   1. Il pacchetto npm GLOBALE (`npm install -g <url>`, o `npm link` in
+//   1. Il pacchetto npm GLOBALE (`npm install -g <url>`; `npm link` è solo per
 //      sviluppo) — da qui vengono `yano` stesso e skills-vendor/ (le skill
 //      mattpocock, mai copiate nei progetti scaffoldati — vedi
 //      launch-planner.mjs). Percorso tipico: la cartella dei pacchetti
@@ -53,7 +53,7 @@
 // nuovo resta il modo più sicuro per farlo aggiornare.
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, unlinkSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -74,6 +74,7 @@ function readVersion(pkgJsonPath) {
 }
 
 function canonicalPath(value) {
+	if (!value) return null;
 	try { return realpathSync(value); }
 	catch { return path.resolve(value); }
 }
@@ -94,10 +95,39 @@ export function inspectGlobalLinkedInstall({ packageRoot, packageName = "yano-or
 	return {
 		found: true,
 		linked,
-		matches_running_package: linked && canonicalPath(installedPath) === canonicalPath(packageRoot),
+		matches_running_package: linked && Boolean(packageRoot) && canonicalPath(installedPath) === canonicalPath(packageRoot),
 		path: installedPath,
 		target: linked ? canonicalPath(installedPath) : null,
 	};
+}
+
+function installPermanentGlobalPackage(repoUrl) {
+	const tempDir = mkdtempSync(path.join(os.tmpdir(), "yano-update-"));
+	try {
+		// Installing a git URL directly can leave npm's temporary git-clone as a
+		// global symlink on some npm versions. Pack first, then install the
+		// resulting tarball, which gives npm an unambiguous real package copy.
+		execFileSync("npm", ["pack", repoUrl, "--pack-destination", tempDir], { stdio: "inherit", shell: process.platform === "win32" });
+		const tarball = readdirSync(tempDir).find((entry) => entry.endsWith(".tgz"));
+		if (!tarball) throw new Error("npm pack non ha prodotto un tarball");
+		execFileSync("npm", ["install", "-g", path.join(tempDir, tarball), "--ignore-scripts"], { stdio: "inherit", shell: process.platform === "win32" });
+	} finally {
+		try { rmSync(tempDir, { recursive: true, force: true }); } catch { /* cleanup best effort */ }
+	}
+}
+
+// npm cannot replace a linked package on every npm/node combination (notably
+// macOS npm 26 reports ENOTDIR while trying to rename the symlink). Remove
+// only the exact global symlink, then install a real package copy. A regular
+// global installation is never touched by this path.
+export function removeLinkedGlobalInstall({ linkedInstall, packageName = "yano-orchestrator" } = {}) {
+	if (!linkedInstall?.linked || !linkedInstall.path) return { removed: false, reason: "not-linked" };
+	try {
+		unlinkSync(linkedInstall.path);
+		return { removed: true, path: linkedInstall.path, package_name: packageName };
+	} catch (error) {
+		return { removed: false, path: linkedInstall.path, reason: error instanceof Error ? error.message : String(error) };
+	}
 }
 
 function updateLinkedCheckout(packageRoot) {
@@ -184,10 +214,12 @@ async function performUpdate({ packageRoot, argv }) {
 
 	const gitDir = piExtensionGitDir(repoUrl);
 	const hasGitClone = gitDir ? existsSync(gitDir) : false;
-	const linkedInstall = inspectGlobalLinkedInstall({ packageRoot, packageName: pkg.name || "yano-orchestrator" });
+	const packageName = pkg.name || "yano-orchestrator";
+	const linkedInstall = inspectGlobalLinkedInstall({ packageRoot, packageName });
 
 	console.log(`yano update: versione installata attualmente (pacchetto npm): ${currentVersion}`);
 	console.log(`yano update: repo sorgente: ${repoUrl}`);
+	console.log(`yano update: modalità installazione: ${linkedInstall.matches_running_package ? "checkout dev collegato (npm link)" : "copia globale permanente"}`);
 	if (hasGitClone) console.log(`yano update: trovata anche la copia di \`pi extension install\` in ${gitDir}`);
 
 	if (checkOnly) {
@@ -227,37 +259,53 @@ async function performUpdate({ packageRoot, argv }) {
 		return { checkOnly: true, currentVersion, remoteVersion };
 	}
 
+	let activePackageRoot = packageRoot;
 	if (linkedInstall.matches_running_package) {
-		console.log(`\nyano update: 1/2 — installazione npm collegata con \`npm link\` (${linkedInstall.path} → ${linkedInstall.target}).`);
-		const linkedResult = updateLinkedCheckout(packageRoot);
-		if (!linkedResult.ok) {
-			console.error(`yano update: non riesco ad aggiornare il checkout collegato (${linkedResult.reason}).`);
-			process.exit(1);
-		}
-		if (linkedResult.reason === "dirty") {
-			console.log("yano update: il checkout collegato ha modifiche locali; salto `git pull` per non sovrascriverle. Il comando e le modifiche già presenti restano immediatamente attivi.");
-		} else if (linkedResult.reason === "linked-non-git") {
-			console.log("yano update: il target di npm link non è un checkout Git; salto il reinstall npm senza toccare il collegamento.");
-		} else {
-			console.log("yano update: checkout collegato aggiornato con git pull --ff-only; nessun npm install necessario.");
-		}
-	} else {
-		console.log("\nyano update: 1/2 — reinstallo il pacchetto npm globale da GitHub (npm install -g ...)...\n");
-		try {
-			execFileSync("npm", ["install", "-g", repoUrl], { stdio: "inherit", shell: process.platform === "win32" });
-		} catch (err) {
-			console.error(`\nyano update: "npm install -g ${repoUrl}" fallito (${err instanceof Error ? err.message : String(err)}).`);
-			console.error(
-				"Su alcuni sistemi npm install -g richiede permessi elevati (sudo su macOS/Linux, un terminale da Amministratore su Windows) — riprova con quelli se l'errore riguarda i permessi.",
-			);
+		console.log(`\nyano update: 1/2 — converto l’installazione linkata in una copia globale permanente (${linkedInstall.path} → ${linkedInstall.target}).`);
+		const removed = removeLinkedGlobalInstall({ linkedInstall, packageName });
+		if (!removed.removed) {
+			console.error(`yano update: impossibile rimuovere il link globale (${removed.reason}).`);
 			process.exit(1);
 		}
 	}
-
-	const newVersion = readVersion(pkgJsonPath);
+	if (!linkedInstall.matches_running_package) console.log("\nyano update: 1/2 — reinstallo il pacchetto npm globale da GitHub (npm install -g ...)...\n");
+	else console.log("yano update: installo ora la copia permanente da GitHub (npm install -g ...)...\n");
+	try {
+		// npm may remove/rename the global package while its lifecycle is still
+		// running. That leaves postinstall with a deleted cwd (uv_cwd) and can
+		// make npm report false TAR_ENTRY_ERROR files. Install the package first,
+		// then run Yano's lifecycle scripts from the stable installed directory.
+		installPermanentGlobalPackage(repoUrl);
+	} catch (err) {
+		console.error(`\nyano update: "npm install -g ${repoUrl}" fallito (${err instanceof Error ? err.message : String(err)}).`);
+		console.error(
+			"Su alcuni sistemi npm install -g richiede permessi elevati (sudo su macOS/Linux, un terminale da Amministratore su Windows) — riprova con quelli se l'errore riguarda i permessi.",
+		);
+		process.exit(1);
+	}
+	const installedAfter = inspectGlobalLinkedInstall({ packageName });
+	if (installedAfter.found && !installedAfter.linked) activePackageRoot = installedAfter.path;
+	const requiredPlaybook = path.join(activePackageRoot, "playbooks", "suggestion-proposal.yaml");
+	if (!existsSync(requiredPlaybook)) {
+		console.error(`yano update: pacchetto globale incompleto; manca ${requiredPlaybook}. Installazione annullata.`);
+		process.exit(1);
+	}
+	for (const script of ["install-yano-cli.mjs", "install-yano-watcher-cron.mjs", "install-yano-scheduler-cron.mjs"]) {
+		try {
+			execFileSync(process.execPath, [path.join(activePackageRoot, "scripts", script), "--if-global", "--quiet"], {
+				cwd: activePackageRoot,
+				stdio: "inherit",
+				env: { ...process.env, npm_config_global: "true" },
+			});
+		} catch (error) {
+			console.error(`yano update: lifecycle ${script} fallito (${error instanceof Error ? error.message : String(error)}).`);
+			process.exit(1);
+		}
+	}
+	const newVersion = readVersion(path.join(activePackageRoot, "package.json"));
 	console.log("");
 	if (linkedInstall.matches_running_package) {
-		console.log(`yano update: checkout npm link attivo (versione locale: ${newVersion || currentVersion}); nessuna reinstallazione npm eseguita.`);
+		console.log(`yano update: installazione permanente attiva (versione: ${newVersion || currentVersion}); npm link disattivato.`);
 	} else if (newVersion && newVersion !== currentVersion) {
 		console.log(`yano update: pacchetto npm aggiornato ${currentVersion} → ${newVersion}.`);
 	} else if (newVersion === currentVersion) {
@@ -300,7 +348,7 @@ async function performUpdate({ packageRoot, argv }) {
 	console.log("\nyano update: 3/3 — sincronizzo le estensioni registrate in Pi (pi update --extensions)...\n");
 	updatePiExtensions();
 
-	const harnessSkill = installYanoCliSkill({ packageRoot });
+	const harnessSkill = installYanoCliSkill({ packageRoot: activePackageRoot });
 	if (harnessSkill.ok) console.log("yano update: skill globale yano-cli sincronizzata negli harness disponibili.");
 	else console.warn("yano update: skill globale yano-cli non sincronizzata completamente — esegui `yano skills status` per i dettagli.");
 

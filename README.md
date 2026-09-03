@@ -276,7 +276,7 @@ yano trace opinion --text "<analisi planner>" --change prompt --confidence mediu
 yano trace export --run <id> --output ./trace-bundle.json
 yano trace import --input ./trace-bundle.json --reindex
 yano trace clear --all --yes   # elimina tutti i dati temporanei di Yano
-yano feedback serve --port 20002 # API REST loopback per bug e suggestions
+yano feedback serve --port 20002 # API REST loopback per bug/suggestions e screenshot (JSON o multipart)
 yano bug create --project-id workspace-... --message "..." --resolution automatic
 yano bug list --type bug
 yano suggestion create --project-id workspace-... --message "..."

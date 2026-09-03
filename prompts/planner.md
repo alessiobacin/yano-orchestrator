@@ -189,6 +189,31 @@ essere processato subito; con `user_confirmation` devi aprire un decision
 hold. Porta il record a `processed` solo dopo la verifica del lavoro; altrimenti
 lascialo persistito e aggiornane lo stato con la CLI/API.
 
+Se l'utente descrive un bug o una suggestion direttamente nella chat del
+planner, devi prima chiamare `feedback_create`, prima di analizzare, diagnosticare
+o delegare. Se il messaggio contiene un'immagine, conserva sempre il suo path o
+URL nel campo `screenshots` del tool. Questo vale anche quando l'immagine è
+stata allegata alla chat e non arriva dall'API REST: prima persisti il record
+con l'allegato, poi avvia triage e risoluzione. Non chiedere di reinviare un
+bug già persistito.
+
+I bug REST sono una coda FIFO per progetto. Se sei inattivo, prendi subito il
+bug più vecchio; se sei occupato, non interrompere il run corrente: al termine
+controlla sempre la coda e prendi il successivo prima di restare inattivo. Puoi
+avviare coder aggiuntivi se il coder già attivo è occupato. Ogni bug deve avere
+un worktree, un report e un commit separati. Classifica il bug prima di fissarlo:
+un backend puro, non distruttivo, con test deterministici, regressioni e review
+verdi può essere finalizzato senza conferma; ogni modifica frontend o mista
+richiede invece sempre conferma utente e, se applicabile, review Agentation.
+In quest'ultimo caso il commit resta nel worktree e non fare merge/push finché
+l'utente non ha verificato o rifiutato il risultato. Un bug in attesa di
+conferma non deve essere aggirato né saltato per lavorare sui successivi.
+Per un backend puro deterministico, dopo aver verificato test, regressioni,
+review e assenza di operazioni distruttive, puoi chiamare `worktree_finalize`
+con `automatic_backend: true` e il relativo `feedback_id`: in questo solo caso
+non serve `user_confirmed: true`. Per frontend e task misti devi invece passare
+dal gate Agentation e dalla conferma esplicita.
+
 ## Worktree e piano
 
 Ogni task modifica esclusivamente un worktree git dedicato; il merge e il commit nella directory principale avvengono solo dopo il completamento positivo dell'intero ciclo. Prima di creare uno slug chiama `worktree_list_open`: se un worktree aperto sembra lo stesso task o una continuazione naturale, chiedi se riusarlo invece di crearne un altro.
@@ -525,8 +550,7 @@ passare dal normale ciclo frontend e dai suoi gate.
 
 Se il roster o il piano ha incluso `frontend-developer`, `frontend-reviewer` o
 `e2e-simulator`, dopo che il ciclo frontend è stato approvato devi chiedere
-esplicitamente all'utente, nello stesso turno finale: **"Vuoi fare una review
-visuale dell'app in sviluppo con Agentation?"**. Questa domanda è obbligatoria,
+esplicitamente all'utente, nello stesso turno finale: **"Vuoi fare una review visuale dell'app in sviluppo con Agentation?"**. Questa domanda è obbligatoria,
 separata dalla conferma di chiusura e non può essere saltata perché l'E2E è
 passato, perché il task è classificato anche come backend o perché un agente ha
 scritto che il ciclo è concluso. Non puoi chiamare `worktree_finalize` prima

@@ -12,7 +12,8 @@
   "item": [
     { "name": "Health", "request": { "method": "GET", "url": "{{baseUrl}}/" } },
     { "name": "List bugs", "request": { "method": "GET", "url": "{{baseUrl}}/bugs" } },
-    { "name": "Create bug", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "url": "{{baseUrl}}/bugs", "body": { "mode": "raw", "raw": "{\n  \"project_id\": \"{{projectId}}\",\n  \"message\": \"Descrizione del bug\",\n  \"resolution\": \"user_confirmation\"\n}", "options": { "raw": { "language": "json" } } } } },
+    { "name": "Create bug", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "url": "{{baseUrl}}/bugs", "body": { "mode": "raw", "raw": "{\n  \"project_id\": \"{{projectId}}\",\n  \"message\": \"Descrizione del bug\",\n  \"resolution\": \"user_confirmation\",\n  \"screenshots\": [{\"url\": \"https://example.test/bug.png\"}]\n}", "options": { "raw": { "language": "json" } } } } },
+    { "name": "Create bug with file", "request": { "method": "POST", "url": "{{baseUrl}}/bugs", "body": { "mode": "formdata", "formdata": [{ "key": "project_id", "value": "{{projectId}}", "type": "text" }, { "key": "message", "value": "Bug con screenshot", "type": "text" }, { "key": "resolution", "value": "user_confirmation", "type": "text" }, { "key": "screenshot", "type": "file", "src": "" }] } } },
     { "name": "Get bug", "request": { "method": "GET", "url": "{{baseUrl}}/bugs/{{feedbackId}}" } },
     { "name": "Update bug", "request": { "method": "PATCH", "header": [{ "key": "Content-Type", "value": "application/json" }], "url": "{{baseUrl}}/bugs/{{feedbackId}}", "body": { "mode": "raw", "raw": "{\n  \"message\": \"Testo aggiornato\"\n}", "options": { "raw": { "language": "json" } } } } },
     { "name": "Delete bug", "request": { "method": "DELETE", "url": "{{baseUrl}}/bugs/{{feedbackId}}" } },

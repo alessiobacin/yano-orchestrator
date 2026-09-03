@@ -58,6 +58,7 @@ import { collectCodeMemContext } from "../scripts/yano-code-mem-context.mjs";
 import { getProjectApi, listProjectApis, resolveApiSecret } from "../scripts/yano-api-registry.mjs";
 import { llmProxyAutoModel, switchImageTurnToAuto } from "../scripts/yano-vision-routing.mjs";
 import { switchPinnedModelToAuto } from "../scripts/yano-model-fallback.mjs";
+import { openDatabase as openFeedbackDatabase, createFeedback as createFeedbackRecord, claimFeedback, listFeedback } from "../scripts/yano-feedback.mjs";
 
 // ESM-safe lazy require, used only inside SQLiteOrchestratorStorage's
 // constructor to resolve node:sqlite on first actual use (see the
@@ -2858,6 +2859,17 @@ export default function (pi: ExtensionAPI) {
 		return inboundQueue.size > 0 || activeTicketIds.size > 0 ? "busy" : "idle";
 	}
 	let currentCtx: ExtensionContext | null = null;
+	let currentInputScreenshots: unknown[] = [];
+	function inputScreenshotReferences(event: any): unknown[] {
+		const candidates = Array.isArray(event?.images) ? event.images : (Array.isArray(event?.message?.content) ? event.message.content : []);
+		return candidates.filter((item: any) => item && (item.type === "image" || item.type === "input_image" || item.path || item.url || item.data)).map((item: any) => ({
+			path: item.path,
+			url: item.url,
+			data: item.data,
+			name: item.name || item.filename,
+			mime_type: item.mime_type || item.mimeType,
+		})).slice(0, 8);
+	}
 	let projectBootstrap = "";
 	let projectBootstrapDelivered = false;
 	let currentInbound: InboundContext | null = null;
@@ -3030,6 +3042,27 @@ export default function (pi: ExtensionAPI) {
 			if (oldestKey) seenAssignments.delete(oldestKey);
 		}
 		return true;
+	}
+	function wakeNextQueuedFeedback(reason: string): void {
+		if (!identity || identity.role !== "planner" || computeSelfStatus() !== "idle") return;
+		let db: any = null;
+		try {
+			db = openFeedbackDatabase();
+			const next = listFeedback(db, { project_id: identity.project, type: "bug", statuses: ["pending_planner", "queued"] })[0];
+			if (!next) return;
+			const claimed = claimFeedback(db, next.id);
+			if (!claimed || claimed.status !== "processing") return;
+			const screenshotNote = claimed.screenshots?.length ? `\nScreenshot allegati: ${JSON.stringify(claimed.screenshots)}` : "";
+			pi.sendMessage({ customType: "feedback-inbound", content: `[bug ${claimed.id}] Bug persistito in coda FIFO. Risolvilo ora prima di restare inattivo.\n\n${claimed.message}${screenshotNote}\n\nClassifica prima l'impatto: backend puro oppure frontend/misto.`, display: true, details: { feedback_id: claimed.id, reason } }, { deliverAs: "followUp", triggerTurn: true });
+			logEvent("feedback_queue_wake", { feedback_id: claimed.id, reason, status: claimed.status });
+		} catch (error) {
+			logEvent("feedback_queue_wake_failed", { reason, error: error instanceof Error ? error.message : String(error) });
+		} finally { try { db?.close(); } catch { /* best effort */ } }
+	}
+	function handleFeedbackReceived(payload: any): void {
+		if (!identity || identity.role !== "planner" || payload?.project_id !== identity.project) return;
+		logEvent("feedback_received", { feedback_id: payload.feedback_id ?? null, feedback_type: payload.feedback_type ?? null, screenshot_count: Array.isArray(payload.screenshots) ? payload.screenshots.length : 0, planner_status: computeSelfStatus() });
+		wakeNextQueuedFeedback("feedback_received");
 	}
 
 	function scheduleEviction(assignment_id: string): void {
@@ -3580,7 +3613,8 @@ export default function (pi: ExtensionAPI) {
 			if (topicStr === T.agentCommands(identity.instance)) {
 				try {
 					const env = JSON.parse(payload.toString("utf-8")) as CommandEnvelope | ContextCompactRequestEnvelope | TerminateEnvelope | ReloadPrepareEnvelope | ReloadCancelEnvelope;
-					if (env.type === "command") handleCommand(env);
+					if (env.type === "feedback_received") handleFeedbackReceived(env);
+					else if (env.type === "command") handleCommand(env);
 					else if (env.type === "context_compact_request") handleContextCompactRequest(env);
 					else if (env.type === "reload_prepare") handleReloadPrepare(env);
 					else if (env.type === "reload_cancel") handleReloadCancel(env);
@@ -3763,6 +3797,7 @@ export default function (pi: ExtensionAPI) {
 	// the attachment with "image omitted" before the model selection changes.
 	pi.on("input", async (event: any) => {
 		if (!identity) return;
+		currentInputScreenshots = inputScreenshotReferences(event);
 		await switchImageTurnToAuto({ event, ctx: currentCtx, setModel: (model) => pi.setModel(model), log: logEvent });
 	});
 
@@ -4271,6 +4306,41 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	// ━━ Tools ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+	// A bug reported in the planner chat must be persisted before diagnosis. This
+	// tool gives the planner the same durable intake used by REST, including the
+	// screenshot references supplied with the user's message.
+	pi.registerTool({
+		name: "feedback_create",
+		label: "Persist Bug or Suggestion",
+		description: "Persist a user-reported bug or suggestion before analysing it. Planner-only. For a bug received with an image, include its local path or HTTPS URL in screenshots; the record is created before any fix is attempted.",
+		parameters: Type.Object({
+			type: Type.Union([Type.Literal("bug"), Type.Literal("suggestion")]),
+			message: Type.String({ description: "Faithful user report, including route and observed behaviour." }),
+			resolution: Type.Optional(Type.Union([Type.Literal("automatic"), Type.Literal("user_confirmation")])),
+			screenshots: Type.Optional(Type.Array(Type.Any({ description: "Screenshot path, HTTPS URL, or attachment descriptor." }))),
+		}),
+		async execute(_callId, params) {
+			if (!identity || identity.role !== "planner") throw new Error("feedback_create: tool riservato al planner.");
+			const db = openFeedbackDatabase();
+			try {
+				const result = await createFeedbackRecord(db, {
+					type: params.type,
+					project_id: identity.project,
+					message: params.message,
+					resolution: params.resolution,
+					screenshots: params.screenshots?.length ? params.screenshots : currentInputScreenshots,
+					notify: false,
+				});
+				claimFeedback(db, result.id);
+				const claimed = listFeedback(db, { project_id: identity.project, type: params.type, statuses: ["processing"] }).find((item: any) => item.id === result.id) || result;
+				currentInputScreenshots = [];
+				logEvent("feedback_persisted_from_planner_chat", { feedback_id: claimed.id, feedback_type: claimed.type, screenshot_count: claimed.screenshots?.length ?? 0 });
+				return { content: [{ type: "text" as const, text: JSON.stringify({ feedback_id: claimed.id, status: claimed.status, screenshots: claimed.screenshots }, null, 2) }], details: { feedback_id: claimed.id, status: claimed.status, screenshot_count: claimed.screenshots?.length ?? 0 } };
+			} finally { db.close(); }
+		},
+		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("feedback_create ")) + theme.fg("accent", `${(args as any).type ?? "bug"} · ${String((args as any).message ?? "").slice(0, 60)}`), 0, 0); },
+		renderResult(result, _options, theme) { const d = result.details as any; return new Text(theme.fg("success", `→ ${d?.feedback_id ?? "feedback"} persistito (${d?.screenshot_count ?? 0} screenshot)`), 0, 0); },
+	});
 
 	// The auto-improver is an observer. Prompt instructions alone are not a
 	// sufficient safety boundary because a resumed/stale Pi transcript can still
@@ -5345,7 +5415,8 @@ export default function (pi: ExtensionAPI) {
 			"user rather than retrying blindly.\n\n" +
 			"Revisione 42 — mandatory closing procedure, enforced here rather than left to prompt discipline alone: this call is " +
 			"REFUSED unless you explicitly declare (a) user_confirmed:true — you asked the user whether this result is what they " +
-			"actually wanted and they said yes, don't assume it from silence; (b) either e2e_tests_run:true (the project's " +
+				"actually wanted and they said yes, don't assume it from silence — except for a persisted pure-backend bug that " +
+				"the planner explicitly classifies as deterministic and safe for automatic finalization; (b) either e2e_tests_run:true (the project's " +
 			"end-to-end/full test suite was actually run as part of this task, by coder/reviewer/e2e-simulator — not by you) or " +
 			"e2e_tests_skipped_reason explaining why none applies (e.g. a pure-docs task with no e2e suite to run); (c) either " +
 			"version_bumped:true (the project's own version marker was bumped as part of this task) or " +
@@ -5366,6 +5437,8 @@ export default function (pi: ExtensionAPI) {
 			commit_message: Type.Optional(Type.String({ description: "Commit message for any uncommitted changes and for the merge commit. Defaults to a generic message referencing the slug." })),
 			notify_message: Type.Optional(Type.String({ description: "Custom completion message sent to all configured notification channels. Defaults to a generic one naming the task slug." })),
 			user_confirmed: Type.Boolean({ description: "You explicitly asked the user to confirm this result is what they wanted, and they confirmed — required, no exceptions." }),
+			automatic_backend: Type.Optional(Type.Boolean({ description: "Planner-only bug exception: true only for a persisted pure-backend, deterministic, non-destructive bug with all required tests/review green." })),
+			feedback_id: Type.Optional(Type.String({ description: "Persisted BUG-... id when finalizing a bug; required with automatic_backend." })),
 			frontend_scope: Type.Optional(Type.Union([Type.Literal("required"), Type.Literal("not_applicable")])),
 			agentation_review_status: Type.Optional(Type.Union([Type.Literal("verified"), Type.Literal("declined")])),
 			agentation_url: Type.Optional(Type.String({ description: "The development URL shown to the user for the Agentation review." })),
@@ -5383,7 +5456,15 @@ export default function (pi: ExtensionAPI) {
 			if (!identity) throw new Error("orchestrator not initialised");
 			const slug = params.slug;
 			if (!SLUG_RE.test(slug)) throw new Error(`worktree_finalize: "${slug}" is not a valid kebab-case slug.`);
-			if (!params.user_confirmed) {
+			let automaticBackendBug = false;
+			if (params.automatic_backend) {
+				if (!params.feedback_id?.startsWith("BUG-")) throw new Error("worktree_finalize: automatic_backend richiede feedback_id BUG-...");
+				const feedbackDb = openFeedbackDatabase();
+				try { automaticBackendBug = listFeedback(feedbackDb, { type: "bug" }).some((item: any) => item.id === params.feedback_id && item.project_id === identity.project && item.status === "processing"); }
+				finally { feedbackDb.close(); }
+				if (!automaticBackendBug) throw new Error("worktree_finalize: automatic_backend richiede un bug persistito del progetto nello stato processing.");
+			}
+			if (!params.user_confirmed && !automaticBackendBug) {
 				throw new Error(
 					"worktree_finalize: refused — user_confirmed must be true. Ask the user explicitly whether this task's result " +
 						"is what they wanted BEFORE finalizing (Revisione 42) — don't assume completion just because every ticket is " +
@@ -5421,6 +5502,8 @@ export default function (pi: ExtensionAPI) {
 			logEvent("worktree_finalize_checklist", {
 				slug,
 				user_confirmed: params.user_confirmed,
+				automatic_backend: automaticBackendBug,
+				feedback_id: params.feedback_id ?? null,
 				frontend_scope: params.frontend_scope ?? "not_applicable",
 				agentation_review_status: params.agentation_review_status ?? null,
 				agentation_url: params.agentation_url ?? null,
@@ -5546,6 +5629,11 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			logEvent("worktree_finalize", { slug, worktree_path: wtPath, branch, merged: true, conflict: false });
+			if (automaticBackendBug && params.feedback_id) {
+				const feedbackDb = openFeedbackDatabase();
+				try { feedbackDb.prepare("UPDATE feedback SET status='processed',updated_at=? WHERE id=?").run(nowIso(), params.feedback_id); }
+				finally { feedbackDb.close(); }
+			}
 			if (params.run_id && finalizationStorage) {
 				finalizationStorage.updateRunFinalizationStatus(params.run_id, "finalized");
 			}
@@ -7376,7 +7464,10 @@ export default function (pi: ExtensionAPI) {
 		if (identity.role === "planner") {
 			await yanoPublishAgentEvent("planner_task_completed", { assignment_id: inbound?.assignment_id ?? null });
 		}
-		if (!inbound || !client) return;
+		if (!inbound || !client) {
+			if (identity.role === "planner") wakeNextQueuedFeedback("planner_turn_end");
+			return;
+		}
 
 		let response: any = lastAssistantText;
 		let error: string | null = null;
@@ -7399,6 +7490,7 @@ export default function (pi: ExtensionAPI) {
 			if (currentInbound === inbound) currentInbound = null;
 			pi.appendEntry("orchestrator-log", { event: "response_sent", assignment_id: inbound.assignment_id });
 			void publishPresence(computeSelfStatus());
+			if (identity.role === "planner") wakeNextQueuedFeedback("planner_turn_end");
 		} catch (err) {
 			pi.appendEntry("orchestrator-log", { event: "response_send_failed", assignment_id: inbound.assignment_id, error: err instanceof Error ? err.message : String(err) });
 		}

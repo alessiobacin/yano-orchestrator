@@ -8,7 +8,7 @@ category: internal_tool
 signal: tool_failure
 fingerprint: c15576e5d489ae34988a5a90d04b35d93426a75db4ffb6179cda38e79bff4ae2
 detected_at: 2026-09-02T19:51:09.415Z
-last_seen_at: 2026-09-02T21:21:32.431Z
+last_seen_at: 2026-09-03T22:04:35.255Z
 source_project: yano-orchestrator
 source_project_root: /Users/alessiobacin/Development/testCode/yano-orchestrator
 source_project_key: workspace-d3dda6a0cb4d

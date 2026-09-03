@@ -276,7 +276,7 @@ roles:
     activation: lazy
     playbook: frontend-browser
     label: "E2E User Simulator"
-    brief: "Scrivi e mantieni test end-to-end (es. Playwright/Cypress) che simulano il flusso reale di un utente sul frontend, coordinandoti con frontend-developer per i selettori/flussi UI da coprire."
+    brief: "Scrivi e mantieni test end-to-end (es. Playwright/Cypress) che simulano il flusso reale di un utente sul frontend, coordinandoti con frontend-developer per i selettori/flussi UI da coprire. Prima di ogni browser run usa yano test-env allocate nel worktree, configura frontend/backend sulle porte assegnate e non riusare silenziosamente server di altri checkout."
     model: { provider: llmproxy, model: llmproxy }
     skills: [e2e-testing-patterns, playwright-best-practices, playwright-cli, chrome-devtools, yano-planner-trace-analysis, yano-cli]
     cli: [git, npm, npx, playwright-cli]
@@ -513,7 +513,7 @@ roles:
     activation: always
     playbook: frontend-browser
     label: "Frontend Reviewer"
-    brief: "Rivedi esclusivamente il lavoro UI del frontend-developer: usa playwright-cli per aprire e verificare il flusso reale nel browser, chrome-devtools per console/rete/screenshot e la checklist code-review per qualità, regressioni e test. Rimanda le correzioni al frontend-developer e informa il planner solo dopo un'approvazione verificata."
+    brief: "Rivedi esclusivamente il lavoro UI del frontend-developer: usa playwright-cli per aprire e verificare il flusso reale nel browser, chrome-devtools per console/rete/screenshot e la checklist code-review per qualità, regressioni e test. Prima alloca porte isolate con yano test-env nel worktree. Rimanda le correzioni al frontend-developer e informa il planner solo dopo un'approvazione verificata."
     model: { provider: llmproxy, model: llmproxy }
     skills: [code-review, yano-code-review, playwright-cli, chrome-devtools, yano-planner-trace-analysis, yano-cli]
     cli: [git, npm, npx, playwright-cli]

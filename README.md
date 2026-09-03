@@ -62,6 +62,7 @@ allow-list runtime che esclude `bash`, `edit` e `write` dal worker.
 - **Automatic per-project MQTT scoping** — two different projects never collide on a shared broker without you having to pass `--project` yourself. The default scope is derived from the project root; the persistent `yano-local-pc` runtime owns the always-on control-plane services and its stable `planner-01`, while application checkouts remain ordinary projects.
 - **Frontend prerequisites are deterministic** — every `yano init` verifies/installs global `@playwright/cli@latest` and the global `playwright-cli` skill; `frontend-developer`, `frontend-reviewer` and `e2e-simulator` receive the browser skill, while backend `reviewer` remains backend-only. The optional `chrome-devtools` MCP remains project-wide because Pi cannot scope MCP servers per role
 - **Cross-platform** — macOS, Linux, and Windows
+- **Isolated browser verification** — E2E and frontend review allocate a free, paired frontend/backend port set per worktree through `yano test-env`, never silently reusing another project's development server
 
 ## Installation
 

@@ -98,6 +98,7 @@ import { runYanoLocalPc } from "../scripts/yano-local-pc.mjs";
 import { runYanoServices } from "../scripts/yano-services.mjs";
 import { runYanoDocsCheck } from "../scripts/yano-docs-check.mjs";
 import { runYanoQaInventory } from "../scripts/yano-qa-inventory.mjs";
+import { runYanoTestEnvironment } from "../scripts/yano-test-environment.mjs";
 import { runYanoAgentMcp } from "../scripts/yano-agent-mcp.mjs";
 import { runFrontendReview } from "../scripts/yano-frontend-review.mjs";
 import { runYanoMemory } from "../scripts/yano-memory-cli.mjs";
@@ -156,6 +157,7 @@ function printTopUsage() {
 			"  local-pc start|status|ask  Agente del PC sviluppatore — `yano local-pc --help`",
 			"  services [opzioni] Registro servizi esterni (Docker/pm2/comando) con health-check e restart deterministico — `yano services --help`",
 			"  api discover|list|show|add|verify|refresh|update|delete  REST API da Postman/OpenAPI — `yano api --help`",
+			"  test-env allocate|show|release  Alloca porte isolate per E2E/review in un worktree",
 			"  data [opzioni]    Mostra o migra il data-root globale — `yano data --help`",
 			"  pause [opzioni]  Salva uno snapshot non distruttivo e mette in pausa i run",
 			"  resume [opzioni] Ripristina uno snapshot e riapre gli agenti mancanti",
@@ -267,6 +269,10 @@ async function main() {
 	}
 	if (sub === "api" || sub === "apis") {
 		runYanoApi({ cwd, argv: rest });
+		return;
+	}
+	if (sub === "test-env") {
+		await runYanoTestEnvironment({ cwd, argv: rest });
 		return;
 	}
 	if (sub === "skills") {

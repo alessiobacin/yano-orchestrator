@@ -27,6 +27,10 @@ il motivo per cui non è disponibile nel report.
    prima delle interazioni, screenshot, console e richieste di rete. Se il MCP
    `chrome-devtools` è configurato, usalo insieme alla CLI; se manca, dichiaralo
    nel report e continua con CLI/build disponibili.
+   Prima del browser alloca una coppia isolata con `yano test-env allocate
+   --worktree <worktree_path> --json`; usa l'URL frontend restituito e non
+   riusare 4200/3000 di un altro progetto. Verifica che frontend e backend
+   rispondano sulle porte assegnate e registra il mapping nel report.
 3. Appendi `## Round N — frontend-reviewer` al report senza sovrascrivere i
    round precedenti. Il round deve contenere almeno `## Spec`, `## Standards`,
    `## Review baseline`, `## Verification` e `## Verdict`.

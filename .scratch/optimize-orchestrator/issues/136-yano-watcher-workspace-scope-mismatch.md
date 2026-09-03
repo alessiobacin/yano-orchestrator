@@ -8,7 +8,7 @@ category: isolation
 signal: workspace_scope_mismatch
 fingerprint: cd6379882bbba96548d7f428ab74050d04ddc5365b7069683fa71a9713311709
 detected_at: 2026-09-03T11:51:39.704Z
-last_seen_at: 2026-09-03T14:21:46.890Z
+last_seen_at: 2026-09-03T14:27:01.716Z
 source_project: newmiodoc
 source_project_root: /Users/alessiobacin/Development/Code/newMioDOC
 source_project_key: workspace-57a4005feedc

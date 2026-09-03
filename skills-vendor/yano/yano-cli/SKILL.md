@@ -60,6 +60,7 @@ Use the smallest command that answers the request. Typical translations are:
 | Initialize and open Herdr with planner | `yano init --name "<name>" --herdr` | Herdr workspace, root pane, and `planner-01` launch |
 | Start an agent in Herdr | `yano start --herdr --instance <id> --role <role>` | verifies workspace label + project root before tab creation |
 | Prepare a visual frontend review | `yano frontend-review start` | installs project-local React `agentation`, infers the dev script/URL and starts the development app after user consent |
+| Allocate isolated E2E ports | `yano test-env allocate --worktree <dir> --json` | selects and persists a free paired frontend/backend port set; never silently reuses another checkout |
 | Start an instance on the persistent Local PC runtime | `yano local-pc status` | `yano-local-pc` and its `planner-01` are supervised in the persistent `yano-local-pc` workspace; scheduler and watcher remain in their own service workspaces |
 | List or inspect agent memory | `yano memory agents --project-root <dir>`, then `yano memory show --scope instance --instance <id> --role <role>` | Lists project, role and instance Markdown memories; memory is bounded and survives agent restart |
 | Bootstrap documentation for an existing project | Start its planner and read `.pi/extensions/yano-orchestrator/memory/project.md` first | The planner performs a light scan, asks before creating or refreshing docs, then delegates to `docs-sync` |

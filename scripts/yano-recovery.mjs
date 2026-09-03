@@ -31,6 +31,7 @@ function usage() {
 		"",
 		"  yano pause --run <id> [--yes]       snapshot + stop graceful degli agenti",
 		"  yano pause --all --yes              snapshot + stop di tutti i run attivi",
+		"  --origin user|cron                  origine persistita della pausa (default: user)",
 		"  yano resume --run <id> [--yes]     ripristina un run e riapre agenti mancanti",
 		"  yano resume --all --yes             ripristina il team del progetto corrente",
 		"  yano resume --dry-run               mostra cosa verrebbe ripristinato",
@@ -224,11 +225,14 @@ function ensureRecoveryTable(db) {
 		created_at TEXT NOT NULL,
 		resumed_at TEXT,
 		status TEXT NOT NULL DEFAULT 'paused',
-		metadata_json TEXT NOT NULL
+		metadata_json TEXT NOT NULL,
+		pause_origin TEXT NOT NULL DEFAULT 'user'
 	)`);
+	if (!dbColumns(db, "yano_recovery_pauses").includes("pause_origin")) db.exec("ALTER TABLE yano_recovery_pauses ADD COLUMN pause_origin TEXT NOT NULL DEFAULT 'user'");
 }
 
-async function pauseRun({ cwd, project, dbPath, workspaceDir, run, broker, yes, herdrSnapshot = null, reload = null, terminateAgents = true }) {
+async function pauseRun({ cwd, project, dbPath, workspaceDir, run, broker, yes, origin = "user", herdrSnapshot = null, reload = null, terminateAgents = true }) {
+	if (!["user", "cron"].includes(origin)) throw new Error(`origine pausa non valida: ${origin}`);
 	const db = getDb(dbPath);
 	ensureRecoveryTable(db);
 	const assignments = collectAssignments(db, [run.id]);
@@ -242,8 +246,8 @@ async function pauseRun({ cwd, project, dbPath, workspaceDir, run, broker, yes, 
 	const traceRecords = readTraceRecords({ cwd, project, limit: 100000 });
 	const { directory, manifest } = snapshotInputs({ cwd, workspaceDir, dbPath, project, run, assignments, presence, traceRecords, herdrSnapshot, reload });
 	const pauseId = `${run.id}-${Date.now()}`;
-	const metadata = { directory, assignments, presence, requested_stop: yes };
-	db.prepare("INSERT OR REPLACE INTO yano_recovery_pauses (id, run_id, project, snapshot_dir, created_at, status, metadata_json) VALUES (?, ?, ?, ?, ?, 'paused', ?)").run(pauseId, run.id, project, directory, new Date().toISOString(), JSON.stringify(metadata));
+	const metadata = { directory, assignments, presence, requested_stop: yes, pause_origin: origin };
+	db.prepare("INSERT OR REPLACE INTO yano_recovery_pauses (id, run_id, project, snapshot_dir, created_at, status, metadata_json, pause_origin) VALUES (?, ?, ?, ?, ?, 'paused', ?, ?)").run(pauseId, run.id, project, directory, new Date().toISOString(), JSON.stringify(metadata), origin);
 	const pausePayload = { pause_id: pauseId, snapshot_dir: directory, agent_count: presence.length };
 	if (dbColumns(db, "events").includes("run_id")) {
 		db.prepare("INSERT INTO events (run_id, ticket_id, type, payload, created_at) VALUES (?, NULL, 'run_paused', ?, ?)").run(run.id, JSON.stringify(pausePayload), new Date().toISOString());
@@ -585,6 +589,7 @@ export async function runControlledReload({ cwd, packageRoot, argv, update }) {
 		for (const run of runs) {
 			const result = await pauseRun({
 				cwd, project, dbPath, workspaceDir, run, broker, yes: true,
+				origin: "user",
 				herdrSnapshot: herdrInventory(herdrSnapshot),
 				reload: { requested_at: startedAt, forced: prepared.forced, safe_point_agents: prepared.prepared },
 				terminateAgents: snapshotResults.length === 0,
@@ -662,7 +667,9 @@ export async function runRecovery({ cwd, argv }) {
 	if (!runs.length) throw new Error("specifica --run <id> oppure --all; nessun run attivo trovato");
 	if (!has(argv, "--yes") && !has(argv, "--dry-run")) console.log("Anteprima: usa --yes per eseguire l'operazione, senza --yes non vengono fermati o avviati agenti.");
 	if (sub === "pause") {
-		for (const run of runs) await pauseRun({ cwd, project, dbPath, workspaceDir, run, broker: value(argv, "--broker") || BROKER_URL, yes: has(argv, "--yes") });
+		const origin = value(argv, "--origin") || "user";
+		if (!["user", "cron"].includes(origin)) throw new Error("--origin deve essere user o cron");
+		for (const run of runs) await pauseRun({ cwd, project, dbPath, workspaceDir, run, broker: value(argv, "--broker") || BROKER_URL, yes: has(argv, "--yes"), origin });
 		return;
 	}
 	if (sub === "resume") {

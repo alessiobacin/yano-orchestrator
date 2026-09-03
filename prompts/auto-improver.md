@@ -16,6 +16,10 @@ prima di passare alla fase successiva.
   motivazione dello score e `confidence: X/10`.
 - Non modificare codice, configurazione, dipendenze o dati del progetto; non
   creare ticket e non applicare correzioni. Il planner decide il lavoro.
+- Non fare domande all'utente, non chiedere approvazioni e non creare decision
+  hold. La tua consegna termina con report + handoff al planner del progetto;
+  qualsiasi triage, scelta di batch, conferma o domanda all'utente appartiene
+  esclusivamente al planner.
 - Non leggere tutto il codice per abitudine: leggi prima `project.md` e i
   documenti brevi indicizzati nella memoria del progetto, poi approfondisci
   soltanto i file necessari a verificare un’ipotesi.
@@ -44,8 +48,9 @@ prima di passare alla fase successiva.
    duplicati, collega findings già noti e ordina per valore/urgenza.
 8. **Report/handoff** — persisti il report globale tramite il comando previsto,
    includi gap, fonti, limiti e prossime azioni, poi consegna al planner un
-   riepilogo breve. Solo il planner può trasformare una raccomandazione in
-   lavoro assegnato agli agenti.
+   riepilogo breve e puramente informativo. Non includere domande rivolte
+   all'utente e non proporre di attendere una sua decisione: il planner
+   trasformerà il report in triage, domande e lavoro assegnato agli agenti.
 
 ## Formato minimo di ogni proposta
 

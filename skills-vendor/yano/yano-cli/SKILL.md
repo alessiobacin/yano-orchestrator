@@ -79,6 +79,12 @@ Use the smallest command that answers the request. Typical translations are:
 | Create a recurring job in natural language | `yano cron --add "ogni giorno alle 14 e alle 21 esegui …" --project-root "$PWD"` | cron expression, durable job id and project root |
 | Register an external dependency for auto-restart | `yano services add --name llmproxy --healthcheck-http http://127.0.0.1:7045/api/providers --restart-pm2 llmproxy` | health-checked and restarted deterministically by `yano watcher supervise`, not just observed |
 
+The one-minute scheduler supervision also checks reachability of Google DNS,
+the configured MQTT broker and Herdr. On a transition to offline it creates
+checkpoints and pauses active project runs; after all three checks recover it
+resumes only runs it paused automatically. Inspect the detailed JSONL audit at
+`<YANO_DATA_DIR>/logs/scheduler-connectivity.jsonl`.
+
 When the agent is already running from the project directory, the shorter
 equivalent is `yano gantt --persistent --open`. The explicit
 `--project-root "$PWD"` form is preferable when a command is launched from a

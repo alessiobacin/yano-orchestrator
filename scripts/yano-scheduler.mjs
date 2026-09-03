@@ -32,6 +32,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { globalDataPath } from "./yano-config.mjs";
 import { ensureComputerLocalService } from "./yano-global-services.mjs";
+import { checkConnectivity } from "./yano-connectivity.mjs";
+import { listYanoProjects } from "./yano-projects.mjs";
+import { runRecovery } from "./yano-recovery.mjs";
 import { installOneMinuteWindowsJob, removeOneMinuteWindowsJob, statusOneMinuteWindowsJob } from "./yano-os-scheduler.mjs";
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -43,7 +46,7 @@ const LOCAL_PC_PROJECT = "yano-local-pc";
 const LOCAL_PC_ROOT = path.join(globalDataPath(), "yano-local-pc");
 const SCHEDULER_ROOT = path.join(globalDataPath(), "yano-scheduler");
 const SCHEDULER_AGENT_NAME = `${SCHEDULER_INSTANCE}-${LOCAL_PC_PROJECT}`.slice(0, 32);
-const DEFAULT_DB = { version: 3, jobs: [], supervisor: { instance: SCHEDULER_INSTANCE, workspace: null, tab_id: null, last_seen_at: null, last_recovered_at: null } };
+const DEFAULT_DB = { version: 3, jobs: [], supervisor: { instance: SCHEDULER_INSTANCE, workspace: null, tab_id: null, last_seen_at: null, last_recovered_at: null, connectivity: { state: "unknown", auto_paused_projects: [], tracked_projects: [] } } };
 
 function nowIso(now = new Date()) { return now.toISOString(); }
 function schedulerDataDir(env = process.env) { return path.join(globalDataPath({ env }), "scheduler"); }
@@ -59,7 +62,9 @@ function readStore(env) {
 	if (!existsSync(file)) return { file, store: structuredClone(DEFAULT_DB) };
 	try {
 		const parsed = JSON.parse(readFileSync(file, "utf8"));
-		return { file, store: { ...structuredClone(DEFAULT_DB), ...parsed, jobs: Array.isArray(parsed.jobs) ? parsed.jobs : [], supervisor: { ...DEFAULT_DB.supervisor, ...(parsed.supervisor || {}) } } };
+		const supervisor = { ...DEFAULT_DB.supervisor, ...(parsed.supervisor || {}) };
+		supervisor.connectivity = { ...DEFAULT_DB.supervisor.connectivity, ...(parsed.supervisor?.connectivity || {}) };
+		return { file, store: { ...structuredClone(DEFAULT_DB), ...parsed, jobs: Array.isArray(parsed.jobs) ? parsed.jobs : [], supervisor } };
 	} catch { fail(`registro non leggibile: ${file}`); }
 }
 function writeStore(file, store) {
@@ -527,21 +532,69 @@ export async function runYanoScheduler({ argv, env = process.env, now = new Date
 		const { file, store } = readStore(env); const job = store.jobs.find((item) => item.id === requireValue(rest, "--id")); if (!job) fail("job non trovato.");
 		if (sub === "remove") { store.jobs = store.jobs.filter((item) => item !== job); writeStore(file, store); result = { removed: job.id }; }
 		else if (sub === "run") {
-			// `run` = test dello script registrato prima di renderlo ricorrente (D).
-			const run = dispatch(job, new Date(), spawn, env);
-			job.last_run_at = nowIso(now); job.last_status = run.status === 0 ? "dispatched" : "failed"; job.last_result = run; recordInstance(job, run, now, { manual_run: true });
-			writeStore(file, store); result = { id: job.id, run };
+			// Dry-run is the safe preflight for recurring jobs. Plain `run` remains
+			// an explicit immediate execution command.
+			if (rest.includes("--dry-run")) {
+				const issues = validateJob(job, { exists: existsSync, scriptsDir: schedulerScriptsDir(env) });
+				result = { id: job.id, dry_run: true, valid: issues.length === 0, issues };
+			} else {
+				const run = dispatch(job, new Date(), spawn, env);
+				job.last_run_at = nowIso(now); job.last_status = run.status === 0 ? "dispatched" : "failed"; job.last_result = run; recordInstance(job, run, now, { manual_run: true });
+				writeStore(file, store); result = { id: job.id, run };
+			}
 		}
 		else { job.enabled = sub === "enable"; job.updated_at = nowIso(now); writeStore(file, store); result = { id: job.id, enabled: job.enabled }; }
 	} else if (sub === "tick") result = tick({ env, now, spawn });
-	else if (sub === "supervise") result = superviseScheduler({ env, now, spawn });
+	else if (sub === "supervise") result = await superviseScheduler({ env, now, spawn });
 	else if (sub === "cron") { const action = rest.find((item) => !item.startsWith("--")) || "status"; result = action === "install" ? schedulerCronInstall({ spawn }) : action === "remove" ? schedulerCronRemove({ spawn }) : action === "status" ? schedulerCronStatus({ spawn }) : fail("azione cron sconosciuta; usa install, status o remove."); }
 	else { usage(); fail(`sottocomando sconosciuto: ${sub}`); }
 	if (json) console.log(JSON.stringify(result)); else console.log(typeof result === "string" ? result : JSON.stringify(result));
 	return result;
 }
 
-export function superviseScheduler({ env = process.env, now = new Date(), spawn = spawnSync } = {}) {
+export async function autoPauseOrResume({ store, env, now, connectivity, spawn, inventoryProvider = listYanoProjects, recovery = runRecovery }) {
+	const state = store.supervisor.connectivity || (store.supervisor.connectivity = structuredClone(DEFAULT_DB.supervisor.connectivity));
+	const previous = state.state || "unknown";
+	const current = connectivity.online ? "online" : "offline";
+	const actions = [];
+	let inventory = null;
+	try { inventory = inventoryProvider(); } catch (error) { actions.push({ action: "inventory", ok: false, error: error instanceof Error ? error.message : String(error) }); }
+	if (inventory?.herdr_reachable && inventory.projects?.length) {
+		state.tracked_projects = inventory.projects.map((project) => ({ name: project.name, root: project.root }));
+	}
+	if (current === "offline" && previous !== "offline") {
+		const candidates = state.tracked_projects || [];
+		state.auto_paused_projects = [];
+		for (const project of candidates) {
+			if ([LOCAL_PC_PROJECT, "yano-scheduler", "yano-watcher"].includes(project.name)) continue;
+			try {
+				await recovery({ cwd: project.root, argv: ["pause", "--all", "--yes", "--origin", "cron", "--project", project.name] });
+				state.auto_paused_projects.push({ ...project, paused_at: nowIso(now), reason: "connectivity_lost" });
+				actions.push({ action: "pause", project: project.name, ok: true });
+			} catch (error) {
+				actions.push({ action: "pause", project: project.name, ok: false, error: error instanceof Error ? error.message : String(error) });
+			}
+		}
+	} else if (current === "online" && previous === "offline") {
+		const paused = [...(state.auto_paused_projects || [])];
+		state.auto_paused_projects = [];
+		for (const project of paused) {
+			try {
+				await recovery({ cwd: project.root, argv: ["resume", "--all", "--yes", "--project", project.name] });
+				actions.push({ action: "resume", project: project.name, ok: true });
+			} catch (error) {
+				state.auto_paused_projects.push(project);
+				actions.push({ action: "resume", project: project.name, ok: false, error: error instanceof Error ? error.message : String(error) });
+			}
+		}
+	}
+	state.state = current;
+	state.last_checked_at = connectivity.checked_at;
+	state.last_transition_at = current !== previous ? nowIso(now) : (state.last_transition_at || null);
+	return { previous, current, transitioned: current !== previous, actions, tracked_projects: state.tracked_projects || [], auto_paused_projects: state.auto_paused_projects || [] };
+}
+
+export async function superviseScheduler({ env = process.env, now = new Date(), spawn = spawnSync } = {}) {
 	const { file, store } = readStore(env);
 	const agent = superviseAgent(store, now, spawn);
 	// The scheduler's own minute tick must also guarantee that its execution
@@ -552,12 +605,20 @@ export function superviseScheduler({ env = process.env, now = new Date(), spawn 
 	try { localPc = ensureComputerLocalService(); } catch (error) { localPc = { running: false, error: error instanceof Error ? error.message : String(error) }; }
 	const retries = (localPc?.running || localPc?.planner?.running) ? retryRecoverableFailures(store, now, spawn, env) : [];
 	const stale_recoveries = (localPc?.running || localPc?.planner?.running) ? recoverStaleDispatches(store, now, spawn, env) : [];
+	const connectivity = await checkConnectivity({ env });
+	const connectivity_recovery = await autoPauseOrResume({ store, env, now, connectivity, spawn });
+	try {
+		const logPath = path.join(globalDataPath({ env }), "logs", "scheduler-connectivity.jsonl");
+		mkdirSync(path.dirname(logPath), { recursive: true, mode: 0o700 });
+		writeFileSync(logPath, "", { flag: "a", mode: 0o600 });
+		writeFileSync(logPath, `${JSON.stringify({ timestamp: nowIso(now), event: "connectivity_supervision", connectivity, recovery: connectivity_recovery })}\n`, { flag: "a", mode: 0o600 });
+	} catch { /* logging must never block recovery */ }
 	// Persist the recovery before tick() reloads the registry; otherwise the
 	// normal tick would overwrite the repaired failure with the stale snapshot.
 	if (retries.length || stale_recoveries.length) writeStore(file, store);
 	const jobs = tick({ env, now, spawn });
 	const refreshed = readStore(env); refreshed.store.supervisor = store.supervisor; writeStore(refreshed.file, refreshed.store);
-	return { checked_at: nowIso(now), agent, local_pc: localPc, retries, stale_recoveries, ...jobs };
+	return { checked_at: nowIso(now), agent, local_pc: localPc, connectivity, connectivity_recovery, retries, stale_recoveries, ...jobs };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) runYanoScheduler({ argv: process.argv.slice(2) }).catch((error) => { console.error(error.message); process.exitCode = 1; });

@@ -8,7 +8,7 @@ category: delegation
 signal: delegation_timeout
 fingerprint: 7e271253177498392a1a66c80bece2234b9b0365d69ce109546e21dad22df104
 detected_at: 2026-09-03T13:28:58.265Z
-last_seen_at: 2026-09-03T15:25:10.312Z
+last_seen_at: 2026-09-03T16:57:03.420Z
 source_project: newmiodoc
 source_project_root: /Users/alessiobacin/Development/Code/newMioDOC
 source_project_key: workspace-57a4005feedc

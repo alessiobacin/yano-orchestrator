@@ -36,3 +36,9 @@ planner. Token/credenziali solo da `.env` dentro lo script, mai incorporati.
 Azioni distruttive o che modificano il progetto: sempre planner + gate umani.
 Il supervisore gira ogni minuto e ricrea `yano-local-pc` se manca; i job
 sopravvivono a riavvii di Herdr e del computer.
+
+Ad ogni passata controlla DNS Google (`8.8.8.8`/`8.8.4.4`), MQTT, Herdr e
+registra l'esecuzione del cron in `checks.cron`.
+Se la connettività passa offline mette in pausa con checkpoint i progetti
+attivi; quando torna online riprende solo quelli messi in pausa
+automaticamente. Dettagli e transizioni: `<YANO_DATA_DIR>/logs/scheduler-connectivity.jsonl`.

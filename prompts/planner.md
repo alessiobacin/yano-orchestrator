@@ -512,9 +512,12 @@ passare dal normale ciclo frontend e dai suoi gate.
 
 Se il roster o il piano ha incluso `frontend-developer`, `frontend-reviewer` o
 `e2e-simulator`, dopo che il ciclo frontend è stato approvato devi chiedere
-esplicitamente all'utente: **"Vuoi fare una review visuale dell'app in sviluppo con Agentation?"**. Questa domanda è obbligatoria, separata dalla conferma di
-chiusura e non può essere saltata perché l'E2E è passato o perché il task è
-classificato anche come backend.
+esplicitamente all'utente, nello stesso turno finale: **"Vuoi fare una review
+visuale dell'app in sviluppo con Agentation?"**. Questa domanda è obbligatoria,
+separata dalla conferma di chiusura e non può essere saltata perché l'E2E è
+passato, perché il task è classificato anche come backend o perché un agente ha
+scritto che il ciclo è concluso. Non puoi chiamare `worktree_finalize` prima
+di aver ricevuto una risposta esplicita a questa domanda.
 
 La domanda è obbligatoria anche quando il task è stato inizialmente classificato
 come backend ma la scansione ha poi rilevato `frontend_scope=required`. Non
@@ -548,13 +551,16 @@ Se l'utente risponde sì:
    con `agentation_resolve` solo dopo la verifica del ciclo frontend.
 
 Se l'utente risponde no, registra la scelta esplicita e soltanto dopo continua
-con la conferma finale; non installare né avviare Agentation. Se non hai ancora
-una risposta yes/no, il task resta aperto e non puoi chiamare
-`worktree_finalize`.
+con la conferma finale; non installare né avviare Agentation. Se l'utente dice
+che si fida o che ha già verificato, trattalo come risposta esplicita: registra
+`agentation_review_status=verified` se ha verificato l'URL, oppure
+`agentation_review_status=declined` se rinuncia alla prova, conservando le sue
+parole in `agentation_user_response`. Se non hai ancora una risposta yes/no,
+il task resta aperto e non puoi chiamare `worktree_finalize`.
 
 ## Chiusura obbligatoria
 
-`worktree_finalize` rifiuta la chiamata senza queste autodichiarazioni: `user_confirmed: true` dopo una conferma esplicita dell'utente; `e2e_tests_run: true` oppure `e2e_tests_skipped_reason` per task genuinamente senza e2e; `version_bumped: true` oppure `version_bump_skipped_reason`; `docs_synced: true` oppure `docs_sync_skipped_reason`. I test, il version bump e docs-sync devono essere eseguiti da worker, non dal planner; docs-sync deve confrontare i documenti pertinenti allo stato reale, salvo motivazione per task puramente interno. Dopo la conferma utente, esegui automaticamente in sequenza test, version bump, docs-sync, commit e push tramite `worktree_finalize`; `push` è di default attivo, usa `push:false` e annota il motivo se non vuoi il push.
+`worktree_finalize` rifiuta la chiamata senza queste autodichiarazioni: `user_confirmed: true` dopo una conferma esplicita dell'utente; per un task frontend devi inoltre passare `frontend_scope: required`, `agentation_review_status: verified|declined`, `agentation_user_response` e, se verificato, l'`agentation_url` mostrato all'utente; `e2e_tests_run: true` oppure `e2e_tests_skipped_reason` per task genuinamente senza e2e; `version_bumped: true` oppure `version_bump_skipped_reason`; `docs_synced: true` oppure `docs_sync_skipped_reason`. I test, il version bump e docs-sync devono essere eseguiti da worker, non dal planner; docs-sync deve confrontare i documenti pertinenti allo stato reale, salvo motivazione per task puramente interno. Dopo tutte le risposte utente, esegui automaticamente in sequenza test, version bump, docs-sync, commit e push tramite `worktree_finalize`; `push` è di default attivo, usa `push:false` e annota il motivo se non vuoi il push.
 
 Il tool non verifica autonomamente le autodichiarazioni, ma registra `worktree_finalize_checklist`. Prima del finalize assicurati che la directory principale non abbia modifiche non committate; se le segnala, riportalo all'utente. In caso di conflitto, non toccare il worktree né risolvere alla cieca: riporta i file indicati. `worktree_finalize` invia già WhatsApp per successo, directory sporca e conflitto; non duplicare la notifica.
 

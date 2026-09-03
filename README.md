@@ -221,6 +221,11 @@ yano invoke --role planner:<progetto> --prompt "riepiloga lo stato" --project-ro
 yano invoke --role yano-local-pc --prompt "promemoria tra 10 minuti"                      # delega a yano-local-pc
 yano cron --add "ogni giorno alle 14 e alle 21 esegui la pulizia del progetto" --project-root "$PWD"  # legacy testo+cron (dispatch planner col testo)
 yano cron --list --json                     # legacy; il supervisore controlla yano-local-pc ogni minuto
+
+# ad ogni minuto il supervisore verifica DNS Google, MQTT e Herdr; se il laptop
+# perde rete mette in pausa i progetti attivi e, al ritorno, riprende solo quelli
+# messi in pausa automaticamente. Log dettagliato:
+# <YANO_DATA_DIR>/logs/scheduler-connectivity.jsonl
 yano local-pc status                         # servizio globale Local PC
 yano local-pc ask --prompt "Controlla promemoria e calendario di oggi"
 # yano services: registro di servizi esterni (Docker/pm2/comando) che Yano non possiede ma da cui dipende

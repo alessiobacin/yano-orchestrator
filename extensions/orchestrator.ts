@@ -56,7 +56,8 @@ import { loadAgentMemory, updateAgentMemory } from "../scripts/yano-agent-memory
 import { ensureProjectSummary, projectBootstrapPrompt, scanProject } from "../scripts/yano-project-context.mjs";
 import { collectCodeMemContext } from "../scripts/yano-code-mem-context.mjs";
 import { getProjectApi, listProjectApis, resolveApiSecret } from "../scripts/yano-api-registry.mjs";
-import { switchImageTurnToAuto } from "../scripts/yano-vision-routing.mjs";
+import { llmProxyAutoModel, switchImageTurnToAuto } from "../scripts/yano-vision-routing.mjs";
+import { switchPinnedModelToAuto } from "../scripts/yano-model-fallback.mjs";
 
 // ESM-safe lazy require, used only inside SQLiteOrchestratorStorage's
 // constructor to resolve node:sqlite on first actual use (see the
@@ -3761,6 +3762,26 @@ export default function (pi: ExtensionAPI) {
 		await switchImageTurnToAuto({ event, ctx: currentCtx, setModel: (model) => pi.setModel(model), log: logEvent });
 	});
 
+	// If a pinned provider fails because of quota/credit or provider transport,
+	// switch once to llmProxy auto and resume the failed turn. Tool/application
+	// errors are intentionally not handled here.
+	pi.on("message_end", async (event: any, ctx: any) => {
+		const message = event?.message;
+		if (message?.role !== "assistant" || !message?.errorMessage) return;
+		await switchPinnedModelToAuto({
+			message,
+			ctx,
+			autoModel: llmProxyAutoModel(ctx),
+			setModel: (model) => pi.setModel(model),
+			resume: async () => {
+				const sendUserMessage = (pi as any).sendUserMessage;
+				if (typeof sendUserMessage !== "function") throw new Error("Pi non espone sendUserMessage per la ripresa del turno");
+				await sendUserMessage.call(pi, "Il provider/modello selezionato non è disponibile. Ho attivato il routing automatico llmProxy: riprendi il task dal checkpoint osservabile senza ricominciare da capo.", { deliverAs: "followUp", triggerTurn: true });
+			},
+			log: logEvent,
+		});
+	});
+
 	// Record context at every completed turn. This is the stable observation
 	// point used by the external watcher: the agent is at a safe point and Pi's
 	// usage estimate reflects the latest provider response.
@@ -5341,6 +5362,10 @@ export default function (pi: ExtensionAPI) {
 			commit_message: Type.Optional(Type.String({ description: "Commit message for any uncommitted changes and for the merge commit. Defaults to a generic message referencing the slug." })),
 			notify_message: Type.Optional(Type.String({ description: "Custom completion message sent to all configured notification channels. Defaults to a generic one naming the task slug." })),
 			user_confirmed: Type.Boolean({ description: "You explicitly asked the user to confirm this result is what they wanted, and they confirmed — required, no exceptions." }),
+			frontend_scope: Type.Optional(Type.Union([Type.Literal("required"), Type.Literal("not_applicable")])),
+			agentation_review_status: Type.Optional(Type.Union([Type.Literal("verified"), Type.Literal("declined")])),
+			agentation_url: Type.Optional(Type.String({ description: "The development URL shown to the user for the Agentation review." })),
+			agentation_user_response: Type.Optional(Type.String({ description: "The user's explicit Agentation decision or verification response." })),
 			e2e_tests_run: Type.Optional(Type.Boolean({ description: "The project's end-to-end/full test suite was actually run as part of this task." })),
 			e2e_tests_skipped_reason: Type.Optional(Type.String({ description: "Required if e2e_tests_run is not true: why no e2e run applies to this task." })),
 			version_bumped: Type.Optional(Type.Boolean({ description: "The project's own version marker (package.json or equivalent) was bumped as part of this task." })),
@@ -5360,6 +5385,14 @@ export default function (pi: ExtensionAPI) {
 						"is what they wanted BEFORE finalizing (Revisione 42) — don't assume completion just because every ticket is " +
 						"done. Once they've confirmed, call this again with user_confirmed: true.",
 				);
+			}
+			if (params.frontend_scope === "required") {
+				if (!params.agentation_review_status || !params.agentation_user_response?.trim()) {
+					throw new Error("worktree_finalize: refused — frontend_scope=required needs an explicit Agentation answer: ask the user to review the development URL, then pass agentation_review_status=verified or declined and agentation_user_response.");
+				}
+				if (params.agentation_review_status === "verified" && !params.agentation_url?.trim()) {
+					throw new Error("worktree_finalize: refused — agentation_review_status=verified requires the development agentation_url shown to the user.");
+				}
 			}
 			if (!params.e2e_tests_run && !params.e2e_tests_skipped_reason) {
 				throw new Error(
@@ -5384,6 +5417,10 @@ export default function (pi: ExtensionAPI) {
 			logEvent("worktree_finalize_checklist", {
 				slug,
 				user_confirmed: params.user_confirmed,
+				frontend_scope: params.frontend_scope ?? "not_applicable",
+				agentation_review_status: params.agentation_review_status ?? null,
+				agentation_url: params.agentation_url ?? null,
+				agentation_user_response: params.agentation_user_response ?? null,
 				e2e_tests_run: !!params.e2e_tests_run,
 				e2e_tests_skipped_reason: params.e2e_tests_skipped_reason ?? null,
 				version_bumped: !!params.version_bumped,

@@ -118,3 +118,11 @@ yano repair --all-projects --yes --update
 ~~~
 
 I run già `completed` e finalizzati non vengono riaperti.
+
+## Pause manuali e pause del cron
+
+Una pausa eseguita dall'utente (`yano pause`) resta manuale e non viene mai
+riattivata automaticamente. Il supervisore usa `--origin cron` e registra
+l'origine nella tabella `yano_recovery_pauses`; al ritorno della connettività
+riattiva esclusivamente i run presenti nel proprio elenco persistente
+`auto_paused_projects`.

@@ -11,6 +11,9 @@ branch/worktree, non installa dipendenze, non esegue migrazioni, commit, push o
 deploy e non apre ticket operativi in autonomia. Scrive solo nella directory
 globale `<YANO_DATA_DIR>/auto-improver/` e nel database SQLite globale. Il planner resta
 l'unico responsabile di accettare una proposta e avviare il flusso di sviluppo.
+L'auto-improver non interroga direttamente l'utente e non apre decision hold:
+consegna report e riepilogo al planner del progetto. È il planner che esegue il
+triage, sceglie il batch, raccoglie eventuali conferme e assegna il lavoro.
 
 ## Evidence pack
 

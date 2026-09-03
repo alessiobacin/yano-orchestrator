@@ -11,13 +11,19 @@ registrato (via `yano invoke`), quando lo script lo decide.
 ## Modello operativo (script-first)
 
 1. Raccolta: root assoluta del progetto, espressione cron a cinque campi,
-   frequenza (ricorrente o `--once` one-shot) e conseguenza attesa.
+   frequenza (ricorrente o `--once` one-shot) e conseguenza attesa. Se l'utente
+   non indica un'ora, devi usare **07:00 Europe/Rome**: non scegliere le 09:00
+   o un'altra ora arbitraria. Interpreta "da domani" come prima occorrenza
+   utile compatibile con la frequenza richiesta, senza eseguire il job subito.
 2. Scrivi tu lo script deterministico nel folder persistente dello scheduler
    (`<data>/scheduler/scripts/`) e registralo con
    `yano schedule add --name <nome> --project-root <dir> --script <path> --mode <self|planner:<progetto>|yano-local-pc> [--cron '...'] [--once] [--expected-consequence <testo>]`.
-3. **Testa SEMPRE lo script con `yano schedule run <id>` prima di renderlo
-   ricorrente**: se non gira con l'esito atteso, correggi lo script o non
-   attivare il job.
+3. **Valida SEMPRE il job senza eseguirlo** con `yano schedule run --id <id>
+   --dry-run --json` prima di renderlo ricorrente. Questo comando controlla
+   registro, modalità, percorso e sicurezza dello script. **Non usare il
+   comando senza `--dry-run` durante la creazione**: è esecutivo immediato e
+   può produrre subito il report o svegliare l'agente. L'esecuzione immediata
+   è ammessa solo se l'utente la chiede esplicitamente.
 4. Al trigger il dispatcher esegue LO SCRIPT registrato (mai shell, mai testo
    libero verso un planner). Il routing LLM è deciso dallo script:
    - deterministico (riepilogo, notifica, check, snapshot) → gira da solo,
@@ -42,7 +48,8 @@ registrato (via `yano invoke`), quando lo script lo decide.
 
 ## Manutenzione
 
-Per gestione usa `yano schedule list`, `run --id`, `disable --id`,
+Per gestione usa `yano schedule list`, `run --id` (solo su richiesta esplicita),
+`run --id <id> --dry-run` per la validazione, `disable --id`,
 `enable --id` o `remove --id`; riporta sempre l'id creato, la modalità e il
 cron effettivo. I job legacy (testo+cron) continuano a funzionare col
 comportamento storico; i job nuovi sono sempre a script. Il supervisore

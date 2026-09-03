@@ -56,7 +56,8 @@ La sintassi storica in linguaggio naturale resta disponibile per i job legacy:
 ## Testare e gestire
 
 ```bash
-yano schedule run <job-id>        # esegue LO SCRIPT registrato subito (test!)
+yano schedule run --id <job-id> --dry-run --json # valida senza eseguire
+yano schedule run --id <job-id>        # esegue subito SOLO su richiesta esplicita
 yano schedule list --json         # job con script_path, mode, expected_consequence, stato
 yano schedule disable --id <job-id>
 yano schedule enable --id <job-id>
@@ -67,8 +68,8 @@ yano schedule instances --id <job-id> --limit 20 --json
 yano schedule retry --id <instance-id> --json
 ```
 
-Regola d'oro: **prima di rendere ricorrente uno script, eseguilo con
-`yano schedule run <id>`** e verifica l'esito. Se lo script manca o fallisce,
+Regola d'oro: **prima di rendere ricorrente uno script, validalo con
+`yano schedule run --id <id> --dry-run --json`**. Se lo script manca o fallisce,
 il dispatch registra `failed` e disabilita il job (`enabled:false`) con un
 fallback loggato — mai testo libero verso un planner dal cron.
 
@@ -103,3 +104,11 @@ l'unico eseguibile è lo script registrato e validato (eseguito dal runtime
 Node come file, mai da una shell). Token e credenziali si leggono da `.env`
 dentro lo script, mai incorporati. Le modalità che modificano il progetto
 passano dal planner con gate umani.
+## Standby e perdita di connessione
+
+Il cron globale esegue la supervisione ogni minuto. Controlla DNS Google
+(`8.8.8.8`/`8.8.4.4`), broker MQTT, Herdr e l'esecuzione della passata cron.
+Se la macchina perde la connettività, salva checkpoint e mette in pausa i run
+attivi dei progetti; quando tutti i segnali tornano disponibili riprende solo i
+progetti messi in pausa automaticamente. Il registro dettagliato è
+`<YANO_DATA_DIR>/logs/scheduler-connectivity.jsonl`.

@@ -770,7 +770,7 @@ function supervise(db) {
 		// observable result; failures/timeouts are retried here and preserved in
 		// scheduler JSON plus the global watcher log.
 		let scheduler;
-		try { scheduler = superviseScheduler({ now: new Date() }); }
+		try { scheduler = await superviseScheduler({ now: new Date() }); }
 		catch (error) { scheduler = { checked_at: now(), error: error instanceof Error ? error.message : String(error) }; }
 		try {
 			const logPath = path.join(path.dirname(dbPath()), "..", "logs", "watcher-global.jsonl");

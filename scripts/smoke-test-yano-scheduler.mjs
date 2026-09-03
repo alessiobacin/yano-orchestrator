@@ -37,6 +37,10 @@ try {
 	const created = await runYanoScheduler({ argv: ["add-natural", "--task", "ogni giorno alle 14 e alle 21 voglio che esegui la pulizia del progetto llmproxy", "--project-root", project, "--json"], env, now: new Date("2026-09-02T10:00:00Z"), spawn });
 	assert.equal(created.created.cron, "0 14,21 * * *");
 	assert.match(crontab, /yano-scheduler-supervisor/);
+	const dryRun = await runYanoScheduler({ argv: ["run", "--id", created.created.id, "--dry-run", "--json"], env, spawn });
+	assert.equal(dryRun.dry_run, true);
+	assert.equal(dryRun.valid, false, "legacy jobs are intentionally not executable through script-first dry-run");
+	assert.equal(launches.length, 0, "dry-run must not dispatch or wake an agent");
 	const listed = await runYanoScheduler({ argv: ["list"], env, spawn });
 	assert.equal(listed.length, 1);
 

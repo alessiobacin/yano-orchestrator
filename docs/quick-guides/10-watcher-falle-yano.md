@@ -313,10 +313,12 @@ proposta e una conferma esplicita dell'utente. Un researcher read-only
 non rende sano un dibattito instradato male: il finding debate viene inviato al
 planner per il recupero, o a Telegram se non è più online.
 
-Se il trace mostra un errore 4xx/5xx del modello pinnato, il watcher registra
-anche `model-runtime-fallback`: il planner deve dichiarare il fallback e
-verificarne l'esito, invece di considerare automaticamente valido il modello
-proposto.
+Se il modello pinnato restituisce un errore di provider, credito, quota o
+gateway, l'estensione runtime passa una sola volta a `llmproxy/llmproxy` e
+riprende il turno dal checkpoint osservabile. Registra
+`model_runtime_fallback` oppure `model_runtime_fallback_failed`. Il watcher
+verifica comunque l'esito e inoltra il finding al planner; errori applicativi e
+dei tool non attivano lo switch.
 
 Il `pinned_id` mostrato nel piano, per esempio
 `z-ai/glm-5.3-flash@openrouter-glm`, appartiene al catalogo llmProxy. Il lancio
@@ -397,3 +399,11 @@ ticket markdown.
 
 Il watcher non corregge, non chiude ticket e non modifica il codice: segnala e
 prepara il contesto per il futuro `yano-feedback` o per un LLM incaricato.
+yano watcher supervise --json
+```
+
+La stessa passata supervisiona anche la connettività del laptop: DNS Google,
+MQTT e Herdr. In caso di perdita mette in pausa con checkpoint i progetti
+attivi; al ripristino riattiva soltanto quelli messi in pausa dal supervisore.
+Gli esiti e le azioni sono nel log globale
+`<YANO_DATA_DIR>/logs/scheduler-connectivity.jsonl`.

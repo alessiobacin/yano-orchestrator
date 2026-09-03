@@ -55,6 +55,25 @@ Vincoli non negoziabili: niente shell/token/pipe/redirezioni nei job (unico
 esecutore = script validato), token solo da `.env`, azioni distruttive sempre
 mediate dal planner con gate umani.
 
+### Connessione, standby e ripristino
+
+La supervisione globale (`yano schedule supervise`, eseguita dal cron ogni
+minuto e anche dal watcher) verifica separatamente tre segnali: risoluzione di
+`google.com` tramite i DNS pubblici Google `8.8.8.8`/`8.8.4.4`, connessione al
+broker MQTT configurato e snapshot del server Herdr. Il cron stesso è
+considerato vivo quando questa passata viene eseguita; il risultato è esposto
+nel campo `checks.cron`. L'esito completo viene
+registrato in `<YANO_DATA_DIR>/logs/scheduler-connectivity.jsonl` e nella
+supervisione globale del watcher.
+
+Quando lo stato passa da `online` a `offline`, il supervisore salva nel
+registro scheduler i progetti attivi e mette in pausa i loro run con checkpoint
+(non tocca `yano-local-pc`, scheduler o watcher). Al ritorno simultaneo dei tre
+segnali riattiva esclusivamente i progetti che aveva messo in pausa lui; un
+progetto messo in pausa manualmente non viene riattivato. Le transizioni sono
+idempotenti e sopravvivono a spegnimento/standby del laptop: al primo tick dopo
+il risveglio il supervisore riconcilia lo stato persistito.
+
 ## Matrice obbligatoria
 
 | Modifica | Superfici da verificare |

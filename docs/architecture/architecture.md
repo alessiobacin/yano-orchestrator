@@ -785,3 +785,12 @@ The stable seams for future work are:
 - effect adapters and notifications.
 
 New features should preserve project scoping, idempotency, durable audit events and explicit actor authorization at these boundaries.
+## Connettività e standby del laptop
+
+Il supervisore globale eseguito dal cron ogni minuto coordina quattro segnali
+osservabili: DNS Google, broker MQTT, server Herdr e la propria esecuzione cron.
+Una transizione `online → offline` crea checkpoint e mette in pausa i run dei
+progetti attivi; la transizione inversa riprende soltanto i run registrati come
+`auto_paused_projects`. Stato, progetti tracciati e audit sono persistenti nel
+registro scheduler e nel log JSONL globale, così il comportamento resta
+idempotente anche dopo standby o riavvio.

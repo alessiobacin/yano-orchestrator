@@ -56,6 +56,7 @@ import { loadAgentMemory, updateAgentMemory } from "../scripts/yano-agent-memory
 import { ensureProjectSummary, projectBootstrapPrompt, scanProject } from "../scripts/yano-project-context.mjs";
 import { collectCodeMemContext } from "../scripts/yano-code-mem-context.mjs";
 import { getProjectApi, listProjectApis, resolveApiSecret } from "../scripts/yano-api-registry.mjs";
+import { switchImageTurnToAuto } from "../scripts/yano-vision-routing.mjs";
 
 // ESM-safe lazy require, used only inside SQLiteOrchestratorStorage's
 // constructor to resolve node:sqlite on first actual use (see the
@@ -3671,8 +3672,13 @@ export default function (pi: ExtensionAPI) {
 	// try to do everything itself. This is what turns "planner, coder and
 	// reviewer are all just Pi agents with the same tools" into the
 	// planner → coder → reviewer → planner pipeline the operator expects.
-	pi.on("before_agent_start", async (_event, ctx) => {
+	pi.on("before_agent_start", async (event: any, ctx) => {
 		if (!identity) return;
+		// A startup llmProxy pin is static, but vision support is a property of
+		// the concrete provider/model selected by the gateway. If this turn has
+		// an image, force llmProxy's automatic model before the first request so
+		// a pinned text-only model cannot answer that it cannot see the image.
+		await switchImageTurnToAuto({ event, ctx, setModel: (model) => pi.setModel(model), log: logEvent });
 		const flags = readCliFlags(pi);
 		const cfg = loadConfig(identity.cwd, flags.configDir || "agents");
 		const roleCfg = cfg.roles[identity.role];

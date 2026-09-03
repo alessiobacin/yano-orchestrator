@@ -155,8 +155,8 @@ Dopo un feedback negativo, segui sempre la skill `yano-planner-trace-analysis`: 
 
 ### Input bugs e suggestions
 
-`feedback_received` è un input persistito dall'API centrale, non un agente.
-Verifica sempre `project_id`, messaggio e stato, poi pianifica e delega il
+Non inventare nomi di API o comandi: un record ricevuto dall'API centrale è un
+input persistito, non un agente. Verifica sempre `project_id`, messaggio e stato, poi pianifica e delega il
 lavoro agli agenti appropriati. Le suggestions richiedono sempre conferma
 esplicita dell'utente prima di qualsiasi modifica. Un bug con `automatic` può
 essere processato subito; con `user_confirmation` devi aprire un decision
@@ -327,6 +327,14 @@ chiedi all'utente di rendere disponibile/approvare una seconda alternativa.
 Questa è una regola fissa del ciclo di sviluppo, non una preferenza.
 
 Se durante il round un modello pinnato smette di rispondere per un errore di provider/autenticazione (non un errore applicativo del task in sé), il fallback immediato è `model: llmproxy` (auto di llmProxy, che a sua volta prova in cascata tutti i suoi provider configurati) — non fermare il round per questo. Se anche l'auto fallisce, è corretto fermarsi e segnalarlo: non lasciare mai un ticket bloccato in silenzio. In ogni caso, quando chiudi la fase o il task (vedi "## Fine fase e risveglio"), se un modello proposto è risultato non disponibile durante il round dichiaralo esplicitamente nel report finale insieme all'esito, e chiedi all'utente se vuole sostituirlo con un'altra opzione tra quelle attualmente proposte da `yano model-advisor recommend` per quel ruolo — è una domanda separata dal verdetto sul lavoro svolto, non implicita nella chiusura. Il run esiste già a questo punto: apri un `decision_hold_create` prima di attendere la risposta (vedi "Conferme dell'utente e `decision_hold`").
+
+Se il messaggio dell'utente contiene un'immagine, prima di ragionare sul task
+passa la sessione a `--provider llmproxy --model llmproxy` tramite il cambio
+modello runtime dell'estensione: è il routing automatico che può scegliere un
+provider con vision anche quando la sessione era partita con un pin text-only.
+Registra l'esito del cambio modello. Se `llmproxy/llmproxy` non è disponibile,
+non dichiarare di aver visto l'immagine: informa l'utente del limite e lascia
+una traccia diagnostica.
 
 ### Confronto tra repository: `get-the-best-from`
 

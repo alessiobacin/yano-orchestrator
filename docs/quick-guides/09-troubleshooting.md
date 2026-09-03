@@ -105,3 +105,17 @@ yano start --instance planner-01 --role planner
 
 Yano individua il database e il roster esistenti, compreso il layout legacy in
 .pi/agents/, senza duplicare lo stato.
+
+# Immagini e modelli llmProxy pinnati
+
+Quando un turno contiene un'immagine, l'estensione Yano seleziona runtime
+`llmproxy/llmproxy` prima della richiesta al modello. Questo mantiene il pin
+scelto all'avvio come default per i turni testuali, ma lascia a llmProxy la
+scelta di un provider con vision per il turno visuale. L'esito è registrato nei
+trace come `vision_model_switched` oppure `vision_model_switch_failed`.
+
+Se il planner dichiara di non poter vedere un'immagine, controlla il trace
+`vision_model_switch_failed` e verifica che il catalogo Pi contenga
+`llmproxy/llmproxy`; non correggere il problema inventando un endpoint o un
+comando di feedback. Per i record bug/suggestion usa sempre il relativo
+`project_id` e lo stato restituito dalla CLI/API.

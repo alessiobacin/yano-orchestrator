@@ -13,8 +13,8 @@ cartella contiene viste più piccole, utili durante diagnosi e onboarding:
   stop controllato, restart Herdr e pulizia delle copie stale;
 - [`03-architect-playbook.mmd`](./03-architect-playbook.mmd) — catalogo,
   proposta ephemeral, readiness, Watcher e promozione;
-- [`04-watcher-routing.mmd`](./04-watcher-routing.mmd) — scansione bounded,
-  polling, route al Planner/Telegram e ticket Yano;
+- [`04-watcher-routing.mmd`](./04-watcher-routing.mmd) — supervisione globale
+  ogni minuto, log/heartbeat, recovery di agenti e schedule, route al Planner/Telegram;
 - [`05-trace-db-gantt.mmd`](./05-trace-db-gantt.mmd) — distinzione tra trace
   globale, DB operativo e dashboard Gantt;
 - [`06-agenti-esterni.mmd`](./06-agenti-esterni.mmd) — confini read-only e

@@ -127,14 +127,25 @@ per una revisione semantica approfondita il Watcher deve ricevere un round o
 un controllo esplicito e deve riportare evidenze, non dichiarare il flusso sano
 solo perché il processo di polling è vivo.
 
-Ad ogni passata il supervisore esegue inoltre un health check deterministico dei
-servizi persistenti (`watcher-service`, `scheduler-service`, `planner-01` e
-`yano-local-pc`):
-verifica workspace/tab/pane, processo Pi foreground e stato effettivo Herdr con
-`agent explain`. Questo controllo non usa token né chiama un modello. Se uno dei
-segnali non è coerente, il supervisore chiude e ricrea soltanto il servizio
-interessato, registrando il recupero; l’agente viene coinvolto solo dopo questa
-anomalia locale.
+Ad ogni passata il supervisore esegue inoltre un health check deterministico di
+tutti i servizi persistenti (`watcher-service`, `scheduler-service`, `planner-01`
+e `yano-local-pc`) e degli agenti/progetti registrati:
+verifica workspace/tab/pane, processo Pi foreground, stato effettivo Herdr con
+`agent explain`, heartbeat applicativo, trace e ticket SQLite. Questo controllo
+non usa token né chiama un modello. Se uno dei segnali non è coerente, il
+supervisore chiude e ricrea il componente interessato, riattiva il planner del
+progetto e registra il recupero; le tab morte/bloccate non vengono lasciate
+come falsi positivi.
+
+La stessa passata riconcilia anche `<YANO_DATA_DIR>/scheduler/jobs.json`:
+un dispatch non è considerato riuscito perché è stato semplicemente accodato.
+Il bridge verso `planner-01` di `yano-local-pc` attende un ack bounded di
+pubblicazione (non la conclusione LLM del task); un
+`failed` o un `dispatched` senza esito oltre la finestra configurata viene
+marcato con la causa, ritentato una sola volta per finestra e registrato in
+`watcher-global.jsonl` e nelle `instances` dello schedule. Il planner di
+`yano-local-pc` può ricevere il task anche mentre il tab dell'agente Local PC è
+in recovery: è il planner il destinatario durevole degli schedule generici.
 
 Ogni passata lascia nel trace un evento `yano_watcher_scan`, con data e ora di
 inizio (`started_at`), fine (`completed_at`), durata, esito, numero di finding e

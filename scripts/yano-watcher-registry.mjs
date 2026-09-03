@@ -39,6 +39,7 @@ import { superviseExternalServices, getService } from "./yano-services.mjs";
 import { herdrSnapshot } from "./yano-herdr-client.mjs";
 import { installOneMinuteWindowsJob, removeOneMinuteWindowsJob, statusOneMinuteWindowsJob } from "./yano-os-scheduler.mjs";
 import { agentTabIdentityAudit, findAgentIdentityConflicts, formatAgentIdentityConflicts } from "./yano-agent-identity.mjs";
+import { superviseScheduler } from "./yano-scheduler.mjs";
 
 const require = createRequire(import.meta.url);
 const WORKSPACE_LABEL = "yano-watcher";
@@ -562,8 +563,18 @@ async function withSupervisorLock(callback) {
 	} catch (error) {
 		if (error?.code !== "EEXIST") throw error;
 		try {
+			const lockContents = fs.readFileSync(lock, "utf8").split(/\s+/);
+			const ownerPid = Number(lockContents[0]);
+			let ownerAlive = false;
+			if (Number.isInteger(ownerPid) && ownerPid > 1) {
+				try { process.kill(ownerPid, 0); ownerAlive = true; } catch (probeError) { ownerAlive = probeError?.code === "EPERM"; }
+			}
 			const age = Date.now() - fs.statSync(lock).mtimeMs;
-			if (age > 120_000) {
+			// A dead owner always releases the lock on the next invocation. The
+			// age fallback remains for old lock files written before PID metadata
+			// existed, but a live long-running supervisor is never overlapped just
+			// because one pass needs more than two minutes.
+			if (!ownerAlive || (age > 120_000 && !Number.isInteger(ownerPid))) {
 				fs.unlinkSync(lock);
 				fd = fs.openSync(lock, "wx");
 				fs.writeSync(fd, `${process.pid}\n${now()}\n`);
@@ -638,6 +649,19 @@ function supervise(db) {
 			if (row) appendRawTraceRecord({ cwd: row.root, project: resolveTraceProject(row.root), record: { type: "watcher_identity_conflict", payload: conflict } });
 		}
 		const global_services = ensureGlobalYanoServices();
+		// The watcher supervisor is the single deterministic control-plane pass:
+		// reconcile services/projects and the scheduler registry in the same
+		// minute. A queued schedule is not healthy until its bridge returns an
+		// observable result; failures/timeouts are retried here and preserved in
+		// scheduler JSON plus the global watcher log.
+		let scheduler;
+		try { scheduler = superviseScheduler({ now: new Date() }); }
+		catch (error) { scheduler = { checked_at: now(), error: error instanceof Error ? error.message : String(error) }; }
+		try {
+			const logPath = path.join(path.dirname(dbPath()), "..", "logs", "watcher-global.jsonl");
+			fs.mkdirSync(path.dirname(logPath), { recursive: true, mode: 0o700 });
+			fs.appendFileSync(logPath, `${JSON.stringify({ timestamp: new Date().toISOString(), event: "global_watch_supervision", scheduler, global_services, projects: rows.length })}\n`, { mode: 0o600 });
+		} catch { /* recovery must not be blocked by logging */ }
 		// Refresh the activation state after global-service recovery.
 		const activated = [...rows.map((row) => activateDefaultWorkers(db, row)).filter(Boolean)];
 		const result = {
@@ -647,6 +671,7 @@ function supervise(db) {
 			projects: rows.map((row) => doStatusForRow(db, row, { heal: true })),
 			activated,
 			global_services,
+			scheduler,
 			external_services,
 			external_workers: [],
 			orphan_tabs_removed,

@@ -21,12 +21,15 @@ function pendingRoot() { return path.join(globalDataPath(), "yano-local-pc", "pe
 function savePending(request) { fs.mkdirSync(pendingRoot(), { recursive: true, mode: 0o700 }); fs.writeFileSync(path.join(pendingRoot(), `${request.assignment_id}.json`), JSON.stringify(request, null, 2), { mode: 0o600 }); }
 function removePending(id) { try { fs.unlinkSync(path.join(pendingRoot(), `${id}.json`)); } catch { /* already removed */ } }
 function pendingRequests() { try { return fs.readdirSync(pendingRoot()).filter((name) => name.endsWith(".json")).map((name) => JSON.parse(fs.readFileSync(path.join(pendingRoot(), name), "utf8"))); } catch { return []; } }
-function usage() { console.log("Uso: yano local-pc <start|status|ask|pending> [--planner] [--prompt \"...\"] [--timeout-ms N]"); }
+function usage() { console.log("Uso: yano local-pc <start|status|ask|pending> [--planner] [--no-wait] [--prompt \"...\"] [--timeout-ms N]"); }
 
-export async function askLocalPc(prompt, { timeoutMs = 120000, broker = brokerUrl(), ensure = ensureComputerLocalService, planner = false } = {}) {
+export async function askLocalPc(prompt, { timeoutMs = 120000, broker = brokerUrl(), ensure = ensureComputerLocalService, planner = false, waitForResponse = true } = {}) {
 	if (!prompt?.trim()) throw new Error("--prompt è obbligatorio.");
 	const service = ensure();
-	if (!service.running) throw new Error(`Local PC non attivo (${service.error || "avvio fallito"}).`);
+	// The planner is the durable scheduler target. The Local PC shell/agent
+	// tab may be recovering independently; do not drop a scheduled request
+	// when planner-01 is already healthy and able to receive MQTT.
+	if (!service.running && !service.planner?.running) throw new Error(`Local PC non attivo (${service.error || "avvio fallito"}).`);
 	const targetInstance = planner ? "planner-01" : INSTANCE;
 	const requestId = `${planner ? "planner" : "computer"}-${crypto.randomUUID()}`;
 	const replyTopic = `pi/${SCOPE}/cli/${requestId}/response`;
@@ -43,7 +46,12 @@ export async function askLocalPc(prompt, { timeoutMs = 120000, broker = brokerUr
 				clearTimeout(timer);
 				try { resolve(JSON.parse(payload.toString())); } catch { resolve({ response: payload.toString() }); }
 			});
-			client.publish(commandTopic, JSON.stringify(request), { qos: 1 });
+			const publish = typeof client.publishAsync === "function"
+				? client.publishAsync(commandTopic, JSON.stringify(request), { qos: 1 })
+				: new Promise((publishResolve, publishReject) => client.publish(commandTopic, JSON.stringify(request), { qos: 1 }, (error) => error ? publishReject(error) : publishResolve()));
+			publish.then(() => {
+				if (!waitForResponse) { clearTimeout(timer); resolve({ accepted: true, request_id: requestId, target_instance: targetInstance, durable_pending: true }); }
+			}).catch(reject);
 		});
 		removePending(requestId);
 		return result;
@@ -55,7 +63,7 @@ export async function runYanoLocalPc({ argv = [] } = {}) {
 	if (!sub || sub === "--help" || sub === "-h") { usage(); return; }
 	if (sub === "start" || sub === "status") { const result = ensureComputerLocalService(); console.log(JSON.stringify(result, null, 2)); return result; }
 	if (sub === "pending") { const result = pendingRequests(); console.log(JSON.stringify(result, null, 2)); return result; }
-	if (sub === "ask") { const result = await askLocalPc(value(argv, "--prompt"), { timeoutMs: Number(value(argv, "--timeout-ms") || 120000), planner: argv.includes("--planner") }); console.log(JSON.stringify(result, null, 2)); return result; }
+	if (sub === "ask") { const result = await askLocalPc(value(argv, "--prompt"), { timeoutMs: Number(value(argv, "--timeout-ms") || 120000), planner: argv.includes("--planner"), waitForResponse: !argv.includes("--no-wait") }); console.log(JSON.stringify(result, null, 2)); return result; }
 	usage(); throw new Error(`sottocomando sconosciuto: ${sub}`);
 }
 

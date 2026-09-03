@@ -134,7 +134,7 @@ export function executeScript(scriptPath, { env = process.env, timeoutMs = 12000
 export function dispatchPlanner({ projectRoot, task, jobId, jobName, now, instance }) {
 	const target = projectRoot ? path.resolve(projectRoot) : null;
 	const prompt = `Task schedulato "${jobName}": ${task}\n\nOrigine: job Yano ${jobId}. Target dichiarato: ${target || "generico"}. Sei il planner di yano-local-pc: verifica lo stato reale del target e segui tutti i gate del playbook applicabile; non bypassare mai conferme utente per azioni distruttive.`;
-	return [path.join(PACKAGE_ROOT, "bin", "yano.mjs"), "local-pc", "ask", "--planner", "--prompt", prompt];
+	return [path.join(PACKAGE_ROOT, "bin", "yano.mjs"), "local-pc", "ask", "--planner", "--no-wait", "--prompt", prompt];
 }
 
 // ── Registry ──────────────────────────────────────────────────────────────────
@@ -169,7 +169,7 @@ function dispatch(job, now, spawn = spawnSync, env = process.env) {
 	// the task text — the historical behaviour, now the explicit fallback.
 	const args = dispatchPlanner({ projectRoot: job.project_root, task: job.task, jobId: job.id, jobName: job.name, now, instance });
 	const result = spawn === spawnSync
-		? launchDetachedPlanner(args, env)
+		? launchPlannerAndWait(args, env, Number(job.timeout_ms) || 120000)
 		: spawn(process.execPath, args, { cwd: SCHEDULER_ROOT, encoding: "utf8", maxBuffer: 1_000_000, env });
 	return { instance, status: result.status ?? 1, stderr: String(result.stderr || "").trim(), stdout: String(result.stdout || "").trim(), legacy: true };
 }
@@ -181,10 +181,38 @@ function runPlannerForJob(job, spawn, env = process.env) {
 		: spawn(process.execPath, args, { cwd: SCHEDULER_ROOT, encoding: "utf8", maxBuffer: 1_000_000, env });
 }
 
-function launchDetachedPlanner(args, env) {
-	const child = spawn(process.execPath, args, { cwd: LOCAL_PC_ROOT, env, stdio: "ignore", detached: true });
-	child.unref();
-	return { status: 0, stdout: "planner task queued", stderr: "" };
+function launchPlannerAndWait(args, env, timeoutMs) {
+	const result = spawnSync(process.execPath, args, {
+		cwd: LOCAL_PC_ROOT,
+		env: { ...env, YANO_SCHEDULE_DISPATCH: "1" },
+		encoding: "utf8",
+		maxBuffer: 2_000_000,
+		timeout: timeoutMs,
+	});
+	if (result.error) return { status: result.status ?? 1, stdout: result.stdout || "", stderr: result.error.message };
+	return { status: result.status ?? 1, stdout: result.stdout || "", stderr: result.stderr || "" };
+}
+
+function recoverStaleDispatches(store, now, spawn, env) {
+	const recovered = [];
+	const timeoutMs = Number(env.YANO_SCHEDULE_DISPATCH_TIMEOUT_MS) || 180_000;
+	for (const job of store.jobs) {
+		for (const instance of runHistory(job)) {
+			if (instance.status !== "dispatched" || !instance.started_at) continue;
+			const age = now.getTime() - Date.parse(instance.started_at);
+			if (!Number.isFinite(age) || age < timeoutMs) continue;
+			if (instance.recovery_attempted_at && now.getTime() - Date.parse(instance.recovery_attempted_at) < 60_000) continue;
+			instance.status = "failed";
+			instance.recovery_attempted_at = nowIso(now);
+			instance.result = { ...(instance.result || {}), status: 1, error: "dispatch_timeout: nessun esito osservabile entro la finestra di consegna", recovered_by: "scheduler-supervisor" };
+			const run = dispatch(job, now, spawn, env);
+			const retry = recordInstance(job, run, now, { retry_of: instance.instance_id, automatic_retry: true, recovery_reason: "dispatch_timeout" });
+			job.last_run_at = nowIso(now); job.last_status = run.status === 0 ? "dispatched" : "failed"; job.last_result = { ...run, automatic_retry: true, retry_of: instance.instance_id };
+			recovered.push({ schedule_id: job.id, stale_instance_id: instance.instance_id, retry });
+			break;
+		}
+	}
+	return recovered;
 }
 
 function retryRecoverableFailures(store, now, spawn, env) {
@@ -522,13 +550,14 @@ export function superviseScheduler({ env = process.env, now = new Date(), spawn 
 	// the next cron slot.
 	let localPc;
 	try { localPc = ensureComputerLocalService(); } catch (error) { localPc = { running: false, error: error instanceof Error ? error.message : String(error) }; }
-	const retries = localPc?.running ? retryRecoverableFailures(store, now, spawn, env) : [];
+	const retries = (localPc?.running || localPc?.planner?.running) ? retryRecoverableFailures(store, now, spawn, env) : [];
+	const stale_recoveries = (localPc?.running || localPc?.planner?.running) ? recoverStaleDispatches(store, now, spawn, env) : [];
 	// Persist the recovery before tick() reloads the registry; otherwise the
 	// normal tick would overwrite the repaired failure with the stale snapshot.
-	if (retries.length) writeStore(file, store);
+	if (retries.length || stale_recoveries.length) writeStore(file, store);
 	const jobs = tick({ env, now, spawn });
 	const refreshed = readStore(env); refreshed.store.supervisor = store.supervisor; writeStore(refreshed.file, refreshed.store);
-	return { checked_at: nowIso(now), agent, local_pc: localPc, retries, ...jobs };
+	return { checked_at: nowIso(now), agent, local_pc: localPc, retries, stale_recoveries, ...jobs };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) runYanoScheduler({ argv: process.argv.slice(2) }).catch((error) => { console.error(error.message); process.exitCode = 1; });

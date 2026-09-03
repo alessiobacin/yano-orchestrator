@@ -1,17 +1,26 @@
 flowchart TD
-    LOOP["yano watch\n--interval-ms 300000"] --> DB["DB read-only\nticket stalled"]
+    LOOP["watcher supervise\ncron ogni minuto"] --> DB["DB + trace bounded\nticket/stato/heartbeat"]
     LOOP --> HEARTBEAT["MQTT heartbeat\nagent live"]
     LOOP --> TRACE["trace bounded\nsegnali Yano"]
+    LOOP --> SERVICES["Herdr + servizi + agenti\nworkspace/tab/pane/processo"]
+    LOOP --> SCHEDULES["scheduler jobs.json\nistanze failed/dispatched stale"]
     LOOP --> SCAN["yano_watcher_scan\nstarted_at / completed_at\nduration / status"]
     DB --> FINDING["finding"]
     HEARTBEAT --> FINDING
     TRACE --> FINDING
+    SERVICES --> FINDING
+    SCHEDULES --> FINDING
     FINDING --> PLANNER{"Planner live?"}
     PLANNER -- sì --> MQTT["comando MQTT\nal Planner"]
     PLANNER -- no --> TELEGRAM["Telegram\nconfig globale"]
+    SCHEDULES --> REMEDY{"anomalia consegna?"}
+    REMEDY -- sì --> LOCALPC["ensure yano-local-pc\nplanner-01 + bridge"]
+    LOCALPC --> RETRY["retry idempotente\ncon timeout/esito osservabile"]
+    RETRY --> LOG["watcher-global.jsonl\n+ scheduler instances"]
+    REMEDY -- no --> LOG
     TRACE --> YANO{"segnale Yano ad alta confidenza?"}
     YANO -- sì --> TICKET[".scratch/optimize-orchestrator/issues\nticket deduplicato"]
     TICKET --> TICKET_ROUTE{"Planner live?"}
     TICKET_ROUTE -- sì --> TICKET_MQTT["MQTT al Planner\nTelegram non inviato"]
     TICKET_ROUTE -- no --> TICKET_TELEGRAM["Telegram\nall'utente"]
-    CLEAN["nessuna anomalia"] --> QUIET["nessuna pagina\n--away"]
+    CLEAN["nessuna anomalia"] --> QUIET["heartbeat/log\nnessuna pagina"]

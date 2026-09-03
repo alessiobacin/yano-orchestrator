@@ -426,6 +426,13 @@ phase; `running` feedback workers are resumed when their exact instance is
 absent; pending feedback analyses are dispatched again; and an enabled
 auto-improver restores both its scheduler and its persisted idle tab without
 starting a premature audit.
+The same pass reconciles `<YANO_DATA_DIR>/scheduler/jobs.json`: a schedule is
+not successful merely because a detached child was queued. The Local PC
+`planner-01` bridge returns a bounded observable result; failed or stale
+`dispatched` instances are marked, retried idempotently, and written to
+`watcher-global.jsonl`. If delivery needs a project planner, the watcher
+recreates its workspace/tab and routes the task instead of allowing it to be
+lost between scheduler and planner.
 The same reconciliation checks project-local SQLite runs: non-finalized runs
 trigger recreation of the project workspace and `planner-01` with a recovery
 prompt grounded in trace, tickets and worktrees. Recovery selects only the

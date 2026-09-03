@@ -3672,13 +3672,8 @@ export default function (pi: ExtensionAPI) {
 	// try to do everything itself. This is what turns "planner, coder and
 	// reviewer are all just Pi agents with the same tools" into the
 	// planner → coder → reviewer → planner pipeline the operator expects.
-	pi.on("before_agent_start", async (event: any, ctx) => {
+	pi.on("before_agent_start", async (_event: any, ctx) => {
 		if (!identity) return;
-		// A startup llmProxy pin is static, but vision support is a property of
-		// the concrete provider/model selected by the gateway. If this turn has
-		// an image, force llmProxy's automatic model before the first request so
-		// a pinned text-only model cannot answer that it cannot see the image.
-		await switchImageTurnToAuto({ event, ctx, setModel: (model) => pi.setModel(model), log: logEvent });
 		const flags = readCliFlags(pi);
 		const cfg = loadConfig(identity.cwd, flags.configDir || "agents");
 		const roleCfg = cfg.roles[identity.role];
@@ -3742,6 +3737,15 @@ export default function (pi: ExtensionAPI) {
 		// scripts/review-log.mjs, che lo segnala esplicitamente.
 		logEvent("turn_start", { had_pending_inbound: [...inboundQueue.values()].some((i) => !i.fulfilled) });
 		return { systemPrompt };
+	});
+
+	// Pi exposes the raw image attachment on `input`, before the message is
+	// normalized for the current model. Switch here (not only in
+	// before_agent_start) so a pinned text-only model cannot cause Pi to replace
+	// the attachment with "image omitted" before the model selection changes.
+	pi.on("input", async (event: any) => {
+		if (!identity) return;
+		await switchImageTurnToAuto({ event, ctx: currentCtx, setModel: (model) => pi.setModel(model), log: logEvent });
 	});
 
 	// Record context at every completed turn. This is the stable observation

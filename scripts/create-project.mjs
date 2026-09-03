@@ -552,7 +552,10 @@ export async function runCreateProject({ packageRoot, cwd, argv, preflightTools 
 					api: "anthropic-messages",
 					baseUrl: "http://127.0.0.1:7045",
 					apiKey: "proxy-local",
-					models: [{ id: "llmproxy", name: "llmProxy", contextWindow: 1000000 }],
+					// llmProxy auto may route to a vision-capable upstream. Pi must
+					// therefore forward image blocks instead of filtering them based
+					// on the generic router model's local metadata.
+					models: [{ id: "llmproxy", name: "llmProxy", contextWindow: 1000000, input: ["text", "image"] }],
 				},
 			},
 		};

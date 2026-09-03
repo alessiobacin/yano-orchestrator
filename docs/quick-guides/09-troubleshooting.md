@@ -114,6 +114,11 @@ scelto all'avvio come default per i turni testuali, ma lascia a llmProxy la
 scelta di un provider con vision per il turno visuale. L'esito è registrato nei
 trace come `vision_model_switched` oppure `vision_model_switch_failed`.
 
+La configurazione Pi del modello generico dichiara intenzionalmente
+`input: ["text", "image"]`: non significa che ogni provider supporti vision,
+ma impedisce a Pi di scartare l'immagine prima che llmProxy possa fare il
+routing verso un provider compatibile.
+
 Se il planner dichiara di non poter vedere un'immagine, controlla il trace
 `vision_model_switch_failed` e verifica che il catalogo Pi contenga
 `llmproxy/llmproxy`; non correggere il problema inventando un endpoint o un

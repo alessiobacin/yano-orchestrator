@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import path from "node:path";
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { globalDataPath, resolveYanoConfig } from "./yano-config.mjs";
 import { materializeAgentMcp } from "./yano-agent-mcp.mjs";
 import { herdrSnapshot as snapshot } from "./yano-herdr-client.mjs";
@@ -11,13 +11,25 @@ const PACKAGE_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname
 const COMPUTER_INSTANCE = "yano-local-pc";
 const COMPUTER_ROLE = "yano-local-pc";
 const COMPUTER_WORKSPACE = "yano-local-pc";
+const SCHEDULER_WORKSPACE = "yano-scheduler";
+const WATCHER_WORKSPACE = "yano-watcher";
 // Herdr normalizes the first tab created by a workspace to the safe slug;
 // keeping this canonical prevents a second duplicate tab on recovery.
 const COMPUTER_TAB = "yano-local-pc";
-const SYSTEM_PROJECT = "yano-scheduler";
-const SYSTEM_SCOPE = "yano-system";
+// Always-on control-plane services belong to the persistent Local PC runtime.
+// No synthetic system project/scope exists; application checkouts remain
+// ordinary optional Yano projects.
+const SYSTEM_PROJECT = "yano-local-pc";
 
 function computerRuntimeRoot() { return path.join(globalDataPath(), "yano-local-pc"); }
+function serviceRuntimeRoot(name) { return path.join(globalDataPath(), name); }
+function serviceLogPath() { return path.join(globalDataPath(), "logs", "global-services.jsonl"); }
+function logService(event, details = {}) {
+	try {
+		mkdirSync(path.dirname(serviceLogPath()), { recursive: true, mode: 0o700 });
+		appendFileSync(serviceLogPath(), `${JSON.stringify({ timestamp: new Date().toISOString(), event, ...details })}\n`, { mode: 0o600 });
+	} catch { /* logging must never prevent service recovery */ }
+}
 function applicationHeartbeatPath(agent, root, project) {
 	const key = cryptoProjectKey(root, project);
 	return path.join(globalDataPath(), "heartbeats", key, `${agent}.json`);
@@ -65,8 +77,9 @@ const SERVICES = [
 	// named exactly `yano-watcher` is classified as a legacy
 	// external kind and rejected as `--kind pi`; keep the workspace names but
 	// use neutral owned tab labels.
-	{ instance: "watcher-service", agentName: "watcher-service", role: "watcher", workspace: "yano-watcher", tab: "watcher-service" },
-	{ instance: "scheduler-service", agentName: "scheduler-service", role: "scheduler", workspace: "yano-scheduler", tab: "scheduler-service", project: SYSTEM_PROJECT, projectScope: SYSTEM_SCOPE },
+	{ instance: "watcher-service", agentName: "watcher-service", role: "watcher", workspace: WATCHER_WORKSPACE, tab: "watcher-service", cwd: serviceRuntimeRoot(WATCHER_WORKSPACE), project: WATCHER_WORKSPACE },
+	{ instance: "scheduler-service", agentName: "scheduler-service", role: "scheduler", workspace: SCHEDULER_WORKSPACE, tab: "scheduler-service", cwd: serviceRuntimeRoot(SCHEDULER_WORKSPACE), project: SCHEDULER_WORKSPACE },
+	{ instance: "planner-01", agentName: "planner-01", role: "planner", workspace: COMPUTER_WORKSPACE, tab: "planner-01", cwd: computerRuntimeRoot(), project: SYSTEM_PROJECT },
 	{ instance: COMPUTER_INSTANCE, agentName: COMPUTER_INSTANCE, role: COMPUTER_ROLE, workspace: COMPUTER_WORKSPACE, tab: COMPUTER_TAB, cwd: computerRuntimeRoot(), project: SYSTEM_PROJECT },
 ];
 
@@ -133,10 +146,12 @@ function closeInitialDuplicates(state, workspaceId, canonicalTabId, service) {
 }
 
 function ensureService(service) {
-	if (service.instance === COMPUTER_INSTANCE) ensureComputerRuntime();
+	if (service.workspace === COMPUTER_WORKSPACE) ensureComputerRuntime();
+	else mkdirSync(service.cwd || serviceRuntimeRoot(service.workspace), { recursive: true, mode: 0o700 });
+	logService("service_check_started", { service: service.instance, role: service.role, workspace: service.workspace, cwd: service.cwd, project: service.project });
 	const serviceCwd = service.cwd || PACKAGE_ROOT;
 	let state = snapshot();
-	if (!state) return { service: service.instance, running: false, recovered: false, error: "Herdr non raggiungibile" };
+	if (!state) { logService("service_check_failed", { service: service.instance, reason: "herdr_unreachable" }); return { service: service.instance, running: false, recovered: false, error: "Herdr non raggiungibile" }; }
 	let workspace = state.workspaces?.find((item) => item.label === service.workspace);
 	if (!workspace) {
 		const created = run("herdr", ["workspace", "create", "--cwd", serviceCwd, "--label", service.workspace, "--no-focus"]);
@@ -162,9 +177,11 @@ function ensureService(service) {
 	const health = pane ? probeService(pane.pane_id, agent, { instance: service.instance, root: serviceCwd, project: service.project || "yano-orchestrator" }) : { healthy: false, reason: "pane_missing" };
 	if (isLive(agent) && health.healthy) {
 		closeInitialDuplicates(state, workspaceId, tab.tab_id, service);
+		logService("service_healthy", { service: service.instance, workspace_id: workspaceId, tab_id: tab.tab_id, pane_id: pane.pane_id, health });
 		return { service: service.instance, running: true, recovered: false, health, workspace_id: workspaceId, tab_id: tab.tab_id, pane_id: pane.pane_id };
 	}
 	if (tab && agent) {
+		logService("service_tab_closed_for_recovery", { service: service.instance, tab_id: tab.tab_id, pane_id: pane?.pane_id, previous_health: health });
 		const closed = run("herdr", ["tab", "close", tab.tab_id]);
 		if (closed.status !== 0) return { service: service.instance, running: false, recovered: false, error: (closed.stderr || "tab di servizio non chiusa").trim() };
 		state = snapshot(); workspace = state?.workspaces?.find((item) => item.label === service.workspace);
@@ -180,7 +197,9 @@ function ensureService(service) {
 	if (!pane?.pane_id) return { service: service.instance, running: false, recovered: false, error: "pane di servizio non trovata" };
 	const composedArgs = [path.join(PACKAGE_ROOT, "scripts", "launch-planner.mjs"), "--instance", service.instance, "--role", service.role, "--json", "--print-only"];
 	if (service.project) composedArgs.push("--project", service.project);
-	if (service.projectScope) composedArgs.push("--project-scope", service.projectScope);
+	// Use the package roster explicitly: the persistent Local PC runtime only
+	// needs its own role file, while watcher/scheduler are package roles.
+	composedArgs.push("--config-dir", path.join(PACKAGE_ROOT, "agents"));
 	if (service.instance === COMPUTER_INSTANCE) composedArgs.push("--approve", "--mcp-config", path.join(serviceCwd, ".mcp.json"));
 	const composed = run(process.execPath, composedArgs, { cwd: serviceCwd, env: { ...process.env, YANO_COMPUTER_LOCAL_ASSEMBLYAI_API_KEY: process.env.YANO_COMPUTER_LOCAL_ASSEMBLYAI_API_KEY || "" } });
 	let args;
@@ -191,18 +210,29 @@ function ensureService(service) {
 	// Pi presence without that heuristic.
 	const command = ["pi", ...args].map(shellQuote).join(" ");
 	const started = run("herdr", ["pane", "run", pane.pane_id, `exec ${command}`], { cwd: serviceCwd });
-	const after = snapshot();
+	let after = snapshot();
+	// Herdr reports the shell immediately after `pane run`; give Pi one short
+	// bounded startup window before declaring an always-on service dead. Without
+	// this grace period the next one-minute tick could close a healthy process
+	// that had not published its first presence card yet.
+	if (!after?.agents?.some((item) => item.pane_id === pane.pane_id && isLive(item))) {
+		run("sleep", ["1"]);
+		after = snapshot();
+	}
 	closeInitialDuplicates(after, workspaceId, tab.tab_id, service);
 	const live = after?.agents?.find((item) => item.pane_id === pane.pane_id && isLive(item));
 	const afterHealth = pane?.pane_id ? probeService(pane.pane_id, live, { instance: service.instance, root: serviceCwd, project: service.project || "yano-orchestrator", warmup: true }) : { healthy: false, reason: "pane_missing_after_start" };
+	logService("service_recovery_attempted", { service: service.instance, recovered: true, running: Boolean(live && afterHealth.healthy), workspace_id: workspaceId, tab_id: tab.tab_id, pane_id: pane.pane_id, health: afterHealth, start_status: started.status });
 	return { service: service.instance, running: Boolean(live && afterHealth.healthy), recovered: true, health: afterHealth, workspace_id: workspaceId, tab_id: tab.tab_id, pane_id: pane.pane_id, error: live && afterHealth.healthy || started.status === 0 ? null : (started.stderr || started.stdout || "Herdr non ha avviato l'agente").trim() };
 }
 
 export function ensureGlobalYanoServices() { return SERVICES.map(ensureService); }
 export function ensureComputerLocalService() {
-	const enabled = path.join(globalDataPath(), "yano-local-pc", "enabled.json");
-	if (!existsSync(enabled)) return { service: COMPUTER_INSTANCE, running: false, enabled: false, error: "yano-local-pc disabilitato: usa yano init --dev-pc" };
-	return ensureService(SERVICES.find((service) => service.instance === COMPUTER_INSTANCE));
+	const localPc = ensureService(SERVICES.find((service) => service.instance === COMPUTER_INSTANCE));
+	const planner = ensureService(SERVICES.find((service) => service.instance === "planner-01"));
+	return { ...localPc, planner };
 }
+
+export function globalServiceLogPath() { return serviceLogPath(); }
 
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) console.log(JSON.stringify(ensureGlobalYanoServices(), null, 2));

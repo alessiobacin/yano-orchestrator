@@ -1,6 +1,6 @@
 # Job ricorrenti e Yano Scheduler (script-first)
 
-`yano-scheduler` è un agente globale supervisionato: il cron Yano lo controlla
+`yano-local-pc` è il runtime globale supervisionato: il cron Yano lo controlla
 ogni minuto, ricrea la sua tab Herdr se manca e legge il registro persistente
 nel data-root globale (`<data>/scheduler/jobs.json`). I job restano
 disponibili dopo logout, riavvio di Herdr o riavvio del computer.
@@ -85,7 +85,8 @@ delega all'esistente `yano local-pc ask` (broker-aware, timeout, mai hang).
 ## Supervisore e cron di sistema
 
 Il supervisore globale gira ogni minuto: ricrea la tab `scheduler-service` nel
-workspace `yano-scheduler` se manca (evitando l'errore Herdr
+workspace persistente `yano-scheduler` se manca. Il runtime `yano-local-pc`
+contiene invece soltanto l’agente PC e il suo `planner-01` (evitando l'errore Herdr
 `agent_kind_mismatch`) e fa tick dei job in scadenza. Lo stato della riga cron
 marcata si controlla con `yano schedule cron status`; `yano schedule cron
 install|remove` gestiscono la riga di sistema (su Windows `schtasks`), mentre

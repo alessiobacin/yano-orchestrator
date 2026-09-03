@@ -25,11 +25,12 @@
 // script_path) keep working through the printer fallback that still dispatches
 // the project planner with the task text — the historical behaviour.
 
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { globalDataPath } from "./yano-config.mjs";
+import { ensureComputerLocalService } from "./yano-global-services.mjs";
 import { installOneMinuteWindowsJob, removeOneMinuteWindowsJob, statusOneMinuteWindowsJob } from "./yano-os-scheduler.mjs";
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -37,7 +38,10 @@ const CRON_MARKER = "# yano-scheduler-supervisor";
 const SCHEDULER_INSTANCE = "scheduler-service";
 const SCHEDULER_WORKSPACE_LABEL = "yano-scheduler";
 const SCHEDULER_TAB_LABEL = "scheduler-service";
-const SCHEDULER_AGENT_NAME = `${SCHEDULER_INSTANCE}-${path.basename(PACKAGE_ROOT).replace(/[^a-zA-Z0-9]+/g, "-").toLowerCase()}`.slice(0, 32);
+const LOCAL_PC_PROJECT = "yano-local-pc";
+const LOCAL_PC_ROOT = path.join(globalDataPath(), "yano-local-pc");
+const SCHEDULER_ROOT = path.join(globalDataPath(), "yano-scheduler");
+const SCHEDULER_AGENT_NAME = `${SCHEDULER_INSTANCE}-${LOCAL_PC_PROJECT}`.slice(0, 32);
 const DEFAULT_DB = { version: 2, jobs: [], supervisor: { instance: SCHEDULER_INSTANCE, workspace: null, tab_id: null, last_seen_at: null, last_recovered_at: null } };
 
 function nowIso(now = new Date()) { return now.toISOString(); }
@@ -113,13 +117,13 @@ export function executeScript(scriptPath, { env = process.env, timeoutMs = 12000
 	return { ok: result.status === 0, status: result.status ?? 1, stdout: String(result.stdout || ""), stderr: String(result.stderr || ""), fallback: false };
 }
 
-// ── Planner/yano-local-pc launch composition (bridge C + legacy fallback) ──
-// Same `yano start`-style Pi composition used by the historical scheduler,
-// passed as argv — no shell string. A legacy job (cron+task, no script_path)
-// is dispatched through this same printer path: the historical behaviour.
+// ── Planner/yano-local-pc bridge (legacy fallback) ──────────────────────────
+// Schedules never create a temporary planner. They address the always-on
+// planner-01 owned by yano-local-pc through the local-pc MQTT bridge.
 export function dispatchPlanner({ projectRoot, task, jobId, jobName, now, instance }) {
-	const prompt = `Task schedulato "${jobName}": ${task}\n\nOrigine: job Yano ${jobId}. Verifica lo stato reale del progetto e segui tutti i gate del playbook applicabile; non bypassare mai conferme utente per azioni distruttive.`;
-	return [path.join(PACKAGE_ROOT, "bin", "yano.mjs"), "start", "--herdr", "--instance", instance, "--role", "planner", "--project", path.basename(projectRoot), prompt];
+	const target = projectRoot ? path.resolve(projectRoot) : null;
+	const prompt = `Task schedulato "${jobName}": ${task}\n\nOrigine: job Yano ${jobId}. Target dichiarato: ${target || "generico"}. Sei il planner di yano-local-pc: verifica lo stato reale del target e segui tutti i gate del playbook applicabile; non bypassare mai conferme utente per azioni distruttive.`;
+	return [path.join(PACKAGE_ROOT, "bin", "yano.mjs"), "local-pc", "ask", "--planner", "--prompt", prompt];
 }
 
 // ── Registry ──────────────────────────────────────────────────────────────────
@@ -147,19 +151,46 @@ function dispatch(job, now, spawn = spawnSync, env = process.env) {
 		}
 		job.last_status = run.ok ? "dispatched" : "failed";
 		job.last_result = { instance, status: run.ok ? 0 : (run.status ?? 1), stdout: run.stdout.slice(0, 500), stderr: run.stderr.slice(0, 500), fallback: false };
-		if (job.mode === "planner:") { const pl = runPlannerForJob(job, spawn, env); Object.assign(job.last_result, { planner: { status: pl.status } }); }
+		if (String(job.mode || "").startsWith("planner:")) { const pl = runPlannerForJob(job, spawn, env); Object.assign(job.last_result, { planner: { status: pl.status } }); }
 		return job.last_result;
 	}
 	// Legacy job (pre-script-first): keep dispatching the project planner with
 	// the task text — the historical behaviour, now the explicit fallback.
 	const args = dispatchPlanner({ projectRoot: job.project_root, task: job.task, jobId: job.id, jobName: job.name, now, instance });
-	const result = spawn(process.execPath, args, { cwd: job.project_root, encoding: "utf8", maxBuffer: 1_000_000, env });
+	const result = spawn === spawnSync
+		? launchDetachedPlanner(args, env)
+		: spawn(process.execPath, args, { cwd: SCHEDULER_ROOT, encoding: "utf8", maxBuffer: 1_000_000, env });
 	return { instance, status: result.status ?? 1, stderr: String(result.stderr || "").trim(), stdout: String(result.stdout || "").trim(), legacy: true };
 }
 
 function runPlannerForJob(job, spawn, env = process.env) {
-	const result = spawn(process.execPath, dispatchPlanner({ projectRoot: job.project_root, task: job.task, jobId: job.id, jobName: job.name, now: new Date(), instance: `scheduled-${idPart(job.id)}-planner` }), { cwd: job.project_root, encoding: "utf8", maxBuffer: 1_000_000, env });
-	return result;
+	const args = dispatchPlanner({ projectRoot: job.project_root, task: job.task, jobId: job.id, jobName: job.name, now: new Date(), instance: "planner-01" });
+	return spawn === spawnSync
+		? launchDetachedPlanner(args, env)
+		: spawn(process.execPath, args, { cwd: SCHEDULER_ROOT, encoding: "utf8", maxBuffer: 1_000_000, env });
+}
+
+function launchDetachedPlanner(args, env) {
+	const child = spawn(process.execPath, args, { cwd: LOCAL_PC_ROOT, env, stdio: "ignore", detached: true });
+	child.unref();
+	return { status: 0, stdout: "planner task queued", stderr: "" };
+}
+
+function retryRecoverableFailures(store, now, spawn, env) {
+	const retried = [];
+	for (const job of store.jobs) {
+		if (!job.enabled || job.last_status !== "failed" || !job.last_result) continue;
+		const diagnostic = `${job.last_result.error || ""} ${job.last_result.stderr || ""}`;
+		if (!/workspace Herdr verificato|workspace Herdr non trovato|yano-local-pc/i.test(diagnostic)) continue;
+		const previousRetry = Date.parse(job.last_retry_at || "");
+		if (Number.isFinite(previousRetry) && now.getTime() - previousRetry < 60_000) continue;
+		const run = dispatch(job, now, spawn, env);
+		job.last_retry_at = nowIso(now);
+		job.last_status = run.status === 0 ? "dispatched" : "failed";
+		job.last_result = { ...run, automatic_retry: true, retry_of: job.last_run_slot || null };
+		retried.push({ id: job.id, status: job.last_status, run: job.last_result });
+	}
+	return retried;
 }
 
 function herdrSnapshot(spawn = spawnSync) {
@@ -169,11 +200,11 @@ function herdrSnapshot(spawn = spawnSync) {
 }
 function ensureSchedulerWorkspace(spawn = spawnSync) {
 	let snapshot = herdrSnapshot(spawn);
-	if (!snapshot) fail("Herdr non raggiungibile: impossibile supervisionare yano-scheduler.");
+	if (!snapshot) fail("Herdr non raggiungibile: impossibile supervisionare yano-local-pc.");
 	const label = SCHEDULER_WORKSPACE_LABEL;
 	let workspace = snapshot.workspaces?.find((item) => item.label === label);
 	if (!workspace) {
-		const created = spawn("herdr", ["workspace", "create", "--cwd", PACKAGE_ROOT, "--label", label, "--focus"], { encoding: "utf8", maxBuffer: 1_000_000 });
+		const created = spawn("herdr", ["workspace", "create", "--cwd", SCHEDULER_ROOT, "--label", label, "--focus"], { encoding: "utf8", maxBuffer: 1_000_000 });
 		if (created.status !== 0) fail(`Herdr non ha creato il workspace scheduler${created.stderr ? `: ${created.stderr.trim()}` : ""}`);
 		snapshot = herdrSnapshot(spawn); workspace = snapshot?.workspaces?.find((item) => item.label === label);
 	}
@@ -188,7 +219,7 @@ function ensureSchedulerWorkspace(spawn = spawnSync) {
 		snapshot = herdrSnapshot(spawn);
 		workspace = snapshot?.workspaces?.find((item) => item.label === label);
 		if (!workspace) {
-			const recreated = spawn("herdr", ["workspace", "create", "--cwd", PACKAGE_ROOT, "--label", label, "--focus"], { encoding: "utf8", maxBuffer: 1_000_000 });
+			const recreated = spawn("herdr", ["workspace", "create", "--cwd", SCHEDULER_ROOT, "--label", label, "--focus"], { encoding: "utf8", maxBuffer: 1_000_000 });
 			if (recreated.status !== 0) fail(`Herdr non ha ricreato il workspace scheduler${recreated.stderr ? `: ${recreated.stderr.trim()}` : ""}`);
 			snapshot = herdrSnapshot(spawn);
 			workspace = snapshot?.workspaces?.find((item) => item.label === label);
@@ -196,7 +227,7 @@ function ensureSchedulerWorkspace(spawn = spawnSync) {
 		if (!workspace?.workspace_id) fail("Herdr non ha restituito il workspace ricreato di yano-scheduler.");
 	}
 	if (!tab || !pane?.pane_id) {
-		const created = spawn("herdr", ["tab", "create", "--workspace", workspace.workspace_id, "--cwd", PACKAGE_ROOT, "--label", SCHEDULER_TAB_LABEL, "--no-focus"], { encoding: "utf8", maxBuffer: 1_000_000 });
+			const created = spawn("herdr", ["tab", "create", "--workspace", workspace.workspace_id, "--cwd", SCHEDULER_ROOT, "--label", SCHEDULER_TAB_LABEL, "--no-focus"], { encoding: "utf8", maxBuffer: 1_000_000 });
 		if (created.status !== 0) fail(`Herdr non ha creato la tab yano-scheduler${created.stderr ? `: ${created.stderr.trim()}` : ""}`);
 		try {
 			const result = JSON.parse(created.stdout || "");
@@ -209,7 +240,7 @@ function ensureSchedulerWorkspace(spawn = spawnSync) {
 			pane = tab ? snapshot?.panes?.find((item) => item.tab_id === tab.tab_id) : null;
 		}
 	}
-	if (!pane?.pane_id) fail("Herdr non ha restituito il pane della tab yano-scheduler.");
+	if (!pane?.pane_id) fail("Herdr non ha restituito il pane della tab yano-local-pc.");
 	snapshot = herdrSnapshot(spawn) || snapshot;
 	const initial = snapshot?.tabs?.find((item) => item.workspace_id === workspace.workspace_id && item.tab_id !== tab.tab_id && /^(1|\d+)$/.test(item.label || ""));
 	if (initial) spawn("herdr", ["tab", "close", initial.tab_id], { encoding: "utf8", maxBuffer: 1_000_000 });
@@ -230,11 +261,11 @@ function superviseAgent(store, now, spawn = spawnSync) {
 	if (live?.tab_id) spawn("herdr", ["tab", "close", live.tab_id], { encoding: "utf8", maxBuffer: 1_000_000 });
 	let target;
 	try { target = ensureSchedulerWorkspace(spawn); } catch (error) { return { running: false, recovered: true, instance: SCHEDULER_INSTANCE, status: 1, error: error.message }; }
-	const composed = spawn(process.execPath, [path.join(PACKAGE_ROOT, "scripts", "launch-planner.mjs"), "--instance", SCHEDULER_INSTANCE, "--role", "scheduler", "--project", "yano-scheduler", "--project-scope", "yano-system", "--json", "--print-only"], { cwd: PACKAGE_ROOT, encoding: "utf8", maxBuffer: 1_000_000, env: process.env });
+	const composed = spawn(process.execPath, [path.join(PACKAGE_ROOT, "scripts", "launch-planner.mjs"), "--instance", SCHEDULER_INSTANCE, "--role", "scheduler", "--project", SCHEDULER_WORKSPACE_LABEL, "--config-dir", path.join(PACKAGE_ROOT, "agents"), "--json", "--print-only"], { cwd: SCHEDULER_ROOT, encoding: "utf8", maxBuffer: 1_000_000, env: process.env });
 	let args;
 	try { args = JSON.parse(composed.stdout || "").args; } catch { return { running: false, recovered: true, instance: SCHEDULER_INSTANCE, status: 1, error: `impossibile comporre il comando Pi scheduler: ${(composed.stderr || composed.stdout || "risposta vuota").trim()}` }; }
 	const command = ["pi", ...args].map(shellQuote).join(" ");
-	const result = spawn("herdr", ["pane", "run", target.pane.pane_id, `exec ${command}`], { cwd: PACKAGE_ROOT, encoding: "utf8", maxBuffer: 1_000_000, env: process.env });
+	const result = spawn("herdr", ["pane", "run", target.pane.pane_id, `exec ${command}`], { cwd: SCHEDULER_ROOT, encoding: "utf8", maxBuffer: 1_000_000, env: process.env });
 	const after = herdrSnapshot(spawn);
 	const started = after?.agents?.find((agent) => agent.pane_id === target.pane.pane_id && isLivePi(agent));
 	const running = result.status === 0 || Boolean(started);
@@ -452,9 +483,19 @@ export async function runYanoScheduler({ argv, env = process.env, now = new Date
 export function superviseScheduler({ env = process.env, now = new Date(), spawn = spawnSync } = {}) {
 	const { file, store } = readStore(env);
 	const agent = superviseAgent(store, now, spawn);
+	// The scheduler's own minute tick must also guarantee that its execution
+	// target exists. A failed legacy job caused by a missing Herdr workspace is
+	// retried once immediately after Local PC recovery, instead of waiting for
+	// the next cron slot.
+	let localPc;
+	try { localPc = ensureComputerLocalService(); } catch (error) { localPc = { running: false, error: error instanceof Error ? error.message : String(error) }; }
+	const retries = localPc?.running ? retryRecoverableFailures(store, now, spawn, env) : [];
+	// Persist the recovery before tick() reloads the registry; otherwise the
+	// normal tick would overwrite the repaired failure with the stale snapshot.
+	if (retries.length) writeStore(file, store);
 	const jobs = tick({ env, now, spawn });
 	const refreshed = readStore(env); refreshed.store.supervisor = store.supervisor; writeStore(refreshed.file, refreshed.store);
-	return { checked_at: nowIso(now), agent, ...jobs };
+	return { checked_at: nowIso(now), agent, local_pc: localPc, retries, ...jobs };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) runYanoScheduler({ argv: process.argv.slice(2) }).catch((error) => { console.error(error.message); process.exitCode = 1; });

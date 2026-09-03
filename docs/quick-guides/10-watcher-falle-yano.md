@@ -128,7 +128,8 @@ un controllo esplicito e deve riportare evidenze, non dichiarare il flusso sano
 solo perché il processo di polling è vivo.
 
 Ad ogni passata il supervisore esegue inoltre un health check deterministico dei
-servizi persistenti (`watcher-service`, `feedback-service` e `scheduler-service`):
+servizi persistenti (`watcher-service`, `scheduler-service`, `planner-01` e
+`yano-local-pc`):
 verifica workspace/tab/pane, processo Pi foreground e stato effettivo Herdr con
 `agent explain`. Questo controllo non usa token né chiama un modello. Se uno dei
 segnali non è coerente, il supervisore chiude e ricrea soltanto il servizio

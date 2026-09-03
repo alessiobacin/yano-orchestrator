@@ -47,7 +47,8 @@ yano-local-pc). `yano cron` resta il CRUD legacy per i job testo+cron
 (`--add` frase naturale, `--list`, `--remove <id>`, `--enable <id>`,
 `--disable <id>`, `--run <id>`): dispatch planner col testo come in passato.
 Il cron di sistema esegue ogni minuto `yano schedule tick|supervise` (o
-`yano cron --supervise`): avvia le scadenze e ricrea `yano-scheduler` se la
+`yano cron --supervise`): avvia le scadenze e ricrea i servizi nel runtime
+persistente `yano-local-pc` se una tab
 tab Herdr è stata chiusa. Il registro è nel data-root globale e sopravvive a
 riavvii; l'uninstall di Yano rimuove soltanto le sue righe cron marcate.
 Vincoli non negoziabili: niente shell/token/pipe/redirezioni nei job (unico

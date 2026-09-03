@@ -54,7 +54,7 @@ allow-list runtime che esclude `bash`, `edit` e `write` dal worker.
 - **Consolidated trace memory** — `yano trace consolidate` derives provenance-preserving summaries, failures, opinions and recurring cross-project patterns; `yano trace plan` selects the smallest useful context within a token budget
 - **Trace backup and restore** — `yano trace export` creates a portable JSON bundle and `yano trace import --reindex` restores raw evidence before rebuilding derived indexes
 - **Role prompts are always read live from the installed package by default — no per-project copy to keep in sync** — `yano update` alone is enough to bring every project current; `yano copy-prompts` + `yano start --custom-prompts` are there only if you actually want to customize a role's prompt for one specific project
-- **Automatic per-project MQTT scoping** — two different projects never collide on a shared broker without you having to pass `--project` yourself. The default scope is derived from the project root; the explicit `--project-scope <scope>` flag overrides it on the wire (`pi/<scope>/**`), e.g. `yano-system` for the global system services — see `docs/quick-guides/…` and command `yano start`.
+- **Automatic per-project MQTT scoping** — two different projects never collide on a shared broker without you having to pass `--project` yourself. The default scope is derived from the project root; the persistent `yano-local-pc` runtime owns the always-on control-plane services and its stable `planner-01`, while application checkouts remain ordinary projects.
 - **Frontend prerequisites are deterministic** — every `yano init` verifies/installs global `@playwright/cli@latest` and the global `playwright-cli` skill; `frontend-developer` and `frontend-reviewer` receive the browser skill, while backend `reviewer` remains backend-only. The optional `chrome-devtools` MCP remains project-wide because Pi cannot scope MCP servers per role
 - **Cross-platform** — macOS, Linux, and Windows
 
@@ -212,7 +212,7 @@ yano schedule list --json                           # job con script_path, mode,
 yano invoke --role planner:<progetto> --prompt "riepiloga lo stato" --project-root "$PWD"   # bridge deterministico dagli script (wake planner)
 yano invoke --role yano-local-pc --prompt "promemoria tra 10 minuti"                      # delega a yano-local-pc
 yano cron --add "ogni giorno alle 14 e alle 21 esegui la pulizia del progetto" --project-root "$PWD"  # legacy testo+cron (dispatch planner col testo)
-yano cron --list --json                     # legacy; il supervisore riapre yano-scheduler ogni minuto
+yano cron --list --json                     # legacy; il supervisore controlla yano-local-pc ogni minuto
 yano local-pc status                         # servizio globale Local PC
 yano local-pc ask --prompt "Controlla promemoria e calendario di oggi"
 # yano services: registro di servizi esterni (Docker/pm2/comando) che Yano non possiede ma da cui dipende

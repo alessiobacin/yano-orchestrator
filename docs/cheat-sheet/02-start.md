@@ -23,7 +23,9 @@ yano frontend-review start
 Scope MQTT: di default lo scope è derivato dalla root del progetto
 (projectKey); `--project-scope <scope>` lo sovrascrive sul wire — l’istanza
 pubblica/sottoscrive (presenza, comandi, risposte, team, LWT) su
-`pi/<scope>/**`. Esempio: i servizi di sistema girano su
-`yano start ... --project-scope yano-system` (scope stabile `pi/yano-system/**`).
+`pi/<scope>/**`. I servizi globali usano il runtime persistente
+`yano-local-pc`; il checkout applicativo corrente non è il loro workspace.
+I servizi globali usano il progetto/runtime persistente `yano-local-pc`; il
+checkout applicativo corrente non viene usato come workspace di sistema.
 Lo scope è usato così com’è nei topic: niente spazi o "/" se non vuoi topic
 nidificati.

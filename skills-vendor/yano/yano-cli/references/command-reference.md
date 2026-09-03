@@ -68,11 +68,11 @@ tab create` / `herdr agent start` for Yano agents.
 
 `yano start --project-scope <scope>` overrides the MQTT scope derived from the
 project root: without the flag the runtime uses `projectKey(cwd)` (canonical
-project slug); with `--project-scope yano-system` the instance
+project slug); the always-on instance uses the
 publishes/subscribes (presence, commands, responses, roles, teams, LWT) on
-`pi/yano-system/**`. It is the stable scope used by the global system services
-(scheduler, watcher, feedback, auto-improver, feedback) to stay visible
-always on the same namespace. The scope string is used verbatim in topic
+`yano-local-pc` runtime and workspace. It is the stable home used by the always-on
+services (scheduler, watcher, local-pc and its planner) to stay visible in the
+same namespace. The scope string is used verbatim in topic
 names: avoid spaces or `/` unless a nested topic is intended.
 
 ```text
@@ -195,7 +195,7 @@ redirezioni o comandi liberi; l'unico esecutore è lo script registrato e valida
 incorporati. Azioni distruttive o che modificano il progetto: mai autonome, sempre
 planner di progetto con gate umani. One-shot (`--once`): il job si auto-disabilita
 dopo la prima esecuzione (`one_shot_reason`). Il supervisore globale gira ogni minuto,
-ricrea la tab Herdr `yano-scheduler` se manca e fa tick dei job in scadenza.
+ricrea il runtime/tab Herdr `yano-local-pc` se manca e fa tick dei job in scadenza.
 
 ## Watcher and external agents
 

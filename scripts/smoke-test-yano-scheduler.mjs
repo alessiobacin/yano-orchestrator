@@ -17,11 +17,11 @@ const spawn = (command, args, options = {}) => {
 	if (command === "crontab" && args[0] === "-") { crontab = options.input; return { status: 0, stdout: "", stderr: "" }; }
 	if (command === "herdr" && args[0] === "workspace" && args[1] === "create") { workspaceCreated = true; return { status: 0, stdout: "", stderr: "" }; }
 	if (command === "herdr" && args[0] === "tab" && args[1] === "create") { schedulerTabCreated = true; return { status: 0, stdout: "", stderr: "" }; }
-	if (command === process.execPath && args.includes("launch-planner.mjs")) return { status: 0, stdout: JSON.stringify({ args: ["--instance", "yano-scheduler", "--role", "scheduler"] }), stderr: "" };
+	if (command === process.execPath && args.includes("launch-planner.mjs")) return { status: 0, stdout: JSON.stringify({ args: ["--instance", "scheduler-service", "--role", "scheduler"] }), stderr: "" };
 	if (command === "herdr") {
 		const workspace = workspaceCreated ? [{ workspace_id: "w-scheduler", label: "yano-scheduler" }] : [];
 		const tabs = schedulerTabCreated ? [{ tab_id: "t-scheduler", workspace_id: "w-scheduler", label: "scheduler-service" }] : [];
-		const panes = schedulerTabCreated ? [{ pane_id: "p-scheduler", tab_id: "t-scheduler", workspace_id: "w-scheduler", cwd: path.resolve(process.cwd()) }] : [];
+		const panes = schedulerTabCreated ? [{ pane_id: "p-scheduler", tab_id: "t-scheduler", workspace_id: "w-scheduler", cwd: path.join(process.cwd(), ".yano-test-scheduler") }] : [];
 		return { status: 0, stdout: JSON.stringify({ result: { snapshot: { agents: [], workspaces: workspace, tabs, panes } } }), stderr: "" };
 	}
 	launches.push({ command, args, cwd: options.cwd }); return { status: 0, stdout: "started", stderr: "" };
@@ -44,7 +44,7 @@ try {
 	assert.equal(supervised.agent.recovered, true, "supervisor recreates the scheduler agent when Herdr has no live tab");
 	assert.equal(supervised.dispatched.length, 1, "due job is dispatched exactly once in its scheduled minute");
 	assert.ok(launches.some((launch) => launch.args.includes("--role") && launch.args.includes("scheduler")), "recovery launches the persistent scheduler role");
-	assert.ok(launches.some((launch) => launch.args.includes("--role") && launch.args.includes("planner")), "a due job launches a project-scoped planner");
+	assert.ok(launches.some((launch) => launch.args.includes("local-pc") && launch.args.includes("--planner")), "a due job is sent to the persistent Local PC planner");
 	assert.equal(schedulerCronStatus({ spawn }).installed, true);
 	console.log("smoke-test-yano-scheduler: ok (natural CRUD, durable registry, cron and self-healing agent)");
 } finally { fs.rmSync(root, { recursive: true, force: true }); }

@@ -244,6 +244,42 @@ function plannerLabelForAgent(snapshot, agent) {
 	return Boolean(tab && /^planner(?:-\d+)?$/i.test(tab.label || ""));
 }
 
+function plannerHeartbeatHealthy(planner) {
+	const status = String(planner?.agent_status || "unknown").toLowerCase();
+	if (!["idle", "working"].includes(status)) return false;
+	const heartbeat = Date.parse(planner?.last_heartbeat || "");
+	if (Number.isFinite(heartbeat)) return Date.now() - heartbeat <= 120_000;
+	// Older Herdr snapshots do not expose MQTT heartbeat fields. In that case
+	// use the authoritative pane process plus Herdr's explanation API rather
+	// than treating an otherwise live planner as dead every minute.
+	if (!planner?.pane_id) return false;
+	const processInfo = spawnSync("herdr", ["pane", "process-info", "--pane", planner.pane_id], { encoding: "utf8" });
+	let process;
+	try { process = JSON.parse(processInfo.stdout || "")?.result?.process_info?.foreground_processes?.[0]; } catch { process = null; }
+	if (!process?.pid) return false;
+	const explained = spawnSync("herdr", ["agent", "explain", planner.pane_id, "--json"], { encoding: "utf8" });
+	let explanation;
+	try { explanation = JSON.parse(explained.stdout || ""); } catch { explanation = null; }
+	return ["idle", "working"].includes(String(explanation?.state || status).toLowerCase()) && explanation?.warning == null && explanation?.visible_blocker !== true;
+}
+
+function ensureRegisteredPlanner(row, snapshot) {
+	if (!snapshot || !fs.existsSync(row.root)) return { recovery: "project_unavailable" };
+	const workspace = findProjectWorkspace(snapshot, row.root, row.name);
+	const planners = workspace ? plannerAgentsInWorkspace(snapshot, workspace.workspace_id, row.root) : [];
+	const healthy = planners.find(plannerHeartbeatHealthy);
+	if (healthy) return { recovery: "planner_healthy", planner_status: healthy.agent_status || "unknown", planner_instance: healthy.name || null };
+	// A dead/blocked planner tab must not be reused as if it were live. Close it
+	// first; recoverPlanner will create a clean planner-01 pane in the verified
+	// project workspace and launch the normal guarded Yano command.
+	for (const planner of planners) {
+		const tab = snapshot.tabs?.find((item) => item.tab_id === planner.tab_id);
+		if (tab) closeHerdrTab(tab.tab_id);
+	}
+	const recovered = recoverPlanner({ row, snapshot: herdrSnapshot() || snapshot, run: { id: "planner-presence", status: "active", finalization_status: "not_started" }, reason: "planner_missing_or_stale_heartbeat" });
+	return { recovery: "planner_recovered", ...recovered };
+}
+
 function plannerStalled(run) {
 	if (Number(run.open_holds || 0) > 0) return false;
 	const activity = Date.parse(run.last_activity_at || run.updated_at || "");
@@ -498,7 +534,10 @@ function doStatusForRow(db, row, { heal = true } = {}) {
 	const identity_conflicts = findAgentIdentityConflicts(snapshot).filter((conflict) => path.resolve(conflict.root) === path.resolve(row.root));
 	const tab = snapshot.tabs?.find((item) => item.tab_id === row.worker_tab_id);
 	const pane = tab && snapshot.panes?.find((item) => item.pane_id === row.worker_pane_id);
-	if (tab && pane) return { ...base, live: "running", identity_conflicts, ...reconcileProjectRun(db, row, snapshot) };
+	if (tab && pane) {
+		const planner = heal ? (() => { try { return ensureRegisteredPlanner(row, snapshot); } catch (error) { return { recovery: "planner_recovery_failed", recovery_error: error instanceof Error ? error.message : String(error) }; } })() : { recovery: "not_checked" };
+		return { ...base, live: "running", identity_conflicts, planner, ...reconcileProjectRun(db, row, herdrSnapshot() || snapshot) };
+	}
 	const drifted = { ...base, live: "not_found", drift: true };
 	if (!heal) return drifted;
 	try {

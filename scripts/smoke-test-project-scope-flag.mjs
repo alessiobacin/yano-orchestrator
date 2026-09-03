@@ -1,15 +1,15 @@
 // Regression test for BUG-20260902-317715D8 (fix-workspace-scope-mismatch):
 // `--project-scope` was REGISTERED but never READ by readCliFlags(), so
-// scheduler-service (launched with --project-scope yano-system) silently
+// scheduler-service (launched with --project-scope yano-local-pc) silently
 // degraded to the canonical project_key scope, producing
 // `presence_ignored_scope_mismatch` between scheduler and projects.
 //
 // This drives the REAL extensions/orchestrator.ts through a real session_start
 // against a real local mosquitto broker (same approach as
-// smoke-test-project-scoping.mjs) with --project-scope yano-system, then reads
+// smoke-test-project-scoping.mjs) with --project-scope yano-local-pc, then reads
 // back the ACTUAL retained MQTT status topic the instance published to
 // (`pi/<scope>/agents/<instance>/status`). With the fix, the scope segment is
-// exactly "yano-system" — NOT projectKey(cwd).
+// exactly "yano-local-pc" — NOT projectKey(cwd).
 //
 // RED contract (written BEFORE the fix): the assertion below fails on the
 // unfixed code (scope === projectKey) and passes once readCliFlags() surrogates
@@ -130,16 +130,16 @@ async function main() {
 	// circuits the scope to `project`, which would mask the project-scope flag.
 	delete process.env.PI_ORCH_TEST_NO_EXIT;
 
-	console.log("\n=== TEST 1 — --project-scope yano-system overrides the canonical scope ===");
+	console.log("\n=== TEST 1 — --project-scope yano-local-pc overrides the canonical scope ===");
 	const dir = scratchDir("yano-scope-flag");
 	const instance = "scope-flag-01";
 	const scopeFlagged = await resolvedScopeFor(dir, instance, {
 		instance,
 		role: "planner",
 		broker: BROKER_URL,
-		"project-scope": "yano-system",
+		"project-scope": "yano-local-pc",
 	});
-	ok(scopeFlagged === "yano-system", `--project-scope yano-system puts the MQTT scope on the wire as "yano-system" (got "${scopeFlagged}")`);
+	ok(scopeFlagged === "yano-local-pc", `--project-scope yano-local-pc puts the MQTT scope on the wire as "yano-local-pc" (got "${scopeFlagged}")`);
 	ok(scopeFlagged !== projectKey(dir, "scope-flag"), `the scope is NOT the canonical projectKey "${projectKey(dir, "scope-flag")}" — the flag is actually read`);
 
 	console.log("\n=== TEST 2 — without --project-scope the canonical root scope still applies ===");

@@ -25,8 +25,8 @@ yano local-pc ask --prompt "Controlla oggi promemoria e calendario e indicami co
 ```
 
 Lo scheduler chiama l'istanza esatta `yano-local-pc` tramite `agent_send`.
-Le richieste dell'utente dalla CLI usano lo stesso scope globale
-`yano-scheduler`; non viene mai usato lo scope di un progetto applicativo.
+Le richieste dell'utente dalla CLI usano lo stesso runtime globale
+`yano-local-pc`; non viene mai usato lo scope di un progetto applicativo.
 Operazioni che modificano o inviano dati richiedono conferma esplicita.
 
 Nel widget bottom dell'interfaccia Pi/Herdr, Yano mostra a destra il semaforo

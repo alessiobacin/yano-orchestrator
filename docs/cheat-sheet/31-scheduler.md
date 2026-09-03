@@ -23,7 +23,7 @@ yano cron --add "ogni giorno alle 14 e alle 21 esegui la pulizia del progetto" -
 yano cron --list --json
 yano cron --disable <job-id> | --enable <job-id> | --run <job-id> | --remove <job-id>
 
-# Supervisore persistente: controlla cron di sistema e tab Herdr yano-scheduler
+# Supervisore persistente: controlla cron di sistema e tab Herdr yano-local-pc
 yano schedule cron status|install|remove
 ```
 
@@ -32,5 +32,5 @@ validato nel folder persistente `<data>/scheduler/scripts/`). Se lo script
 manca o fallisce: `enabled:false` + fallback loggato, mai testo libero a un
 planner. Token/credenziali solo da `.env` dentro lo script, mai incorporati.
 Azioni distruttive o che modificano il progetto: sempre planner + gate umani.
-Il supervisore gira ogni minuto e ricrea `yano-scheduler` se manca; i job
+Il supervisore gira ogni minuto e ricrea `yano-local-pc` se manca; i job
 sopravvivono a riavvii di Herdr e del computer.

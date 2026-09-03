@@ -24,3 +24,8 @@ morto (Mac in sleep, terminale chiuso, Herdr riavviato) — è il comando da
 rilanciare periodicamente (o dopo ogni risveglio del Mac) per essere certi
 che il polling sia ancora vivo. Gli eventi di scansione finiscono nel trace
 del progetto osservato; vedi `docs/quick-guides/10-watcher-falle-yano.md`.
+
+Il recovery identifica il workspace dal percorso della repository, non dalla
+sola etichetta: `llmproxy` e `llmProxy` sono quindi trattati come lo stesso
+progetto. Un planner già vivo viene riusato e non viene mai lanciato un
+secondo `planner-01`.

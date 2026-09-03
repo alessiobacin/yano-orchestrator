@@ -8,7 +8,8 @@ flowchart TD
     DB --> FINDING["finding"]
     HEARTBEAT --> FINDING
     TRACE --> FINDING
-    SERVICES --> FINDING
+    SERVICES --> IDENTITY["workspace canonico: root path\nlabel case-insensitive\nplanner live reuse / no duplicate"]
+    IDENTITY --> FINDING
     SCHEDULES --> FINDING
     FINDING --> PLANNER{"Planner live?"}
     PLANNER -- sì --> MQTT["comando MQTT\nal Planner"]

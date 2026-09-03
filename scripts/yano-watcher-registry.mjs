@@ -247,12 +247,35 @@ function runNeedsPlanner(run) {
 	return run.status === "active" || (run.status === "completed" && !["finalized", "not_applicable"].includes(run.finalization_status));
 }
 
-function findProjectWorkspace(snapshot, root, project) {
-	// A project can have specialist tabs in a shared workspace (for example
-	// `code-mem`). Matching by any pane cwd therefore restarts the wrong
-	// project's planner. The recovery workspace is the explicitly labelled
-	// project workspace; create it if it was lost.
-	return snapshot?.workspaces?.find((workspace) => workspace.label === project) || null;
+export function findProjectWorkspace(snapshot, root, project) {
+	// Workspace labels are user-facing and are not a stable identity: Herdr
+	// preserves casing while Yano may derive a normalized project name. The
+	// canonical identity is the project root. Prefer a case-insensitive label
+	// match, then rank candidates by evidence that they actually belong to the
+	// root and contain a live planner. This prevents a stale recovery workspace
+	// from winning over the original project workspace (for example `llmproxy`
+	// versus `llmProxy`).
+	const expectedRoot = path.resolve(root || "");
+	const expectedLabel = String(project || "").trim().toLocaleLowerCase();
+	const candidates = (snapshot?.workspaces || []).filter((workspace) =>
+		String(workspace.label || "").trim().toLocaleLowerCase() === expectedLabel,
+	);
+	if (!candidates.length) return null;
+	const score = (workspace) => {
+		const panes = (snapshot?.panes || []).filter((pane) => pane.workspace_id === workspace.workspace_id);
+		const hasRootPane = panes.some((pane) => path.resolve(pane.cwd || "") === expectedRoot);
+		const planners = (snapshot?.agents || []).filter((agent) =>
+			agent.workspace_id === workspace.workspace_id &&
+			path.resolve(agent.cwd || "") === expectedRoot &&
+			(plannerLabelForAgent(snapshot, agent) || /planner/i.test(`${agent.terminal_title_stripped || ""} ${agent.terminal_title || ""} ${agent.name || ""}`)),
+		);
+		const livePlanner = planners.some((planner) => ["idle", "working"].includes(String(planner.agent_status || "").toLowerCase()));
+		const exactLabel = workspace.label === project;
+		return (livePlanner ? 1000 : 0) + (hasRootPane ? 100 : 0) + (exactLabel ? 10 : 0);
+	};
+	return candidates
+		.map((workspace, index) => ({ workspace, index, score: score(workspace) }))
+		.sort((a, b) => b.score - a.score || a.index - b.index)[0].workspace;
 }
 
 function plannerAgentsInWorkspace(snapshot, workspaceId, root) {
@@ -404,6 +427,22 @@ function recoverPlanner({ row, snapshot, run, reason }) {
 		pane = tab && current?.panes?.find((item) => item.tab_id === tab.tab_id);
 	}
 	if (!pane) throw new Error(`pane planner non trovato per ${row.name}`);
+	// The snapshot can change between the initial health check and this launch
+	// (another supervisor or a manual start may have brought the planner back).
+	// Never send a second planner-01 command into a pane after that race.
+	const alreadyHealthy = plannerAgentsInWorkspace(current, workspace.workspace_id, row.root).find(plannerHeartbeatHealthy);
+	if (alreadyHealthy) {
+		const healthyTab = current.tabs?.find((item) => item.tab_id === alreadyHealthy.tab_id);
+		return {
+			recovered: false,
+			reused_existing: true,
+			workspace_id: workspace.workspace_id,
+			planner_tab_id: healthyTab?.tab_id || alreadyHealthy.tab_id,
+			planner_pane_id: alreadyHealthy.pane_id,
+			run_id: run.id,
+			recovery_reason: reason,
+		};
+	}
 	const prompt = `[yano-watcher recovery] Il progetto ${row.name} richiede ripristino (${reason}). Controlla SQLite, trace, run ${run.id}, ticket pending/running e worktree. Il run non è concluso (status=${run.status}, finalization_status=${run.finalization_status || "not_started"}). Non ricreare ticket esistenti; riprendi dal checkpoint osservabile, riattiva gli agenti mancanti e porta il lavoro fino alla risposta finale all'utente.`;
 	const launched = spawnSync("herdr", ["pane", "run", pane.pane_id, `yano start --instance planner-01 --role planner --project ${shellQuote(row.name)} ${shellQuote(prompt)}`], { cwd: row.root, encoding: "utf8" });
 	if (launched.status !== 0) throw new Error((launched.stderr || "planner non riavviato").trim());

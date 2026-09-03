@@ -13,6 +13,15 @@ avvia un secondo planner quando trova una collisione: restituisce
 `recovery: "identity_conflict"` e registra `watcher_identity_conflict` nel
 trace. Anche `yano start` applica lo stesso rifiuto prima di creare il processo
 
+Il workspace del progetto viene identificato prima di tutto dal percorso reale
+della repository e solo in seconda battuta dall'etichetta Herdr, ignorando la
+differenza tra maiuscole e minuscole. Se esistono più workspace con la stessa
+etichetta, il watcher riusa quello che contiene il percorso corretto e un
+planner vivo; non crea un secondo `planner-01`. Prima di ogni lancio di
+recovery esegue inoltre una verifica finale anti-race: se nel frattempo il
+planner è tornato vivo, riusa la sessione esistente e non invia un nuovo
+comando `yano start`.
+
 ```bash
 yano watcher supervise --json
 ```

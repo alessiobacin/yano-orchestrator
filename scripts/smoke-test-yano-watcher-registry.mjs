@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { runYanoWatcherRegistry } from "./yano-watcher-registry.mjs";
+import { findProjectWorkspace, runYanoWatcherRegistry } from "./yano-watcher-registry.mjs";
 import { readTraceRecords } from "./yano-trace-storage.mjs";
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "yano-watcher-registry-"));
@@ -18,6 +18,20 @@ async function call(sub, ...args) {
 }
 
 try {
+	const workspaceSnapshot = {
+		workspaces: [
+			{ workspace_id: "w-stale", label: "llmproxy" },
+			{ workspace_id: "w-live", label: "llmProxy" },
+		],
+		panes: [
+			{ pane_id: "p-stale", workspace_id: "w-stale", cwd: projectRoot },
+			{ pane_id: "p-live", workspace_id: "w-live", cwd: projectRoot },
+		],
+		tabs: [{ tab_id: "t-live", workspace_id: "w-live", label: "planner-01" }],
+		agents: [{ agent: "pi", name: "planner-01", terminal_title_stripped: "planner-01", agent_status: "idle", cwd: projectRoot, pane_id: "p-live", tab_id: "t-live", workspace_id: "w-live" }],
+	};
+	assert.equal(findProjectWorkspace(workspaceSnapshot, projectRoot, "llmproxy")?.workspace_id, "w-live", "workspace matching is case-insensitive and prefers the live planner/root");
+
 	const initialized = await call("init", "--project", "llmproxy", "--lookback-ms", "3600000", "--json");
 	assert.equal(initialized.project.interval_ms, 60000, "un watcher senza override controlla ogni minuto");
 	assert.equal(initialized.project.lookback_ms, 3600000);

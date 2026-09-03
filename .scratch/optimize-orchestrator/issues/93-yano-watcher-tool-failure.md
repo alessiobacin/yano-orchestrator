@@ -1,5 +1,5 @@
 ---
-type: debugger
+type: human
 kind: task
 created_by: yano-watcher
 status: open
@@ -20,7 +20,7 @@ evidence_record_id: unknown
 
 # Un tool interno di Yano è terminato con errore.
 
-Type: debugger
+Type: human
 Kind: task
 Created-by: yano-watcher
 Status: open

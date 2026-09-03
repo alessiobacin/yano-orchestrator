@@ -1,5 +1,5 @@
 ---
-type: debugger
+type: human
 kind: task
 created_by: yano-watcher
 status: open
@@ -20,7 +20,7 @@ evidence_record_id: unknown
 
 # Yano ha tentato di inviare un lavoro ma non ha trovato un destinatario vivo.
 
-Type: debugger
+Type: human
 Kind: task
 Created-by: yano-watcher
 Status: open

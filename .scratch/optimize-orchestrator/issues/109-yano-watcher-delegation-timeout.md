@@ -1,5 +1,5 @@
 ---
-type: debugger
+type: human
 kind: task
 created_by: yano-watcher
 status: open
@@ -21,7 +21,7 @@ evidence_record_id: unknown
 
 # Yano ha esaurito il timeout durante la delega a un agente.
 
-Type: debugger
+Type: human
 Kind: task
 Created-by: yano-watcher
 Status: open

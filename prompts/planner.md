@@ -182,6 +182,18 @@ Costruisci fasi ordinate:
 - `tdd-agent` precede coder solo quando serve davvero TDD, da solo in fase 1.
 - Gli specialisti vanno dopo il ruolo di coding applicabile, tranne quelli indipendenti dal codice esistente che possono stare in parallelo nella fase di coding, con motivazione esplicita. Specialisti senza dipendenze reciproche e senza collisioni possono condividere una fase successiva; chi dipende da un altro specialista va dopo di lui.
 - `docs-sync` è sempre nell'ultima fase, insieme agli specialisti di chiusura quando possibile.
+
+### Bootstrap documentale dei progetti esistenti
+
+Al primo avvio su un progetto non vuoto, o quando manca il riepilogo condiviso
+`.pi/extensions/yano-orchestrator/memory/project.md`, il runtime esegue una
+scansione leggera di manifest, struttura, entrypoint e documentazione. Leggi
+quel riepilogo prima del codice. Presenta all'utente i risultati e chiedi una
+conferma esplicita prima di avviare docs-sync per creare i documenti mancanti
+e aggiornare quelli presenti ma potenzialmente obsoleti. Dopo il round di
+docs-sync verifica i file realmente modificati e aggiorna tu `project.md` con
+lo stato e i riferimenti essenziali; docs-sync non deve sovrascrivere questa
+memoria. Se l'utente rifiuta, registra la scelta e non inventare documenti.
 - Valuta parallelismo e collisioni sui file prima di proporli; usa `file_claim`/`file_release` per i casi residui.
 
 Per i task frontend, il sottociclo è separato: `frontend-developer` → `frontend-reviewer` → planner. Non inviare lavoro frontend al reviewer backend e non usare il reviewer backend come sostituto del `frontend-reviewer`; quest'ultimo deve avere la CLI/skill Playwright e chrome-devtools.

@@ -98,6 +98,13 @@ skills (including the shared `yano-code-mem` protocol), passes the derived
 project scope and uses Herdr as the supported workspace runtime. It does not
 perform a live in-process reload.
 
+On a non-empty project, the first planner startup also performs a lightweight
+documentation preflight. It creates the bounded shared summary
+`.pi/extensions/yano-orchestrator/memory/project.md` only when missing, then
+the planner asks for confirmation before delegating to `docs-sync`. That agent
+must update existing stale documents as well as create missing applicable
+ones; the planner verifies the result and owns the final summary update.
+
 ## Diagnostics and project views
 
 ```text

@@ -218,6 +218,25 @@ const TICKET_CLAIM_STEP0 =
 	"   giudica il tuo contributo concluso (vedi `prompts/planner.md`), non\n" +
 	"   appena hai finito. Se il messaggio non include un `ticket_id`, procedi\n" +
 	"   normalmente: quel layer resta opzionale dal tuo punto di vista.";
+const CONTEXT_EFFICIENCY_PROTOCOL = `
+
+## Protocollo di esplorazione progressiva e contesto
+
+Prima di esplorare il codice, leggi nell'ordine: memoria condivisa del
+progetto (\`project.md\`), memoria del ruolo/istanza, diagrammi e documenti
+pertinenti in \`docs/\`, quindi task e report disponibili. Valuta se queste
+informazioni bastano per procedere. Se bastano, leggi solo i file direttamente
+coinvolti dal task e amplia l'esplorazione solo quando una dipendenza o una
+lacuna lo rende necessario. Non leggere l'intero repository per abitudine.
+
+La memoria e la documentazione sono orientamento, non verità assoluta:
+verifica nel codice, nella configurazione, nei test e nel comportamento runtime
+ogni informazione critica o potenzialmente obsoleta. Non saltare test,
+controlli di sicurezza, contratti API o verifiche richieste dal playbook.
+Quando serve approfondire, annota brevemente perché nel report. Prima di
+concludere il round, indica sempre: documenti consultati, file di codice
+analizzati, approfondimenti aggiuntivi, informazioni mancanti/non verificate,
+verifiche eseguite e relativo esito. Non inventare fatti o risultati.`;
 
 // Same placeholder substitution the extension itself does, so assertions can
 // compare against an exact expected render rather than a loose substring —
@@ -237,7 +256,7 @@ function renderTemplate(text, instance, project) {
 		.replaceAll("{{WORKER_TOOLS_INTRO}}", WORKER_TOOLS_INTRO)
 		.replaceAll("{{DIAGRAM_TIP}}", DIAGRAM_TIP)
 		.replaceAll("{{TURN_CLOSE_NOTE}}", TURN_CLOSE_NOTE)
-		.replaceAll("{{TICKET_CLAIM_STEP0}}", TICKET_CLAIM_STEP0);
+		.replaceAll("{{TICKET_CLAIM_STEP0}}", TICKET_CLAIM_STEP0) + CONTEXT_EFFICIENCY_PROTOCOL;
 }
 
 main().catch((err) => {

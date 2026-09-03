@@ -24,3 +24,12 @@ yano memory delete --scope instance --instance coder-01 --role coder --project-r
 
 La memoria progetto è breve e condivisa da tutti gli agenti. Le memorie di
 ruolo non devono duplicare fatti già presenti nel riepilogo progetto.
+
+Al primo avvio del planner su un progetto esistente, il preflight crea
+`project.md` se manca e propone all’utente una sincronizzazione dei documenti
+presenti e mancanti. Dopo la conferma, `docs-sync` aggiorna anche i documenti
+obsoleti; il planner verifica il risultato e aggiorna il riepilogo.
+
+Tutti gli agenti seguono inoltre l’ordine memoria → documenti → task/report →
+file assegnati. Ampliano la lettura del codice solo per dipendenze o lacune e
+riportano nel report cosa hanno consultato e verificato.

@@ -48,6 +48,32 @@ Every instance has an `instance`, `role`, `project` and `team` identity. MQTT to
 
 ## Main flow
 
+### Contesto e esplorazione progressiva
+
+Ogni agente riceve un protocollo comune: prima consulta `project.md`, memoria
+di ruolo/istanza, diagrammi, documenti pertinenti, task e report; solo dopo
+legge il codice direttamente coinvolto. L’esplorazione si amplia per gradi
+quando una dipendenza o un’informazione mancante lo richiede. Memoria e docs
+sono orientamento e vanno confrontati con codice, configurazione, test e
+runtime per ogni informazione critica. Il report finale dichiara documenti,
+file, approfondimenti, lacune e verifiche.
+
+### Existing-project documentation preflight
+
+Quando il planner viene avviato su una directory non vuota, il runtime esegue
+una scansione deterministica e leggera di manifest, directory principali,
+entrypoint e categorie documentali. Se manca
+`.pi/extensions/yano-orchestrator/memory/project.md`, crea soltanto il
+riepilogo condiviso e bounded; non modifica i documenti applicativi.
+
+Il planner presenta quindi i risultati all’utente e chiede conferma. Dopo la
+conferma delega `docs-sync`, che confronta codice, configurazione e test reali,
+aggiorna i documenti esistenti obsoleti e crea quelli mancanti applicabili.
+`docs-sync` restituisce l’elenco dei file modificati ma non sovrascrive
+`project.md`: il planner verifica l’esito e aggiorna la memoria di progetto
+con i riferimenti finali. Un rifiuto viene registrato senza inventare
+documentazione.
+
 1. `yano init` validates Node, Pi-facing prerequisites, MCP configuration and broker availability before writing a scaffold. In-place initialization of an existing project is non-destructive: it preserves application files and merges only missing Yano infrastructure; if root `agents/` belongs to the application, the Yano roster uses `.pi/agents/`. The active MCP template includes `chrome-devtools`, GitHub and the project-wide Agentation server. With `--herdr`, the CLI first creates or reuses and explicitly focuses a Herdr workspace rooted at the current directory, runs the scaffold command in its root pane, then starts `planner-01` in that same terminal; when invoked outside Herdr it opens/attaches the Herdr client, while an invocation already inside Herdr avoids nesting another client. Older projects whose roster is still under `.pi/agents/` remain launchable; the launcher selects that directory explicitly instead of assuming the modern root `agents/` layout.
 2. `yano start` launches any configured role. For a worker tab, `yano start --herdr`
    verifies both the Herdr workspace label and a pane rooted at the current

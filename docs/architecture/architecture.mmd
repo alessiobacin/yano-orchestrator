@@ -14,6 +14,13 @@ flowchart TD
     CLI --> GLOBAL_CONFIG["Global config.env\nmanaged by `yano config`\ncredentials + runtime defaults"]
     CLI --> CLI_SKILL["yano-cli\nshared Pi-agent command contract\nsemantic intent → scoped CLI"]
     INIT --> CODE_MEM_INIT["cm init pi\nrequired local-memory bootstrap"]
+    PLANNER --> PROJECT_SCAN["light project scan\nmanifest / structure / entrypoints / docs"]
+    PROJECT_SCAN --> PROJECT_MEMORY["project.md\nbounded shared summary\ncreated only when missing"]
+    PROJECT_MEMORY --> DOC_GATE["planner asks user\nconfirmation before docs sync"]
+    DOC_GATE --> DOC_SYNC["docs-sync\ncreate missing + refresh stale docs"]
+    DOC_SYNC --> PLANNER_SUMMARY["planner verifies result\nand updates project.md"]
+    PROJECT_MEMORY --> CONTEXT_PROTOCOL["all agents\nprogressive context protocol"]
+    CONTEXT_PROTOCOL --> TARGETED_CODE["assigned files first\nexpand for dependencies/gaps"]
     CLI --> CODE_MEM_SKILL["yano-code-mem\nshared retrieval + safe-recording protocol"]
     HUMAN_PI["plain pi\nhuman session; no Yano identity"] --> CLI
     INIT --> PLANNER["pi planner\nrole + instance identity"]

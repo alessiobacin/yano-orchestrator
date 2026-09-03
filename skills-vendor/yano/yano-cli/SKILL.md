@@ -36,6 +36,12 @@ worker, change configuration, or ask the user for approval.
    application. They may report findings to the planner, but must not edit the
    application, create its operational tickets, commit, or deploy.
 
+9. Optimize context progressively: read project and role/instance memory,
+   relevant diagrams/docs, task and reports before source code; if sufficient,
+   inspect only assigned files and expand for dependencies or gaps. Verify
+   critical or stale facts against code, tests, configuration and runtime, and
+   report the documents/files/extra exploration and verification results.
+
 ## Semantic intent map
 
 Use the smallest command that answers the request. Typical translations are:
@@ -56,6 +62,7 @@ Use the smallest command that answers the request. Typical translations are:
 | Prepare a visual frontend review | `yano frontend-review start` | installs project-local React `agentation`, infers the dev script/URL and starts the development app after user consent |
 | Start an instance on the persistent Local PC runtime | `yano local-pc status` | `yano-local-pc` and its `planner-01` are supervised in the persistent `yano-local-pc` workspace; scheduler and watcher remain in their own service workspaces |
 | List or inspect agent memory | `yano memory agents --project-root <dir>`, then `yano memory show --scope instance --instance <id> --role <role>` | Lists project, role and instance Markdown memories; memory is bounded and survives agent restart |
+| Bootstrap documentation for an existing project | Start its planner and read `.pi/extensions/yano-orchestrator/memory/project.md` first | The planner performs a light scan, asks before creating or refreshing docs, then delegates to `docs-sync` |
 | Check or change trace capture | `yano trace status`, `yano trace enable --mode full` | global per-user data root and effective mode |
 | Investigate a specific failure | `yano trace context ... --json`, then `yano trace search ... --mode hybrid --json` | filtered evidence before broad history |
 | Pause and resume work | `yano pause ... --yes`, then `yano resume ... --yes` | checkpoint, assignments, missing agents; never use `end` as pause |

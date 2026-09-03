@@ -53,6 +53,7 @@ import { fetchPublicSource, searchPublicAlternatives } from "../scripts/yano-aut
 import { ensureTraceProject, getTraceConfig, projectKey, setTraceMode, traceEnabled, traceRoot } from "../scripts/yano-trace-storage.mjs";
 import { loadYanoRules } from "../scripts/yano-rules.mjs";
 import { loadAgentMemory, updateAgentMemory } from "../scripts/yano-agent-memory.mjs";
+import { ensureProjectSummary, projectBootstrapPrompt, scanProject } from "../scripts/yano-project-context.mjs";
 
 // ESM-safe lazy require, used only inside SQLiteOrchestratorStorage's
 // constructor to resolve node:sqlite on first actual use (see the
@@ -720,6 +721,28 @@ const TURN_CLOSE_NOTE =
 	"con `report_append` — di' sempre, in una riga o poche righe, cosa hai appena\n" +
 	"fatto. Chi guarda il pannello di questa istanza deve poter capire l'esito\n" +
 	"senza dover aprire i log MQTT o il file di report.";
+
+// Shared context-efficiency protocol. It is injected into every role at
+// runtime so custom project prompts cannot accidentally omit the policy.
+const CONTEXT_EFFICIENCY_PROTOCOL = `
+
+## Protocollo di esplorazione progressiva e contesto
+
+Prima di esplorare il codice, leggi nell'ordine: memoria condivisa del
+progetto (\`project.md\`), memoria del ruolo/istanza, diagrammi e documenti
+pertinenti in \`docs/\`, quindi task e report disponibili. Valuta se queste
+informazioni bastano per procedere. Se bastano, leggi solo i file direttamente
+coinvolti dal task e amplia l'esplorazione solo quando una dipendenza o una
+lacuna lo rende necessario. Non leggere l'intero repository per abitudine.
+
+La memoria e la documentazione sono orientamento, non verità assoluta:
+verifica nel codice, nella configurazione, nei test e nel comportamento runtime
+ogni informazione critica o potenzialmente obsoleta. Non saltare test,
+controlli di sicurezza, contratti API o verifiche richieste dal playbook.
+Quando serve approfondire, annota brevemente perché nel report. Prima di
+concludere il round, indica sempre: documenti consultati, file di codice
+analizzati, approfondimenti aggiuntivi, informazioni mancanti/non verificate,
+verifiche eseguite e relativo esito. Non inventare fatti o risultati.`;
 
 // Near-identical across specialist.md, security-evaluator.md, docs-sync.md.
 // coder.md keeps its own wording (it's about the SAME ticket layer but the
@@ -2788,6 +2811,8 @@ export default function (pi: ExtensionAPI) {
 		return inboundQueue.size > 0 || activeTicketIds.size > 0 ? "busy" : "idle";
 	}
 	let currentCtx: ExtensionContext | null = null;
+	let projectBootstrap = "";
+	let projectBootstrapDelivered = false;
 	let currentInbound: InboundContext | null = null;
 	let contextCompactionInFlight = false;
 	let reloadRequested = false;
@@ -3367,6 +3392,8 @@ export default function (pi: ExtensionAPI) {
 			capacity: resolved.capacity,
 			skills: resolved.skills,
 		};
+		projectBootstrap = "";
+		projectBootstrapDelivered = false;
 		try {
 			acquireIdentityLease(cwd, project, flags.instance);
 		} catch (error) {
@@ -3375,6 +3402,32 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 		T = topics(project, process.env.PI_ORCH_TEST_NO_EXIT === "1" ? project : (flags.projectScope || projectKey(cwd, project)));
+
+		// Existing projects get a deterministic, lightweight documentation
+		// preflight before the planner explores the code deeply. The scan is
+		// read-only; only a missing shared project summary is initialized. The
+		// planner still owns the human gate and delegates document creation or
+		// refresh to docs-sync after confirmation.
+		if (role === "planner") {
+			try {
+				const scan = scanProject({ root: cwd });
+				if (scan.initialized) {
+					const summary = ensureProjectSummary(scan);
+					projectBootstrap = projectBootstrapPrompt({ ...scan, project_memory: { ...scan.project_memory, exists: true } });
+					logEvent("project_documentation_preflight", {
+						project_root: cwd,
+						project_memory: summary.file,
+						project_memory_created: summary.created,
+						needs_documentation_gate: scan.needs_documentation_gate,
+						manifest_count: scan.manifests.length,
+						entrypoint_count: scan.entrypoints.length,
+						documentation_findings: scan.docs.relevant,
+					});
+				}
+			} catch (error) {
+				logEvent("project_documentation_preflight_failed", { error: error instanceof Error ? error.message : String(error) });
+			}
+		}
 
 		// `yano start` supplies an expected mode. Enforce it at the extension
 		// boundary too, so an old project config cannot silently downgrade a new
@@ -3633,7 +3686,12 @@ export default function (pi: ExtensionAPI) {
 			.replaceAll("{{WORKER_TOOLS_INTRO}}", WORKER_TOOLS_INTRO)
 			.replaceAll("{{DIAGRAM_TIP}}", DIAGRAM_TIP)
 			.replaceAll("{{TURN_CLOSE_NOTE}}", TURN_CLOSE_NOTE)
-			.replaceAll("{{TICKET_CLAIM_STEP0}}", TICKET_CLAIM_STEP0) + rulesPrompt + loadAgentMemory({ root: identity.cwd, role: identity.role, instance: identity.instance });
+			.replaceAll("{{TICKET_CLAIM_STEP0}}", TICKET_CLAIM_STEP0) + rulesPrompt + CONTEXT_EFFICIENCY_PROTOCOL + loadAgentMemory({ root: identity.cwd, role: identity.role, instance: identity.instance }) +
+			(identity.role === "planner" && !projectBootstrapDelivered && projectBootstrap ? projectBootstrap : "");
+		if (identity.role === "planner" && projectBootstrap) {
+			projectBootstrapDelivered = true;
+			logEvent("project_documentation_gate_presented", { project_memory: path.join(identity.cwd, ".pi", "extensions", "yano-orchestrator", "memory", "project.md") });
+		}
 		herdrReportAgent(identity.displayName, "working", identity.instance);
 		// had_pending_inbound:false qui è il segnale diagnostico chiave per "un
 		// agente è partito da solo": significa che questo turno sta iniziando

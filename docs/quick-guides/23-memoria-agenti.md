@@ -24,3 +24,16 @@ rilevante, così il contesto non cresce indefinitamente. Prima di una scelta
 tecnica, operativa o non banale, l’agente deve verificare la memoria e chiedere
 se l’utente vuole ripetere l’approccio precedente oppure adottarne uno diverso.
 Non serve conferma per comandi meccanici già autorizzati.
+
+## Ordine di lettura per risparmiare contesto
+
+Ogni agente riceve dal runtime una regola comune: prima deve leggere memoria
+progetto, memoria del ruolo/istanza, diagrammi e documenti pertinenti, task e
+report. Se queste informazioni sono sufficienti, legge solo i file coinvolti
+dal task. Approfondisce progressivamente import, dipendenze, configurazioni e
+test solo quando sono necessari.
+
+Memoria e documentazione non sostituiscono la verifica: informazioni critiche
+o potenzialmente obsolete devono essere confrontate con il codice reale, i
+test e il runtime. Nel report l’agente indica documenti, file, approfondimenti,
+lacune e verifiche eseguite.

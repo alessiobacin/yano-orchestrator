@@ -63,6 +63,12 @@ function readRolePromptFile(dir, name) {
 // text), this mirror also reports which tier/kind of file was used, since
 // blocks 1-3/2/2b/2c/2d/3/4 below assert on that for clarity.
 function loadRolePrompt(primaryDir, fallbackDir, role, roleCfg) {
+	if (roleCfg?.prompt) {
+		const aliasedPrimary = readRolePromptFile(primaryDir, roleCfg.prompt);
+		if (aliasedPrimary !== null) return { text: aliasedPrimary, source: "prompt-alias" };
+		const aliasedFallback = readRolePromptFile(fallbackDir, roleCfg.prompt);
+		if (aliasedFallback !== null) return { text: aliasedFallback, source: "prompt-alias" };
+	}
 	const fromPrimary = readRolePromptFile(primaryDir, role);
 	if (fromPrimary !== null) return { text: fromPrimary, source: "bespoke" };
 	const fromFallback = readRolePromptFile(fallbackDir, role);
@@ -153,6 +159,12 @@ function main() {
 	assert.match(fdRendered, /target_role:\s*"frontend-reviewer"/, "frontend-developer.md must instruct sending work to frontend-reviewer, not straight to planner");
 	assert.ok(!/target_role:\s*"planner"/.test(fdRendered), "frontend-developer.md must NOT instruct sending its own work directly to planner");
 	console.log("   OK — frontend-developer.md renders cleanly, is picked up ahead of specialist.md, and always routes through reviewer");
+
+	console.log("2e. reusable prompt aliases resolve before role-specific fallback...");
+	const { text: aiText, source: aiSource } = loadRolePrompt(GLOBAL_PROMPTS_DIR, null, "ai-optimizer", cfg.roles["ai-optimizer"]);
+	assert.equal(aiSource, "prompt-alias", "ai-optimizer should resolve its meaningful reusable prompt alias");
+	assert.match(aiText, /AI application optimization/);
+	console.log("   OK — ai-optimizer uses prompts/ai-optimization.md through roles.yaml prompt alias");
 
 	console.log("3. ALL roles in the roster render cleanly with no leftover placeholders...");
 	const roster = Object.keys(cfg.roles).filter((r) => !["planner", "coder", "reviewer"].includes(r));

@@ -3,6 +3,11 @@
 Usa questa procedura quando il planner capisce che il catalogo non contiene un
 playbook adeguato o serve un ruolo specialistico nuovo.
 
+Architect può creare anche capability `rest-api`, oltre a playbook, CLI, skill
+e MCP server. La REST API segue lo stesso ciclo ephemeral: review del codice,
+test, installazione, prima esecuzione riuscita e approvazione prima della
+promozione.
+
 ## 1. Controllare il catalogo prima di creare
 
 ```bash
@@ -14,6 +19,15 @@ yano architect assess --project-root "$PWD" \
 Se il risultato contiene `catalog.action: reuse`, il Planner usa il playbook
 indicato e sceglie una variante adatta. Per `knowledge-authoring` le varianti
 sono `single-author`, `research-and-author` e `full-team`.
+
+Prima di creare una capability, dopo `assess`, l'Architect deve ricercare
+soluzioni esistenti online: almeno tre query/alternative, fonti ufficiali,
+licenza, manutenzione, sicurezza, dipendenze e compatibilità. Preferisce
+[`mcp-searxng`](https://github.com/mcp/ihor-sokoliuk/mcp-searxng) per la ricerca
+e il [server MCP Fetch ufficiale](https://github.com/modelcontextprotocol/servers/tree/main/src/fetch)
+per leggere le pagine. SearXNG richiede un'istanza configurata; Fetch va
+limitato a URL HTTPS esterni approvati. Se i server non sono configurati,
+l'Architect registra `pending`/`blocked` e non inventa risultati.
 
 ## 2. Creare una nuova competenza riutilizzabile
 

@@ -54,6 +54,8 @@ import { ensureTraceProject, getTraceConfig, projectKey, setTraceMode, traceEnab
 import { loadYanoRules } from "../scripts/yano-rules.mjs";
 import { loadAgentMemory, updateAgentMemory } from "../scripts/yano-agent-memory.mjs";
 import { ensureProjectSummary, projectBootstrapPrompt, scanProject } from "../scripts/yano-project-context.mjs";
+import { collectCodeMemContext } from "../scripts/yano-code-mem-context.mjs";
+import { getProjectApi, listProjectApis, resolveApiSecret } from "../scripts/yano-api-registry.mjs";
 
 // ESM-safe lazy require, used only inside SQLiteOrchestratorStorage's
 // constructor to resolve node:sqlite on first actual use (see the
@@ -304,6 +306,7 @@ interface InboundContext {
 	reply_to: string;
 	sender_instance: string;
 	response_schema?: object | null;
+	prompt_preview: string;
 	fulfilled: boolean;
 }
 
@@ -312,6 +315,9 @@ interface InboundContext {
 interface RoleConfig {
 	activation?: "always" | "lazy";
 	playbook?: string;
+	// Optional reusable prompt name. This lets several roles/playbooks share a
+	// meaningful prompt without forcing the file to be named after one role.
+	prompt?: string;
 	model?: { provider?: string; model?: string };
 	skills?: string[];
 	cli?: string[];
@@ -739,6 +745,13 @@ La memoria e la documentazione sono orientamento, non verità assoluta:
 verifica nel codice, nella configurazione, nei test e nel comportamento runtime
 ogni informazione critica o potenzialmente obsoleta. Non saltare test,
 controlli di sicurezza, contratti API o verifiche richieste dal playbook.
+Quando il progetto è inizializzato con Code Mem, usa prima il suo orientamento
+bounded: \`cm recall "<task>" --level 1 --limit 6 --mode hybrid\` per la memoria
+semantica e \`cm query "<domanda>"\` per il grafo di file, moduli e simboli.
+Usa \`cm gn\`/\`cm gp\` solo per seguire una relazione specifica. Non eseguire
+\`cm scan --deep\` a ogni turno: l'indice si aggiorna in fase di init o quando
+il watcher rileva cambiamenti, mentre l'agente deve leggere il codice solo dopo
+aver ristretto il perimetro.
 Quando serve approfondire, annota brevemente perché nel report. Prima di
 concludere il round, indica sempre: documenti consultati, file di codice
 analizzati, approfondimenti aggiuntivi, informazioni mancanti/non verificate,
@@ -782,6 +795,14 @@ function loadRolePrompt(primaryDir: string, fallbackDir: string | null, role: st
 	// an approval message that IS the final gate. Every other configured
 	// role is a specialist for this rule.
 	const requiresPlannerHandoff = Boolean(roleCfg?.brief) && !["planner", "coder", "reviewer", "frontend-reviewer"].includes(role);
+	if (roleCfg?.prompt) {
+		const fromPromptAlias = readRolePromptFile(primaryDir, roleCfg.prompt);
+		if (fromPromptAlias !== null) return requiresPlannerHandoff ? `${fromPromptAlias}${MANDATORY_SPECIALIST_PLANNER_HANDOFF}` : fromPromptAlias;
+		if (fallbackDir) {
+			const fallbackPromptAlias = readRolePromptFile(fallbackDir, roleCfg.prompt);
+			if (fallbackPromptAlias !== null) return requiresPlannerHandoff ? `${fallbackPromptAlias}${MANDATORY_SPECIALIST_PLANNER_HANDOFF}` : fallbackPromptAlias;
+		}
+	}
 	const fromPrimary = readRolePromptFile(primaryDir, role);
 	if (fromPrimary !== null) return requiresPlannerHandoff ? `${fromPrimary}${MANDATORY_SPECIALIST_PLANNER_HANDOFF}` : fromPrimary;
 	if (fallbackDir) {
@@ -809,6 +830,13 @@ function roleCapabilitiesPrompt(roleCfg?: RoleConfig): string {
 	const playbookPath = roleCfg?.playbook_path ? `\n- Sorgente playbook immutabile: ${roleCfg.playbook_path}` : "";
 	const proposal = roleCfg?.source_proposal ? `\n- Proposta Architect: ${roleCfg.source_proposal}` : "";
 	return `## Contratto delle capacità (enforced da roles.yaml)\n- Playbook: ${playbook}${playbookPath}${proposal}\n- Attivazione: ${activation}\n- Skill autorizzate: ${skills}\n- CLI autorizzate: ${cli}\n- MCP autorizzati: ${mcp}\nUsa solo queste capacità. Se una è mancante, interrompi il round, descrivi il comando/documentazione per risolvere e informa il planner; non sostituirla silenziosamente con strumenti equivalenti.`;
+}
+
+function apiRegistryPrompt(root: string): string {
+	const apis = listProjectApis(root).filter((api) => api.enabled !== false);
+	if (!apis.length) return "";
+	const rows = apis.map((api) => `- ${api.name}: ${api.base_url} — ${api.description} (metodi: ${api.methods.join(", ")}; scope: ${api.scope}; autenticazione: ${api.auth_env ? `${api.auth_header} da variabile protetta` : "nessuna dichiarata"})`);
+	return `\n\n## REST API utente disponibili\nQueste API sono state registrate esplicitamente dall'utente per questo progetto o globalmente. Usale solo se la descrizione è pertinente al task, rispetta i metodi dichiarati e non inventare endpoint. Per richieste mutanti chiedi conferma secondo il playbook.\n${rows.join("\n")}\nPer chiamarle usa il tool \`api_request\`; il tool limita host, metodi e credenziali al registro.`;
 }
 
 // Sets the terminal window/tab title via the standard OSC 0/2 escape
@@ -3062,6 +3090,7 @@ export default function (pi: ExtensionAPI) {
 			reply_to: env.reply_to,
 			sender_instance: env.sender_instance,
 			response_schema: env.response_schema ?? null,
+			prompt_preview: String(env.prompt || "").slice(0, 800),
 			fulfilled: false,
 		};
 		inboundQueue.set(env.assignment_id, inbound);
@@ -3647,6 +3676,14 @@ export default function (pi: ExtensionAPI) {
 		const flags = readCliFlags(pi);
 		const cfg = loadConfig(identity.cwd, flags.configDir || "agents");
 		const roleCfg = cfg.roles[identity.role];
+		const branch = ctx?.sessionManager?.getBranch?.() ?? [];
+		const lastUser = [...branch].reverse().find((entry: any) => entry?.role === "user");
+		const branchText = Array.isArray(lastUser?.content)
+			? lastUser.content.map((part: any) => part?.text || part?.content || "").join(" ")
+			: String(lastUser?.content || "");
+		const codeMemQuery = (currentInbound?.prompt_preview || branchText || `${identity.role} ${identity.project} architecture`).slice(0, 800);
+		const codeMem = collectCodeMemContext({ root: identity.cwd, query: codeMemQuery, maxChars: 6_000 });
+		logEvent("code_mem_context_queried", { ok: codeMem.ok, reason: codeMem.reason, query_hash: crypto.createHash("sha256").update(codeMem.query || codeMemQuery).digest("hex").slice(0, 12), query_chars: (codeMem.query || codeMemQuery).length, chars: codeMem.context.length });
 		// Revisione 47: per default i prompt vengono SEMPRE letti dalla cartella
 		// prompts/ del pacchetto installato (resolveGlobalPromptsDir(), risolta
 		// dalla posizione reale di QUESTO file, mai da un percorso ipotizzato) —
@@ -3686,7 +3723,7 @@ export default function (pi: ExtensionAPI) {
 			.replaceAll("{{WORKER_TOOLS_INTRO}}", WORKER_TOOLS_INTRO)
 			.replaceAll("{{DIAGRAM_TIP}}", DIAGRAM_TIP)
 			.replaceAll("{{TURN_CLOSE_NOTE}}", TURN_CLOSE_NOTE)
-			.replaceAll("{{TICKET_CLAIM_STEP0}}", TICKET_CLAIM_STEP0) + rulesPrompt + CONTEXT_EFFICIENCY_PROTOCOL + loadAgentMemory({ root: identity.cwd, role: identity.role, instance: identity.instance }) +
+			.replaceAll("{{TICKET_CLAIM_STEP0}}", TICKET_CLAIM_STEP0) + rulesPrompt + CONTEXT_EFFICIENCY_PROTOCOL + apiRegistryPrompt(identity.cwd) + (codeMem.context ? `\n\n## Orientamento code-mem (consultazione bounded)\nUsa questi risultati per scegliere quali file approfondire. Sono orientamento, non prova definitiva: verifica ogni informazione critica nel codice, nei test e nel runtime. Non riversare l'intero repository nel contesto.\n${codeMem.context}` : "") + loadAgentMemory({ root: identity.cwd, role: identity.role, instance: identity.instance }) +
 			(identity.role === "planner" && !projectBootstrapDelivered && projectBootstrap ? projectBootstrap : "");
 		if (identity.role === "planner" && projectBootstrap) {
 			projectBootstrapDelivered = true;
@@ -4191,6 +4228,43 @@ export default function (pi: ExtensionAPI) {
 	// sufficient safety boundary because a resumed/stale Pi transcript can still
 	// request bash/edit/write. Give that role a narrow runtime tool surface and
 	// keep the only write operation below inside the global Yano data directory.
+	pi.registerTool({
+		name: "api_request",
+		label: "Registered REST API Request",
+		description: "Call one user-registered REST API. Only registered hosts, declared methods and configured credentials are allowed; never an arbitrary URL fetch.",
+		parameters: Type.Object({
+			api: Type.String({ description: "Registered API name from the REST API registry." }),
+			method: Type.String({ description: "Declared HTTP method: GET, POST, PUT, PATCH or DELETE." }),
+			path: Type.String({ description: "Path relative to the registered base URL, for example /api/status." }),
+			body: Type.Optional(Type.Any({ description: "JSON request body when required by the API." })),
+		}),
+		async execute(_callId, params) {
+			if (!identity) throw new Error("api_request: identity non disponibile");
+			const api = getProjectApi(identity.cwd, params.api);
+			if (!api || api.enabled === false) throw new Error(`api_request: API registrata non disponibile: ${params.api}`);
+			const method = String(params.method || "").toUpperCase();
+			if (!api.methods.includes(method)) throw new Error(`api_request: metodo ${method} non dichiarato per ${api.name}`);
+			if (!String(params.path || "").startsWith("/") || String(params.path).includes("\\") || String(params.path).includes("..")) throw new Error("api_request: path deve essere relativo e sicuro (inizia con /, senza ..)");
+			const requestedPath = new URL(params.path, "https://placeholder.invalid").pathname;
+			const endpoint = (api.endpoints || []).find((candidate: any) => candidate.method === method && candidate.path === requestedPath);
+			if (!endpoint) throw new Error(`api_request: endpoint non rilevato nella sorgente registrata: ${method} ${requestedPath}`);
+			const url = new URL(params.path, `${api.base_url}/`);
+			if (url.origin !== new URL(api.base_url).origin) throw new Error("api_request: host fuori dal registro");
+			const headers: Record<string, string> = { accept: "application/json, text/plain, */*" };
+			const secret = resolveApiSecret(api);
+			if (api.auth_env && !secret) throw new Error(`api_request: credenziale mancante; configura ${api.auth_env} con yano config set ${api.auth_env} --stdin`);
+			if (secret) headers[api.auth_header || "x-api-key"] = secret;
+			if (params.body !== undefined) headers["content-type"] = "application/json";
+			const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), 30_000);
+			try {
+				const response = await fetch(url, { method, headers, body: params.body === undefined ? undefined : JSON.stringify(params.body), signal: controller.signal });
+				const text = (await response.text()).slice(0, 50_000); let parsed: unknown = text; try { parsed = JSON.parse(text); } catch { /* plain response */ }
+				return { content: [{ type: "text" as const, text: JSON.stringify({ api: api.name, method, path: params.path, status: response.status, ok: response.ok, response: parsed }, null, 2) }], details: { api: api.name, method, path: params.path, status: response.status, ok: response.ok, response_chars: text.length } };
+			} finally { clearTimeout(timer); }
+		},
+		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("api_request ")) + theme.fg("accent", `${(args as any).api ?? "?"} ${(args as any).method ?? "GET"} ${(args as any).path ?? "/"}`), 0, 0); },
+		renderResult(result, _options, theme) { const d = result.details as any; return new Text(theme.fg(d?.ok ? "success" : "error", `${d?.ok ? "✓" : "✗"} ${d?.status ?? "?"} ${d?.api ?? "API"}`), 0, 0); },
+	});
 	pi.registerTool({
 		name: "auto_improve_web_search",
 		label: "Auto-Improve Web Search",

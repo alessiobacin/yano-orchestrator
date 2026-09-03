@@ -27,6 +27,8 @@ pensate per chi usa Yano per la prima volta e lavora dalla root del progetto.
 21. [CLI semantica per gli agenti Pi](./21-yano-cli-semantica.md)
 22. [Job ricorrenti e Yano Scheduler](./22-job-ricorrenti.md)
 23. [Bootstrap documentale del progetto](./24-bootstrap-documentale-progetto.md)
+24. [Ottimizzazione di applicazioni AI](./26-ottimizzazione-app-ai.md)
+25. [REST API utente in Yano](./27-api-rest-utente.md)
 
 Per i riferimenti completi dei comandi (oltre alle controparti compatte qui
 sopra) vedi anche [quick-start](./quick-start.md), [yano-feedback](./12-yano-feedback.md),

@@ -27,6 +27,14 @@ catalog:
 enforcement:
   status: partial
   note: The phase order and checkpoints are contractual; the planner and auto-improver enforce them while the runtime validates the playbook shape.
+contract:
+  execution: sequential
+  checkpoint: every_phase_before_next_phase
+  evidence: [scope, source, command, exit_code, output, classification, score, confidence, limitation]
+  report_sections: [executive_summary, evidence, findings, scored_recommendations, duplicates, gaps, handoff]
+  budgets: {max_commands: 120, max_files: 300, max_minutes: 90, max_tokens: 24000}
+  verification: {mode: bounded_read_only_audit, required: true}
+  recovery: [resume_from_last_checkpoint, preserve_previous_report, bounded_retry, planner_handoff_on_block]
 states:
   - {id: received, owner: planner, terminal: false}
   - {id: preflight, owner: auto-improver, terminal: false}

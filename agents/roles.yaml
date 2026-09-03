@@ -135,6 +135,18 @@ roles:
       - architecture
       - platform
 
+  ai-optimizer:
+    activation: lazy
+    playbook: ai-application-optimization
+    prompt: ai-optimization
+    label: "AI Optimization Specialist"
+    brief: "Misura e ottimizza applicazioni AI per contesto, token, granularità dei task, routing dei modelli, latenza, qualità, affidabilità e costi. Produce evidenze e raccomandazioni; implementa solo modifiche assegnate dal planner."
+    model: { provider: llmproxy, model: llmproxy }
+    skills: [yano-ai-optimization, yano-planner-trace-analysis, yano-cli, yano-code-mem]
+    cli: [git, node, npm, npx, yano]
+    mcp: []
+    teams: [performance, quality]
+
   market-researcher:
     activation: lazy
     playbook: knowledge-authoring

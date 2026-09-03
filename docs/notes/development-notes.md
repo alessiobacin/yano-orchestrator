@@ -5018,7 +5018,7 @@ matrice in `docs/documentation-sync.md`, preservando la history con `git mv`.
   Riferimenti aggiornati: `README.md` (albero root + comando `yano feedback
   serve`), `docs/cheat-sheet/26-feedback.md`, `docs/quick_guides/12-yano-feedback.md`,
   `docs/yano-feedback.md`, `scripts/yano-feedback.mjs` (commento + output `--help`),
-  `docs/architecture.mmd` (nodo `POSTMAN_COLLECTION`), `playbooks/clean-repo.usage.md`.
+  `docs/architecture.mmd` (nodo `POSTMAN_COLLECTION`), `docs/guides/playbooks/clean-repo.usage.md`.
   `scripts/create-project.mjs` verificato: NON copia `postman/` nei progetti
   scaffoldati, nessun aggiornamento necessario.
 - `docs/diagramma/` → **`docs/diagram/`**: i sei `.mmd` operativi e il loro
@@ -5026,7 +5026,7 @@ matrice in `docs/documentation-sync.md`, preservando la history con `git mv`.
   `docs/diagram` citata da README e quick-start si applica ora anche a questo
   repo stesso). Riferimenti aggiornati: `scripts/check-documentation-sync.mjs`
   (path esatti righe 33/64/65), `docs/architecture.md` (link a `diagram/README.md`),
-  `playbooks/clean-repo.usage.md` (sezione equivalenze), `prompts/docs-sync.md`
+  `docs/guides/playbooks/clean-repo.usage.md` (sezione equivalenze), `prompts/docs-sync.md`
   (esempio equivalente rimasto: solo `docs/quick_guides`).
 
 Le note storiche di questo file (Revisioni precedenti) conservano i percorsi

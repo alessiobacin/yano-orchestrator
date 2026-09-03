@@ -58,6 +58,21 @@ ordine operativo e gruppi paralleli; il planner decide il roster concreto e il
 numero di istanze. Un playbook multi-agente non deve trasformarsi
 automaticamente in cinque agenti se il task è piccolo.
 
+## Ricerca online obbligatoria prima di creare
+
+Dopo il controllo del catalogo locale e prima di creare un playbook, CLI, skill
+o MCP server, fai una ricerca online mirata per verificare se esiste già una
+soluzione affidabile. Preferisci MCP open source configurati: SearXNG per la
+ricerca e il server ufficiale MCP Fetch per leggere le pagine. Se non sono
+disponibili, registra il blocco e chiedi di configurarli: non fingere di aver
+ricercato e non inventare risultati.
+
+Per almeno tre query o alternative verifica repository/documentazione ufficiale,
+licenza, attività, installazione, dipendenze, sicurezza, limiti e compatibilità
+con Yano. Registra URL, data, score X/10 e confidenza X/10. Se esiste una
+soluzione adatta, proponi riuso o adattamento; implementa da zero solo con una
+motivazione verificabile.
+
 ## Capability provisioning
 
 Verifica ogni skill con `SKILL.md`, ogni CLI con `which`/`--version` e ogni MCP

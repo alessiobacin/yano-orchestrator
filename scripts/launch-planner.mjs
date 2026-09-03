@@ -125,6 +125,8 @@ const YANO_AUTO_IMPROVEMENT_SKILL = "yano-auto-improvement";
 const YANO_AUTO_IMPROVEMENT_SKILL_ROLES = ["auto-improver"];
 const YANO_ARCHITECT_SKILL = "yano-architect";
 const YANO_ARCHITECT_SKILL_ROLES = ["architect"];
+const YANO_AI_OPTIMIZATION_SKILL = "yano-ai-optimization";
+const YANO_AI_OPTIMIZATION_SKILL_ROLES = ["ai-optimizer"];
 
 // Revisione 49 — skill vendorizzata destinata SOLO ai ruoli reviewer e
 // frontend-developer (vedi skills-vendor/awesome-copilot/VERSION.md).
@@ -191,6 +193,10 @@ function resolveYanoAutoImprovementSkillPath(packageRoot) {
 
 function resolveYanoArchitectSkillPath(packageRoot) {
 	return resolveVendoredSkillPaths(packageRoot, "yano", [YANO_ARCHITECT_SKILL])[0];
+}
+
+function resolveYanoAiOptimizationSkillPath(packageRoot) {
+	return resolveVendoredSkillPaths(packageRoot, "yano", [YANO_AI_OPTIMIZATION_SKILL])[0];
 }
 
 // Pi carica automaticamente le skill in ~/.pi/agent/skills e nelle directory
@@ -617,6 +623,9 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 	const yanoArchitectSkillFlags = YANO_ARCHITECT_SKILL_ROLES.includes(role)
 		? ["--skill", resolveYanoArchitectSkillPath(packageRoot)]
 		: [];
+	const yanoAiOptimizationSkillFlags = YANO_AI_OPTIMIZATION_SKILL_ROLES.includes(role)
+		? ["--skill", resolveYanoAiOptimizationSkillPath(packageRoot)]
+		: [];
 	const generatedSkillFlags = generatedRole
 		? (generatedRole.document.skills || []).flatMap((name) => {
 			const skillPath = generatedSkillPath(packageRoot, name);
@@ -627,7 +636,7 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 	const yanoCliSkillFlags = ["--skill", resolveYanoCliSkillPath(packageRoot)];
 	const yanoCodeMemSkillFlags = ["--skill", resolveYanoCodeMemSkillPath(packageRoot)];
 	const yanoObserverDryRunSkillFlags = ["--skill", resolveYanoObserverDryRunSkillPath(packageRoot)];
-	const allSkillFlags = [...mattPocockSkillFlags, ...yanoTraceSkillFlags, ...yanoCliSkillFlags, ...yanoCodeMemSkillFlags, ...yanoObserverDryRunSkillFlags, ...chromeDevToolsSkillFlags, ...yanoReviewSkillFlags, ...yanoDeploymentSkillFlags, ...yanoObserverSkillFlags, ...yanoAutoImprovementSkillFlags, ...yanoArchitectSkillFlags, ...generatedSkillFlags];
+	const allSkillFlags = [...mattPocockSkillFlags, ...yanoTraceSkillFlags, ...yanoCliSkillFlags, ...yanoCodeMemSkillFlags, ...yanoObserverDryRunSkillFlags, ...chromeDevToolsSkillFlags, ...yanoReviewSkillFlags, ...yanoDeploymentSkillFlags, ...yanoObserverSkillFlags, ...yanoAutoImprovementSkillFlags, ...yanoArchitectSkillFlags, ...yanoAiOptimizationSkillFlags, ...generatedSkillFlags];
 	const requestedSkillPaths = allSkillFlags.filter((_, index) => index % 2 === 1);
 	const skillFlags = explicitSkillPathsWithoutPiConflicts(requestedSkillPaths).flatMap((skillPath) => ["--skill", skillPath]);
 	// -e esplicito SOLO in sviluppo del pacchetto stesso (looksLikePackageRepo)

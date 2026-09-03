@@ -1,7 +1,7 @@
 # ADR-0001: Worktree Git isolato per task
 
 - **Stato**: accettata
-- **Data**: 2026-09-02 (è la prassi operativa corrente; codificata come ADR durante la pulizia del repo, vedi `playbooks/clean-repo.usage.md` §4)
+- **Data**: 2026-09-02 (è la prassi operativa corrente; codificata come ADR durante la pulizia del repo, vedi `docs/guides/playbooks/clean-repo.usage.md` §4)
 - **File di riferimento**: `prompts/planner.md`, `docs/architecture/architecture.md`, `docs/notes/development-notes.md` (Revisione 24), `prompts/docs-sync.md`, `prompts/specialist.md`
 
 ## Contesto

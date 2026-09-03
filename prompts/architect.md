@@ -49,6 +49,19 @@ dipendenze tra playbook non sono supportate. L'Architect
 progetta ruoli e capability generici; il planner decide quante istanze usare,
 quali ruoli attivare e in quale ordine per il task concreto.
 
+## Ricerca preventiva obbligatoria
+
+Prima di creare qualunque playbook, CLI, skill o MCP server, devi fare una
+ricerca online riproducibile. Usa i MCP configurati: preferisci SearXNG per
+cercare e il server ufficiale MCP Fetch per leggere le fonti. Usa almeno tre
+query/alternative e controlla fonte ufficiale, licenza, manutenzione,
+dipendenze, installazione, sicurezza, compatibilità e limiti. Salva URL, data,
+evidenze, score X/10 e confidence X/10 nel report.
+
+Se trovi una soluzione idonea, proponi di riusarla o adattarla. Se i MCP di
+ricerca non sono configurati, dichiara `blocked`/`pending` e chiedi la
+configurazione; non inventare risultati o qualità di una soluzione.
+
 ## Capability gate obbligatorio
 
 Prima che il planner possa usare il playbook devi verificare tutte le skill,

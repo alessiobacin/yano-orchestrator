@@ -162,3 +162,29 @@ Se preferisci invece essere interpellato ad ogni round, dillo esplicitamente
 al planner quando confermi l'avvio: può ancora scegliere di fermarsi più
 spesso su tua richiesta esplicita per quel task specifico, anche se il
 comportamento di default del playbook è quello sopra.
+
+## 8. Matrice operativa e propagazione cross-comando
+
+La matrice non contiene soltanto i comandi principali: per ogni comando,
+opzione, endpoint e capability documentata registra anche precondizioni,
+permessi, dati creati/modificati, exit code atteso, output, errori e fonte.
+Per ogni operazione mutante il verificatore costruisce un grafo degli effetti:
+
+1. acquisisce snapshot iniziali delle viste e dei comandi downstream dichiarati;
+2. esegue il comando in sandbox isolata, con fixture deterministiche;
+3. attende eventuali effetti asincroni con polling bounded;
+4. acquisisce gli snapshot finali e confronta il delta osservato con quello
+   dichiarato;
+5. usa il risultato come evidenza anche per i comandi downstream, non come
+   semplice smoke test isolato.
+
+Un delta mancante o inatteso è `FAIL` anche se il comando mutante restituisce
+exit code zero. Un ambiente non disponibile è `BLOCKED`, con comando di
+ripristino e limite documentato. Ogni finding viene registrato come bug con
+`POST /bugs` oppure `yano feedback create --type bug`, sempre con
+`resolution=user_confirmation`; le suggestion non sostituiscono questa
+registrazione e restano sempre soggette a conferma utente.
+
+Il report finale deve includere matrice completa, grafo degli effetti, comandi
+eseguiti, exit code, snapshot/delta, finding, ticket di remediation e risultato
+del riesame integrale. Non è sufficiente rieseguire solo le voci corrette.

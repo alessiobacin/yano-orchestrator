@@ -102,6 +102,11 @@ prima di ogni fase. L'ordine è: preflight, modalità (`backend-only`,
 pack, performance/architettura, backend/API/dati, frontend/UX quando applicabile,
 feature/prodotto, micro-validazione, scoring/deduplicazione, report e handoff.
 
+Il ruolo usa il prompt dedicato `prompts/auto-improver.md`, allineato alla skill
+`skills-vendor/yano/yano-auto-improvement/SKILL.md`: audit read-only, nessuna
+invenzione, evidenze classificate e score/confidence per ogni parere, finding e
+raccomandazione.
+
 Il report è schietto e evidence-first: non può inventare metriche, bug, fonti,
 alternative o feature. Ogni finding e ogni raccomandazione contiene tipo di
 evidenza (`FACT`, `INFERENCE` o `HYPOTHESIS`), riferimenti, `score: X/10`,

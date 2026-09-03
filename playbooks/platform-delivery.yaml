@@ -11,6 +11,36 @@ enforcement:
   note: Cluster access and cloud cost evidence are environment-specific
     and must be explicitly probed. Do not treat this playbook as permission
     to promote production without the deployment-delivery approval gate.
+contract:
+  execution: sequential
+  checkpoint: every_state_transition
+  evidence:
+    - scope
+    - inputs
+    - commands
+    - exit_code
+    - output
+    - changed_state
+    - blockers
+  report_sections:
+    - summary
+    - scope
+    - evidence
+    - result
+    - blockers
+    - handoff
+  budgets:
+    max_commands: 80
+    max_files: 200
+    max_minutes: 45
+    max_tokens: 16000
+  verification:
+    mode: delivery
+    required: true
+  recovery:
+    - resume_from_last_checkpoint
+    - preserve_evidence
+    - bounded_retry
 states:
   - id: received
     owner: planner

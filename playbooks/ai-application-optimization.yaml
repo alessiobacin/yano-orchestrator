@@ -1,0 +1,60 @@
+schema_version: 1
+id: ai-application-optimization
+label: AI application performance and cost optimization
+description: >-
+  Sequential, evidence-driven optimization of applications that use AI. It
+  measures quality, context, latency, reliability and cost before changing
+  prompts, task boundaries, routing or runtime behavior.
+catalog:
+  scope: global
+  reusable: true
+  intents: [ai optimization, token optimization, llm routing, ai performance, ai cost]
+  exclusions: [blind model replacement, unmeasured quality tradeoffs, production changes without approval]
+  parameters: [project_name, project_root, quality_baseline, budget_constraints]
+enforcement:
+  status: partial
+  note: The planner enforces approval gates; every optimization must retain evidence and a before/after comparison.
+contract:
+  execution: sequential
+  checkpoint: every_state_transition
+  evidence: [scope, source, command, exit_code, output, metric, score, confidence, limitation]
+  report_sections: [summary, baseline, findings, experiments, before_after, cost, risks, handoff]
+  budgets: {max_commands: 120, max_files: 250, max_minutes: 90, max_tokens: 24000}
+  verification: {mode: benchmark_and_regression_audit, required: true}
+  recovery: [resume_from_last_checkpoint, preserve_measurements, bounded_retry, planner_handoff_on_block]
+states:
+  - {id: received, owner: planner, terminal: false}
+  - {id: ai_surface_inventory, owner: ai-optimizer, terminal: false}
+  - {id: baseline_measurement, owner: ai-optimizer, terminal: false}
+  - {id: context_optimization, owner: ai-optimizer, terminal: false}
+  - {id: task_granularity, owner: ai-optimizer, terminal: false}
+  - {id: model_routing, owner: ai-optimizer, terminal: false}
+  - {id: runtime_optimization, owner: ai-optimizer, terminal: false}
+  - {id: quality_benchmark, owner: ai-optimizer, terminal: false}
+  - {id: remediation, owner: planner_and_coder, terminal: false}
+  - {id: reverify, owner: ai-optimizer, terminal: false}
+  - {id: completed, owner: planner, terminal: true}
+  - {id: blocked, owner: planner_and_human, terminal: true}
+transitions:
+  - {id: inventory, from: received, to: ai_surface_inventory, actor: planner, requires: [objective_received, project_root_confirmed]}
+  - {id: baseline, from: ai_surface_inventory, to: baseline_measurement, actor: ai-optimizer, requires: [ai_surfaces_catalogued, docs_and_code_mem_consulted]}
+  - {id: optimize_context, from: baseline_measurement, to: context_optimization, actor: ai-optimizer, requires: [reproducible_baseline, metrics_defined]}
+  - {id: split_tasks, from: context_optimization, to: task_granularity, actor: ai-optimizer, requires: [context_findings_scored]}
+  - {id: route_models, from: task_granularity, to: model_routing, actor: ai-optimizer, requires: [task_boundaries_scored, model_catalog_checked]}
+  - {id: optimize_runtime, from: model_routing, to: runtime_optimization, actor: ai-optimizer, requires: [routing_options_costed, user_approval_if_provider_changes]}
+  - {id: benchmark_quality, from: runtime_optimization, to: quality_benchmark, actor: ai-optimizer, requires: [runtime_changes_measured_or_declared_not_applicable]}
+  - {id: remediate, from: quality_benchmark, to: remediation, actor: planner, requires: [recommendations_accepted, quality_guardrails_defined]}
+  - {id: rerun, from: remediation, to: reverify, actor: planner_and_coder, requires: [changes_implemented, regression_tests_passed]}
+  - {id: accept, from: reverify, to: completed, actor: planner, requires: [before_after_recorded, docs_synced_or_skipped_with_reason, no_unapproved_quality_regression]}
+  - {id: block, from: [baseline_measurement, quality_benchmark, reverify], to: blocked, actor: planner_and_human, requires: [blocker_recorded, partial_report_persisted]}
+failure_routes:
+  - {condition: no_reproducible_baseline, action: record_limitation_and_propose_measurement, terminal: false}
+  - {condition: quality_regression, action: rollback_or_block_and_escalate, terminal: true}
+  - {condition: model_catalog_unavailable, action: use_known_catalog_only_and_mark_unknowns, terminal: false}
+invariants:
+  - {id: no_invention, description: Unknown metrics, prices, capabilities and quality remain explicitly unknown.}
+  - {id: every_opinion_scored, description: Every finding and recommendation has score X/10, rationale and confidence X/10.}
+  - {id: quality_before_cost, description: Token or cost reduction cannot be accepted when measured quality regresses without explicit approval.}
+  - {id: bounded_context, description: Read project memory and code-mem orientation first; inspect source incrementally and only as needed.}
+  - {id: cross_command_effects, description: Re-run affected commands and workflows after changing shared prompts, routing, schemas or caching.}
+  - {id: human_gate, description: Provider, dependency, budget, production and materially quality-affecting changes require user confirmation.}

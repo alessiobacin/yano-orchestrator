@@ -70,6 +70,10 @@ Use the smallest command that answers the request. Typical translations are:
 | Apply a Yano update to live instances | `yano update --reload --dry-run`, then `yano update --reload --yes` | controlled checkpoint restart; converts an accidental npm link to a permanent global copy |
 | Find or inspect a playbook | `yano playbook list`, `show`, `candidates`, `agent show` | catalog source, requirements, roles and missing credentials |
 | Configure a missing requirement | `yano config set <KEY> <value>` or `... --stdin` | global per-user config path, never application `.env` for global installs |
+| Discover/register a user REST API | `yano api discover|add --name <id> --base-url <url> [--postman <file.json> | --spec <file|URL>]` | add runs discovery first; without Postman/OpenAPI delegates visibly to the active `yano-architect` for safe, non-mutating tests; explicit project registry by default; `--scope global` applies to all projects |
+| Inspect registered REST APIs | `yano api list --scope effective --project-root <dir> --json` | merged project + global registry, masked credentials and declared methods |
+| Verify/refresh a REST API | `yano api verify|refresh --name <id> [--scope project|global]` | safe GET checks and re-discovery from the original source; architect-discovered APIs are re-discovered through `yano-architect` |
+| Remove or update a REST API | `yano api update|delete --name <id> [--scope project|global]` | explicit registry mutation; agents call only discovered endpoints through `api_request` |
 | Check/install this skill in local harnesses | `yano skills status --json`, then `yano skills install` | Claude Code/Codex/Pi catalogs and Pi's shared discovery roots |
 | Create a recurring job in natural language | `yano cron --add "ogni giorno alle 14 e alle 21 esegui …" --project-root "$PWD"` | cron expression, durable job id and project root |
 | Register an external dependency for auto-restart | `yano services add --name llmproxy --healthcheck-http http://127.0.0.1:7045/api/providers --restart-pm2 llmproxy` | health-checked and restarted deterministically by `yano watcher supervise`, not just observed |

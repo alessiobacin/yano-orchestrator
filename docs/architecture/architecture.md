@@ -19,9 +19,14 @@ negli altri sistemi gli MCP Apple sono esclusi e restano disponibili gli
 strumenti terminali nativi di Pi.
 
 Architect genera capability globali con `yano architect create --type
-playbook|cli|skill|mcp-server`. Il codice viene scritto nel catalogo persistente
+playbook|cli|skill|mcp-server|rest-api`. Il codice viene scritto nel catalogo persistente
 globale e resta ephemeral finché review, test, installazione, prima esecuzione
 riuscita e approvazione utente non sono completate.
+
+Le REST API utente sono invece configurabili con `yano api`: non sono default,
+possono essere globali o per progetto e vengono esposte attraverso il tool
+vincolato `api_request` solo quando host, metodo e credenziale risultano nel
+registro.
 
 ## Purpose
 
@@ -271,6 +276,15 @@ start and captures completed agent responses on a best-effort basis; it cannot
 block a Yano/Pi session. Yano also injects `yano-code-mem` into every launched
 role so agents retrieve and save memory with the same evidence and secrecy
 rules.
+
+Before each agent turn, Yano performs a bounded, best-effort orientation query
+when `cm` is available: `cm recall` at level 1 for semantic memory and `cm
+query` for the project graph. The resulting pack is capped at 6,000 characters
+and is used only to select files for progressive inspection. `cm scan --deep`
+is deliberately not run per turn; initialization or an explicit refresh owns
+indexing, while source code and tests remain the authoritative verification
+surface. If Code Mem is unavailable, the agent starts normally with the
+project documents and Yano memory.
 
 In addition to Code Mem, the orchestrator maintains bounded per-agent Markdown
 memory under `.pi/extensions/yano-orchestrator/memory/`. Role memory is shared

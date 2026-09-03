@@ -101,6 +101,7 @@ import { runYanoQaInventory } from "../scripts/yano-qa-inventory.mjs";
 import { runYanoAgentMcp } from "../scripts/yano-agent-mcp.mjs";
 import { runFrontendReview } from "../scripts/yano-frontend-review.mjs";
 import { runYanoMemory } from "../scripts/yano-memory-cli.mjs";
+import { runYanoApi } from "../scripts/yano-api-registry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, "..");
@@ -154,6 +155,7 @@ function printTopUsage() {
 			"  cron [opzioni]  CRUD naturale dei job ricorrenti e supervisore yano-scheduler — `yano cron --help`",
 			"  local-pc start|status|ask  Agente del PC sviluppatore — `yano local-pc --help`",
 			"  services [opzioni] Registro servizi esterni (Docker/pm2/comando) con health-check e restart deterministico — `yano services --help`",
+			"  api discover|list|show|add|verify|refresh|update|delete  REST API da Postman/OpenAPI — `yano api --help`",
 			"  data [opzioni]    Mostra o migra il data-root globale — `yano data --help`",
 			"  pause [opzioni]  Salva uno snapshot non distruttivo e mette in pausa i run",
 			"  resume [opzioni] Ripristina uno snapshot e riapre gli agenti mancanti",
@@ -261,6 +263,10 @@ async function main() {
 	}
 	if (sub === "services") {
 		await runYanoServices({ argv: rest });
+		return;
+	}
+	if (sub === "api" || sub === "apis") {
+		runYanoApi({ cwd, argv: rest });
 		return;
 	}
 	if (sub === "skills") {

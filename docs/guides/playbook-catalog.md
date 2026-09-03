@@ -24,6 +24,7 @@ workflow instead of launching every specialist.
 | `security-review` | security-evaluator, dependency-health | scanner/audit evidence, concrete finding or clean result |
 | `documentation-release` | docs-sync, architecture-diagrammer, release-notes-writer | source-to-doc diff, examples/diagram/changelog verification |
 | `performance-observability` | observability-agent, speed-benchmarker | before/after measurements with units, environment and sample context |
+| `ai-application-optimization` | ai-optimizer | AI inventory, token/context/latency/cost baseline, task granularity, model routing, quality guardrails and before/after verification |
 | `architect-provisioning` | architect | proposal scope, capability readiness, watcher validation, user feedback and explicit promotion evidence |
 | `knowledge-authoring` | market-researcher, seo-strategist, website-content-strategist, business-docs-author, business-docs-reviewer | catalog-first intent match, parameterized project context, research evidence, structured deliverables and review; variants `single-author`, `research-and-author`, `full-team` |
 | `qa-full-audit` | qa-inventory-analyst, qa-functional-verifier (+ existing QA/security/perf specialists coordinated in parallel) | canonical command/feature matrix with source, PASS/FAIL/BLOCKED verdict and evidence per entry, full matrix re-run after remediation, zero open blocking findings; variants `quick-gate`, `full-audit`, `self-audit` |
@@ -36,10 +37,21 @@ feedback. See [`yano-architect.md`](../quick-guides/yano-architect.md).
 
 ## Universal gates
 
-Every playbook requires: declared scope, verified starting state, reproducible
-evidence, automated checks, classified errors, a recoverable change, and a
-report artifact. Missing prerequisites stop the phase; they are never silently
-substituted.
+Every playbook also declares a machine-validated `contract`: sequential
+execution, checkpoint cadence, evidence fields, report sections, bounded
+budgets, verification mode and recovery strategy. Missing prerequisites stop
+the phase; they are never silently substituted. The human-readable companion
+documents live under [`docs/guides/playbooks/`](./playbooks/); they are usage
+guides, not agent skills. Skills remain under `skills-vendor/`.
+
+## User REST APIs
+
+REST API esterne o interne registrate dall’utente sono capability configurabili,
+non default Yano. `yano api` mantiene un registro globale e uno per progetto;
+il runtime espone agli agenti solo la vista effective del progetto. Le chiamate
+passano dal tool `api_request`, che limita origin, metodi, path e credenziali.
+La descrizione aiuta l’agente a decidere la pertinenza, ma non autorizza
+endpoint inventati o modifiche non approvate.
 
 ## Catalog-first rule
 
@@ -50,6 +62,15 @@ mandatory for a new proposal and records whether the first operational variant
 is single-agent, multi-agent or selected by the Planner. The Architect owns
 the generic team contract; the Planner owns the task-specific variant,
 parallelism and instance count.
+
+Before creating any capability, Architect also performs documented online
+research through configured open-source MCPs. The preferred pairing is
+[`mcp-searxng`](https://github.com/mcp/ihor-sokoliuk/mcp-searxng) for search and
+the [official MCP Fetch server](https://github.com/modelcontextprotocol/servers/tree/main/src/fetch)
+for page extraction. SearXNG needs a configured SearXNG instance; Fetch must be
+restricted to approved external URLs because its upstream documentation warns
+about access to local/internal addresses. Missing research MCPs produce a
+blocked/pending record, never an invented conclusion.
 
 For development and mixed tasks, the planner's `to-spec` → `to-tickets` output
 is the required human planning boundary. The approved Markdown tickets are

@@ -1,0 +1,25 @@
+{
+  "info": {
+    "name": "Yano Feedback API",
+    "description": "CRUD per bug e suggestion. Il server locale ascolta sulla porta 20002.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://127.0.0.1:20002" },
+    { "key": "projectId", "value": "project-id" },
+    { "key": "feedbackId", "value": "feedback-id" }
+  ],
+  "item": [
+    { "name": "Health", "request": { "method": "GET", "url": "{{baseUrl}}/" } },
+    { "name": "List bugs", "request": { "method": "GET", "url": "{{baseUrl}}/bugs" } },
+    { "name": "Create bug", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "url": "{{baseUrl}}/bugs", "body": { "mode": "raw", "raw": "{\n  \"project_id\": \"{{projectId}}\",\n  \"message\": \"Descrizione del bug\",\n  \"resolution\": \"user_confirmation\"\n}", "options": { "raw": { "language": "json" } } } } },
+    { "name": "Get bug", "request": { "method": "GET", "url": "{{baseUrl}}/bugs/{{feedbackId}}" } },
+    { "name": "Update bug", "request": { "method": "PATCH", "header": [{ "key": "Content-Type", "value": "application/json" }], "url": "{{baseUrl}}/bugs/{{feedbackId}}", "body": { "mode": "raw", "raw": "{\n  \"message\": \"Testo aggiornato\"\n}", "options": { "raw": { "language": "json" } } } } },
+    { "name": "Delete bug", "request": { "method": "DELETE", "url": "{{baseUrl}}/bugs/{{feedbackId}}" } },
+    { "name": "List suggestions", "request": { "method": "GET", "url": "{{baseUrl}}/suggestions" } },
+    { "name": "Create suggestion", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "url": "{{baseUrl}}/suggestions", "body": { "mode": "raw", "raw": "{\n  \"project_id\": \"{{projectId}}\",\n  \"message\": \"Suggerimento\"\n}", "options": { "raw": { "language": "json" } } } } },
+    { "name": "Get suggestion", "request": { "method": "GET", "url": "{{baseUrl}}/suggestions/{{feedbackId}}" } },
+    { "name": "Update suggestion", "request": { "method": "PATCH", "header": [{ "key": "Content-Type", "value": "application/json" }], "url": "{{baseUrl}}/suggestions/{{feedbackId}}", "body": { "mode": "raw", "raw": "{\n  \"message\": \"Suggerimento aggiornato\"\n}", "options": { "raw": { "language": "json" } } } } },
+    { "name": "Delete suggestion", "request": { "method": "DELETE", "url": "{{baseUrl}}/suggestions/{{feedbackId}}" } }
+  ]
+}

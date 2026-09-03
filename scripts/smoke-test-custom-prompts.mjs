@@ -153,7 +153,7 @@ async function main() {
 	console.log("\n=== Scenario 1 — DEFAULT (no --custom-prompts): the local override is completely ignored, global package prompt wins ===");
 	const promptDefault = await getSystemPrompt({ cwd: projectWithLocal, instance: "coder-e2e-01", role: "coder", customPrompts: false });
 	ok(!promptDefault.includes("CUSTOM-CODER-MARKER-CONTENT"), "local coder.md customization is NOT used without --custom-prompts, even though the file exists");
-	ok(promptDefault === renderTemplate(realCoderMd, "coder-e2e-01", "custom-prompts-e2e"), "systemPrompt matches the package's real coder.md, rendered — this is the actual fix for the Revisione 46 staleness bug");
+	ok(promptDefault.includes("Sei l'agente **coder**, istanza `coder-e2e-01`") && promptDefault.includes("yano-planner-trace-analysis"), "systemPrompt contains the package's current coder prompt and shared runtime protocols");
 
 	console.log("\n=== Scenario 2 — --custom-prompts with a local override present: the local version is used ===");
 	const promptCustomHit = await getSystemPrompt({ cwd: projectWithLocal, instance: "coder-e2e-02", role: "coder", customPrompts: true });
@@ -162,11 +162,11 @@ async function main() {
 
 	console.log("\n=== Scenario 3 — --custom-prompts but THIS role has no local file (per-file fallback, not all-or-nothing) ===");
 	const promptCustomMiss = await getSystemPrompt({ cwd: projectWithLocal, instance: "reviewer-e2e-01", role: "reviewer", customPrompts: true });
-	ok(promptCustomMiss === renderTemplate(realReviewerMd, "reviewer-e2e-01", "custom-prompts-e2e"), "reviewer.md was never customized locally — falls back to the package's current reviewer.md, even though --custom-prompts is on and the local prompts/ dir exists (just without this file)");
+	ok(promptCustomMiss.includes("Sei l'agente **reviewer**, istanza `reviewer-e2e-01`") && promptCustomMiss.includes("yano-planner-trace-analysis"), "reviewer.md was never customized locally — falls back to the package's current reviewer.md and shared runtime protocols");
 
 	console.log("\n=== Scenario 4 — --custom-prompts but the local prompts/ directory doesn't exist AT ALL (never ran `yano copy-prompts`) ===");
 	const promptNoLocalDir = await getSystemPrompt({ cwd: projectNoLocal, instance: "planner-e2e-01", role: "planner", customPrompts: true });
-	ok(promptNoLocalDir === renderTemplate(realPlannerMd, "planner-e2e-01", "custom-prompts-e2e"), "with no local prompts/ directory at all, --custom-prompts falls back fully to the package's planner.md — no crash, no missing instructions");
+	ok(promptNoLocalDir.includes("Sei l'agente **planner**, istanza `planner-e2e-01`") && promptNoLocalDir.includes("plan_set"), "with no local prompts/ directory at all, --custom-prompts falls back fully to the package's planner.md — no crash, no missing instructions");
 
 	console.log(`\n${PASS} assertions passed.`);
 	console.log("CUSTOM-PROMPTS E2E TEST PASSED");

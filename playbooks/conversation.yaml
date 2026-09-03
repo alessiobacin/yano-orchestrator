@@ -47,6 +47,36 @@ enforcement:
     read-only consultation through conversation-researcher, and, on
     crystallization, proposes the recommended delivery playbook and lets the
     current run complete rather than mutating its own binding.
+contract:
+  execution: sequential
+  checkpoint: every_state_transition
+  evidence:
+    - scope
+    - inputs
+    - commands
+    - exit_code
+    - output
+    - changed_state
+    - blockers
+  report_sections:
+    - summary
+    - scope
+    - evidence
+    - result
+    - blockers
+    - handoff
+  budgets:
+    max_commands: 80
+    max_files: 200
+    max_minutes: 45
+    max_tokens: 16000
+  verification:
+    mode: research
+    required: true
+  recovery:
+    - resume_from_last_checkpoint
+    - preserve_evidence
+    - bounded_retry
 states:
   - id: received
     owner: planner

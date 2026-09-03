@@ -23,6 +23,25 @@ cm recent 12                             # recent durable records
 and current trace data before acting. It is scoped to the current project's
 root, so never run it from a different project or from a task worktree.
 
+## Progressive code orientation
+
+Yano injects a bounded orientation pack before the agent turn when Code Mem is
+available. Use it to narrow the code reading scope, not as a substitute for
+verification:
+
+```bash
+cm recall "<task>" --level 1 --limit 6 --mode hybrid
+cm query "<architecture or dependency question>"
+cm gn <node-id>                 # only for a concrete graph node
+cm gp <from-node> <to-node>     # only for a concrete dependency path
+```
+
+The first pass must be `project.md` plus the compact Code Mem results. Read
+only the files returned by the memory/graph orientation and expand gradually
+when a dependency, test, or runtime behavior is not covered. Never dump the
+whole graph or repository into context. `cm scan --deep` is an indexing
+operation for initialization or an explicit refresh, not a per-turn command.
+
 ## Record durable outcomes
 
 ```bash

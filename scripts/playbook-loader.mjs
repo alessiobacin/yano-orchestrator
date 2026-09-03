@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { parse as parseYaml } from "yaml";
 
-const TOP_LEVEL_KEYS = new Set(["schema_version", "id", "label", "description", "enforcement", "catalog", "requirements", "team", "states", "transitions", "failure_routes", "invariants", "non_code_tasks"]);
+const TOP_LEVEL_KEYS = new Set(["schema_version", "id", "label", "description", "enforcement", "catalog", "requirements", "team", "contract", "states", "transitions", "failure_routes", "invariants", "non_code_tasks"]);
 const EFFECT_KINDS = new Set(["audit", "human_approval", "mqtt_event", "notification"]);
 
 export class PlaybookValidationError extends Error {
@@ -47,7 +47,7 @@ function validateCatalog(catalog, source) {
 function validateRequirements(requirements, source) {
 	if (requirements === undefined) return;
 	assert(requirements && typeof requirements === "object" && !Array.isArray(requirements), "requirements must be a mapping", { source });
-	for (const kind of ["cli", "mcp"]) {
+	for (const kind of ["cli", "mcp", "skills"]) {
 		if (requirements[kind] === undefined) continue;
 		assert(Array.isArray(requirements[kind]), `requirements.${kind} must be an array`, { source });
 		for (const item of requirements[kind]) {
@@ -67,6 +67,21 @@ function validateRequirements(requirements, source) {
 			if (item.description !== undefined) assert(typeof item.description === "string", `credential ${key}.description must be a string`, { source });
 		}
 	}
+}
+
+function validateContract(contract, source) {
+	if (contract === undefined) return;
+	assert(contract && typeof contract === "object" && !Array.isArray(contract), "contract must be a mapping", { source });
+	for (const field of ["execution", "checkpoint"]) assert(typeof contract[field] === "string" && contract[field].trim(), `contract.${field} must be a non-empty string`, { source });
+	for (const field of ["evidence", "report_sections", "recovery"]) {
+		assert(Array.isArray(contract[field]) && contract[field].length > 0 && contract[field].every((value) => typeof value === "string" && value.trim()), `contract.${field} must be a non-empty array of strings`, { source });
+	}
+	assert(contract.budgets && typeof contract.budgets === "object" && !Array.isArray(contract.budgets), "contract.budgets must be a mapping", { source });
+	for (const field of ["max_commands", "max_files", "max_minutes", "max_tokens"]) {
+		assert(Number.isInteger(contract.budgets[field]) && contract.budgets[field] > 0, `contract.budgets.${field} must be a positive integer`, { source });
+	}
+	assert(contract.verification && typeof contract.verification === "object" && !Array.isArray(contract.verification), "contract.verification must be a mapping", { source });
+	assert(typeof contract.verification.mode === "string" && contract.verification.mode.trim(), "contract.verification.mode must be a non-empty string", { source });
 }
 
 function validateTeam(team, source) {
@@ -110,6 +125,7 @@ export function validatePlaybook(document, source = "<memory>") {
 	validateCatalog(document.catalog, source);
 	validateRequirements(document.requirements, source);
 	validateTeam(document.team, source);
+	validateContract(document.contract, source);
 	uniqueIds(document.states, "state");
 	uniqueIds(document.transitions, "transition");
 	const stateIds = new Set(document.states.map((state) => state.id));

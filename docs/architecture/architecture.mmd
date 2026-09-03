@@ -89,10 +89,13 @@ flowchart TD
     subgraph STORAGE["Durable project workspace"]
         SQLITE["SQLite orchestrator.db\nruns / specs / tickets / DAG\nPlaybooks / holds / evidence / outbox"]
         CODE_MEM_STORE["memory/\nCode Mem SQLite + generated projections\nPi start/capture hook (best effort)"]
+        CODE_MEM_ORIENT["bounded per-turn orientation\ncm recall level 1 + cm query\nmax 6,000 chars; no deep scan per turn"]
         AGENT_MEMORY[".pi/.../memory/\nproject.md + roles/<role>.md + instances/<instance>.md\nuser-preferences.md; bounded Markdown per turn"]
         WORKTREES[".worktrees/<slug>\nGit isolated branches"]
         REPORTS[".pi/.../reports\nround evidence"]
     end
+    CODE_MEM_STORE --> CODE_MEM_ORIENT
+    CODE_MEM_ORIENT --> AGENT_MEMORY
 
     subgraph GLOBAL_TRACE["Global Yano per-user data root (platform default or YANO_DATA_DIR)"]
         TRACE["traces/<project-key>/events\nJSONL forensic trace\nevents / standard / full\ncontext_usage per agent"]

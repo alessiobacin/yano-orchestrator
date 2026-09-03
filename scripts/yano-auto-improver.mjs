@@ -369,11 +369,26 @@ function renameHerdrTab(tabId, label) {
 	if (result.status !== 0) throw new Error(`yano auto-improve: impossibile rinominare la tab ${tabId} in ${label}${result.stderr ? `: ${result.stderr.trim()}` : ""}`);
 }
 
-function ensureWorkspace(snapshot, dryRun) {
+function composeWorkerArgs(info, instance, readOnlyTools) {
+	const launcher = path.join(PACKAGE_ROOT, "scripts", "launch-planner.mjs");
+	// Compose from the observed project root so relative extension paths and
+	// project-scoped config resolve exactly as they will in the real pane. The
+	// auto-improver can still inspect any repository once it has the minimal
+	// Yano launch markers; it never requires the app itself to be scaffolded.
+	const composed = spawnSync(process.execPath, [launcher, "--instance", instance, "--role", "auto-improver", "--project", info.name, "--tools", readOnlyTools, "--print-only", "--json"], { cwd: info.root, encoding: "utf8", maxBuffer: 2_000_000 });
+	if (composed.status !== 0) throw new Error(`yano auto-improve: composizione del worker fallita${composed.stderr ? `: ${composed.stderr.trim()}` : ""}`);
+	const line = String(composed.stdout || "").trim().split("\n").reverse().find((candidate) => candidate.trim().startsWith("{"));
+	let args = null;
+	try { args = JSON.parse(line || "").args; } catch { /* validated below */ }
+	if (!Array.isArray(args)) throw new Error("yano auto-improve: launch-planner non ha restituito argomenti Pi validi");
+	return args;
+}
+
+function ensureWorkspace(snapshot, dryRun, projectRoot) {
 	const existing = snapshot?.workspaces?.find((item) => item.label === WORKSPACE_LABEL);
 	if (existing) return existing;
 	if (dryRun) return { workspace_id: null, label: WORKSPACE_LABEL };
-	const result = spawnSync("herdr", ["workspace", "create", "--cwd", path.join(dataRoot(), "agent-workspaces"), "--label", WORKSPACE_LABEL, "--focus"], { encoding: "utf8" });
+	const result = spawnSync("herdr", ["workspace", "create", "--cwd", projectRoot || path.join(dataRoot(), "agent-workspaces"), "--label", WORKSPACE_LABEL, "--focus"], { encoding: "utf8" });
 	if (result.status !== 0) throw new Error(`yano auto-improve: impossibile creare workspace Herdr${result.stderr ? `: ${result.stderr.trim()}` : ""}`);
 	let workspace = null;
 	try { const parsed = JSON.parse(result.stdout); workspace = parsed?.result?.workspace || parsed?.workspace; } catch { /* refresh below */ }
@@ -399,11 +414,11 @@ function launchWorker(info, row, auditId, evidencePath, reportPath, dryRun = fal
 	// an unnecessary restart loop on the next supervisor pass.
 	const commandLine = serviceOnly
 		? `yano start --instance ${shellQuote(instance)} --role auto-improver --project ${shellQuote(info.name)} --tools ${shellQuote(readOnlyTools)}`
-		: `yano start --instance ${shellQuote(instance)} --role auto-improver --project ${shellQuote(info.name)} --tools ${shellQuote(readOnlyTools)} ${shellQuote(prompt)}`;
+		: `yano start --instance ${shellQuote(instance)} --role auto-improver --project ${shellQuote(info.name)} --tools ${shellQuote(readOnlyTools)} <audit-prompt-as-argv>`;
 	if (dryRun) return { workspace_id: row.workspace_id, tab_id: row.worker_tab_id, pane_id: row.worker_pane_id, instance, command: commandLine, dry_run: true };
 	const snapshot = herdrSnapshot();
 	if (!snapshot) throw new Error("yano auto-improve: Herdr non raggiungibile; avvia Herdr e riprova");
-	const workspace = ensureWorkspace(snapshot, false);
+	const workspace = ensureWorkspace(snapshot, false, info.root);
 	const tabLabel = projectTabLabel(info.name);
 	let refreshed = herdrSnapshot() || snapshot;
 	let tab = refreshed.tabs?.find((item) => item.workspace_id === workspace.workspace_id && (item.label === tabLabel || item.tab_id === row.worker_tab_id || item.label === info.name));
@@ -415,13 +430,48 @@ function launchWorker(info, row, auditId, evidencePath, reportPath, dryRun = fal
 		pane = tab && refreshed.panes?.find((item) => item.tab_id === tab.tab_id);
 	}
 	if (!tab) {
-		const created = spawnSync("herdr", ["tab", "create", "--workspace", workspace.workspace_id, "--cwd", info.root, "--label", tabLabel, "--no-focus"], { encoding: "utf8" });
-		if (created.status !== 0) throw new Error(`yano auto-improve: Herdr non ha creato la tab ${tabLabel}${created.stderr ? `: ${created.stderr.trim()}` : ""}`);
-		refreshed = herdrSnapshot() || refreshed;
-		tab = refreshed.tabs?.find((item) => item.workspace_id === workspace.workspace_id && item.label === tabLabel);
-		pane = tab && refreshed.panes?.find((item) => item.tab_id === tab.tab_id);
+		// Herdr creates a numeric starter tab when it creates a workspace. Reuse
+		// that empty tab instead of leaving a useless `1` beside the real worker.
+		const initialTab = refreshed.tabs?.find((item) => item.workspace_id === workspace.workspace_id && /^(1|\d+)$/.test(item.label || ""));
+		const initialPane = initialTab && refreshed.panes?.find((item) => item.tab_id === initialTab.tab_id);
+		const initialBusy = initialPane && !["done", "offline", "unknown", "completed"].includes(String(initialPane.agent_status || "").toLowerCase()) && initialPane.agent_status;
+		const initialCwdMatches = initialPane && path.resolve(initialPane.cwd || "") === path.resolve(info.root);
+		if (initialTab && initialPane && !initialBusy && initialCwdMatches) {
+			renameHerdrTab(initialTab.tab_id, tabLabel);
+			refreshed = herdrSnapshot() || refreshed;
+			tab = refreshed.tabs?.find((item) => item.tab_id === initialTab.tab_id);
+			pane = tab && refreshed.panes?.find((item) => item.tab_id === tab.tab_id);
+		} else {
+			// A workspace created with an old Yano version may retain its numeric
+			// starter tab rooted at the service data directory. Never launch a
+			// project audit from that cwd: close the empty tab and recreate it at
+			// the observed project's root.
+			if (initialTab && initialPane && !initialBusy && !initialCwdMatches) {
+				const closed = spawnSync("herdr", ["tab", "close", initialTab.tab_id], { encoding: "utf8" });
+				if (closed.status !== 0) throw new Error(`yano auto-improve: impossibile chiudere la tab iniziale ${initialTab.label}${closed.stderr ? `: ${closed.stderr.trim()}` : ""}`);
+				refreshed = herdrSnapshot() || refreshed;
+			}
+			const created = spawnSync("herdr", ["tab", "create", "--workspace", workspace.workspace_id, "--cwd", info.root, "--label", tabLabel, "--no-focus"], { encoding: "utf8" });
+			if (created.status !== 0) throw new Error(`yano auto-improve: Herdr non ha creato la tab ${tabLabel}${created.stderr ? `: ${created.stderr.trim()}` : ""}`);
+			refreshed = herdrSnapshot() || refreshed;
+			tab = refreshed.tabs?.find((item) => item.workspace_id === workspace.workspace_id && item.label === tabLabel);
+			pane = tab && refreshed.panes?.find((item) => item.tab_id === tab.tab_id);
+		}
 	}
 	if (!tab || !pane) throw new Error(`yano auto-improve: tab/pane non trovati per ${tabLabel}`);
+	// Older runs may already have both the correctly named project tab and the
+	// numeric starter tab. Remove only an idle/unknown numeric tab whose cwd is
+	// not the observed project, preserving any real interactive tab.
+	for (const numericTab of (refreshed.tabs || []).filter((item) => item.workspace_id === workspace.workspace_id && item.tab_id !== tab.tab_id && /^(1|\d+)$/.test(item.label || ""))) {
+		const numericPane = (refreshed.panes || []).find((item) => item.tab_id === numericTab.tab_id);
+		const status = String(numericPane?.agent_status || "").toLowerCase();
+		const idle = !status || ["done", "idle", "offline", "unknown", "completed"].includes(status);
+		const wrongRoot = path.resolve(numericPane?.cwd || "") !== path.resolve(info.root);
+		if (numericPane && idle && wrongRoot) {
+			const closed = spawnSync("herdr", ["tab", "close", numericTab.tab_id], { encoding: "utf8" });
+			if (closed.status !== 0) throw new Error(`yano auto-improve: impossibile chiudere la tab numerica ${numericTab.label}${closed.stderr ? `: ${closed.stderr.trim()}` : ""}`);
+		}
+	}
 	if (serviceOnly) {
 		const stale = herdrSnapshot()?.panes?.find((item) => item.pane_id === pane.pane_id);
 		if (stale && ["done", "unknown", "offline", "completed"].includes(String(stale.agent_status || "").toLowerCase())) {
@@ -448,9 +498,23 @@ function launchWorker(info, row, auditId, evidencePath, reportPath, dryRun = fal
 		if (started.status !== 0) throw new Error(`yano auto-improve: avvio agente idle fallito${started.stderr ? `: ${started.stderr.trim()}` : (started.stdout ? `: ${started.stdout.trim()}` : "")}`);
 		return { workspace_id: workspace.workspace_id, tab_id: tab.tab_id, pane_id: pane.pane_id, instance: recoveredInstance, command: `pi ${piArgs.map(shellQuote).join(" ")}`, dry_run: false };
 	}
-	const launched = spawnSync("herdr", ["pane", "run", pane.pane_id, `exec ${commandLine}`], { cwd: info.root, encoding: "utf8" });
+	const piArgs = serviceOnly ? null : composeWorkerArgs(info, instance, readOnlyTools);
+	const agentInstance = `${slug(instance)}-r-${Date.now().toString(36)}`.slice(0, 32);
+	const startArgs = serviceOnly
+		? null
+		: ["agent", "start", agentInstance, "--kind", "pi", "--pane", pane.pane_id, "--", ...piArgs];
+	const launched = serviceOnly
+		? spawnSync("herdr", ["pane", "run", pane.pane_id, `exec ${commandLine}`], { cwd: info.root, encoding: "utf8" })
+		: spawnSync("herdr", startArgs, { cwd: info.root, encoding: "utf8", maxBuffer: 2_000_000 });
 	if (launched.status !== 0) throw new Error(`yano auto-improve: avvio agente fallito${launched.stderr ? `: ${launched.stderr.trim()}` : ""}`);
-	return { workspace_id: workspace.workspace_id, tab_id: tab.tab_id, pane_id: pane.pane_id, instance, command: commandLine, dry_run: false };
+	// Do not put the audit prompt in a shell command or in Pi's argv: Herdr
+	// shells impose practical line limits and silently truncate long prompts.
+	// Deliver it through the agent API after interactive readiness is observed.
+	if (!serviceOnly) {
+		const prompted = spawnSync("herdr", ["agent", "prompt", agentInstance, prompt], { cwd: info.root, encoding: "utf8", maxBuffer: 2_000_000 });
+		if (prompted.status !== 0) throw new Error(`yano auto-improve: consegna del prompt audit fallita${prompted.stderr ? `: ${prompted.stderr.trim()}` : ""}`);
+	}
+	return { workspace_id: workspace.workspace_id, tab_id: tab.tab_id, pane_id: pane.pane_id, instance: serviceOnly ? instance : agentInstance, command: serviceOnly ? commandLine : `herdr agent start ${agentInstance} --kind pi --pane ${pane.pane_id} -- [Pi args]`, command_args: piArgs, prompt_delivery: serviceOnly ? null : "herdr agent prompt (API payload)", dry_run: false };
 }
 
 function createAudit(db, info, row) {

@@ -15,6 +15,8 @@ fs.mkdirSync(projectRoot, { recursive: true });
 fs.mkdirSync(fakeBin, { recursive: true });
 fs.writeFileSync(path.join(projectRoot, "package.json"), JSON.stringify({ name: "focusboard", scripts: { test: "node test.mjs" } }, null, 2));
 fs.writeFileSync(path.join(projectRoot, "README.md"), "focusboard e2e\n");
+fs.mkdirSync(path.join(projectRoot, "agents"), { recursive: true });
+fs.writeFileSync(path.join(projectRoot, "agents", "roles.yaml"), "roles: {}\n");
 fs.writeFileSync(herdrState, JSON.stringify({ workspaces: [], tabs: [], panes: [], calls: [] }));
 
 const fakeHerdr = path.join(fakeBin, "herdr");
@@ -36,8 +38,15 @@ if (args[0] === "api" && args[1] === "snapshot") {
   const tab = { tab_id: "t-focusboard", workspace_id: at("--workspace"), label: at("--label"), cwd: at("--cwd") };
   state.tabs.push(tab);
   state.panes.push({ pane_id: "p-focusboard", tab_id: tab.tab_id });
-} else if (args[0] === "pane" && args[1] === "run") {
-  result = { result: { pane_id: args[2], command: args[3] } };
+} else if (args[0] === "tab" && args[1] === "rename") {
+  const tab = state.tabs.find((item) => item.tab_id === args[2]);
+  if (tab) tab.label = args[3];
+} else if (args[0] === "agent" && args[1] === "start") {
+  const pane = state.panes.find((item) => item.pane_id === at("--pane"));
+  if (pane) pane.agent_status = "idle";
+  result = { result: { agent: args[2] } };
+} else if (args[0] === "agent" && args[1] === "prompt") {
+  result = { result: { accepted: true, agent: args[2], prompt_chars: String(args[3] || "").length } };
 }
 fs.writeFileSync(statePath, JSON.stringify(state));
 process.stdout.write(JSON.stringify(result));
@@ -75,7 +84,9 @@ try {
 	assert.equal(started.launched.workspace_id, "w-auto");
 	assert.equal(started.launched.tab_id, "t-focusboard");
 	assert.equal(started.launched.pane_id, "p-focusboard");
-	assert.match(started.launched.command, /--role auto-improver/);
+	assert.match(started.launched.command, /\[Pi args\]/);
+	assert.ok(Array.isArray(started.launched.command_args));
+	assert.equal(started.launched.prompt_delivery, "herdr agent prompt (API payload)");
 	assert.ok(fs.existsSync(started.evidencePath));
 	assert.ok(fs.existsSync(started.reportPath));
 	const evidence = JSON.parse(fs.readFileSync(started.evidencePath, "utf8"));
@@ -87,16 +98,18 @@ try {
 	assert.equal(state.tabs[0].label, "auto-improver-focusboard");
 	assert.equal(state.tabs[0].cwd, projectRoot);
 	assert.equal(state.panes[0].pane_id, "p-focusboard");
-	const paneRun = state.calls.find((args) => args[0] === "pane" && args[1] === "run");
-	assert.ok(paneRun, "Herdr pane run non registrato");
-	assert.match(paneRun[3], /yano start/);
-	assert.match(paneRun[3], /--instance 'auto-improver-focusboard'/);
-	assert.match(paneRun[3], /--role auto-improver/);
-	const toolsMatch = paneRun[3].match(/--tools '([^']+)'/);
-	assert.ok(toolsMatch, "allow-list strumenti non presente nel comando Herdr");
-	assert.deepEqual(toolsMatch[1].split(","), ["read", "grep", "find", "ls", "auto_improve_web_search", "auto_improve_web_fetch", "agent_list", "agent_get", "agent_send", "agent_await", "auto_improve_complete"]);
-	assert.doesNotMatch(paneRun[3], /--continue/);
-	assert.ok(!toolsMatch[1].match(/\b(?:bash|edit|write)\b/), "allow-list contiene uno strumento di scrittura o shell");
+	const agentStart = state.calls.find((args) => args[0] === "agent" && args[1] === "start");
+	assert.ok(agentStart, "Herdr agent start non registrato");
+	assert.equal(agentStart[agentStart.indexOf("--pane") + 1], "p-focusboard");
+	const piArgs = agentStart.slice(agentStart.indexOf("--") + 1);
+	assert.ok(piArgs.includes("--role") && piArgs[piArgs.indexOf("--role") + 1] === "auto-improver");
+	const toolsIndex = piArgs.indexOf("--tools");
+	assert.ok(toolsIndex >= 0, "allow-list strumenti non presente negli argomenti Pi");
+	assert.deepEqual(piArgs[toolsIndex + 1].split(","), ["read", "grep", "find", "ls", "auto_improve_web_search", "auto_improve_web_fetch", "agent_list", "agent_get", "agent_send", "agent_await", "auto_improve_complete"]);
+	assert.ok(!piArgs.includes("--continue"));
+	assert.ok(!piArgs[toolsIndex + 1].match(/\b(?:bash|edit|write)\b/), "allow-list contiene uno strumento di scrittura o shell");
+	const promptCall = state.calls.find((args) => args[0] === "agent" && args[1] === "prompt");
+	assert.ok(promptCall && promptCall[3].length > 1000, "il prompt audit deve essere consegnato come payload API completo, non troncato nella shell");
 
 	const running = runCli(["auto-improve", "status", "--project-root", projectRoot, "--json"]);
 	assert.equal(running.project.worker_status, "running");

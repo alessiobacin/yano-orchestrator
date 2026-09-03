@@ -41,9 +41,10 @@ yano auto-improve start --project-root /path/progetto
 yano auto-improve start --project-root /path/progetto --once --dry-run --json
 ```
 
-`start` crea o riusa il workspace Herdr `yano-auto-improver`, apre una tab con
-il nome del progetto, lancia un transcript Pi nuovo per l'audit e avvia lo
-scheduler detached. La tab/istanza può essere riusata, ma gli audit non
+`start` crea o riusa il workspace Herdr `yano-auto-improver`, riusa e rinomina
+la tab iniziale numerica libera (non lascia una tab `1` inutile), avvia un
+transcript Pi nuovo per l'audit tramite `herdr agent start` con argomenti
+separati e avvia lo scheduler detached. La tab/istanza può essere riusata, ma gli audit non
 riprendono transcript precedenti, così il confine read-only resta verificabile. Per
 verificare il comando senza Herdr:
 

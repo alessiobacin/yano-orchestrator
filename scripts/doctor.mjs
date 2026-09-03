@@ -82,7 +82,12 @@ const LAZY_SKILL_SOURCES = {
 // Keep older scaffolded rosters launchable after the skill was renamed in the
 // catalog. The project-local role declaration remains authoritative, but the
 // prerequisite gate may satisfy this legacy spelling with the installed skill.
-const SKILL_COMPATIBILITY_ALIASES = Object.freeze({ refactoring: "refactor" });
+const SKILL_COMPATIBILITY_ALIASES = Object.freeze({
+	refactoring: "refactor",
+	// Older rosters used `e2e-testing`; the maintained catalog entry is
+	// `e2e-testing-patterns`.
+	"e2e-testing": "e2e-testing-patterns",
+});
 const LAZY_CLI_INSTALLERS = {
 	"playwright-cli": ["npm", ["install", "-g", PLAYWRIGHT_CLI_PACKAGE]],
 	postman: ["npm", ["install", "-g", "postman-cli"]],

@@ -3,29 +3,29 @@ type: human
 kind: task
 created_by: yano-watcher
 status: open
-severity: critical
-category: isolation
-signal: workspace_scope_mismatch
-fingerprint: cd6379882bbba96548d7f428ab74050d04ddc5365b7069683fa71a9713311709
-detected_at: 2026-09-03T11:51:39.704Z
-last_seen_at: 2026-09-03T12:58:48.378Z
+severity: high
+category: internal_tool
+signal: tool_failure
+fingerprint: e9d39f59d2247b132d8d49de3c3682f33eeff3b77d569313a3827ae6fe45c661
+detected_at: 2026-09-03T12:57:51.021Z
+last_seen_at: 2026-09-03T12:58:48.388Z
 source_project: newmiodoc
 source_project_root: /Users/alessiobacin/Development/Code/newMioDOC
 source_project_key: workspace-57a4005feedc
 run_id: unknown
 round: unknown
 task: unknown
-instance: planner-vision-e2e-01
+instance: planner-01
 evidence_record_id: unknown
 ---
 
-# Yano ha osservato una discordanza tra progetto, workspace o presenza degli agenti.
+# Un tool interno di Yano è terminato con errore.
 
 Type: human
 Kind: task
 Created-by: yano-watcher
 Status: open
-Fingerprint: cd6379882bbba96548d7f428ab74050d04ddc5365b7069683fa71a9713311709
+Fingerprint: e9d39f59d2247b132d8d49de3c3682f33eeff3b77d569313a3827ae6fe45c661
 
 ## Sintesi
 
@@ -33,27 +33,25 @@ Il watcher ha rilevato un comportamento attribuibile al flusso interno di Yano, 
 
 ## Evidenza osservabile
 
-- Segnale: `workspace_scope_mismatch`
-- Categoria: `isolation`
+- Segnale: `tool_failure`
+- Categoria: `internal_tool`
 - Progetto osservato: `newmiodoc` (/Users/alessiobacin/Development/Code/newMioDOC)
-- Timestamp del record: `2026-09-03T11:50:00.957Z`
+- Timestamp del record: `2026-09-03T12:56:56.162Z`
 - Record di trace: `unknown`
 
 ```json
 {
-  "ts": "2026-09-03T11:50:00.957Z",
-  "seq": 10,
-  "instance": "planner-vision-e2e-01",
+  "ts": "2026-09-03T12:56:56.162Z",
+  "seq": 270,
+  "instance": "planner-01",
   "role": "planner",
-  "project": "newMioDOC-vision-e2e",
+  "project": "newmiodoc",
   "project_key": "workspace-57a4005feedc",
   "trace_mode": "full",
-  "type": "presence_ignored_scope_mismatch",
-  "topic": "pi/workspace-57a4005feedc/agents/planner-01/status",
-  "card_instance": "planner-01",
-  "card_project": "newmiodoc",
-  "card_project_key": "workspace-57a4005feedc",
-  "expected_project": "newMioDOC-vision-e2e"
+  "type": "tool_execution_end",
+  "tool_call_id": "call_01a06757fa0570d0b10066c9",
+  "tool": "ticket_complete",
+  "ok": false
 }
 ```
 

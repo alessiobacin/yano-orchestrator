@@ -316,6 +316,24 @@ function recoverPlanner({ row, snapshot, run, reason }) {
 		workspace = findProjectWorkspace(current, row.root, row.name);
 	}
 	if (!workspace) throw new Error(`workspace Herdr non trovato per ${row.name}`);
+	// A stale planner can still be registered by Herdr as an apparently live
+	// identity. Reusing its pane would make `yano start` reject recovery as a
+	// duplicate instance. Close only planners that fail the heartbeat gate,
+	// then refresh before selecting or creating the replacement pane.
+	for (const planner of plannerAgentsInWorkspace(current, workspace.workspace_id, row.root)) {
+		if (plannerHeartbeatHealthy(planner)) continue;
+		const staleTab = current.tabs?.find((item) => item.tab_id === planner.tab_id);
+		if (staleTab) closeHerdrTab(staleTab.tab_id);
+	}
+	current = herdrSnapshot() || current;
+	workspace = findProjectWorkspace(current, row.root, row.name);
+	if (!workspace) {
+		const created = spawnSync("herdr", ["workspace", "create", "--cwd", row.root, "--label", row.name, "--focus"], { encoding: "utf8" });
+		if (created.status !== 0) throw new Error((created.stderr || "workspace non ricreato").trim());
+		current = herdrSnapshot() || current;
+		workspace = findProjectWorkspace(current, row.root, row.name);
+	}
+	if (!workspace) throw new Error(`workspace Herdr non ricreato per ${row.name}`);
 	const livePlanner = plannerAgentsInWorkspace(current, workspace.workspace_id, row.root)[0];
 	let tab = livePlanner && current?.tabs?.find((item) => item.tab_id === livePlanner.tab_id);
 	let pane = livePlanner && current?.panes?.find((item) => item.pane_id === livePlanner.pane_id);

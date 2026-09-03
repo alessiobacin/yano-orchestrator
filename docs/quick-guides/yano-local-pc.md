@@ -1,8 +1,8 @@
-# Computer locale
+# Local PC
 
-`computer-locale` è un servizio globale persistente nel workspace Herdr
-`yano-computer-locale`. È gestito dal self-heal di Yano insieme a watcher,
-debugger e scheduler e viene ricreato se la tab o il processo vengono chiusi.
+`yano-local-pc` è un servizio globale persistente nel workspace Herdr
+`yano-local-pc`. È gestito dal self-heal di Yano insieme a watcher,
+feedback e scheduler e viene ricreato se la tab o il processo vengono chiusi.
 
 I server Apple sono caricati esclusivamente dalla configurazione runtime del
 servizio, mai dai `.mcp.json` dei progetti. Sono disponibili Notes, Messages,
@@ -19,12 +19,12 @@ unset ASSEMBLYAI_KEY
 ```
 
 ```sh
-yano computer start
-yano computer status
-yano computer ask --prompt "Controlla oggi promemoria e calendario e indicami conflitti"
+yano local-pc start
+yano local-pc status
+yano local-pc ask --prompt "Controlla oggi promemoria e calendario e indicami conflitti"
 ```
 
-Lo scheduler chiama l'istanza esatta `computer-locale` tramite `agent_send`.
+Lo scheduler chiama l'istanza esatta `yano-local-pc` tramite `agent_send`.
 Le richieste dell'utente dalla CLI usano lo stesso scope globale
 `yano-scheduler`; non viene mai usato lo scope di un progetto applicativo.
 Operazioni che modificano o inviano dati richiedono conferma esplicita.

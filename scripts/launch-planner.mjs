@@ -106,7 +106,7 @@ const YANO_CLI_SKILL = "yano-cli";
 // record it safely and consistently.
 const YANO_CODE_MEM_SKILL = "yano-code-mem";
 // Preview read-only condivisa: ogni ruolo deve poter proporre una simulazione
-// sicura di auto-improver, suggester o Architect senza creare lavoro reale.
+// sicura di auto-improver, feedback o Architect senza creare lavoro reale.
 const YANO_OBSERVER_DRY_RUN_SKILL = "yano-observer-dry-run";
 
 // Adapter Yano della skill /code-review di Matt Pocock: il reviewer riceve il
@@ -120,11 +120,9 @@ const YANO_REVIEW_SKILL_ROLES = ["reviewer", "frontend-reviewer"];
 const YANO_DEPLOYMENT_SKILL = "yano-deployment";
 const YANO_DEPLOYMENT_SKILL_ROLES = ["deployment-agent"];
 const YANO_OBSERVER_SKILL = "yano-observer";
-const YANO_OBSERVER_SKILL_ROLES = ["watcher", "debugger", "auto-improver", "suggester"];
+const YANO_OBSERVER_SKILL_ROLES = ["watcher", "auto-improver"];
 const YANO_AUTO_IMPROVEMENT_SKILL = "yano-auto-improvement";
 const YANO_AUTO_IMPROVEMENT_SKILL_ROLES = ["auto-improver"];
-const YANO_SUGGESTER_SKILL = "yano-suggester";
-const YANO_SUGGESTER_SKILL_ROLES = ["suggester"];
 const YANO_ARCHITECT_SKILL = "yano-architect";
 const YANO_ARCHITECT_SKILL_ROLES = ["architect"];
 
@@ -190,9 +188,6 @@ function resolveYanoAutoImprovementSkillPath(packageRoot) {
 	return resolveVendoredSkillPaths(packageRoot, "yano", [YANO_AUTO_IMPROVEMENT_SKILL])[0];
 }
 
-function resolveYanoSuggesterSkillPath(packageRoot) {
-	return resolveVendoredSkillPaths(packageRoot, "yano", [YANO_SUGGESTER_SKILL])[0];
-}
 
 function resolveYanoArchitectSkillPath(packageRoot) {
 	return resolveVendoredSkillPaths(packageRoot, "yano", [YANO_ARCHITECT_SKILL])[0];
@@ -619,9 +614,6 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 	const yanoAutoImprovementSkillFlags = YANO_AUTO_IMPROVEMENT_SKILL_ROLES.includes(role)
 		? ["--skill", resolveYanoAutoImprovementSkillPath(packageRoot)]
 		: [];
-	const yanoSuggesterSkillFlags = YANO_SUGGESTER_SKILL_ROLES.includes(role)
-		? ["--skill", resolveYanoSuggesterSkillPath(packageRoot)]
-		: [];
 	const yanoArchitectSkillFlags = YANO_ARCHITECT_SKILL_ROLES.includes(role)
 		? ["--skill", resolveYanoArchitectSkillPath(packageRoot)]
 		: [];
@@ -635,7 +627,7 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 	const yanoCliSkillFlags = ["--skill", resolveYanoCliSkillPath(packageRoot)];
 	const yanoCodeMemSkillFlags = ["--skill", resolveYanoCodeMemSkillPath(packageRoot)];
 	const yanoObserverDryRunSkillFlags = ["--skill", resolveYanoObserverDryRunSkillPath(packageRoot)];
-	const allSkillFlags = [...mattPocockSkillFlags, ...yanoTraceSkillFlags, ...yanoCliSkillFlags, ...yanoCodeMemSkillFlags, ...yanoObserverDryRunSkillFlags, ...chromeDevToolsSkillFlags, ...yanoReviewSkillFlags, ...yanoDeploymentSkillFlags, ...yanoObserverSkillFlags, ...yanoAutoImprovementSkillFlags, ...yanoSuggesterSkillFlags, ...yanoArchitectSkillFlags, ...generatedSkillFlags];
+	const allSkillFlags = [...mattPocockSkillFlags, ...yanoTraceSkillFlags, ...yanoCliSkillFlags, ...yanoCodeMemSkillFlags, ...yanoObserverDryRunSkillFlags, ...chromeDevToolsSkillFlags, ...yanoReviewSkillFlags, ...yanoDeploymentSkillFlags, ...yanoObserverSkillFlags, ...yanoAutoImprovementSkillFlags, ...yanoArchitectSkillFlags, ...generatedSkillFlags];
 	const requestedSkillPaths = allSkillFlags.filter((_, index) => index % 2 === 1);
 	const skillFlags = explicitSkillPathsWithoutPiConflicts(requestedSkillPaths).flatMap((skillPath) => ["--skill", skillPath]);
 	// -e esplicito SOLO in sviluppo del pacchetto stesso (looksLikePackageRepo)

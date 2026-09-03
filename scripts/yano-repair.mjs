@@ -87,9 +87,7 @@ function workerIsActive(status) {
 function externalWorkerRows(snapshot = null) {
 	const root = traceRoot();
 	const registries = [
-		{ source: "debugger", role: "debugger", file: path.join(root, "debugger", "debugger.sqlite"), table: "debugger_projects", defaultInstance: (name) => `debugger-${slugifyProject(name)}` },
 		{ source: "auto-improver", role: "auto-improver", file: path.join(root, "auto-improver", "auto-improver.sqlite"), table: "auto_projects", defaultInstance: (name) => `auto-improver-${slugifyProject(name)}` },
-		{ source: "suggester", role: "suggester", file: path.join(root, "suggester", "suggester.sqlite"), table: "suggester_projects", defaultInstance: (name) => `suggester-${slugifyProject(name)}` },
 	];
 	const rows = [];
 	for (const registry of registries) {
@@ -116,7 +114,7 @@ function externalWorkerRows(snapshot = null) {
 	const workspaceLabels = new Map((snapshot?.workspaces || []).map((workspace) => [workspace.workspace_id, workspace.label]));
 	for (const pane of allSnapshotPanes(snapshot)) {
 		const role = roleFromInstance(pane.instance, pane.label);
-		if (!role || !["architect", "watcher", "debugger", "auto-improver", "suggester"].includes(role)) continue;
+		if (!role || !["architect", "watcher", "auto-improver"].includes(role)) continue;
 		if (pane.agent !== "pi" || ["unknown", "offline", "done", "completed"].includes(String(pane.agent_status || "").toLowerCase()) || !pane.cwd) continue;
 		const name = resolveTraceProject(pane.cwd);
 		const key = projectKey(pane.cwd, name);
@@ -177,9 +175,7 @@ function findWorkerPane(snapshot, worker) {
 
 function workerWorkspaceLabel(role) {
 	return {
-		debugger: "yano-debugger",
 		"auto-improver": "yano-auto-improver",
-		suggester: "yano-suggester",
 	}[role] || `yano-${role}`;
 }
 
@@ -284,7 +280,7 @@ function aliasesFromSnapshot(snapshot, panes, canonicalName) {
 	];
 	for (const rawLabel of labels) {
 		const label = String(rawLabel || "").toLowerCase();
-		const match = label.match(/^(?:architect|watcher|debugger|auto-improver|suggester|yano-watcher|yano-debugger|yano-auto-improver|yano-suggester)[-_](.+)$/);
+		const match = label.match(/^(?:architect|watcher|auto-improver|yano-watcher|yano-auto-improver)[-_](.+)$/);
 		if (match?.[1] && !/^prop-\d{14}-[a-f0-9]+$/.test(match[1])) aliases.add(match[1]);
 	}
 	return [...aliases].filter(Boolean);
@@ -484,8 +480,6 @@ function roleFromInstance(instance, label) {
 	if (text.includes("architect")) return "architect";
 	if (text.includes("yano-watcher") || text.startsWith("watcher")) return "watcher";
 	if (text.includes("auto-improver")) return "auto-improver";
-	if (text.includes("suggester")) return "suggester";
-	if (text.includes("debugger")) return "debugger";
 	if (text.startsWith("planner")) return "planner";
 	if (text.startsWith("frontend-developer") || text.startsWith("frontend_developer")) return "frontend-developer";
 	if (text.startsWith("frontend-reviewer") || text.startsWith("frontend_reviewer")) return "frontend-reviewer";
@@ -510,7 +504,7 @@ function canonicalTabLabel(info, role) {
 	if (role === "planner") return "planner-01";
 	if (role === "architect") return "architect-" + slug;
 	if (role === "watcher") return "watcher-" + slug;
-	if (["debugger", "auto-improver", "suggester"].includes(role)) return role + "-" + slug;
+	if (role === "auto-improver") return role + "-" + slug;
 	return null;
 }
 
@@ -575,7 +569,7 @@ function launchAgentInPane(info, pane, role, instance, traceMode, continueSessio
 	const label = canonicalTabLabel(info, role);
 	if (label && pane.tab_id) spawnSync("herdr", ["tab", "rename", pane.tab_id, label], { encoding: "utf8" });
 	let promptSent = false;
-	if (["architect", "watcher", "debugger", "auto-improver", "suggester"].includes(role)) {
+	if (["architect", "watcher", "auto-improver"].includes(role)) {
 		const text = role === "watcher"
 			? "Riallineamento Yano completato. Il progetto canonico è " + info.name + " alla root " + info.root + ". Opera solo in read-only, usa questo scope e segnala al Planner eventuali contesti/proposte precedenti non più disponibili."
 			: role === "architect"
@@ -610,7 +604,7 @@ function restartObservedAgents(info, beforePanes, traceMode, projectWorkspace, p
 		// remaining stale tabs after the canonical agent is live.
 		if (singletonRoles.has(role) && selectedRoles.has(role)) continue;
 		if (singletonRoles.has(role)) selectedRoles.add(role);
-		const isExternal = ["architect", "watcher", "debugger", "auto-improver", "suggester"].includes(role);
+		const isExternal = ["architect", "watcher", "auto-improver"].includes(role);
 		let pane = allProjectPanes(snapshot, info.root).find((candidate) => candidate.pane_id === oldPane.pane_id && (!candidate.agent || candidate.agent_status === "unknown"));
 		// A project agent must never be relaunched into a global Yano workspace.
 		// This happened when repair reused the first blank pane matching the cwd:

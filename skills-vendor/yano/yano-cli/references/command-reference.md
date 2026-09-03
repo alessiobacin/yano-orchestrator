@@ -23,9 +23,9 @@ yano docs-check [--project-root <dir>] [--json]
 yano qa-inventory scan [--project-root <dir>] [--yano-self-audit] [--json]
 yano gantt [options]
 yano watch [options]
-yano schedule add --name <nome> --project-root <dir> --script <path> --mode <self|planner:<progetto>|computer-locale> [--cron '...'] [--once] [--timeout-ms N] [--expected-consequence <testo>] [--json]
+yano schedule add --name <nome> --project-root <dir> --script <path> --mode <self|planner:<progetto>|yano-local-pc> [--cron '...'] [--once] [--timeout-ms N] [--expected-consequence <testo>] [--json]
 yano schedule run <id>|list [--json]|remove|enable|disable --id <id>  # script-first recurring jobs; run = esegui lo script subito (test)
-yano invoke --role <planner[:<scope>]|computer-locale> --prompt "..." [--project-root <dir>] [--timeout-ms N]  # bridge deterministico dagli script
+yano invoke --role <planner[:<scope>]|yano-local-pc> --prompt "..." [--project-root <dir>] [--timeout-ms N]  # bridge deterministico dagli script
 yano trace [subcommand] [options]
 yano pause|resume|recovery [subcommand] [options]
 yano repair [options]
@@ -40,9 +40,9 @@ yano architect [subcommand] [options]
 yano watcher init|start|status|pause|resume|leave [options]  # persistent registry — see docs/quick-guides/10-watcher-falle-yano.md
 yano leave [--project-root <dir>] --yes                # permanently removes only watcher supervision
 yano watcher projects [options]
-yano debugger [subcommand] [options]
+yano feedback [subcommand] [options]
 yano auto-improve [subcommand] [options]
-yano suggester [subcommand] [options]
+yano feedback [subcommand] [options]
 yano model-advisor [subcommand] [options]
 yano playbook [subcommand] [options]
 yano agent [subcommand] [options]
@@ -71,7 +71,7 @@ project root: without the flag the runtime uses `projectKey(cwd)` (canonical
 project slug); with `--project-scope yano-system` the instance
 publishes/subscribes (presence, commands, responses, roles, teams, LWT) on
 `pi/yano-system/**`. It is the stable scope used by the global system services
-(scheduler, watcher, debugger, auto-improver, suggester) to stay visible
+(scheduler, watcher, feedback, auto-improver, feedback) to stay visible
 always on the same namespace. The scope string is used verbatim in topic
 names: avoid spaces or `/` unless a nested topic is intended.
 
@@ -171,7 +171,7 @@ rule requires its ID from `--list --json`.
 # Script-first (modello corrente): al trigger si esegue LO SCRIPT registrato, mai shell.
 # Esecuzione = runtime Node sul file; fallback loggato + enabled:false se lo script manca.
 # Folder script persistente: <data>/scheduler/scripts/ (un upgrade non lo cancella).
-yano schedule add --name <nome> --project-root <dir> --script <path> --mode <self|planner:<progetto>|computer-locale> [--cron '0 14,21 * * *'] [--once] [--timeout-ms N] [--expected-consequence <testo>] [--json]
+yano schedule add --name <nome> --project-root <dir> --script <path> --mode <self|planner:<progetto>|yano-local-pc> [--cron '0 14,21 * * *'] [--once] [--timeout-ms N] [--expected-consequence <testo>] [--json]
 yano schedule run <id> [--json]        # esegue lo script registrato SUBITO (test prima di renderlo ricorrente)
 yano schedule list [--json]            # job con script_path, mode, expected_consequence, enabled, last_status
 yano schedule remove --id <id>|enable --id <id>|disable --id <id>
@@ -181,8 +181,8 @@ yano schedule cron <install|status|remove>
 
 # Bridge deterministico chiamabile DENTRO gli script (e da CLI fuori da un agente):
 #   planner[:<scope>]  -> compone `yano start --herdr --role planner --project <scope> --print-only` (wake del planner di progetto)
-#   computer-locale    -> delega a `yano computer ask` (broker-aware, timeout, mai hang)
-yano invoke --role <planner[:<scope>]|computer-locale> --prompt "..." [--project <scope>|--project-root <dir>] [--timeout-ms N]
+#   yano-local-pc    -> delega a `yano local-pc ask` (broker-aware, timeout, mai hang)
+yano invoke --role <planner[:<scope>]|yano-local-pc> --prompt "..." [--project <scope>|--project-root <dir>] [--timeout-ms N]
 
 # Legacy (job testo+cron già esistenti, dispatch planner col testo come in passato):
 yano cron --add <natural request> [--project-root <dir>]
@@ -210,9 +210,9 @@ yano watcher pause|resume --project-root <dir>
 yano watcher leave --project-root <dir> --yes
 yano watcher projects [--all] [--project-root <dir>] [--json]
 yano architect projects [--all] [--project-root <dir>] [--json]
-yano debugger projects [--all] [--project-root <dir>] [--json]
+yano feedback projects [--all] [--project-root <dir>] [--json]
 yano auto-improve projects [--all] [--project-root <dir>] [--json]
-yano suggester projects [--all] [--project-root <dir>] [--json]
+yano feedback projects [--all] [--project-root <dir>] [--json]
 ```
 
 `agent_send` is liveness-aware. An offline target is rerouted to a live
@@ -222,7 +222,7 @@ message with its sender and assignment correlation intact. The persistent
 watcher exists for projects registered by `yano init` and is activated when
 that project has an active run. An explicit `yano watcher leave` or pause is
 an operator opt-out; `yano start` does not create an unrelated watcher.
-The debugger, suggester and auto-improver registry handoffs use this same
+The feedback, feedback and auto-improver registry handoffs use this same
 liveness check and fallback channel.
 
 The global npm installation installs an idempotent user crontab entry running
@@ -392,17 +392,17 @@ Architect may create a generic reusable playbook, not a project-specific copy.
 The candidate remains ephemeral until capability readiness, bounded Watcher
 validation, and planner/user feedback permit promotion.
 
-## Debugger, auto-improver, suggester
+## feedback, auto-improver, feedback
 
 ```text
-yano debugger init --project-root <dir>
-yano debugger start --project-root <dir> [--dry-run|--once]
-yano debugger status --project-root <dir> [--bug-id <id>]
-yano debugger report --project-root <dir> --title <text> ...
-yano debugger claim --project-root <dir> --bug-id <id>
-yano debugger transition --project-root <dir> --bug-id <id> --to <state>
-yano debugger pause|resume --project-root <dir>
-yano debugger serve [--port <port>] [--host <host>] [--json]  # REST API — see docs/quick-guides/yano-debugger.md#api-rest-yano-debugger-serve
+yano feedback init --project-root <dir>
+yano feedback start --project-root <dir> [--dry-run|--once]
+yano feedback status --project-root <dir> [--bug-id <id>]
+yano feedback report --project-root <dir> --title <text> ...
+yano feedback claim --project-root <dir> --bug-id <id>
+yano feedback transition --project-root <dir> --bug-id <id> --to <state>
+yano feedback pause|resume --project-root <dir>
+yano feedback serve [--port <port>] [--host <host>] [--json]  # REST API — see docs/quick-guides/yano-feedback.md#api-rest-yano-feedback-serve
 
 yano auto-improve init --project-root <dir> --interval 5d --notify auto
 yano auto-improve start|run --project-root <dir> [--dry-run] [--once]
@@ -410,14 +410,18 @@ yano auto-improve status|reports|pause|resume|stop --project-root <dir>
 yano auto-improve complete --audit-id <id> --report-file <temp-file>
 yano auto-improve serve [--port <port>] [--host <host>] [--json]  # REST API — see docs/quick-guides/yano-auto-improve.md#api-rest-yano-auto-improve-serve
 
-yano suggester init --project-root <dir> [--notify auto]
-yano suggester submit --project-root <dir> --title <text> --description <text> [--queue-only] [--once]
-yano suggester start --project-root <dir> [--dry-run] [--once]
-yano suggester status|reports|pause|resume|stop --project-root <dir>
-yano suggester complete --suggestion-id <id> --report-file <temp-file> --category <bug|feature|improvement|ux>
-yano suggester approve --suggestion-id <id> --actor <superadmin> --yes
-yano suggester reject --suggestion-id <id> --actor <superadmin> --reason <text> --yes
-yano suggester serve [--port <port>] [--host <host>] [--json]  # REST API — see docs/quick-guides/yano-suggester.md#api-rest-yano-suggester-serve
+Auto-improve usa il playbook sequenziale globale `auto-improvement-360`;
+ogni finding/parere nel report deve avere score e confidenza su 10 e non può
+contenere dati inventati.
+
+yano feedback init --project-root <dir> [--notify auto]
+yano feedback submit --project-root <dir> --title <text> --description <text> [--queue-only] [--once]
+yano feedback start --project-root <dir> [--dry-run] [--once]
+yano feedback status|reports|pause|resume|stop --project-root <dir>
+yano feedback complete --suggestion-id <id> --report-file <temp-file> --category <bug|feature|improvement|ux>
+yano feedback approve --suggestion-id <id> --actor <superadmin> --yes
+yano feedback reject --suggestion-id <id> --actor <superadmin> --reason <text> --yes
+yano feedback serve [--port <port>] [--host <host>] [--json]  # REST API — see docs/quick-guides/yano-feedback.md#api-rest-yano-feedback-serve
 
 yano model-advisor catalog [--json]                             # catalogo llmProxy normalizzato
 yano model-advisor recommend --role-class coordinator|support [--vision] [--json]  # model@provider-id pinnato migliore per la role-class

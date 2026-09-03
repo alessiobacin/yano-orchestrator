@@ -3,7 +3,7 @@
 `yano-architect` è l'agente globale che crea playbook e ruoli specialistici
 quando il catalogo corrente non copre bene l'intento del planner. Vive nel
 workspace Herdr `yano-architect`, allo stesso livello globale di
-`yano-watcher`, `yano-debugger`, `yano-auto-improver` e `yano-suggester`.
+`yano-watcher`, `yano-feedback`, `yano-auto-improver` e `yano-feedback`.
 
 L'architect non modifica mai il progetto osservato. Scrive soltanto sotto la
 directory dati globale di Yano (`<YANO_DATA_DIR>`, scelta automaticamente per
@@ -143,3 +143,20 @@ incorporano né dipendono da altri playbook in questa versione.
 - nessun playbook generated ha effetti di produzione impliciti;
 - manifest, checksum, evidenze e feedback restano nel database globale per
   audit e rollback logico della versione catalogata.
+
+## Capability globali generate da Architect
+
+Architect può creare capability persistenti globali, sempre in stato
+ephemeral fino a review, test, installazione, prima esecuzione riuscita e
+approvazione dell'utente:
+
+```bash
+yano architect create --type playbook --name analytics --task "..."
+yano architect create --type cli --name yano-report --task "..."
+yano architect create --type skill --name domain-audit --task "..."
+yano architect create --type mcp-server --name project-tools --task "..."
+```
+
+Il codice viene scritto sotto `<YANO_DATA_DIR>/catalog/capabilities/`. Le
+capability non diventano operative automaticamente: Architect deve sottoporle
+a review, eseguire i test e verificare l'installazione prima della promozione.

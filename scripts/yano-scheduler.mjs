@@ -18,8 +18,8 @@
 //   - "self"              — run the script, no LLM involved;
 //   - "planner:<project>" — run the script THEN wake the target project's
 //                           planner with the task text (destination per spec);
-//   - "computer-locale"   — run the script THEN bridge to the global
-//                           computer-locale agent via `yano invoke`.
+//   - "yano-local-pc"   — run the script THEN bridge to the global
+//                           yano-local-pc agent via `yano invoke`.
 //
 // Legacy compatibility: jobs persisted before this change (cron+task, no
 // script_path) keep working through the printer fallback that still dispatches
@@ -73,9 +73,9 @@ export function validateScriptSecurity(job, { exists = existsSync, scriptsDir = 
 	const issues = [];
 	if (!job || typeof job !== "object") { issues.push("job non valido"); return issues; }
 	// Modalità dichiarata obbligatoria: niente job senza mode esplicita.
-	if (!job.mode) issues.push("modalità non dichiarata (mode obbligatoria: self | planner:<progetto> | computer-locale)");
+	if (!job.mode) issues.push("modalità non dichiarata (mode obbligatoria: self | planner:<progetto> | yano-local-pc)");
 	else if (job.mode === "planner") issues.push("mode 'planner' non valida: usare 'planner:<nome progetto>'");
-	else if (!["self", "computer-locale"].includes(job.mode) && !/^planner:[A-Za-z0-9][A-Za-z0-9._-]*$/.test(job.mode)) issues.push(`modalità non supportata: ${job.mode}`);
+	else if (!["self", "yano-local-pc"].includes(job.mode) && !/^planner:[A-Za-z0-9][A-Za-z0-9._-]*$/.test(job.mode)) issues.push(`modalità non supportata: ${job.mode}`);
 	// Path sicuro: assoluto e dentro il folder script persistente dell'utente.
 	if (!job.script_path) issues.push("script_path mancante: ogni job deve referenziare uno script registrato");
 	else {
@@ -113,7 +113,7 @@ export function executeScript(scriptPath, { env = process.env, timeoutMs = 12000
 	return { ok: result.status === 0, status: result.status ?? 1, stdout: String(result.stdout || ""), stderr: String(result.stderr || ""), fallback: false };
 }
 
-// ── Planner/computer-locale launch composition (bridge C + legacy fallback) ──
+// ── Planner/yano-local-pc launch composition (bridge C + legacy fallback) ──
 // Same `yano start`-style Pi composition used by the historical scheduler,
 // passed as argv — no shell string. A legacy job (cron+task, no script_path)
 // is dispatched through this same printer path: the historical behaviour.
@@ -360,7 +360,7 @@ function usage() {
 		"Uso: yano schedule <add|list|remove|enable|disable|run|tick|supervise|cron> [opzioni]",
 		"Oppure: yano cron --add <frase naturale> [--project-root <dir>] | --list | --remove <id> | --enable <id> | --disable <id> | --run <id> | --supervise | --status",
 		"",
-		"  add --name <nome> --project-root <dir> --script <path> --mode <self|planner:<progetto>|computer-locale>",
+		"  add --name <nome> --project-root <dir> --script <path> --mode <self|planner:<progetto>|yano-local-pc>",
 		"      [--cron '0 14,21 * * *'] [--once] [--timeout-ms N] [--expected-consequence <testo>] [--json]",
 		"      Registra uno schedule che esegue LO SCRIPT registrato; --once = una sola esecuzione (poi si disabilita).",
 		"  add-natural: sintassi storica testo+cron (job legacy, dispatch planner come in passato).",

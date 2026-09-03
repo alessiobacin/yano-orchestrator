@@ -132,7 +132,7 @@ npm run check-syntax
 yano doctor --network
 ```
 
-Stesso confine di sicurezza già usato dal ruolo `debugger` in modalità
+Stesso confine di sicurezza già usato dal ruolo `feedback` in modalità
 `yano-maintenance`: mai un altro progetto, mai fuori da un worktree dedicato
 di `yano-orchestrator`.
 

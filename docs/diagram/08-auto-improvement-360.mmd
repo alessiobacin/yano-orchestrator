@@ -1,0 +1,17 @@
+flowchart LR
+    START[Planner: audit richiesto] --> PREFLIGHT[Preflight + root]
+    PREFLIGHT --> MODE[Rileva backend-only / frontend-only / full-stack]
+    MODE --> PREVIOUS[Indice report precedenti]
+    PREVIOUS --> EVIDENCE[Evidence pack bounded]
+    EVIDENCE --> PERF[Performance + architettura]
+    PERF --> API[Backend + API + dati]
+    API --> UX[Frontend + UX se applicabile]
+    UX --> PRODUCT[Feature + prodotto + agent UX]
+    PRODUCT --> TEST[Micro-validazioni read-only]
+    TEST --> SCORE[Score /10 + confidenza /10 + dedup]
+    SCORE --> REPORT[Report persistito con complete]
+    REPORT --> PLANNER[Handoff al Planner]
+    PLANNER --> ROUTE[Planner decide e assegna]
+
+    RULES[Schietto | nessuna invenzione | FACT/INFERENCE/HYPOTHESIS] -.-> SCORE
+    CHECK[Checkpoint obbligatorio a ogni fase] -.-> EVIDENCE

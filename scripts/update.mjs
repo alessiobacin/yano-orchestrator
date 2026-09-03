@@ -288,11 +288,6 @@ async function performUpdate({ packageRoot, argv }) {
 	}
 	const installedAfter = inspectGlobalLinkedInstall({ packageName });
 	if (installedAfter.found && !installedAfter.linked) activePackageRoot = installedAfter.path;
-	const requiredPlaybook = path.join(activePackageRoot, "playbooks", "suggestion-proposal.yaml");
-	if (!existsSync(requiredPlaybook)) {
-		console.error(`yano update: pacchetto globale incompleto; manca ${requiredPlaybook}. Installazione annullata.`);
-		process.exit(1);
-	}
 	for (const script of ["install-yano-cli.mjs", "install-yano-watcher-cron.mjs", "install-yano-scheduler-cron.mjs"]) {
 		try {
 			execFileSync(process.execPath, [path.join(activePackageRoot, "scripts", script), "--if-global", "--quiet"], {

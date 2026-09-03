@@ -94,7 +94,7 @@ transitions:
       - cross_command_propagation_checked_for_every_mutating_command
       - evidence_has_command_and_exit_status
       - report_updated
-      - every_finding_registered_in_debugger
+      - every_finding_registered_in_feedback
   - id: open_remediation
     from: findings
     to: remediation
@@ -173,28 +173,28 @@ invariants:
       and fixes happen in a dedicated worktree/yano-maintenance boundary,
       never directly against the live catalog or a third-party project.
   - id: no_finalize_before_explicit_user_confirmation
-  - id: every_finding_registered_in_debugger
+  - id: every_finding_registered_in_feedback
     description: >-
       Every finding qa-functional-verifier records — blocking, non-blocking
       and BLOCKED alike — is also registered as a bug in the cross-project
-      yano-debugger registry (`yano debugger report`, one call per finding,
+      yano-feedback registry (`yano feedback report`, one call per finding,
       mode `project` unless the reference project is Yano itself), with the
       reproduction evidence (command, exit code, expected/actual) included so
-      the debugger can confirm quickly instead of starting from zero. A
-      successful `yano debugger report` automatically wakes a live debugger
+      the feedback can confirm quickly instead of starting from zero. A
+      successful `yano feedback report` automatically wakes a live feedback
       instance for that project (and the planner, as a fallback if none is
       running) — qa-functional-verifier reports and stops there; it never
-      decides or sets the diagnostic state itself. The debugger owns that
+      decides or sets the diagnostic state itself. The feedback owns that
       decision, purely for durable, deduplicated tracking of what QA found
       and what happened to it — it stays diagnostic-only and never fixes
       anything itself. Actual remediation is unchanged — it always goes
       through the normal open_remediation -> remediation loop
       (coder/reviewer or frontend-developer/frontend-reviewer) driven by the
-      planner, independently of when/whether the debugger has finished
-      confirming a given finding. A finding the debugger confirms as a real,
+      planner, independently of when/whether the feedback has finished
+      confirming a given finding. A finding the feedback confirms as a real,
       reproducible defect is transitioned to `triaged`; a BLOCKED item
       (missing credentials/infra, out of scope) to `blocked`; a false
-      positive to `not_reproducible` or `rejected`. The debugger has no
+      positive to `not_reproducible` or `rejected`. The feedback has no
       fixed/closed state by design — the project's own ticket engine remains
       the record of the actual fix, and the full matrix re-run remains the
       proof of it.

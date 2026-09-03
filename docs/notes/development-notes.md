@@ -5014,10 +5014,10 @@ equivalenze documentali volontarie sono state allineate ai nomi canonici della
 matrice in `docs/documentation-sync.md`, preservando la history con `git mv`.
 
 - `postman/` (root) → **`docs/postman/`**: la collection e l'environment del
-  debugger si trovano ora nella posizione canonica della categoria `postman`.
-  Riferimenti aggiornati: `README.md` (albero root + comando `yano debugger
-  serve`), `docs/cheat-sheet/26-debugger.md`, `docs/quick_guides/12-yano-debugger.md`,
-  `docs/yano-debugger.md`, `scripts/yano-debugger.mjs` (commento + output `--help`),
+  feedback si trovano ora nella posizione canonica della categoria `postman`.
+  Riferimenti aggiornati: `README.md` (albero root + comando `yano feedback
+  serve`), `docs/cheat-sheet/26-feedback.md`, `docs/quick_guides/12-yano-feedback.md`,
+  `docs/yano-feedback.md`, `scripts/yano-feedback.mjs` (commento + output `--help`),
   `docs/architecture.mmd` (nodo `POSTMAN_COLLECTION`), `playbooks/clean-repo.usage.md`.
   `scripts/create-project.mjs` verificato: NON copia `postman/` nei progetti
   scaffoldati, nessun aggiornamento necessario.

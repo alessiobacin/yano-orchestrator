@@ -15,9 +15,9 @@ for (const file of files) {
 	const content = fs.readFileSync(path.join(issueDir, file), "utf8");
 	const type = content.match(/^Type:\s*(\w+)\s*$/m)?.[1];
 	const kind = content.match(/^Kind:\s*(\w+)\s*$/m)?.[1];
-	assert.ok(["human", "debugger"].includes(type), `${file}: Type deve essere human o debugger`);
+	assert.ok(["human"].includes(type), `${file}: Type deve essere human`);
 	assert.ok(["research", "prototype", "grilling", "task"].includes(kind), `${file}: Kind non valido`);
-	if (type === "debugger") assert.equal(kind, "task", `${file}: un issue debugger deve essere un task`);
+	if (type === "human") assert.ok(kind, `: un issue human deve avere una categoria`);
 }
 
 console.log(`smoke-test-issue-layout: ok (${files.length} issue nel percorso canonico)`);

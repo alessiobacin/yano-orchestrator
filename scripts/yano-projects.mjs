@@ -15,7 +15,7 @@ const KNOWN_ROLES = [
 	"frontend-reviewer", "frontend-developer", "auto-improver", "deployment-agent", "security-evaluator",
 	"architecture-diagrammer", "business-docs-author", "business-docs-reviewer", "market-researcher",
 	"website-content-strategist", "speed-benchmarker", "schema-migrator", "docs-sync", "reviewer", "architect",
-	"watcher", "debugger", "suggester", "planner", "coder", "specialist",
+	"watcher", "planner", "coder", "specialist",
 ];
 const ROLE_ALIASES = new Map([["docs", "docs-sync"]]);
 

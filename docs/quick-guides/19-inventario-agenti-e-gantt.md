@@ -5,9 +5,9 @@
 ```bash
 yano architect projects
 yano watcher projects
-yano debugger projects
+yano feedback projects
 yano auto-improve projects       # alias: yano auto-improver projects
-yano suggester projects
+yano feedback projects
 ```
 
 Questi comandi mostrano solo agenti Pi realmente live in Herdr. Per includere

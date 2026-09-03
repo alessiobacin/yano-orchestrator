@@ -6,7 +6,7 @@ future feature non devono essere interpretate come comportamento disponibile.
 
 ## Regola comune
 
-Watcher, debugger, auto-improver e suggester sono sensori/analisti esterni.
+Watcher, feedback, auto-improver e feedback sono sensori/analisti esterni.
 Nessuno modifica il progetto di riferimento, crea commit o worktree, apre
 ticket operativi nel progetto, fa deploy o promuove codice. Raccolgono
 evidenze, producono un report e notificano il planner. Il planner, dopo
@@ -21,7 +21,7 @@ eventuale decisione del superadmin/utente, usa il flusso normale
 - distinzione tra errore del progetto e finding ad alta confidenza di Yano;
 - deduplicazione deterministica delle segnalazioni;
 - ticket di manutenzione Yano in `yano-orchestrator/.scratch/optimize-orchestrator/issues`;
-- `type: debugger`, `created_by: yano-watcher`, riferimenti trace e Telegram;
+- `type: feedback`, `created_by: yano-watcher`, riferimenti trace e Telegram;
 - handoff MQTT al planner vivo, Telegram se non esiste un planner vivo;
 - risoluzione di `YANO_ORCHESTRATOR_REPO` dalla configurazione Yano autorizzata.
 - comando di test singolo `yano watch --once`.
@@ -36,19 +36,19 @@ eventuale decisione del superadmin/utente, usa il flusso normale
 - metriche cross-project su agenti stale, wake-up persi e round bloccati;
 - digest e soppressione degli alert ripetitivi;
 - intervallo adattivo e backoff quando un progetto è inattivo;
-- dashboard read-only e integrazione diretta con il futuro `yano-debugger`.
+- dashboard read-only e integrazione diretta con il futuro `yano-feedback`.
 
-## Debugger
+## feedback
 
 ### Implementato nella v1
 
 - intake/registro globale dei bug e fingerprint per progetto;
-- workspace Herdr `yano-debugger` con una tab per progetto;
+- workspace Herdr `yano-feedback` con una tab per progetto;
 - lifecycle diagnostico `reported → triaged → reproducing → not_reproducible|blocked`;
 - evidenze di trace, Git e superfici osservabili;
 - matrice porte paired dev/staging/production;
 - vincolo esplicito: nessuna fix, modifica, deploy o promozione automatica.
-- preflight singola `yano debugger start --once`, senza Herdr persistente.
+- preflight singola `yano feedback start --once`, senza Herdr persistente.
 
 ### Da sviluppare dopo
 
@@ -79,19 +79,19 @@ eventuale decisione del superadmin/utente, usa il flusso normale
 - scheduling adattivo, digest e dashboard delle raccomandazioni;
 - priorità calcolata da valore, rischio, evidenza e feedback accettati dal planner.
 
-## Suggester
+## feedback
 
 ### Implementato nella v1
 
-- `yano suggester init/start/submit/status/reports/complete/approve/reject/pause/resume/stop`;
-- SQLite globale in `<YANO_DATA_DIR>/suggester/suggester.sqlite`;
-- workspace Herdr `yano-suggester`, una tab per progetto;
+- `yano feedback init/start/submit/status/reports/complete/approve/reject/pause/resume/stop`;
+- SQLite globale in `<YANO_DATA_DIR>/feedback/feedback.sqlite`;
+- workspace Herdr `yano-feedback`, una tab per progetto;
 - intake CLI con source, user, priorità, route e app version;
 - redazione di pattern comuni di segreti e fingerprint esatto;
 - report/evidence read-only, classificazione `bug/feature/improvement/ux` e stato `awaiting_approval`;
 - gate superadmin: il planner viene notificato soltanto dopo `approve`;
 - notifica MQTT al planner e canali già configurati dopo l'approvazione.
-- modalità singola `yano suggester start|submit --once` per test bounded.
+- modalità singola `yano feedback start|submit --once` per test bounded.
 
 ### Da sviluppare dopo
 
@@ -133,8 +133,8 @@ eventuale decisione del superadmin/utente, usa il flusso normale
 
 1. Hardening comune: autenticazione, redazione, retention e metriche di
    consegna dei quattro agenti.
-2. Watcher/debugger: correlazione dei finding Yano e riproduzione sandbox.
-3. Suggester: receiver HTTP/FAB e matching semantico, mantenendo sempre il
+2. Watcher/feedback: correlazione dei finding Yano e riproduzione sandbox.
+3. feedback: receiver HTTP/FAB e matching semantico, mantenendo sempre il
    gate del superadmin.
 4. Auto-improver: memoria cross-project, baseline e dashboard.
 

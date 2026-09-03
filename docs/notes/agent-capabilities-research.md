@@ -4,13 +4,13 @@
 
 The active core is exactly eleven roles (updated during the December 2026
 repository audit against the current `agents/roles.yaml`): `planner`, `coder`,
-`reviewer`, `debugger`, `tdd-agent`, `architecture-diagrammer`, `docs-sync`,
+`reviewer`, `feedback`, `tdd-agent`, `architecture-diagrammer`, `docs-sync`,
 `security-evaluator`, `frontend-developer`, `frontend-reviewer`, and
 `scheduler`. Ten of them have `activation: always`; `scheduler` joins the core
 team (the persistent cron/scheduler worker that supervises recurring jobs and
-keeps `yano-scheduler` alive). The `debugger` role has `activation: always`
-but belongs to the `debugger`/`quality` teams rather than `core`: it is the
-external bug-diagnosis agent behind `yano debugger`, so it is always-on
+keeps `yano-scheduler` alive). The `feedback` role has `activation: always`
+but belongs to the `feedback`/`quality` teams rather than `core`: it is the
+external bug-diagnosis agent behind `yano feedback`, so it is always-on
 infrastructure even though it is not a planner-team member.
 
 The remaining thirty-two roles are specialists with `activation: lazy`. They

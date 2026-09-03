@@ -27,15 +27,22 @@ Everything communicates over a local MQTT broker, using role/instance identity a
 - **Phased execution plans** — the planner declares which roles work together and in what order, and the system enforces it
 - **Multi-channel notifications** via Evolution API/WhatsApp, Telegram Bot API, and SendGrid email when a task completes or needs your input, so you don't have to watch the terminal
 - **A global `yano` CLI** (`yano init`, `yano start`, `yano doctor`, `yano update`, `yano copy-prompts`, `yano uninstall`, `yano end`, `yano pause`, `yano resume`, `yano recovery`) for scaffolding, launching, verifying the environment, checkpointing and restoring active work, and closing projects — `yano resume` restores agents exclusively in the visible Herdr workspace
-- **External `yano-debugger` agent** — `yano debugger` keeps application bug reports and diagnostic transitions in global SQLite, starts one Herdr debugger tab per project, preserves trace provenance and hands accepted diagnoses to the planner
-- **Read-only external observers** — debugger diagnostica senza modificare, mentre `yano auto-improve` esegue audit periodici (default 5 giorni) in un workspace Herdr globale e consegna evidenze/raccomandazioni al planner
+- **Centralized bug/suggestion intake** — `yano feedback` persists records in SQLite and forwards them to the planner of the selected project; the planner owns triage and delegation
+- **Read-only external observer** — `yano auto-improve` esegue audit periodici (default 5 giorni) e consegna evidenze/raccomandazioni al planner
+
+Gli audit auto-improve seguono il playbook globale `auto-improvement-360` in
+fasi sequenziali: preflight, rilevazione automatica backend/frontend,
+indicizzazione dei report precedenti, raccolta evidence, analisi 360°,
+micro-validazione, scoring/deduplicazione e handoff al planner. Ogni parere
+deve avere score e confidenza su 10; dati non verificati restano espliciti e
+non vengono inventati.
 
 Gli audit auto-improve riconoscono test, build e lint anche quando il progetto
 non li dichiara come script npm; distinguono quindi una suite esistente senza
 comando standard dall'assenza effettiva di test. Ogni audit usa inoltre un
 transcript Pi nuovo, anche quando riusa la tab Herdr del progetto, e una
 allow-list runtime che esclude `bash`, `edit` e `write` dal worker.
-- **User suggestion observer** — `yano suggester` raccoglie proposte in un workspace Herdr globale, le deduplica e notifica il planner solo dopo approvazione del superadmin
+- **User suggestions** — `POST /suggestions` and `yano suggestion create` always require user confirmation and remain persisted until processed or deleted
 - **Model advisor** — `yano model-advisor` propone un pin llmProxy `model@provider-id` per role-class (coordinator/support) in base a costo/coding/latenza live di llmProxy, con fallback ad auto-routing (`llmproxy`) quando i dati non sono disponibili — vedi `docs/quick-guides/yano-model-advisor.md`
 - **Global playbook/role architect** — `yano architect` crea proposte ephemeral, verifica skill/CLI/MCP, avvia il watcher di validazione e promuove versioni immutabili solo dopo feedback positivo; `yano playbook|agent` consulta il catalogo
 - **Controlled deployment agent** — `deployment-agent` uses the `deployment-delivery` Playbook and `yano-deployment` skill to keep development source-based, dockerize staging/production, preserve paired ports and require rollback evidence plus explicit production approval
@@ -146,7 +153,7 @@ project.
 
 For an explicit operator-wide sweep use `yano repair --all-projects --dry-run`
 first, then `yano repair --all-projects --yes --update`. It groups active Herdr
-project roots with the persistent debugger/auto-improver/suggester registries,
+project roots with the persistent feedback/auto-improver/feedback registries,
 repairs each project sequentially and writes one recovery snapshot per project;
 paused or stopped external workers are left paused or stopped.
 
@@ -203,11 +210,11 @@ yano schedule add --name <nome> --project-root "$PWD" --script <path> --mode sel
 yano schedule run <id>                              # testa lo script subito, prima di renderlo ricorrente
 yano schedule list --json                           # job con script_path, mode, expected_consequence, stato
 yano invoke --role planner:<progetto> --prompt "riepiloga lo stato" --project-root "$PWD"   # bridge deterministico dagli script (wake planner)
-yano invoke --role computer-locale --prompt "promemoria tra 10 minuti"                      # delega a computer-locale
+yano invoke --role yano-local-pc --prompt "promemoria tra 10 minuti"                      # delega a yano-local-pc
 yano cron --add "ogni giorno alle 14 e alle 21 esegui la pulizia del progetto" --project-root "$PWD"  # legacy testo+cron (dispatch planner col testo)
 yano cron --list --json                     # legacy; il supervisore riapre yano-scheduler ogni minuto
-yano computer status                         # servizio globale Computer locale
-yano computer ask --prompt "Controlla promemoria e calendario di oggi"
+yano local-pc status                         # servizio globale Local PC
+yano local-pc ask --prompt "Controlla promemoria e calendario di oggi"
 # yano services: registro di servizi esterni (Docker/pm2/comando) che Yano non possiede ma da cui dipende
 # (broker MQTT, llmProxy, ...); `yano watcher supervise` (cron ogni minuto) li ricontrolla e riavvia da solo
 yano services add --name llmproxy --healthcheck-http http://127.0.0.1:7045/api/providers --restart-pm2 llmproxy
@@ -256,13 +263,13 @@ yano trace opinion --text "<analisi planner>" --change prompt --confidence mediu
 yano trace export --run <id> --output ./trace-bundle.json
 yano trace import --input ./trace-bundle.json --reindex
 yano trace clear --all --yes   # elimina tutti i dati temporanei di Yano
-yano debugger init --base-port 3055  # registra il progetto e le porte dev/staging/prod
-yano debugger start             # avvia/riusa il worker nel workspace Herdr yano-debugger
-yano debugger start --once --json # preflight read-only senza Herdr
-yano debugger status --json     # stato del worker e dei bug del progetto
-yano debugger status --bug-id BUG-... --json # dettaglio bug + eventi diagnostici
-yano debugger leave --project-root /path/progetto --yes # disattiva definitivamente il debugger per il progetto
-yano debugger serve --port 4177 # API REST (un'unica istanza, molti progetti — docs/postman/yano-debugger.postman_collection.json)
+yano feedback serve --port 20002 # API REST loopback per bug e suggestions
+yano bug create --project-id workspace-... --message "..." --resolution automatic
+yano bug list --type bug
+yano suggestion create --project-id workspace-... --message "..."
+yano suggestion list --type suggestion
+yano feedback update --type bug --id BUG-... --status processed
+yano feedback delete --type suggestion --id SUG-...
 yano auto-improve init --project-root /path/progetto --interval 5d --notify auto
 yano auto-improve start --project-root /path/progetto
 yano auto-improve start --project-root /path/progetto --once --dry-run --json
@@ -271,19 +278,13 @@ yano auto-improve pause --project-root /path/progetto
 yano auto-improve resume --project-root /path/progetto
 yano auto-improve stop --project-root /path/progetto
 yano auto-improve serve --port 4178 # API REST (un'unica istanza, molti progetti)
-yano suggester init --project-root /path/progetto --notify auto
-yano suggester start --project-root /path/progetto --once --dry-run
-yano suggester submit --project-root /path/progetto --title "..." --description "..."
-yano suggester status --project-root /path/progetto --json
-yano suggester approve --suggestion-id SUG-... --actor superadmin --yes
-yano suggester serve --port 4179 # API REST (un'unica istanza, molti progetti)
 ```
 
-Watcher e debugger sono registrati automaticamente da `yano init`. Il
+Watcher e feedback sono registrati automaticamente da `yano init`. Il
 supervisore globale li avvia quando rileva run/task attivi, ma rispetta una
 pausa o un `leave` esplicito. I progetti senza task restano visibili in
 `yano watcher projects --all --json` e possono essere riattivati con
-`yano watcher resume --project-root ...`. Architect, suggester e auto-improver
+`yano watcher resume --project-root ...`. Architect, feedback e auto-improver
 restano invece servizi on-demand; scheduler è globale e viene ricreato dal
 cron ogni minuto.
 

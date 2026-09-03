@@ -32,13 +32,13 @@ vincoli e procedure complete usare la [documentazione](../../README.md), la
 - [23-data.md](./23-data.md)
 - [24-architect.md](./24-architect.md)
 - [25-watcher.md](./25-watcher.md)
-- [26-debugger.md](./26-debugger.md)
+- [26-feedback.md](./26-feedback.md)
 - [27-auto-improve.md](./27-auto-improve.md)
-- [28-suggester.md](./28-suggester.md)
+- [28-feedback.md](./28-feedback.md)
 - [29-playbook.md](./29-playbook.md)
 - [30-agent.md](./30-agent.md)
 - [31-scheduler.md](./31-scheduler.md)
-- [32-computer-locale.md](./32-computer-locale.md)
+- [32-yano-local-pc.md](./32-yano-local-pc.md)
 - [33-services.md](./33-services.md)
 
 Le modifiche al codice devono aggiornare anche le superfici documentali indicate

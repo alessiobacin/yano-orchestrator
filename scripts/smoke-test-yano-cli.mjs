@@ -35,7 +35,7 @@ assert.match(installer, /discoveryRoots|settings\.json/, "l'installer deve legge
 for (const command of [
 	"yano init", "yano start", "yano doctor", "yano update", "yano repair", "yano trace",
 	"yano config", "yano data", "yano playbook", "yano agent", "yano watcher projects",
-	"yano architect projects", "yano debugger", "yano auto-improve", "yano suggester", "yano projects", "yano gantt --project-root", "yano gantt --link", "yano gantt --links",
+	"yano architect projects", "yano feedback", "yano auto-improve", "yano feedback", "yano projects", "yano gantt --project-root", "yano gantt --link", "yano gantt --links",
 	"yano cron",
 ]) assert.ok(reference.includes(command), `la reference deve documentare ${command}`);
 

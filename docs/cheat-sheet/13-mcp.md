@@ -15,12 +15,12 @@ riportate dal comando e dal playbook coinvolto.
 
 ```bash
 yano mcp agent list --json
-yano mcp agent list --agent computer-locale --json
-yano mcp agent add --agent computer-locale --name evolution-api \
+yano mcp agent list --agent yano-local-pc --json
+yano mcp agent add --agent yano-local-pc --name evolution-api \
   --config '{"command":"npx","args":["-y","mcp-evolution-api"],"env":{"EVOLUTION_API_URL":"${YANO_CONFIG:EVOLUTION_API_URL}","EVOLUTION_API_KEY":"${YANO_CONFIG:EVOLUTION_API_KEY}"}}'
-yano mcp agent update --agent computer-locale --name evolution-api --config '<JSON>'
-yano mcp agent show --agent computer-locale --name evolution-api --json
-yano mcp agent remove --agent computer-locale --name evolution-api
+yano mcp agent update --agent yano-local-pc --name evolution-api --config '<JSON>'
+yano mcp agent show --agent yano-local-pc --name evolution-api --json
+yano mcp agent remove --agent yano-local-pc --name evolution-api
 ```
 
 `--agent` accetta il nome/ID dell'istanza. Le variabili `${YANO_CONFIG:KEY}`

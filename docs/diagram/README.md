@@ -21,6 +21,8 @@ cartella contiene viste più piccole, utili durante diagnosi e onboarding:
   consegna al Planner.
 - [`07-update-installazione.mmd`](./07-update-installazione.mmd) — distinzione
   tra checkout dev, copia npm permanente, clone Pi e Docker complementare.
+- [`08-auto-improvement-360.mmd`](./08-auto-improvement-360.mmd) — fasi,
+  checkpoint, scoring e handoff dell'auto-improver al Planner.
 
 I file `.mmd` sono sorgenti Mermaid: possono essere aperti in VS Code con una
 preview Mermaid o renderizzati con uno strumento Mermaid compatibile.

@@ -62,27 +62,9 @@ roles:
     teams:
       - core
 
-  debugger:
-    activation: always
-    playbook: observer-audit
-    label: "Yano Debugger"
-    brief: "Gestisci bug applicativi in modo esclusivamente diagnostico: raccogli il contesto trace, riproduci senza modificare il progetto, redigi evidenze e inoltra la diagnosi al planner. Non correggere codice, test o configurazioni e non fare deploy."
-    model:
-      provider: llmproxy
-      model: llmproxy
-    skills:
-      - yano-observer
-      - yano-planner-trace-analysis
-      - yano-cli
-    cli: [git, npm, npx, curl]
-    mcp: []
-    teams:
-      - debugger
-      - quality
-
   auto-improver:
     activation: lazy
-    playbook: observer-audit
+    playbook: auto-improvement-360
     label: "Yano Auto-Improver"
     brief: "Esegui audit periodici read-only del progetto: correlando codice, test, documentazione, trace, bug e feedback produci raccomandazioni prioritizzate e inviale al planner. Non modificare mai il progetto, non creare ticket operativi autonomamente e non eseguire deploy."
     model:
@@ -97,25 +79,6 @@ roles:
     mcp: []
     teams:
       - improvement
-      - quality
-
-  suggester:
-    activation: lazy
-    playbook: suggestion-proposal
-    label: "Yano Suggester"
-    brief: "Raccogli e analizza suggerimenti utenti in modo esclusivamente read-only: deduplica, valuta valore/rischio/complessità, redigi una proposta e attendi l'approvazione del superadmin prima di notificare il planner. Non modificare il progetto, non creare ticket operativi e non fare deploy."
-    model:
-      provider: llmproxy
-      model: llmproxy
-    skills:
-      - yano-observer
-      - yano-suggester
-      - yano-planner-trace-analysis
-      - yano-cli
-    cli: [git, npm, npx, curl]
-    mcp: []
-    teams:
-      - suggestions
       - quality
 
   watcher:
@@ -420,22 +383,22 @@ roles:
     activation: lazy
     playbook: default
     label: "Recurring Job Scheduler (script-first)"
-    brief: "Agente MINIMALE e deterministico specializzato SOLO nello scrivere script semplici e registrarli come schedule; non è un generalista e non coordina altri agenti. Risponde SOLO al chiamante: l'utente nella chat dello scheduler, oppure un planner di qualsiasi progetto che chiede \"schedula X una volta / in modo ricorrente\" - niente handoff broadcast verso tutti i planner. Registra con `yano schedule add --script <path> --mode <self|planner:<progetto>|computer-locale> [--cron '...'] [--once] [--expected-consequence <testo>]`, scrivendo lo script nel folder persistente utente (<data>/scheduler/scripts/) e TESTANDOLO SEMPRE con `yano schedule run <id>` prima di renderlo ricorrente. Il routing LLM avviene DENTRO lo script via `yano invoke --role <planner[:<scope>]|computer-locale> --prompt ...`: deterministico gira da solo; di progetto sveglia il planner di quel progetto; generico/macchina delega a computer-locale; azioni distruttive o che modificano il progetto MAI autonome (gate umani via planner). Vincoli non negoziabili: niente shell arbitrari/token/pipe/redirezioni nei job (unico esecutore = script registrato e validato), niente token/credenziali negli script (leggere da .env a runtime), read-only di default (nessuna modifica al progetto, niente commit/finalize). Manutenzione con `yano schedule list|run|disable|enable|remove --id`; i job legacy testo+cron restano funzionanti col comportamento storico. Il supervisore globale ricrea la tab Herdr scheduler ogni minuto e il registro sopravvive ai riavvii."
+    brief: "Agente MINIMALE e deterministico specializzato SOLO nello scrivere script semplici e registrarli come schedule; non è un generalista e non coordina altri agenti. Risponde SOLO al chiamante: l'utente nella chat dello scheduler, oppure un planner di qualsiasi progetto che chiede \"schedula X una volta / in modo ricorrente\" - niente handoff broadcast verso tutti i planner. Registra con `yano schedule add --script <path> --mode <self|planner:<progetto>|yano-local-pc> [--cron '...'] [--once] [--expected-consequence <testo>]`, scrivendo lo script nel folder persistente utente (<data>/scheduler/scripts/) e TESTANDOLO SEMPRE con `yano schedule run <id>` prima di renderlo ricorrente. Il routing LLM avviene DENTRO lo script via `yano invoke --role <planner[:<scope>]|yano-local-pc> --prompt ...`: deterministico gira da solo; di progetto sveglia il planner di quel progetto; generico/macchina delega a yano-local-pc; azioni distruttive o che modificano il progetto MAI autonome (gate umani via planner). Vincoli non negoziabili: niente shell arbitrari/token/pipe/redirezioni nei job (unico esecutore = script registrato e validato), niente token/credenziali negli script (leggere da .env a runtime), read-only di default (nessuna modifica al progetto, niente commit/finalize). Manutenzione con `yano schedule list|run|disable|enable|remove --id`; i job legacy testo+cron restano funzionanti col comportamento storico. Il supervisore globale ricrea la tab Herdr scheduler ogni minuto e il registro sopravvive ai riavvii."
     model: { provider: llmproxy, model: llmproxy }
     skills: [yano-cli, yano-planner-trace-analysis]
     cli: [yano]
     mcp: []
     teams: [automation, core]
 
-  computer-local:
+  yano-local-pc:
     activation: always
-    playbook: computer-local-operations
-    label: "Computer locale"
-    brief: "Agente globale persistente per consultare e gestire le risorse Apple locali tramite MCP. Rispondi all'utente o allo scheduler, chiedi conferma prima di azioni distruttive o comunicazioni esterne e non accedere mai ai progetti Yano come se fossero il computer locale."
+    playbook: yano-local-pc-operations
+    label: "Local PC"
+    brief: "Agente globale per interagire direttamente con il PC dello sviluppatore tramite MCP, CLI e strumenti locali, portando in Yano informazioni e risorse del computer. Su macOS usa anche MCP Apple affidabili; su altri sistemi usa solo gli interfacciamenti nativi di Pi. Chiedi conferma prima di azioni distruttive o comunicazioni esterne."
     model: { provider: llmproxy, model: llmproxy }
     skills: [yano-cli, yano-planner-trace-analysis]
     cli: [node, yano]
-    mcp: [apple-notes, apple-messages, apple-contacts, apple-reminders, apple-calendar, apple-maps, apple-mail, apple-voice-memos]
+    mcp: []
     teams: [system]
 
   # Fase 5 - Manutenzione & Debito tecnico

@@ -28,8 +28,8 @@ Read the file at the referenced path. The user will normally pass the path or th
 Used by `/skill:wayfinder`. The **map** is a file with one **child** file per ticket.
 
 - **Map**: `.scratch/<effort>/map.md` — the Notes / Decisions-so-far / Fog body.
-- **Child ticket**: `.scratch/<effort>/issues/NN-<slug>.md`, numbered from `01`, with the question in the body. `Type:` records the provenance (`human` or `debugger`), `Kind:` records the ticket category (`research`/`prototype`/`grilling`/`task`), and `Status:` records `claimed`/`resolved`.
-- I ticket creati dal watcher per una falla interna di Yano usano `Type: debugger`, `Kind: task`, `Created-by: yano-watcher`; gli issue pianificati o inseriti dall'utente usano `Type: human` e conservano la categoria in `Kind:`.
+- **Child ticket**: `.scratch/<effort>/issues/NN-<slug>.md`, numbered from `01`, with the question in the body. `Type:` records the provenance (`human` or `feedback`), `Kind:` records the ticket category (`research`/`prototype`/`grilling`/`task`), and `Status:` records `claimed`/`resolved`.
+- I ticket creati dal watcher per una falla interna di Yano usano `Type: feedback`, `Kind: task`, `Created-by: yano-watcher`; gli issue pianificati o inseriti dall'utente usano `Type: human` e conservano la categoria in `Kind:`.
 - **Blocking**: a `Blocked by: NN, NN` line near the top. A ticket is unblocked when every file it lists is `resolved`.
 - **Frontier**: scan `.scratch/<effort>/issues/` for files that are open, unblocked, and unclaimed; first by number wins.
 - **Claim**: set `Status: claimed` and save before any work.

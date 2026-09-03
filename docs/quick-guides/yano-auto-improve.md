@@ -93,6 +93,23 @@ di questi comandi cancella dati o modifica il progetto osservato.
 
 ## Handoff al planner
 
+### Playbook sequenziale `auto-improvement-360`
+
+L'auto-improver non esegue più un audit monolitico: il ruolo è collegato al
+playbook `playbooks/auto-improvement-360.yaml`, che conserva un checkpoint
+prima di ogni fase. L'ordine è: preflight, modalità (`backend-only`,
+`frontend-only` o `full-stack`), indice degli improvement precedenti, evidence
+pack, performance/architettura, backend/API/dati, frontend/UX quando applicabile,
+feature/prodotto, micro-validazione, scoring/deduplicazione, report e handoff.
+
+Il report è schietto e evidence-first: non può inventare metriche, bug, fonti,
+alternative o feature. Ogni finding e ogni raccomandazione contiene tipo di
+evidenza (`FACT`, `INFERENCE` o `HYPOTHESIS`), riferimenti, `score: X/10`,
+motivazione dello score, `confidence: X/10` e motivazione della confidenza.
+Una proposta già presente viene classificata e non duplicata; un'area non
+applicabile viene registrata come tale. Se una verifica manca, il valore resta
+`UNKNOWN` o `REQUIRES_VALIDATION`.
+
 L'agente riceve un evidence pack e completa il report globale dell'audit. Poi
 esegue:
 
@@ -114,7 +131,7 @@ accetta, usa `to-spec → to-tickets` e il normale ciclo coder/reviewer.
 
 ## API REST (`yano auto-improve serve`)
 
-L'auto-improver, come il debugger, è pensato come un'unica istanza logica
+L'auto-improver, come il feedback, è pensato come un'unica istanza logica
 che gestisce molti progetti (lo stesso registro `auto_projects` usato dalla
 CLI): `yano auto-improve serve` espone questo registro su HTTP, per chi vuole
 avviare/consultare audit da uno strumento diverso dalla shell (uno script, un

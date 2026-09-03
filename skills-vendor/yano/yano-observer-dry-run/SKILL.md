@@ -1,6 +1,6 @@
 ---
 name: yano-observer-dry-run
-description: Use whenever a user or Yano agent wants to preview, test, simulate, or run once in dry-run mode what Yano Auto-Improver, Suggester, or Architect would recommend for a repository, feature suggestion, or missing playbook. Always use the smallest read-only Yano command and report that no worker, Herdr tab, audit, proposal, ticket, file, or external side effect was created.
+description: Use whenever a user or Yano agent wants to preview, test, simulate, or run once in dry-run mode what Yano Auto-Improver, feedback, or Architect would recommend for a repository, feature suggestion, or missing playbook. Always use the smallest read-only Yano command and report that no worker, Herdr tab, audit, proposal, ticket, file, or external side effect was created.
 ---
 
 # Yano observer dry-run
@@ -30,10 +30,10 @@ yano auto-improve start --project-root <dir> --once --dry-run --json
 Report the evidence sources, detected test/build/lint surfaces, proposed audit
 scope and any explicit limitation. It must not create an audit or Herdr tab.
 
-### Suggester: feature-request response preview
+### feedback: feature-request response preview
 
 ```text
-yano suggester submit --project-root <dir> --title <title> --description <text> --queue-only --once --dry-run --json
+yano feedback submit --project-root <dir> --title <title> --description <text> --queue-only --once --dry-run --json
 ```
 
 If the installed CLI does not support a completely non-persistent submit
@@ -53,7 +53,7 @@ a preview.
 ## Response format
 
 ```text
-Preview: auto-improver | suggester | architect
+Preview: auto-improver | feedback | architect
 Project: <root>
 Input: <sanitized request>
 Command: <exact command>

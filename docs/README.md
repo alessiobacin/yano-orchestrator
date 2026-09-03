@@ -28,9 +28,9 @@ invocazione). Usate da coder, reviewer, specialisti e docs-sync.
 
 ### [quick-guides/](quick-guides/README.md)
 Procedure brevi per chi usa Yano dalla root del progetto: installazione,
-init (manuale o Herdr), trace, troubleshooting, watcher, debugger,
-auto-improve, suggester, architect, job ricorrenti. Include i riferimenti
-completi dei comandi (`yano-trace`, `yano-debugger`, `yano-recovery`, …) e la
+init (manuale o Herdr), trace, troubleshooting, watcher, feedback,
+auto-improve, feedback, architect, job ricorrenti. Include i riferimenti
+completi dei comandi (`yano-trace`, `yano-feedback`, `yano-recovery`, …) e la
 quick start. È il percorso consigliato per i nuovi utenti.
 
 ### [adr/](adr/README.md)
@@ -47,9 +47,9 @@ esterni).
 
 ### [postman/](postman/)
 Collection Postman JSON importabile
-(`yano-debugger.postman_collection.json`) ed environment
-(`yano-debugger.postman_environment.json`) dell'API REST del debugger
-(`yano debugger serve --port 4177`). Categoria obbligatoria quando il
+(`yano-feedback.postman_collection.json`) ed environment
+(`yano-feedback.postman_environment.json`) dell'API REST del feedback
+(`yano feedback serve --port 4177`). Categoria obbligatoria quando il
 progetto espone un backend/API.
 
 ### [cheat-sheet/](cheat-sheet/README.md)

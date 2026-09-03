@@ -57,6 +57,6 @@ caricata automaticamente solo per `deployment-agent`. Il report deve contenere
 preflight, port matrix, verifica development, build/validazione staging,
 approval/promozione production, rollback checkpoint, test e verdetto.
 
-Per inizializzare il worker globale del debugger applicativo usare invece
-`yano debugger`; il debugger e il deployment agent sono ruoli distinti: il
+Per inizializzare il worker globale del feedback applicativo usare invece
+`yano feedback`; il feedback e il deployment agent sono ruoli distinti: il
 primo corregge bug, il secondo rilascia una versione approvata.

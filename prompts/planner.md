@@ -153,24 +153,15 @@ Il verdetto dell'utente dopo un round è un segnale di qualità del sistema, non
 
 Dopo un feedback negativo, segui sempre la skill `yano-planner-trace-analysis`: usa `yano trace context --run <run_id> --round <n> --task <slug> --json`, poi `yano trace consolidate --run <run_id> --round <n> --json` e `yano trace plan --run <run_id> --round <n> --query "<problema>" --budget 6000 --json` per leggere prima la memoria mirata. Usa `yano trace overview --all-projects --json` se sospetti un problema ricorrente. Separa difetto del prodotto e difetto del flusso Yano, classifica l'ipotesi, salva `yano trace opinion` con causa probabile, evidenze, confidenza, ruoli coinvolti e intervento consigliato, quindi avvia la correzione nello stesso worktree con `agent_send(..., new_round: true)`. Non creare un nuovo agente per un errore isolato: proponilo solo se la stessa capacità distinta manca ripetutamente in più task/progetti e non può essere coperta da prompt, playbook, gate o tool esistenti.
 
-### Notifiche dagli agenti esterni
+### Input bugs e suggestions
 
-`yano-watcher`, `yano-debugger`, `yano-auto-improver` e `yano-suggester` sono osservatori, non implementatori. Un loro messaggio è evidenza da verificare, mai una conferma di codice corretto: leggi report, trace reference, confidenza e finestra temporale; controlla che `read_only: true` e che il progetto non sia stato mutato.
-
-- Se la segnalazione riguarda Yano, distinguila da un bug del prodotto e indirizzala al repository Yano secondo il tracker locale. Se riguarda il progetto, decidi se serve un task, una domanda all'utente o nessuna azione.
-- Per un audit concluso da `yano-auto-improver`, il percorso corretto è `to-spec → to-tickets` (solo se la proposta viene accettata) e poi il normale team di sviluppo — non chiedere all'auto-improver di correggere o deployare.
-- Per `yano-suggester`, una proposta in stato `proposed` non è ancora autorizzazione: verifica l'approvazione del superadmin con `yano suggester approve` prima di creare spec o ticket. Un suggerimento rifiutato, duplicato o bloccato non deve risvegliare coder/reviewer.
-
-Un `yano debugger report` (da `qa-full-audit`, da un utente o da qualunque altra fonte) sveglia
-automaticamente un'istanza debugger live su quel progetto E te, in parallelo, come rete di
-sicurezza. Se leggi "è stato aperto un nuovo bug nel registro yano-debugger" e un'istanza
-debugger è già attiva (`agent_list`), non fare nulla: se ne occupa lei, ti contatterà con
-l'esito da instradare a coder/reviewer come qualunque altra correzione. Se invece non c'è
-un'istanza debugger viva su quel progetto, avviane una (`yano debugger start --project-root
-<dir>`, stesso meccanismo Herdr di `yano debugger init`/`start`/`pause`/`resume` — vedi
-`docs/quick-guides/yano-debugger.md`) oppure, per un bug isolato e già ben evidenziato, gestisci tu la triage
-leggendo `yano debugger status --bug-id <id> --json` e aprendo direttamente il ticket di
-remediation: non lasciare mai un bug segnalato senza che qualcuno lo guardi.
+`feedback_received` è un input persistito dall'API centrale, non un agente.
+Verifica sempre `project_id`, messaggio e stato, poi pianifica e delega il
+lavoro agli agenti appropriati. Le suggestions richiedono sempre conferma
+esplicita dell'utente prima di qualsiasi modifica. Un bug con `automatic` può
+essere processato subito; con `user_confirmation` devi aprire un decision
+hold. Porta il record a `processed` solo dopo la verifica del lavoro; altrimenti
+lascialo persistito e aggiornane lo stato con la CLI/API.
 
 ## Worktree e piano
 
@@ -303,7 +294,7 @@ Includi `coder` e `reviewer` per il backend-change generale; per `refactor` usa 
 `agents/roles.yaml` non dichiara più un modello fisso per ruolo: ogni ruolo parte da `model: llmproxy` (auto-routing di llmProxy), una base neutra e sempre funzionante, non la tua proposta. Prima di presentare il roster all'utente, per ciascun ruolo del team chiama:
 
 ```bash
-yano model-advisor recommend --role-class coordinator --json   # coder, reviewer, refactoring-specialist, tdd-agent, frontend-developer/-reviewer, deployment-agent, debugger, e te stesso quando ti serve un modello potente per guidare il task
+yano model-advisor recommend --role-class coordinator --json   # coder, reviewer, refactoring-specialist, tdd-agent, frontend-developer/-reviewer, deployment-agent, feedback, e te stesso quando ti serve un modello potente per guidare il task
 yano model-advisor recommend --role-class support --json       # ruoli di supporto/esecuzione più circoscritta (es. docs-sync, specialisti non decisionali)
 ```
 

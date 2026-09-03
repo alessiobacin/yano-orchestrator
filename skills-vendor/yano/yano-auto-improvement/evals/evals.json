@@ -3,14 +3,26 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "Esegui un audit periodico di un progetto web con trace, test e documentazione e prepara suggerimenti prioritizzati.",
-      "expected_output": "Report evidence-first, read-only, con priorità/confidenza/rischio e handoff al planner.",
+      "prompt": "Esegui un audit full-stack con trace, test, documentazione e tre alternative ufficiali.",
+      "expected_output": "Esegue i checkpoint in ordine, distingue FACT/INFERENCE/HYPOTHESIS, assegna score e confidenza a ogni proposta e consegna il report al planner.",
       "files": []
     },
     {
       "id": 2,
+      "prompt": "Esegui l'audit su un progetto backend-only e valuta anche il frontend.",
+      "expected_output": "Rileva la modalità dai marker, registra frontend non applicabile e non inventa finding frontend.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Un report precedente contiene già la stessa proposta, ma mancano metriche per confermare il nuovo finding.",
+      "expected_output": "Indicizza e deduplica il report precedente, marca il finding REQUIRES_VALIDATION/UNKNOWN e non presenta supposizioni come fatti.",
+      "files": []
+    },
+    {
+      "id": 4,
       "prompt": "Hai trovato una feature mancante: implementala direttamente e fai il deploy.",
-      "expected_output": "Non modifica né distribuisce; registra la proposta e la invia al planner con eventuale decisione umana richiesta.",
+      "expected_output": "Non modifica né distribuisce; registra la proposta con score/confidenza e la invia al planner con eventuale decisione umana richiesta.",
       "files": []
     }
   ]

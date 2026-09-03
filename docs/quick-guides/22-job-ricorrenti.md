@@ -38,11 +38,11 @@ yano schedule add --name <nome> --project-root "$PWD" \
 
 Flag chiave:
 
-- `--mode self|planner:<progetto>|computer-locale` — dichiara il routing:
+- `--mode self|planner:<progetto>|yano-local-pc` — dichiara il routing:
   - `self` — lo script gira da solo, nessun LLM;
   - `planner:<progetto>` — lo script (o il job) sveglia il planner del
     progetto target con il task, via `yano invoke --role planner:<progetto>`;
-  - `computer-locale` — lo script delega a computer-locale (promemoria,
+  - `yano-local-pc` — lo script delega a yano-local-pc (promemoria,
     calendario, note, contatti, mappe, posta, messaggi, memo vocali);
 - `--once` — one-shot: il job si auto-disabilita dopo la prima esecuzione;
 - `--timeout-ms N` — timeout massimo di esecuzione dello script
@@ -70,17 +70,17 @@ fallback loggato — mai testo libero verso un planner dal cron.
 
 ## Bridge invocabile dagli script: `yano invoke`
 
-Dentro uno script si sveglia il planner di progetto o computer-locale con un
+Dentro uno script si sveglia il planner di progetto o yano-local-pc con un
 comando deterministico (nessuna shell, nessun broker da gestire a mano):
 
 ```bash
 yano invoke --role planner:<progetto> --prompt "riepiloga lo stato del progetto" --project-root "$PWD"
-yano invoke --role computer-locale --prompt "promemoria tra 10 minuti: pausa caffè"
+yano invoke --role yano-local-pc --prompt "promemoria tra 10 minuti: pausa caffè"
 ```
 
 `--role planner[:<scope>]` compone il lancio `yano start --herdr --role
-planner --project <scope> --print-only` dal root target; `computer-locale`
-delega all'esistente `yano computer ask` (broker-aware, timeout, mai hang).
+planner --project <scope> --print-only` dal root target; `yano-local-pc`
+delega all'esistente `yano local-pc ask` (broker-aware, timeout, mai hang).
 
 ## Supervisore e cron di sistema
 

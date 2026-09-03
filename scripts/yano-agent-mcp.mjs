@@ -9,7 +9,7 @@ import { globalDataPath, resolveYanoConfig } from "./yano-config.mjs";
 
 const filePath = () => path.join(globalDataPath(), "mcp", "agents.json");
 const configPath = (agent) => path.join(globalDataPath(), "mcp", "agents", `${safe(agent)}.json`);
-const runtimePath = (agent) => agent === "computer-locale" ? path.join(globalDataPath(), "computer-local", ".mcp.json") : null;
+const runtimePath = (agent) => agent === "yano-local-pc" ? path.join(globalDataPath(), "yano-local-pc", ".mcp.json") : null;
 const safe = (value) => String(value || "agent").replace(/[^A-Za-z0-9_.-]+/g, "-").slice(0, 100);
 const json = (argv, flag) => { const i = argv.indexOf(flag); return i < 0 ? null : argv[i + 1] || null; };
 const has = (argv, flag) => argv.includes(flag);
@@ -49,14 +49,14 @@ export function materializeAgentMcp(agent) {
 	fs.writeFileSync(configPath(agent), JSON.stringify(output, null, 2) + "\n", { mode: 0o600 });
 	return configPath(agent);
 }
-export function agentMcpUsage() { return ["Uso: yano mcp agent <list|show|add|update|remove>", "", "  list [--agent <nome|id>] mostra built-in, aggiunti ed effective", "  --agent <nome|id>   agente destinatario, es. computer-locale", "  add/update --name <server> --config '<JSON>'", "  remove --name <server>", "  --json"].join("\n"); }
+export function agentMcpUsage() { return ["Uso: yano mcp agent <list|show|add|update|remove>", "", "  list [--agent <nome|id>] mostra built-in, aggiunti ed effective", "  --agent <nome|id>   agente destinatario, es. yano-local-pc", "  add/update --name <server> --config '<JSON>'", "  remove --name <server>", "  --json"].join("\n"); }
 export function runYanoAgentMcp({ argv = [] } = {}) {
 	const sub = argv[0]; if (!sub || has(argv, "--help") || has(argv, "-h")) { console.log(agentMcpUsage()); return; }
 	const agent = json(argv, "--agent") || json(argv, "--instance");
 	const db = read(); db.agents ||= {};
 	if (sub === "list") {
 		const agents = new Set(Object.keys(db.agents));
-		if (runtimePath("computer-locale") && fs.existsSync(runtimePath("computer-locale"))) agents.add("computer-locale");
+		if (runtimePath("yano-local-pc") && fs.existsSync(runtimePath("yano-local-pc"))) agents.add("yano-local-pc");
 		const result = agent ? { [agent]: effectiveMcp(agent, db) } : Object.fromEntries([...agents].sort().map((name) => [name, effectiveMcp(name, db)]));
 		const output = { agent: agent || null, servers: result, note: "built_in = MCP materializzati automaticamente; added = MCP aggiunti con yano mcp agent add/update; effective = configurazione realmente disponibile" };
 		if (has(argv, "--json")) console.log(JSON.stringify(output, null, 2)); else console.log(JSON.stringify(output, null, 2));

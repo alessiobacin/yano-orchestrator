@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// User-facing bridge to the persistent Computer locale agent. Requests use a
+// User-facing bridge to the persistent Local PC agent. Requests use a
 // dedicated Yano scope, never a project scope.
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -10,24 +10,24 @@ import { globalDataPath } from "./yano-config.mjs";
 import { projectKey } from "./yano-trace-storage.mjs";
 
 const PROJECT = "yano-scheduler";
-const INSTANCE = "computer-locale";
+const INSTANCE = "yano-local-pc";
 // The service currently runs with the canonical project scope derived from
 // its runtime project.json. Keep the CLI on that same scope; a human label
 // such as `yano-system` would silently publish to a topic nobody subscribes
 // to after a restart.
-const SCOPE = projectKey(path.join(globalDataPath(), "computer-local"), PROJECT);
+const SCOPE = projectKey(path.join(globalDataPath(), "yano-local-pc"), PROJECT);
 const brokerUrl = () => process.env.PI_ORCH_BROKER_URL || "mqtt://127.0.0.1:1883";
 function value(argv, flag) { const i = argv.indexOf(flag); return i < 0 ? null : argv[i + 1] || null; }
-function pendingRoot() { return path.join(globalDataPath(), "computer-local", "pending"); }
+function pendingRoot() { return path.join(globalDataPath(), "yano-local-pc", "pending"); }
 function savePending(request) { fs.mkdirSync(pendingRoot(), { recursive: true, mode: 0o700 }); fs.writeFileSync(path.join(pendingRoot(), `${request.assignment_id}.json`), JSON.stringify(request, null, 2), { mode: 0o600 }); }
 function removePending(id) { try { fs.unlinkSync(path.join(pendingRoot(), `${id}.json`)); } catch { /* already removed */ } }
 function pendingRequests() { try { return fs.readdirSync(pendingRoot()).filter((name) => name.endsWith(".json")).map((name) => JSON.parse(fs.readFileSync(path.join(pendingRoot(), name), "utf8"))); } catch { return []; } }
-function usage() { console.log("Uso: yano computer <start|status|ask|pending> [--prompt \"...\"] [--timeout-ms N]"); }
+function usage() { console.log("Uso: yano local-pc <start|status|ask|pending> [--prompt \"...\"] [--timeout-ms N]"); }
 
-export async function askComputerLocal(prompt, { timeoutMs = 120000, broker = brokerUrl(), ensure = ensureComputerLocalService } = {}) {
+export async function askLocalPc(prompt, { timeoutMs = 120000, broker = brokerUrl(), ensure = ensureComputerLocalService } = {}) {
 	if (!prompt?.trim()) throw new Error("--prompt è obbligatorio.");
 	const service = ensure();
-	if (!service.running) throw new Error(`Computer locale non attivo (${service.error || "avvio fallito"}).`);
+	if (!service.running) throw new Error(`Local PC non attivo (${service.error || "avvio fallito"}).`);
 	const requestId = `computer-${crypto.randomUUID()}`;
 	const replyTopic = `pi/${SCOPE}/cli/${requestId}/response`;
 	const commandTopic = `pi/${SCOPE}/agents/${INSTANCE}/commands`;
@@ -50,13 +50,13 @@ export async function askComputerLocal(prompt, { timeoutMs = 120000, broker = br
 	} finally { await client.endAsync(); }
 }
 
-export async function runYanoComputerLocal({ argv = [] } = {}) {
+export async function runYanoLocalPc({ argv = [] } = {}) {
 	const [sub] = argv;
 	if (!sub || sub === "--help" || sub === "-h") { usage(); return; }
 	if (sub === "start" || sub === "status") { const result = ensureComputerLocalService(); console.log(JSON.stringify(result, null, 2)); return result; }
 	if (sub === "pending") { const result = pendingRequests(); console.log(JSON.stringify(result, null, 2)); return result; }
-	if (sub === "ask") { const result = await askComputerLocal(value(argv, "--prompt"), { timeoutMs: Number(value(argv, "--timeout-ms") || 120000) }); console.log(JSON.stringify(result, null, 2)); return result; }
+	if (sub === "ask") { const result = await askLocalPc(value(argv, "--prompt"), { timeoutMs: Number(value(argv, "--timeout-ms") || 120000) }); console.log(JSON.stringify(result, null, 2)); return result; }
 	usage(); throw new Error(`sottocomando sconosciuto: ${sub}`);
 }
 
-if (process.argv[1]?.endsWith("yano-computer-local.mjs")) runYanoComputerLocal({ argv: process.argv.slice(2) }).catch((error) => { console.error(`yano computer: ${error.message}`); process.exitCode = 1; });
+if (process.argv[1]?.endsWith("yano-local-pc.mjs")) runYanoLocalPc({ argv: process.argv.slice(2) }).catch((error) => { console.error(`yano local-pc: ${error.message}`); process.exitCode = 1; });

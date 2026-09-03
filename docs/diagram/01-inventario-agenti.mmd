@@ -3,7 +3,7 @@ flowchart LR
     CLI["yano <role> projects"] --> HERDR["Herdr snapshot"]
     HERDR --> LIVE["active_projects\nPi live + pane/cwd"]
     HERDR --> OFFLINE["stale/offline\nsolo con --all"]
-    REG["registri globali\ndebugger/auto/suggester"] --> REGISTERED["registered_projects"]
+    REG["registri globali\nfeedback/auto/feedback"] --> REGISTERED["registered_projects"]
     PROP["architect.sqlite\nproposte"] --> REGISTERED
     LIVE --> OUTPUT["JSON o elenco breve"]
     REGISTERED --> OUTPUT

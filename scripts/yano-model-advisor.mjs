@@ -4,7 +4,7 @@
 // task/role, based on live cost/coding-benchmark/latency data pulled from
 // llmProxy (http://127.0.0.1:7045 by default — Alessio's local instance).
 // Library + CLI only in this increment: `yano model-advisor <recommend|catalog>`.
-// No REST server (unlike yano-debugger.mjs/yano-auto-improver.mjs) — nothing
+// No REST server (unlike yano-feedback.mjs/yano-auto-improver.mjs) — nothing
 // long-running is needed for a single advisory lookup.
 //
 // This increment ONLY produces the recommendation; wiring the planner to
@@ -489,7 +489,7 @@ function usage() {
 		"  --api-key <key>       default: YANO_LLMPROXY_API_KEY (yano config set YANO_LLMPROXY_API_KEY --stdin)",
 		"",
 		"Questo incremento è solo libreria + CLI: nessun server REST (a differenza di",
-		"yano debugger/auto-improve/suggester) — vedi docs/quick-guides/yano-model-advisor.md.",
+		"yano feedback/auto-improve/feedback) — vedi docs/quick-guides/yano-model-advisor.md.",
 	].join("\n");
 }
 

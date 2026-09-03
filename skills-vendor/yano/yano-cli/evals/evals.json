@@ -4,7 +4,7 @@
     {
       "id": 6,
       "prompt": "L'utente chiede in modo naturale: 'Quanti progetti Yano sono attivi adesso?'. Indica il comando esatto e come interpretare il risultato.",
-      "expected_output": "Usa yano projects --json. Risponde usando project_count, projects e herdr_reachable; conta le root distinte con almeno un agente Pi/Yano live, include planner/coder/reviewer e worker esterni, esclude stale/offline e non sostituisce il comando con watcher/architect/debugger projects o repair.",
+      "expected_output": "Usa yano projects --json. Risponde usando project_count, projects e herdr_reachable; conta le root distinte con almeno un agente Pi/Yano live, include planner/coder/reviewer e worker esterni, esclude stale/offline e non sostituisce il comando con watcher/architect/feedback projects o repair.",
       "files": []
     },
     {

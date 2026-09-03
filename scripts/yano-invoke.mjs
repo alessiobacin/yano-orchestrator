@@ -6,7 +6,7 @@
 // validated composition — no shell string, no free-form command, no broker
 // required for the planner path.
 //
-//   yano invoke --role computer-locale --prompt "..." [--timeout-ms N]
+//   yano invoke --role yano-local-pc --prompt "..." [--timeout-ms N]
 //   yano invoke --role planner --project <scope> [--project-root <dir>] --prompt "..." [--timeout-ms N]
 //   yano invoke --role planner:<scope> --project-root <dir> --prompt "..."   (alias)
 //
@@ -16,9 +16,9 @@
 //     (script-driven wake of the project planner; same pattern the scheduler
 //     uses at dispatch time). The command is printed for the caller: actual
 //     execution belongs to the registered script / the planner launch flow.
-//   - computer-locale — delegates to the existing MQTT-aware client
-//     (`yano computer ask`), so the broker handshake stays inside the
-//     broker-aware computer-local service.
+//   - yano-local-pc — delegates to the existing MQTT-aware client
+//     (`yano local-pc ask`), so the broker handshake stays inside the
+//     broker-aware yano-local-pc service.
 
 import path from "node:path";
 import { existsSync } from "node:fs";
@@ -52,24 +52,24 @@ export async function runYanoInvoke({ argv = [] } = {}) {
 	const json = argv.includes("--json");
 
 	if (!role || !prompt) {
-		console.log("Uso: yano invoke --role <planner[:<scope>]|computer-locale> --prompt \"...\" [--project <scope>|--project-root <dir>] [--timeout-ms N]");
+		console.log("Uso: yano invoke --role <planner[:<scope>]|yano-local-pc> --prompt \"...\" [--project <scope>|--project-root <dir>] [--timeout-ms N]");
 		if (process.argv[1]?.endsWith("yano-invoke.mjs")) process.exitCode = 1;
 		return;
 	}
-	if (!["planner", "computer-locale"].includes(role) && !/^planner:/.test(role)) fail(`ruolo non supportato: ${role} (usare planner[:<progetto>] o computer-locale)`);
+	if (!["planner", "yano-local-pc"].includes(role) && !/^planner:/.test(role)) fail(`ruolo non supportato: ${role} (usare planner[:<progetto>] o yano-local-pc)`);
 
-	if (role === "computer-locale") {
-		// Delegate to the existing MQTT-aware computer-local client. The bridge
+	if (role === "yano-local-pc") {
+		// Delegate to the existing MQTT-aware yano-local-pc client. The bridge
 		// reports status 0/1 with the output; a missing broker is a status-1
 		// failure, never a hang.
-		const { runYanoComputerLocal } = await import("./yano-computer-local.mjs");
+		const { runYanoLocalPc } = await import("./yano-local-pc.mjs");
 		let output;
 		try {
-			output = await runYanoComputerLocal({ argv: ["ask", "--prompt", prompt, "--timeout-ms", String(timeoutMs)] });
+		output = await runYanoLocalPc({ argv: ["ask", "--prompt", prompt, "--timeout-ms", String(timeoutMs)] });
 		} catch (error) {
 			output = { error: error instanceof Error ? error.message : String(error) };
 		}
-		const result = { role: "computer-locale", prompt, status: output?.running === false || output?.error ? 1 : 0, timeout_ms: timeoutMs, output };
+		const result = { role: "yano-local-pc", prompt, status: output?.running === false || output?.error ? 1 : 0, timeout_ms: timeoutMs, output };
 		if (json) console.log(JSON.stringify(result)); else console.log(JSON.stringify(result));
 		return result;
 	}

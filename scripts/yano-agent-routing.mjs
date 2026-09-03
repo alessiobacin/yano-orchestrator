@@ -1,7 +1,7 @@
 // Shared liveness-aware routing for Yano service handoffs.
 //
 // The Pi extension uses the same policy internally for agent_send. These
-// helpers cover the registry workers (debugger, suggester and auto-improver),
+// helpers cover the registry workers (feedback, feedback and auto-improver),
 // whose CLI processes also publish MQTT commands and must not silently drop a
 // notification when the intended worker or planner is absent.
 

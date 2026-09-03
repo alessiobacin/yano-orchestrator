@@ -10,8 +10,8 @@ yano start --instance reviewer-01 --role reviewer
 yano start --instance planner-01 --role planner --project /percorso/progetto
 ~~~
 
-Per i worker esterni usare i comandi dedicati (yano watcher, yano debugger,
-yano auto-improve, yano suggester). Il titolo della tab Herdr coincide con
+Per i worker esterni usare i comandi dedicati (yano watcher, yano feedback,
+yano auto-improve, yano feedback). Il titolo della tab Herdr coincide con
 l’istanza.
 
 Per preparare una review visuale approvata dall'utente:

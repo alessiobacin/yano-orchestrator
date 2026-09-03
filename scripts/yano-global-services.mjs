@@ -8,16 +8,16 @@ import { materializeAgentMcp } from "./yano-agent-mcp.mjs";
 import { herdrSnapshot as snapshot } from "./yano-herdr-client.mjs";
 
 const PACKAGE_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
-const COMPUTER_INSTANCE = "computer-locale";
-const COMPUTER_ROLE = "computer-local";
-const COMPUTER_WORKSPACE = "yano-computer-locale";
+const COMPUTER_INSTANCE = "yano-local-pc";
+const COMPUTER_ROLE = "yano-local-pc";
+const COMPUTER_WORKSPACE = "yano-local-pc";
 // Herdr normalizes the first tab created by a workspace to the safe slug;
 // keeping this canonical prevents a second duplicate tab on recovery.
-const COMPUTER_TAB = "computer-locale";
+const COMPUTER_TAB = "yano-local-pc";
 const SYSTEM_PROJECT = "yano-scheduler";
 const SYSTEM_SCOPE = "yano-system";
 
-function computerRuntimeRoot() { return path.join(globalDataPath(), "computer-local"); }
+function computerRuntimeRoot() { return path.join(globalDataPath(), "yano-local-pc"); }
 function applicationHeartbeatPath(agent, root, project) {
 	const key = cryptoProjectKey(root, project);
 	return path.join(globalDataPath(), "heartbeats", key, `${agent}.json`);
@@ -34,7 +34,8 @@ function ensureComputerRuntime() {
 	const projectConfig = path.join(root, ".pi", "extensions", "yano-orchestrator", "config");
 	mkdirSync(agents, { recursive: true, mode: 0o700 });
 	mkdirSync(projectConfig, { recursive: true, mode: 0o700 });
-	if (!existsSync(path.join(agents, "roles.yaml"))) writeFileSync(path.join(agents, "roles.yaml"), `roles:\n  ${COMPUTER_ROLE}:\n    activation: always\n    playbook: computer-local-operations\n    label: "Computer locale"\n    brief: "Agente globale per consultare e gestire, solo su richiesta esplicita, le risorse locali Apple tramite MCP. Conferma sempre prima delle operazioni distruttive o dell'invio di messaggi."\n    model:\n      provider: llmproxy\n      model: llmproxy\n    skills: [yano-cli]\n    cli: [node, yano]\n    mcp: [apple-notes, apple-messages, apple-contacts, apple-reminders, apple-calendar, apple-maps, apple-mail, apple-voice-memos]\n    teams: [system]\n`, { mode: 0o600 });
+	const appleMcp = process.platform === "darwin" ? "[apple-notes, apple-messages, apple-contacts, apple-reminders, apple-calendar, apple-maps, apple-mail, apple-voice-memos]" : "[]";
+	if (!existsSync(path.join(agents, "roles.yaml"))) writeFileSync(path.join(agents, "roles.yaml"), `roles:\n  ${COMPUTER_ROLE}:\n    activation: always\n    playbook: yano-local-pc-operations\n    label: "Yano Local PC"\n    brief: "Agente per interagire con il PC dello sviluppatore tramite MCP, CLI e strumenti locali; porta nel contesto Yano informazioni e risorse del computer. Conferma sempre prima delle operazioni distruttive o dell'invio di messaggi."\n    model:\n      provider: llmproxy\n      model: llmproxy\n    skills: [yano-cli]\n    cli: [node, yano]\n    mcp: ${appleMcp}\n    teams: [system]\n`, { mode: 0o600 });
 	writeFileSync(path.join(projectConfig, "project.json"), JSON.stringify({ schema_version: 1, extension_version: "global", project: SYSTEM_PROJECT, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }, null, 2), { mode: 0o600 });
 	const rolesPath = path.join(agents, "roles.yaml");
 	const roles = readFileSync(rolesPath, "utf8");
@@ -43,7 +44,7 @@ function ensureComputerRuntime() {
 	}
 	const config = resolveYanoConfig({});
 	const voiceKey = config.YANO_COMPUTER_LOCAL_ASSEMBLYAI_API_KEY || config.ASSEMBLYAI_API_KEY;
-	const servers = {
+	const servers = process.platform === "darwin" ? {
 		"apple-notes": { command: "npx", args: ["@griches/apple-notes-mcp"] },
 		"apple-messages": { command: "npx", args: ["@griches/apple-messages-mcp"] },
 		"apple-contacts": { command: "npx", args: ["@griches/apple-contacts-mcp"] },
@@ -51,7 +52,7 @@ function ensureComputerRuntime() {
 		"apple-calendar": { command: "npx", args: ["@griches/apple-calendar-mcp"] },
 		"apple-maps": { command: "npx", args: ["@griches/apple-maps-mcp"] },
 		"apple-mail": { command: "npx", args: ["@griches/apple-mail-mcp"] },
-	};
+	} : {};
 	if (voiceKey) servers["apple-voice-memos"] = { command: "npx", args: ["apple-voice-memos-mcp"], env: { ASSEMBLYAI_API_KEY: voiceKey } };
 	if (config.EVOLUTION_API_URL && config.EVOLUTION_API_KEY) servers["evolution-api"] = { command: "npx", args: ["-y", "mcp-evolution-api"], env: { EVOLUTION_API_URL: config.EVOLUTION_API_URL, EVOLUTION_API_KEY: config.EVOLUTION_API_KEY } };
 	const custom = materializeAgentMcp(COMPUTER_INSTANCE);
@@ -61,11 +62,10 @@ function ensureComputerRuntime() {
 }
 const SERVICES = [
 	// Herdr infers the agent kind from the tab title while starting it. A tab
-	// named exactly `yano-watcher`/`yano-debugger` is classified as a legacy
+	// named exactly `yano-watcher` is classified as a legacy
 	// external kind and rejected as `--kind pi`; keep the workspace names but
 	// use neutral owned tab labels.
 	{ instance: "watcher-service", agentName: "watcher-service", role: "watcher", workspace: "yano-watcher", tab: "watcher-service" },
-	{ instance: "debugger-service", agentName: "debugger-service", role: "debugger", workspace: "yano-debugger", tab: "debugger-service" },
 	{ instance: "scheduler-service", agentName: "scheduler-service", role: "scheduler", workspace: "yano-scheduler", tab: "scheduler-service", project: SYSTEM_PROJECT, projectScope: SYSTEM_SCOPE },
 	{ instance: COMPUTER_INSTANCE, agentName: COMPUTER_INSTANCE, role: COMPUTER_ROLE, workspace: COMPUTER_WORKSPACE, tab: COMPUTER_TAB, cwd: computerRuntimeRoot(), project: SYSTEM_PROJECT },
 ];
@@ -125,7 +125,7 @@ function probeService(paneId, snapshotAgent, { instance = null, root = PACKAGE_R
 }
 
 function closeInitialDuplicates(state, workspaceId, canonicalTabId, service) {
-	const duplicateLabels = new Set(["1", "Computer locale", "computer-locale", service.instance]);
+	const duplicateLabels = new Set(["1", "Local PC", "yano-local-pc", service.instance]);
 	for (const candidate of state?.tabs || []) {
 		if (candidate.workspace_id !== workspaceId || candidate.tab_id === canonicalTabId || !duplicateLabels.has(candidate.label)) continue;
 		run("herdr", ["tab", "close", candidate.tab_id]);
@@ -199,6 +199,10 @@ function ensureService(service) {
 }
 
 export function ensureGlobalYanoServices() { return SERVICES.map(ensureService); }
-export function ensureComputerLocalService() { return ensureService(SERVICES[3]); }
+export function ensureComputerLocalService() {
+	const enabled = path.join(globalDataPath(), "yano-local-pc", "enabled.json");
+	if (!existsSync(enabled)) return { service: COMPUTER_INSTANCE, running: false, enabled: false, error: "yano-local-pc disabilitato: usa yano init --dev-pc" };
+	return ensureService(SERVICES.find((service) => service.instance === COMPUTER_INSTANCE));
+}
 
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) console.log(JSON.stringify(ensureGlobalYanoServices(), null, 2));

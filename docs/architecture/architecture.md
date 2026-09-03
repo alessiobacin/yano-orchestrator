@@ -10,6 +10,19 @@ le categorie e dichiara Postman non applicabile quando non c'è backend.
 
 This document is the human-readable companion to [`architecture.mmd`](./architecture.mmd), the Mermaid source diagram for the current system. The detailed command flows are split into [`docs/diagram/`](../diagram/README.md), so each operational path can be read without loading the whole architecture graph.
 
+## Local PC e capability globali
+
+`yano init --dev-pc` abilita esplicitamente l'agente `yano-local-pc`, che porta
+nel contesto Yano informazioni e risorse del PC dello sviluppatore tramite MCP,
+CLI e strumenti locali. Su macOS vengono aggiunti gli MCP Apple affidabili;
+negli altri sistemi gli MCP Apple sono esclusi e restano disponibili gli
+strumenti terminali nativi di Pi.
+
+Architect genera capability globali con `yano architect create --type
+playbook|cli|skill|mcp-server`. Il codice viene scritto nel catalogo persistente
+globale e resta ephemeral finché review, test, installazione, prima esecuzione
+riuscita e approvazione utente non sono completate.
+
 ## Purpose
 
 Yano Orchestrator coordinates independent `pi` processes working on one project. The planner owns decomposition, phase progression and final integration. Workers operate in isolated Git worktrees and communicate through a project-scoped MQTT 5 namespace.
@@ -31,7 +44,7 @@ pi planner ── reads prompts + agents/roles.yaml
   └── optional adapters: WhatsApp, MCP, effect delivery, browser tooling
 ```
 
-Every instance has an `instance`, `role`, `project` and `team` identity. MQTT topics are scoped as `pi/<scope>/...`: by default the scope is derived from the current project root (`projectKey(cwd)`), so two projects sharing a broker remain isolated unless the operator deliberately passes the same `--project` value; the explicit `--project-scope <scope>` flag is now READ by the runtime (`readCliFlags`) and overrides that default, so an instance launched with `--project-scope yano-system` publishes/subscribes (status, commands, responses, roles, teams, LWT) on `pi/yano-system/**` (used by the global system services: scheduler, watcher, debugger, auto-improver, suggester). The scope is used verbatim in MQTT topic names: avoid spaces or `/` unless a nested topic is intended. `yano start` resolves the root identity and passes the canonical slug explicitly to the child `pi` process, so an auto-loaded extension from a different installation cannot silently choose a shared/default namespace; a human display name belonging to the same root is normalized to that slug even when it appears in a generated command. The runtime also validates both the status topic and the `project` field in every retained presence card before adding it to the roster. An explicit scope override is reported at startup when it differs from the scope derived by the current project root; all instances that must collaborate must use the same value. The watcher also inspects session-start trace records and reports `project_scope_mismatch` when a worker from the root joins the wrong namespace.
+Every instance has an `instance`, `role`, `project` and `team` identity. MQTT topics are scoped as `pi/<scope>/...`: by default the scope is derived from the current project root (`projectKey(cwd)`), so two projects sharing a broker remain isolated unless the operator deliberately passes the same `--project` value; the explicit `--project-scope <scope>` flag is now READ by the runtime (`readCliFlags`) and overrides that default, so an instance launched with `--project-scope yano-system` publishes/subscribes (status, commands, responses, roles, teams, LWT) on `pi/yano-system/**` (used by the global system services: scheduler, watcher, feedback, auto-improver, feedback). The scope is used verbatim in MQTT topic names: avoid spaces or `/` unless a nested topic is intended. `yano start` resolves the root identity and passes the canonical slug explicitly to the child `pi` process, so an auto-loaded extension from a different installation cannot silently choose a shared/default namespace; a human display name belonging to the same root is normalized to that slug even when it appears in a generated command. The runtime also validates both the status topic and the `project` field in every retained presence card before adding it to the roster. An explicit scope override is reported at startup when it differs from the scope derived by the current project root; all instances that must collaborate must use the same value. The watcher also inspects session-start trace records and reports `project_scope_mismatch` when a worker from the root joins the wrong namespace.
 
 ## Main flow
 
@@ -95,7 +108,7 @@ yano repair --all-projects --yes --update
 ```
 
 This inventories active Herdr project roots and the persistent registries of
-the read-only external workers (`debugger`, `auto-improver` and `suggester`),
+the read-only external workers (`feedback`, `auto-improver` and `feedback`),
 then repairs projects one at a time. Each project gets its own snapshot and
 the update is performed once before the sequence. Workers that are deliberately
 `paused` or `stopped` are not resurrected; a worker with an active registry and
@@ -138,9 +151,9 @@ snapshot:
 ```text
 yano architect projects
 yano watcher projects
-yano debugger projects
+yano feedback projects
 yano auto-improve projects
-yano suggester projects
+yano feedback projects
 ```
 
 Per includere anche proposte e registrazioni offline usa `--all`; per script
@@ -304,13 +317,13 @@ development checkout `.env`, or from the global user configuration for a
 global-only installation. It is never read from the watched project or a CLI
 override. If a detected Yano defect needs it and it is missing, the command
 returns an actionable configuration error instead of silently losing the
-maintenance ticket. The future `yano-debugger` can consume these files; until
+maintenance ticket. The future `yano-feedback` can consume these files; until
 then they are deliberately ordinary Markdown tickets for an LLM.
 
 Two further guards keep escalation signal rather than noise (`scripts/yano-watcher-findings.mjs`).
 First, a project name matching the fixture convention Yano's own smoke tests
 use (`*-smoke`, `manual-e2e-*`/`manual e2e *`, case-insensitive) never opens a
-maintenance ticket, Telegram alert or debugger-registry bug — the finding
+maintenance ticket, Telegram alert or feedback-registry bug — the finding
 still lands in that project's own trace as `yano_watcher_finding_suppressed`
 for observability. This is a heuristic, overridable with
 `YANO_WATCHER_TEST_FIXTURE_PATTERN` (a custom regex) and disable-able entirely
@@ -319,7 +332,7 @@ that never recurs (same fingerprint never seen again, including on a later
 dedup hit) for `YANO_WATCHER_STALE_TICKET_DAYS` (default 14) is automatically
 marked `auto-closed-stale` by a throttled sweep (`YANO_WATCHER_STALE_SWEEP_INTERVAL_MS`,
 default six hours) that runs as part of the ordinary polling pass — it never
-touches a human- or debugger-authored ticket, or one already resolved. Every
+touches a human- or feedback-authored ticket, or one already resolved. Every
 dedup hit on an open ticket also bumps a `last_seen_at` timestamp; if the same
 fault recurs after auto-close, the next dedup hit reopens the ticket instead
 of silently dropping the signal.
@@ -339,7 +352,7 @@ when necessary, and then forwards the command. A persistent watcher is
 registered only by an explicit watcher command and remains scoped to the
 project/options selected by the operator; starting a planner with `yano start`
 does not implicitly create one.
-The registry services (`debugger`, `suggester` and `auto-improver`) use the same
+The registry services (`feedback`, `feedback` and `auto-improver`) use the same
 router for their planner handoffs; their completion or bug notifications also
 cannot disappear silently when the intended worker or planner is offline.
 
@@ -355,8 +368,8 @@ cross-checks every registry row against Herdr, and self-heals dead watcher
 panes; explicit `paused` rows are never restarted.
 It also restores global worker intent: installed Architect proposals are resumed
 through their project-scoped ephemeral phase and, after promotion, their global
-phase; `running` debugger workers are resumed when their exact instance is
-absent; pending Suggester analyses are dispatched again; and an enabled
+phase; `running` feedback workers are resumed when their exact instance is
+absent; pending feedback analyses are dispatched again; and an enabled
 auto-improver restores both its scheduler and its persisted idle tab without
 starting a premature audit.
 The same reconciliation checks project-local SQLite runs: non-finalized runs
@@ -410,32 +423,40 @@ session operation and invokes Pi's native `ctx.compact()`, recording
 compaction reloads the effective context and resumes the same Yano work with
 SQLite/run/ticket state intact. This path is intentionally playbook-agnostic.
 
-### Global `yano-debugger`
+### Global `yano-feedback`
 
-`yano debugger` è il secondo agente esterno e vive fuori dal workspace del
-progetto, nel workspace Herdr globale `yano-debugger`, con una tab per ogni
-progetto registrato, nominata `debugger-<project-name>`. Il registro `debugger/debugger.sqlite` contiene progetto,
+`yano feedback` è il secondo agente esterno e vive fuori dal workspace del
+progetto, nel workspace Herdr globale `yano-feedback`, con una tab per ogni
+progetto registrato, nominata `feedback-<project-name>`. Il registro `feedback/feedback.sqlite` contiene progetto,
 worker, bug, transizioni e audit; gli eventi vengono duplicati nel trace del
 progetto per consentire la diagnosi contestuale. La modalità `project` è
 separata da `yano-maintenance`, che può puntare solo al repository
 `yano-orchestrator`.
 
-Il debugger esterno è esclusivamente diagnostico: il suo lifecycle è
+Il feedback esterno è esclusivamente diagnostico: il suo lifecycle è
 `reported → triaged → reproducing → not_reproducible|blocked`. Legge trace,
 log, stato Git e superfici applicative osservabili, ma non modifica codice,
-test, configurazioni, worktree o deployment. Un report del debugger viene
+test, configurazioni, worktree o deployment. Un report del feedback viene
 consegnato al planner, che decide se aprire un normale task di sviluppo e
 delegarlo a coder/reviewer/deployment-agent. Le vecchie transizioni
-`fixing/testing/staging/production` non appartengono più al debugger.
+`fixing/testing/staging/production` non appartengono più al feedback.
 
 Le porte vengono assegnate con la stessa base nei tre ambienti:
 backend `3000–3999`, `4000–4999`, `5000–5999`; frontend `6000–6999`,
 `7000–7999`, `8000–8999`.
 Per una verifica bounded e read-only è disponibile
-`yano debugger start --project-root <dir> --once`; non apre Herdr e non avvia
+`yano feedback start --project-root <dir> --once`; non apre Herdr e non avvia
 processi persistenti.
 
 ### Global `yano-auto-improver`
+
+Il ruolo `auto-improver` è associato al playbook globale
+`auto-improvement-360`. Il flusso conserva checkpoint sequenziali per
+preflight e modalità, report precedenti, evidence pack, performance/
+architettura, backend/API/dati, frontend/UX condizionale, prodotto,
+micro-validazione, scoring/deduplicazione, report e handoff al planner. Ogni
+opinione ha score e confidenza su 10; fatti, inferenze e ipotesi sono separati
+e l'assenza di evidenza non viene trasformata in un finding.
 
 `yano auto-improve` registra un progetto nel database globale
 `<YANO_DATA_DIR>/auto-improver/auto-improver.sqlite`, crea audit periodici (per default
@@ -463,24 +484,24 @@ Comandi principali: `init`, `start`, `run`, `status`, `reports`, `pause`,
 composizione del worker senza aprire Herdr. `yano auto-improve run|start
 --once` esegue un solo audit e non avvia lo scheduler detached.
 
-### Global `yano-suggester`
+### Global `yano-feedback`
 
-`yano suggester` è un osservatore globale read-only. Registra i suggerimenti in
-`<YANO_DATA_DIR>/suggester/suggester.sqlite`, conserva evidence pack e report sotto
-`<YANO_DATA_DIR>/suggester/` e usa il workspace Herdr `yano-suggester`, con una tab
-`suggester-<project-name>` per progetto. La v1 offre intake CLI, redazione di segreti, fingerprint esatto,
+`yano feedback` è un osservatore globale read-only. Registra i suggerimenti in
+`<YANO_DATA_DIR>/feedback/feedback.sqlite`, conserva evidence pack e report sotto
+`<YANO_DATA_DIR>/feedback/` e usa il workspace Herdr `yano-feedback`, con una tab
+`feedback-<project-name>` per progetto. La v1 offre intake CLI, redazione di segreti, fingerprint esatto,
 analisi bounded e lifecycle `received → analyzing → awaiting_approval →
 accepted|rejected`.
 
 Una proposta resta in attesa del superadmin: `approve` è il solo passaggio che
 può notificare il planner via MQTT e canali configurati. Il planner decide se
-chiedere chiarimenti o avviare `to-spec → to-tickets`; il suggester non modifica
+chiedere chiarimenti o avviare `to-spec → to-tickets`; il feedback non modifica
 codice, test, dati, configurazioni, ticket operativi o deployment. FAB/HTTP,
 auth, rate limiting e deduplicazione semantica sono roadmap, non capacità v1.
 
 La distinzione tra v1 e sviluppi successivi di tutti gli agenti esterni è
 registrata in [`docs/notes/agents/external-agents-roadmap.md`](../notes/agents/external-agents-roadmap.md).
-`yano suggester start|submit --once` consente un test bounded; `--dry-run`
+`yano feedback start|submit --once` consente un test bounded; `--dry-run`
 evita l'apertura del worker Herdr.
 
 ### Global `yano-architect`
@@ -537,7 +558,7 @@ attuale.
 
 ### Deployment agent
 
-Il `deployment-agent` è un worker distinto dal debugger applicativo. Il suo
+Il `deployment-agent` è un worker distinto dal feedback applicativo. Il suo
 Playbook `deployment-delivery` governa il percorso `development_ready →
 staging_packaged → staging_validated → production_approved →
 production_deployed`. Development resta codice sorgente nella checkout

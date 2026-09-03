@@ -1,7 +1,7 @@
 # Yano Scheduler — job ricorrenti a script (script-first)
 
 ```bash
-# Registra uno schedule che esegue LO SCRIPT registrato (mode self|planner:<progetto>|computer-locale)
+# Registra uno schedule che esegue LO SCRIPT registrato (mode self|planner:<progetto>|yano-local-pc)
 yano schedule add --name <nome> --project-root "$PWD" --script <path> --mode self --cron '0 14,21 * * *' --expected-consequence "riepilogo inviato"
 yano schedule add --name backuppone-shot --project-root "$PWD" --script <path> --mode self --cron '0 0 * * *' --once
 
@@ -16,7 +16,7 @@ yano schedule remove --id <job-id>
 
 # Bridge deterministico chiamabile DENTRO gli script
 yano invoke --role planner:<progetto> --prompt "riepiloga lo stato" --project-root "$PWD"
-yano invoke --role computer-locale --prompt "promemoria tra 10 minuti: pausa caffè"
+yano invoke --role yano-local-pc --prompt "promemoria tra 10 minuti: pausa caffè"
 
 # Sintassi storica in linguaggio naturale (job legacy, dispatch planner col testo)
 yano cron --add "ogni giorno alle 14 e alle 21 esegui la pulizia del progetto" --project-root "$PWD"

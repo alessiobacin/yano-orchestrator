@@ -88,7 +88,7 @@ const commandReference = read("skills-vendor/yano/yano-cli/references/command-re
 for (const command of [
 	"yano init", "yano start", "yano doctor", "yano update", "yano end", "yano projects",
 	"yano gantt", "yano watch", "yano trace", "yano repair", "yano config", "yano data",
-	"yano architect", "yano debugger", "yano auto-improve", "yano suggester", "yano playbook", "yano agent",
+	"yano architect", "yano auto-improve", "yano feedback", "yano playbook", "yano agent",
 	"yano cron",
 ]) if (!commandReference.includes(command)) failures.push(`command-reference.md: manca ${command}`);
 

@@ -35,15 +35,15 @@ In questo repository la migrazione è già stata eseguita: la directory `quick_g
 ## Job ricorrenti
 
 Lo scheduler è **script-first**: `yano schedule add --name <nome> --project-root
-<dir> --script <path> --mode <self|planner:<progetto>|computer-locale>
+<dir> --script <path> --mode <self|planner:<progetto>|yano-local-pc>
 [--cron '...'] [--once] [--timeout-ms N] [--expected-consequence <testo>]`
 registra un job che al trigger esegue LO SCRIPT registrato (mai shell; folder
 persistente utente `<data>/scheduler/scripts/`). `yano schedule run <id>` testa
 lo script subito (obbligatorio prima di renderlo ricorrente); `yano schedule
 list` mostra i campi del job (script_path, mode, expected_consequence, stato).
 Il routing LLM avviene DENTRO lo script via `yano invoke --role
-<planner[:<scope>]|computer-locale> --prompt "..."` (planner di progetto o
-computer-locale). `yano cron` resta il CRUD legacy per i job testo+cron
+<planner[:<scope>]|yano-local-pc> --prompt "..."` (planner di progetto o
+yano-local-pc). `yano cron` resta il CRUD legacy per i job testo+cron
 (`--add` frase naturale, `--list`, `--remove <id>`, `--enable <id>`,
 `--disable <id>`, `--run <id>`): dispatch planner col testo come in passato.
 Il cron di sistema esegue ogni minuto `yano schedule tick|supervise` (o

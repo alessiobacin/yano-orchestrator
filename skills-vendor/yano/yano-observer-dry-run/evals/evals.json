@@ -10,7 +10,7 @@
     {
       "id": 2,
       "prompt": "Simula la risposta a questa richiesta feature, senza registrarla davvero.",
-      "expected_output": "Usa solo un percorso suggester completamente dry-run oppure segnala il limite della CLI.",
+      "expected_output": "Usa solo un percorso feedback completamente dry-run oppure segnala il limite della CLI.",
       "files": []
     },
     {

@@ -128,7 +128,7 @@ un controllo esplicito e deve riportare evidenze, non dichiarare il flusso sano
 solo perché il processo di polling è vivo.
 
 Ad ogni passata il supervisore esegue inoltre un health check deterministico dei
-servizi persistenti (`watcher-service`, `debugger-service` e `scheduler-service`):
+servizi persistenti (`watcher-service`, `feedback-service` e `scheduler-service`):
 verifica workspace/tab/pane, processo Pi foreground e stato effettivo Herdr con
 `agent explain`. Questo controllo non usa token né chiama un modello. Se uno dei
 segnali non è coerente, il supervisore chiude e ricrea soltanto il servizio
@@ -161,7 +161,7 @@ sotto), non "dovrebbe essere attivo ma non lo è più".
 
 `yano watcher init|start|status|pause|resume|leave` chiude questo buco con un
 piccolo registro persistente (stessa logica già in uso per
-`yano debugger init|start|pause|resume`, vedi `docs/quick-guides/yano-debugger.md`):
+`yano feedback init|start|pause|resume`, vedi `docs/quick-guides/yano-feedback.md`):
 
 ~~~bash
 yano watcher init --project-root /path/progetto --interval-ms 300000 --lookback-ms 3600000
@@ -234,9 +234,9 @@ ticket e worktree da verificare. Quando tutti i run risultano finalizzati, la
 tab `watcher-<project>` resta aperta senza generare recovery. Una pausa esplicita
 resta rispettata. Nella stessa passata il supervisore ripristina anche i worker
 globali con intento durevole: proposte Architect installate, anche nella fase
-`ready_ephemeral`, debugger `running`, analisi Suggester pendenti e lo
+`ready_ephemeral`, feedback `running`, analisi feedback pendenti e lo
 scheduler dell'auto-improver. Per un auto-improver `idle` ricrea anche la sua
-tab persistente senza avviare un audit prima della scadenza; il Suggester resta
+tab persistente senza avviare un audit prima della scadenza; il feedback resta
 senza tab finché non esiste una proposta pendente.
 
 ## Watcher LLM per un playbook ephemeral
@@ -324,7 +324,7 @@ contiene `yano_watcher_final_scan_requested` e lo scan finale con `once: true`.
 
 Un progetto il cui nome segue la convenzione delle fixture degli smoke test di
 Yano (`*-smoke`, `manual-e2e-*`/`manual e2e *`, case-insensitive) non apre mai
-un ticket, un alert Telegram o un bug nel registro debugger: il finding resta
+un ticket, un alert Telegram o un bug nel registro feedback: il finding resta
 comunque visibile nel trace di quel progetto come
 `yano_watcher_finding_suppressed`. È un'euristica sui nomi, non sul percorso:
 personalizzabile con `YANO_WATCHER_TEST_FIXTURE_PATTERN` (una regex) o
@@ -359,20 +359,20 @@ yano trace events \
 ```
 
 Ogni ticket markdown appena creato (non un duplicato) viene anche instradato,
-in modo additivo, nel registro `yano-debugger` in modalità `yano-maintenance`
+in modo additivo, nel registro `yano-feedback` in modalità `yano-maintenance`
 (scoped al repository yano-orchestrator, mai al progetto osservato):
 
 ```bash
-yano debugger status --project-root "$YANO_ORCHESTRATOR_REPO" --mode yano-maintenance --json
+yano feedback status --project-root "$YANO_ORCHESTRATOR_REPO" --mode yano-maintenance --json
 ```
 
 Questo dà al difetto "Yano su Yano" lo stesso ciclo di vita, la stessa
-deduplicazione e lo stesso risveglio automatico di un debugger/planner live
-(vedi "Chi guarda il bug appena aperto" in `docs/quick-guides/yano-debugger.md`) che ha
+deduplicazione e lo stesso risveglio automatico di un feedback/planner live
+(vedi "Chi guarda il bug appena aperto" in `docs/quick-guides/yano-feedback.md`) che ha
 qualunque altro bug — senza sostituire il file markdown, che resta il
 meccanismo primario. Un fallimento nell'instradamento (registro non
 raggiungibile, sqlite non disponibile) non blocca mai la creazione del
 ticket markdown.
 
 Il watcher non corregge, non chiude ticket e non modifica il codice: segnala e
-prepara il contesto per il futuro `yano-debugger` o per un LLM incaricato.
+prepara il contesto per il futuro `yano-feedback` o per un LLM incaricato.

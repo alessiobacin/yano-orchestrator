@@ -7,7 +7,7 @@ flowchart TD
     OBS --> GANTT_PORTS["Gantt per progetto\nporta automatica libera\n10000-19999"]
     GANTT_PORTS --> GANTT_REGISTRY["--persistent\n--link / --links\nYANO_DATA_DIR/gantt/instances.json"]
     CLI --> PROJECTS["projects\nglobal live-project count\ndeduplicated Herdr roots"]
-    CLI --> EXT_STATUS["architect|watcher|debugger|auto-improve|suggester projects\nactive vs registered"]
+    CLI --> EXT_STATUS["architect|watcher|feedback|auto-improve|feedback projects\nactive vs registered"]
     CLI --> RELOAD["update --reload\ncontrolled restart"]
     CLI --> REPAIR["repair\nsnapshot + Herdr agent start\nreconcile + stale singleton cleanup"]
     CLI --> REPAIR_ALL["repair --all-projects\nsequential global sweep"]
@@ -109,11 +109,11 @@ flowchart TD
         SENDGRID["SendGrid email"]
     end
 
-    subgraph YANO_DEBUGGER["Global debugger boundary"]
-        DEBUGGER["yano-debugger\nbug intake + lifecycle"]
+    subgraph YANO_feedback["Global feedback boundary"]
+        feedback["yano-feedback\nbug intake + lifecycle"]
         DEBUG_ONCE["start --once\nread-only preflight"]
-        DEBUG_DB["debugger.sqlite\nprojects / bugs / events"]
-        DEBUG_WS["Herdr workspace\nyano-debugger\ntab: debugger-<project-name>"]
+        DEBUG_DB["feedback.sqlite\nprojects / bugs / events"]
+        DEBUG_WS["Herdr workspace\nyano-feedback\ntab: feedback-<project-name>"]
         ENVIRONMENTS["dev / staging / production\npaired port ranges"]
     end
 
@@ -125,13 +125,13 @@ flowchart TD
         AUTO_REPORTS["auto-improver/\nevidence + reports"]
     end
 
-    subgraph YANO_SUGGESTER["Global suggester boundary"]
-        SUGGESTER["yano-suggester\nread-only intake + proposal"]
-        SUGGESTER_ONCE["start|submit --once\nbounded test"]
-        SUGGESTER_DB["suggester.sqlite\nprojects / suggestions / approvals"]
-        SUGGESTER_WS["Herdr workspace\nyano-suggester\ntab: suggester-<project-name>"]
-        SUGGESTER_REPORTS["suggester/\nevidence + reports"]
-        SUGGESTER_GATE["superadmin approval gate"]
+    subgraph YANO_feedback["Global feedback boundary"]
+        feedback["yano-feedback\nread-only intake + proposal"]
+        feedback_ONCE["start|submit --once\nbounded test"]
+        feedback_DB["feedback.sqlite\nprojects / suggestions / approvals"]
+        feedback_WS["Herdr workspace\nyano-feedback\ntab: feedback-<project-name>"]
+        feedback_REPORTS["feedback/\nevidence + reports"]
+        feedback_GATE["superadmin approval gate"]
     end
 
     subgraph YANO_ARCHITECT["Global architect boundary"]
@@ -201,14 +201,14 @@ flowchart TD
     CLI --> WATCHER_ONCE
     WATCHER_ONCE --> WATCHER
     WATCHER --> WATCHER_ONCE
-    CLI --> DEBUGGER
+    CLI --> feedback
     CLI --> DEBUG_ONCE
-    DEBUG_ONCE --> DEBUGGER
-    DEBUGGER --> DEBUG_DB
-    DEBUGGER --> DEBUG_WS
-    DEBUGGER --> ENVIRONMENTS
+    DEBUG_ONCE --> feedback
+    feedback --> DEBUG_DB
+    feedback --> DEBUG_WS
+    feedback --> ENVIRONMENTS
     DEBUG_DB --> TRACE
-    DEBUGGER --> PLANNER
+    feedback --> PLANNER
     CLI --> AUTO_IMPROVER
     CLI --> AUTO_ONCE
     AUTO_ONCE --> AUTO_IMPROVER
@@ -221,18 +221,18 @@ flowchart TD
     AUTO_IMPROVER --> SENDGRID
     AUTO_DB --> PLANNER
     AUTO_REPORTS --> PLANNER
-    CLI --> SUGGESTER
-    CLI --> SUGGESTER_ONCE
-    SUGGESTER_ONCE --> SUGGESTER
-    SUGGESTER --> SUGGESTER_DB
-    SUGGESTER --> SUGGESTER_WS
-    SUGGESTER --> SUGGESTER_REPORTS
-    SUGGESTER --> TELEGRAM
-    SUGGESTER --> WHATSAPP
-    SUGGESTER --> SENDGRID
-    SUGGESTER_DB --> SUGGESTER_GATE
-    SUGGESTER_REPORTS --> SUGGESTER_GATE
-    SUGGESTER_GATE --> PLANNER
+    CLI --> feedback
+    CLI --> feedback_ONCE
+    feedback_ONCE --> feedback
+    feedback --> feedback_DB
+    feedback --> feedback_WS
+    feedback --> feedback_REPORTS
+    feedback --> TELEGRAM
+    feedback --> WHATSAPP
+    feedback --> SENDGRID
+    feedback_DB --> feedback_GATE
+    feedback_REPORTS --> feedback_GATE
+    feedback_GATE --> PLANNER
     CLI --> ARCHITECT
     CLI --> ARCHITECT_ONCE
     ARCHITECT_ONCE --> ARCHITECT_GATE
@@ -296,7 +296,7 @@ flowchart TD
     REPAIR_ALL --> REPAIR
     REPAIR_ALL --> DEBUG_DB
     REPAIR_ALL --> AUTO_DB
-    REPAIR_ALL --> SUGGESTER_DB
+    REPAIR_ALL --> feedback_DB
     SQLITE --> GATES
     GATES --> COMMANDS
     WATCHDOG --> PLANNER
@@ -312,6 +312,6 @@ flowchart TD
     classDef durable fill:#253b2b,stroke:#7ec488,color:#e5e7eb
     classDef risk fill:#3a1f1f,stroke:#e06c75,color:#e5e7eb
     class USER user
-    class CLI,INIT,OBS,PLANNER,GATES,FINALIZE,MERGE,RELOAD,REPAIR,REPAIR_ALL,BARRIER,DEBUGGER,DEPLOY_AGENT,ARCHITECT,ARCHITECT_ASSESS,ARCHITECT_INTERVIEW,ARCHITECT_TEAM,ARCHITECT_VARIANT control
-    class SQLITE,WORKTREES,REPORTS,TRACE,TRACE_MEMORY,TRACE_LINKS,PROJECTIONS,TRACE_CONFIG,SNAPSHOT,DEBUG_DB,DEBUG_WS,ENVIRONMENTS,AUTO_DB,AUTO_WS,AUTO_REPORTS,SUGGESTER_DB,SUGGESTER_WS,SUGGESTER_REPORTS,SUGGESTER_GATE,ARCHITECT_DB,ARCHITECT_WS,ARCHITECT_EPHEMERAL,ARCHITECT_CATALOG,DEPLOY_PLAYBOOK,DEV_SOURCE,DOCKER_ENVS,RELEASE durable
+    class CLI,INIT,OBS,PLANNER,GATES,FINALIZE,MERGE,RELOAD,REPAIR,REPAIR_ALL,BARRIER,feedback,DEPLOY_AGENT,ARCHITECT,ARCHITECT_ASSESS,ARCHITECT_INTERVIEW,ARCHITECT_TEAM,ARCHITECT_VARIANT control
+    class SQLITE,WORKTREES,REPORTS,TRACE,TRACE_MEMORY,TRACE_LINKS,PROJECTIONS,TRACE_CONFIG,SNAPSHOT,DEBUG_DB,DEBUG_WS,ENVIRONMENTS,AUTO_DB,AUTO_WS,AUTO_REPORTS,feedback_DB,feedback_WS,feedback_REPORTS,feedback_GATE,ARCHITECT_DB,ARCHITECT_WS,ARCHITECT_EPHEMERAL,ARCHITECT_CATALOG,DEPLOY_PLAYBOOK,DEV_SOURCE,DOCKER_ENVS,RELEASE durable
     class WATCHDOG,ADAPTERS,WATCHER,ARCHITECT_GATE risk

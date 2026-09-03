@@ -11,7 +11,7 @@ import { createRequire } from "node:module";
 import { projectKey, resolveTraceProject, traceRoot } from "./yano-trace-storage.mjs";
 
 const require = createRequire(import.meta.url);
-const ROLES = new Set(["architect", "watcher", "debugger", "auto-improver", "suggester"]);
+const ROLES = new Set(["architect", "watcher", "auto-improver"]);
 const TERMINAL_WORKER_STATES = new Set(["", "stopped", "paused", "rejected", "completed", "done", "blocked", "offline"]);
 
 function has(argv, flag) { return argv.includes(flag); }
@@ -58,8 +58,6 @@ function roleFromIdentifier(identifier) {
 	if (text.includes("architect")) return "architect";
 	if (text.includes("yano-watcher") || text.startsWith("watcher")) return "watcher";
 	if (text.includes("auto-improver")) return "auto-improver";
-	if (text.includes("suggester")) return "suggester";
-	if (text.includes("debugger")) return "debugger";
 	return null;
 }
 
@@ -136,9 +134,7 @@ function registryRows(includeInactive = false) {
 	const root = traceRoot();
 	const rows = [];
 	const registries = [
-		{ role: "debugger", source: "debugger", file: path.join(root, "debugger", "debugger.sqlite"), table: "debugger_projects", status: "worker_status", instance: "worker_instance", workspace: "workspace_id", tab: "worker_tab_id", pane: "worker_pane_id" },
 		{ role: "auto-improver", source: "auto-improver", file: path.join(root, "auto-improver", "auto-improver.sqlite"), table: "auto_projects", status: "worker_status", instance: "worker_instance", workspace: "workspace_id", tab: "worker_tab_id", pane: "worker_pane_id" },
-		{ role: "suggester", source: "suggester", file: path.join(root, "suggester", "suggester.sqlite"), table: "suggester_projects", status: "worker_status", instance: "worker_instance", workspace: "workspace_id", tab: "worker_tab_id", pane: "worker_pane_id" },
 	];
 	for (const registry of registries) {
 		for (const row of readRows(registry.file, registry.table)) {

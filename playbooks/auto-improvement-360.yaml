@@ -1,0 +1,78 @@
+schema_version: 1
+id: auto-improvement-360
+label: Sequential 360-degree improvement audit
+description: >-
+  Read-only, evidence-first audit that executes the yano-auto-improvement
+  skill in bounded sequential phases and hands a scored, deduplicated report
+  to the project planner.
+catalog:
+  scope: global
+  reusable: true
+  intents:
+    - auto-improve
+    - improvement report
+    - performance audit
+    - UX review
+    - feature roadmap
+    - full-stack audit
+  exclusions:
+    - project implementation
+    - dependency installation
+    - ticket creation by the auto-improver
+    - deployment
+  parameters:
+    - project_name
+    - project_root
+    - variant
+enforcement:
+  status: partial
+  note: The phase order and checkpoints are contractual; the planner and auto-improver enforce them while the runtime validates the playbook shape.
+states:
+  - {id: received, owner: planner, terminal: false}
+  - {id: preflight, owner: auto-improver, terminal: false}
+  - {id: project_mode, owner: auto-improver, terminal: false}
+  - {id: existing_improvements, owner: auto-improver, terminal: false}
+  - {id: evidence_collection, owner: auto-improver, terminal: false}
+  - {id: performance_architecture, owner: auto-improver, terminal: false}
+  - {id: backend_api_data, owner: auto-improver, terminal: false}
+  - {id: frontend_ux, owner: auto-improver, terminal: false}
+  - {id: product_features, owner: auto-improver, terminal: false}
+  - {id: micro_validation, owner: auto-improver, terminal: false}
+  - {id: scoring_deduplication, owner: auto-improver, terminal: false}
+  - {id: report, owner: auto-improver, terminal: false}
+  - {id: awaiting_planner, owner: planner, terminal: false}
+  - {id: completed, owner: planner, terminal: true}
+  - {id: blocked, owner: planner_and_human, terminal: true}
+transitions:
+  - {id: begin, from: received, to: preflight, actor: planner, requires: [objective_received, project_root_confirmed]}
+  - {id: detect_mode, from: preflight, to: project_mode, actor: auto-improver, requires: [evidence_pack_requested, bounded_read_only_scope]}
+  - {id: index_previous, from: project_mode, to: existing_improvements, actor: auto-improver, requires: [mode_detected, mode_evidence_recorded]}
+  - {id: collect_evidence, from: existing_improvements, to: evidence_collection, actor: auto-improver, requires: [improvement_index_ready]}
+  - {id: audit_performance, from: evidence_collection, to: performance_architecture, actor: auto-improver, requires: [evidence_pack_ready]}
+  - {id: audit_backend, from: performance_architecture, to: backend_api_data, actor: auto-improver, requires: [performance_section_complete]}
+  - {id: audit_frontend, from: backend_api_data, to: frontend_ux, actor: auto-improver, requires: [backend_section_complete, frontend_applicable_or_not_applicable_recorded]}
+  - {id: audit_product, from: frontend_ux, to: product_features, actor: auto-improver, requires: [frontend_section_complete]}
+  - {id: validate, from: product_features, to: micro_validation, actor: auto-improver, requires: [product_section_complete]}
+  - {id: score_and_dedupe, from: micro_validation, to: scoring_deduplication, actor: auto-improver, requires: [validation_limits_recorded]}
+  - {id: write_report, from: scoring_deduplication, to: report, actor: auto-improver, requires: [all_findings_scored, duplicates_resolved, no_invention_check_passed]}
+  - {id: handoff, from: report, to: awaiting_planner, actor: auto-improver, requires: [report_persisted, completion_command_succeeded, handoff_summary_ready]}
+  - {id: accept, from: awaiting_planner, to: completed, actor: planner, requires: [planner_acknowledged]}
+  - {id: block, from: [preflight, evidence_collection, report, awaiting_planner], to: blocked, actor: planner_and_human, requires: [blocker_recorded, partial_report_persisted]}
+failure_routes:
+  - {condition: project_unavailable, action: record_blocker_and_pause, terminal: true}
+  - {condition: missing_mode_or_evidence, action: record_unknown_and_continue_or_block, terminal: false}
+  - {condition: web_sources_unavailable, action: record_search_limits_without_invention, terminal: false}
+  - {condition: report_collision, action: preserve_previous_report_and_request_new_audit_id, terminal: false}
+  - {condition: three_handoff_failures, action: escalate_to_human_keep_report, terminal: true}
+invariants:
+  - {id: read_only_project, description: The auto-improver never mutates the observed project.}
+  - {id: sequential_checkpoints, description: Each phase persists its checkpoint before the next phase starts.}
+  - {id: no_invention, description: Unknown facts remain explicitly unknown and are never presented as findings.}
+  - {id: every_opinion_scored, description: Every opinion, finding and recommendation has score X/10, rationale and confidence X/10.}
+  - {id: evidence_classified, description: Every conclusion is FACT, INFERENCE or HYPOTHESIS with references or a stated limitation.}
+  - {id: existing_improvements_reviewed, description: Previous improvement reports are indexed before proposing new work.}
+  - {id: no_duplicate_recommendations, description: Duplicate and superseded proposals are marked and excluded from the new action list.}
+  - {id: frontend_scope_guard, description: Frontend findings are omitted when frontend is not applicable and the decision is recorded.}
+  - {id: planner_owns_action, description: Only the planner routes accepted findings to implementation agents.}
+  - {id: report_persisted, description: Completion is possible only after the authorized global report is persisted through yano auto-improve complete.}
+  - {id: bounded_audit, description: File, command, web and token budgets remain bounded and read-only.}

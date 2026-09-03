@@ -96,7 +96,7 @@ async function main() {
 	routeObserver.on("message", (_topic, payload) => { try { plannerCommands.push(JSON.parse(payload.toString())); } catch { /* ignore */ } });
 
 	console.log("\n=== TEST 1 — target offline, planner live: route to planner ===");
-	const routed = await coder.tools.get("agent_send").execute("route-1", { target_instance: "debugger-01", prompt: "diagnosi QA non consegnata" });
+	const routed = await coder.tools.get("agent_send").execute("route-1", { target_instance: "human-01", prompt: "diagnosi QA non consegnata" });
 	ok(routed.details.route === "planner", "agent_send routes an unavailable target to the live planner");
 	ok(routed.details.fallback_target === "planner-01", "fallback records the exact planner instance");
 	ok(coder.entries.some((entry) => entry.data?.event === "outbound_command"), "sender keeps an assignment id for the original delegation");
@@ -108,10 +108,10 @@ async function main() {
 		type: "agent_route_fallback",
 		fallback_id: "watcher-forward-1",
 		project,
-		original_target: "debugger-01",
-		original: { type: "command", assignment_id: "watcher-forward-1", sender_instance: "worker-01", sender_role: "coder", project, project_key: scope, target_instance: "debugger-01", prompt: "messaggio conservato dal watcher", reply_to: `pi/${scope}/agents/worker-01/responses`, hops: 0 },
+		original_target: "human-01",
+		original: { type: "command", assignment_id: "watcher-forward-1", sender_instance: "worker-01", sender_role: "coder", project, project_key: scope, target_instance: "human-01", prompt: "messaggio conservato dal watcher", reply_to: `pi/${scope}/agents/worker-01/responses`, hops: 0 },
 	} });
-	ok(plannerCommands.some((message) => message.fallback_for === "debugger-01" && message.assignment_id === "watcher-forward-1"), "watcher forwards a retained fallback to the live planner with original correlation");
+	ok(plannerCommands.some((message) => message.fallback_for === "human-01" && message.assignment_id === "watcher-forward-1"), "watcher forwards a retained fallback to the live planner with original correlation");
 
 	console.log("\n=== TEST 2 — target offline, no planner live: publish watcher fallback ===");
 	await planner.hooks.get("session_shutdown")({}, fakeContext(cwd));
@@ -122,11 +122,11 @@ async function main() {
 	await new Promise((resolve, reject) => { observer.once("connect", resolve); observer.once("error", reject); });
 	await observer.subscribeAsync(`pi/${project}-watcher/system/agent-fallback`, { qos: 1 });
 	observer.on("message", (_topic, payload) => { try { received.push(JSON.parse(payload.toString())); } catch { /* clear retained */ } });
-	const fallback = await sender.tools.get("agent_send").execute("route-2", { target_instance: "debugger-01", prompt: "delega da recuperare" });
+	const fallback = await sender.tools.get("agent_send").execute("route-2", { target_instance: "human-01", prompt: "delega da recuperare" });
 	ok(fallback.details.route === "watcher", "agent_send routes to the watcher when no planner is live");
 	await waitUntil(() => received.some((message) => message.type === "agent_route_fallback"), "watcher fallback envelope");
 	const envelope = received.find((message) => message.type === "agent_route_fallback");
-	ok(envelope.original_target === "debugger-01", "fallback preserves the intended recipient");
+	ok(envelope.original_target === "human-01", "fallback preserves the intended recipient");
 	ok(envelope.original?.assignment_id === fallback.details.assignment_id, "fallback preserves assignment correlation");
 	ok(envelope.original?.sender_instance === "worker-01", "fallback preserves the original sender");
 

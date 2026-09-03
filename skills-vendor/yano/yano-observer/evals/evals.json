@@ -3,7 +3,7 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "Il debugger ha riprodotto un bug applicativo. Prepara il passaggio al planner senza correggere il progetto.",
+      "prompt": "Il feedback ha riprodotto un bug applicativo. Prepara il passaggio al planner senza correggere il progetto.",
       "expected_output": "Diagnosi read-only con evidenze redatte, nessuna modifica e handoff strutturato al planner.",
       "files": []
     },

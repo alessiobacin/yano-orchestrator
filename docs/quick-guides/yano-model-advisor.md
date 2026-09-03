@@ -9,7 +9,7 @@ di coding e latenza reali del momento, invece di una alias fissa
 (`reasoning-model`/`coding-model`) scelta una volta per tutte.
 
 Questo incremento è solo **libreria + CLI**: non c'è un server REST (a
-differenza di `yano debugger`/`yano auto-improve`/`yano suggester`), perché
+differenza di `yano feedback`/`yano auto-improve`/`yano feedback`), perché
 una singola lookup non richiede nulla di persistente. Il planner legge il
 suggerimento, lo presenta con il roster e lo usa solo dopo la conferma
 dell'utente; se il modello pinnato smette di essere disponibile a metà round

@@ -42,11 +42,9 @@ const YANO_REVIEW_SKILL_ROLES = ["reviewer", "frontend-reviewer"];
 const YANO_DEPLOYMENT_SKILL = "yano-deployment";
 const YANO_DEPLOYMENT_SKILL_ROLES = ["deployment-agent"];
 const YANO_OBSERVER_SKILL = "yano-observer";
-const YANO_OBSERVER_SKILL_ROLES = ["watcher", "debugger", "auto-improver", "suggester"];
+const YANO_OBSERVER_SKILL_ROLES = ["watcher", "auto-improver"];
 const YANO_AUTO_IMPROVEMENT_SKILL = "yano-auto-improvement";
 const YANO_AUTO_IMPROVEMENT_SKILL_ROLES = ["auto-improver"];
-const YANO_SUGGESTER_SKILL = "yano-suggester";
-const YANO_SUGGESTER_SKILL_ROLES = ["suggester"];
 const YANO_ARCHITECT_SKILL = "yano-architect";
 const YANO_ARCHITECT_SKILL_ROLES = ["architect"];
 const CHROME_DEVTOOLS_SKILL = "chrome-devtools";
@@ -272,44 +270,6 @@ for (const [roleName, cfg] of Object.entries(roles)) {
 }
 console.log("   OK");
 
-console.log("\n15. le skill Yano observer/auto-improvement sono presenti e riservate agli agenti esterni...");
-const yanoObserverSkillPath = path.join(repoRoot, "skills-vendor", "yano", YANO_OBSERVER_SKILL);
-const yanoAutoImprovementSkillPath = path.join(repoRoot, "skills-vendor", "yano", YANO_AUTO_IMPROVEMENT_SKILL);
-const yanoSuggesterSkillPath = path.join(repoRoot, "skills-vendor", "yano", YANO_SUGGESTER_SKILL);
-for (const [name, skillPath] of [[YANO_OBSERVER_SKILL, yanoObserverSkillPath], [YANO_AUTO_IMPROVEMENT_SKILL, yanoAutoImprovementSkillPath], [YANO_SUGGESTER_SKILL, yanoSuggesterSkillPath]]) {
-	assert.ok(existsSync(path.join(skillPath, "SKILL.md")), `${name} deve contenere SKILL.md`);
-	assert.ok(existsSync(path.join(skillPath, "evals", "evals.json")), `${name} deve contenere evals/evals.json`);
-	assert.ok(launcherSrc.includes(`"${name}"`), `launch-planner.mjs deve referenziare ${name}`);
-}
-for (const [roleName, cfg] of Object.entries(roles)) {
-	const declared = cfg.skills ?? [];
-	assert.equal(declared.includes(YANO_OBSERVER_SKILL), YANO_OBSERVER_SKILL_ROLES.includes(roleName), `skill observer non correttamente isolata per '${roleName}'`);
-	assert.equal(declared.includes(YANO_AUTO_IMPROVEMENT_SKILL), YANO_AUTO_IMPROVEMENT_SKILL_ROLES.includes(roleName), `skill auto-improvement non correttamente isolata per '${roleName}'`);
-	assert.equal(declared.includes(YANO_SUGGESTER_SKILL), YANO_SUGGESTER_SKILL_ROLES.includes(roleName), `skill suggester non correttamente isolata per '${roleName}'`);
-}
-const printedDebugger = execFileSync("node", ["scripts/launch-planner.mjs", "--instance", "debugger-check", "--role", "debugger", "--print-only"], { cwd: repoRoot, encoding: "utf8" });
-const printedAutoImprover = execFileSync("node", ["scripts/launch-planner.mjs", "--instance", "auto-improver-check", "--role", "auto-improver", "--print-only"], { cwd: repoRoot, encoding: "utf8" });
-const printedSuggester = execFileSync("node", ["scripts/launch-planner.mjs", "--instance", "suggester-check", "--role", "suggester", "--print-only"], { cwd: repoRoot, encoding: "utf8" });
-const printedWatcher = execFileSync("node", ["scripts/launch-planner.mjs", "--instance", "watcher-check", "--role", "watcher", "--print-only"], { cwd: repoRoot, encoding: "utf8" });
-assert.ok(printedDebugger.includes(yanoObserverSkillPath), "debugger deve ricevere la skill observer");
-assert.ok(!printedDebugger.includes(yanoAutoImprovementSkillPath), "debugger non deve ricevere la skill auto-improvement");
-assert.ok(printedAutoImprover.includes(yanoObserverSkillPath), "auto-improver deve ricevere la skill observer");
-assert.ok(printedAutoImprover.includes(yanoAutoImprovementSkillPath), "auto-improver deve ricevere la skill auto-improvement");
-assert.ok(printedSuggester.includes(yanoObserverSkillPath), "suggester deve ricevere la skill observer");
-assert.ok(printedSuggester.includes(yanoSuggesterSkillPath), "suggester deve ricevere la skill suggester");
-assert.ok(!printedSuggester.includes(yanoAutoImprovementSkillPath), "suggester non deve ricevere la skill auto-improvement");
-assert.ok(printedWatcher.includes(yanoObserverSkillPath), "watcher deve ricevere la skill observer");
-assert.ok(!printedWatcher.includes(yanoAutoImprovementSkillPath), "watcher non deve ricevere la skill auto-improvement");
-assert.ok(!printedWatcher.includes(yanoSuggesterSkillPath), "watcher non deve ricevere la skill suggester");
-assert.equal(roles.debugger.playbook, "observer-audit", "debugger deve usare il playbook read-only observer-audit");
-assert.equal(roles["auto-improver"].playbook, "observer-audit", "auto-improver deve usare il playbook read-only observer-audit");
-assert.equal(roles.suggester.playbook, "suggestion-proposal", "suggester deve usare il playbook suggestion-proposal");
-assert.equal(roles.watcher.playbook, "observer-audit", "watcher deve usare il playbook read-only observer-audit");
-assert.match(read("prompts/debugger.md"), /Non modificare|mai.*modificare/i, "il prompt debugger deve esplicitare il vincolo read-only");
-assert.match(read("prompts/watcher.md"), /read-only|read only|Non modificare/i, "il prompt watcher deve esplicitare il vincolo read-only");
-assert.match(read("skills-vendor/yano/yano-observer/SKILL.md"), /No project mutation|read-only/i, "la skill observer deve esplicitare il vincolo read-only");
-console.log("   OK");
-
 console.log("\n16. la skill Yano architect è presente e riservata all'architect...");
 const yanoArchitectSkillPath = path.join(repoRoot, "skills-vendor", "yano", YANO_ARCHITECT_SKILL);
 assert.ok(existsSync(path.join(yanoArchitectSkillPath, "SKILL.md")), "la skill architect deve contenere SKILL.md");
@@ -342,5 +302,5 @@ assert.match(read("package.json"), /install-yano-cli\.mjs --if-global/, "il pack
 console.log("   OK");
 
 console.log(
-  "\nOK: scripts/check-skill-isolation — skill planner, CLI condivisa, trace, code-review, deployment, observer/auto-improvement/suggester, architect e chrome-devtools risultano cablate correttamente.",
+  "\nOK: scripts/check-skill-isolation — skill planner, CLI condivisa, trace, code-review, deployment, observer/auto-improvement, architect e chrome-devtools risultano cablate correttamente.",
 );

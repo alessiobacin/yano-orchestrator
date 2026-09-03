@@ -20,5 +20,5 @@ repository `yano-orchestrator`.
     tracciano issue e spec in questo repo (`.scratch/<feature-slug>/`,
     nessuna dipendenza da GitHub/GitLab Issues);
   - [`agents/external-agents-roadmap.md`](./agents/external-agents-roadmap.md)
-    — versione corrente e roadmap degli agenti esterni (watcher, debugger,
-    auto-improver, suggester, architect).
+    — versione corrente e roadmap degli agenti esterni (watcher, feedback,
+    auto-improver, feedback, architect).

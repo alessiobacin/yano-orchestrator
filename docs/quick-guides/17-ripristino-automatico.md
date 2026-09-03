@@ -104,8 +104,8 @@ Se l’inventario è corretto, applica il ripristino sequenziale:
 yano repair --all-projects --yes --update
 ~~~
 
-L’operazione include i worker esterni registrati per progetto (`debugger`,
-`auto-improver` e `suggester`) e non riattiva worker esplicitamente in pausa o
+L’operazione include i worker esterni registrati per progetto (`feedback`,
+`auto-improver` e `feedback`) e non riattiva worker esplicitamente in pausa o
 fermati. Ogni progetto riceve uno snapshot separato; il comando non indovina
 la root di un semplice scope MQTT sconosciuto e non modifica il codice.
 

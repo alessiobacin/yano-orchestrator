@@ -1,6 +1,6 @@
 ---
 name: yano-cli
-description: Use this skill whenever a Pi/Yano agent must understand, explain, inspect, or execute the Yano CLI. It maps natural-language requests to safe commands for project initialization, Herdr launches, global active-project counts, agent inventories, watcher/architect/debugger/auto-improver/suggester status, trace analysis, recovery, repair, playbooks, global configuration, data migration, diagnostics, and dashboards.
+description: Use this skill whenever a Pi/Yano agent must understand, explain, inspect, or execute the Yano CLI. It maps natural-language requests to safe commands for project initialization, Herdr launches, global active-project counts, agent inventories, watcher/architect/feedback/auto-improver/feedback status, trace analysis, recovery, repair, playbooks, global configuration, data migration, diagnostics, and dashboards.
 compatibility: Requires the globally installed `yano` CLI and a project root when a command is project-scoped. Herdr is the supported workspace and terminal runtime for Yano agents.
 ---
 
@@ -45,7 +45,7 @@ Use the smallest command that answers the request. Typical translations are:
 | How many Yano projects are active right now? | `yano projects --json` | `project_count`, `projects`, `herdr_reachable` |
 | Is the watcher active for this project? | `yano watcher projects --project-root "$PWD" --json` | `active_projects`, `status`, `instance`, `workspace`, `tab_id` |
 | Which projects does the watcher control? | `yano watcher projects --all --json` | `projects`; `--all` includes registered/offline records |
-| Which external workers are active? | `yano architect projects`, `yano watcher projects`, `yano debugger projects`, `yano auto-improve projects`, `yano suggester projects` | Herdr-live rows are authoritative; registrations are context |
+| Which external workers are active? | `yano architect projects`, `yano watcher projects`, `yano feedback projects`, `yano auto-improve projects`, `yano feedback projects` | Herdr-live rows are authoritative; registrations are context |
 | What agents are live in this project? | `yano fleet --project-root "$PWD" --json` | live MQTT/Herdr agents; stale retained cards are excluded |
 | Open the Gantt for this project | `yano gantt --project-root "$PWD" --persistent --open` | URL and automatically selected free port in `10000-19999` |
 | Recover the current or all persistent Gantt links | `yano gantt --link --json` or `yano gantt --links --json` | registered URL, project root and live/stopped status |
@@ -135,9 +135,9 @@ The canonical status commands are:
 ```text
 yano architect projects [--all] [--project-root <dir>] [--json]
 yano watcher projects [--all] [--project-root <dir>] [--json]
-yano debugger projects [--all] [--project-root <dir>] [--json]
+yano feedback projects [--all] [--project-root <dir>] [--json]
 yano auto-improve projects [--all] [--project-root <dir>] [--json]
-yano suggester projects [--all] [--project-root <dir>] [--json]
+yano feedback projects [--all] [--project-root <dir>] [--json]
 ```
 
 Interpret the result carefully:
@@ -292,7 +292,7 @@ watcher is registered only through an explicit watcher command for the
 selected project/options; `yano start` does not start one implicitly. Agents
 must not silently continue after a missing recipient: the routing result and
 fallback path must be reported to the planner.
-The same router is used by the `debugger`, `suggester` and `auto-improver`
+The same router is used by the `feedback`, `feedback` and `auto-improver`
 registry services for their planner handoffs.
 The global npm installation installs the one-minute external self-heal; it runs
 `yano watcher supervise`, which checks every registered running watcher and
@@ -364,7 +364,7 @@ installation.
   coordinates user approval and delegates project changes.
 - Architect: owns playbook/agent assessment, capability readiness, import,
   provisioning, revision and promotion.
-- Watcher, debugger, auto-improver, suggester: inspect and report within their
+- Watcher, feedback, auto-improver, feedback: inspect and report within their
   separate read-only contracts; they do not mutate the reference application.
 
 `yano auto-improve` costruisce un evidence pack bounded: considera sia gli
@@ -374,6 +374,12 @@ Ogni audit richiede inoltre una valutazione 360° della capability principale
 contro almeno tre alternative, con fonti ufficiali HTTPS, gap su feature,
 UX, LLM/agent, tool/API, MCP, connettori e plugin; il worker usa per questo
 `auto_improve_web_search` e `auto_improve_web_fetch` in sola lettura.
+Il ruolo usa il playbook sequenziale globale `auto-improvement-360`: non si
+passa alla fase successiva senza checkpoint. Le fasi comprendono modalità,
+report precedenti, evidence, performance/architettura, backend/API/dati,
+frontend/UX condizionale, prodotto, micro-validazione, scoring/deduplicazione
+e handoff. Ogni parere richiede score e confidenza su 10; ciò che non è
+verificato va indicato come `UNKNOWN`/`HYPOTHESIS`, mai inventato.
 Ogni audit deve partire da un transcript Pi nuovo: la tab Herdr può essere
 riusata, ma non si deve passare `--continue` a un auto-improver. Il launcher
 deve anche usare la allow-list read-only con `auto_improve_complete` come unica
@@ -398,9 +404,9 @@ not modify project files or finalize a run. To edit the cron entry use
 
 ### Recurring jobs
 
-Two modes coexist. **Script-first (current model)** — `yano schedule add --name <nome> --project-root <dir> --script <path> --mode <self|planner:<progetto>|computer-locale> [--cron '...'] [--once]` registers a job that executes the REGISTERED SCRIPT at trigger time (never a shell; the script lives in the persistent per-user folder `<data>/scheduler/scripts/`, so a package upgrade never deletes it). Test every script before making it recurring with `yano schedule run <id>` (runs the script immediately); if the script is missing or fails, the dispatch logs `failed` and disables the job (`enabled:false`) — never free text to a planner from the cron. Manage jobs with `yano schedule list`, `--remove --id`, `--enable --id`, `--disable --id`; `--once` auto-disables a job after its first run. Routing is decided INSIDE the script via `yano invoke`: `yano invoke --role planner:<scope> --prompt "..."` (composes `yano start --herdr --role planner --project <scope> --print-only` to wake that project's planner) or `yano invoke --role computer-locale --prompt "..."` (delegates to the broker-aware `yano computer ask`). Destructive or project-mutating intent always routes through the project planner with human gates.
+Two modes coexist. **Script-first (current model)** — `yano schedule add --name <nome> --project-root <dir> --script <path> --mode <self|planner:<progetto>|yano-local-pc> [--cron '...'] [--once]` registers a job that executes the REGISTERED SCRIPT at trigger time (never a shell; the script lives in the persistent per-user folder `<data>/scheduler/scripts/`, so a package upgrade never deletes it). Test every script before making it recurring with `yano schedule run <id>` (runs the script immediately); if the script is missing or fails, the dispatch logs `failed` and disables the job (`enabled:false`) — never free text to a planner from the cron. Manage jobs with `yano schedule list`, `--remove --id`, `--enable --id`, `--disable --id`; `--once` auto-disables a job after its first run. Routing is decided INSIDE the script via `yano invoke`: `yano invoke --role planner:<scope> --prompt "..."` (composes `yano start --herdr --role planner --project <scope> --print-only` to wake that project's planner) or `yano invoke --role yano-local-pc --prompt "..."` (delegates to the broker-aware `yano local-pc ask`). Destructive or project-mutating intent always routes through the project planner with human gates.
 
-**Legacy (natural language)** — `yano cron --add` accepts the Italian forms `ogni giorno alle 14 e alle 21 esegui <task>` and `ogni settimana di lunedì alle 13:00 fai partire <task>`, stores the resulting cron and task in the global Yano data-root, and returns a job id. Manage it with `yano cron --list`, `--disable <id>`, `--enable <id>`, `--run <id>` or `--remove <id>`. The global one-minute supervisor restores the `yano-scheduler` Herdr agent after a reboot or closed tab, then dispatches due legacy jobs to a planner in the job's project. A scheduled task never bypasses playbook approval gates; scripts must read secrets from `.env`, never embed tokens. System services (scheduler, watcher, debugger, auto-improver, suggester) are launched with `--project-scope yano-system`: the runtime reads the flag (`readCliFlags`) and their MQTT presence lives on the stable `pi/yano-system/**` namespace instead of the workspace-derived project key; the scope string is used verbatim in topic names (no spaces or `/` unless a nested topic is intended).
+**Legacy (natural language)** — `yano cron --add` accepts the Italian forms `ogni giorno alle 14 e alle 21 esegui <task>` and `ogni settimana di lunedì alle 13:00 fai partire <task>`, stores the resulting cron and task in the global Yano data-root, and returns a job id. Manage it with `yano cron --list`, `--disable <id>`, `--enable <id>`, `--run <id>` or `--remove <id>`. The global one-minute supervisor restores the `yano-scheduler` Herdr agent after a reboot or closed tab, then dispatches due legacy jobs to a planner in the job's project. A scheduled task never bypasses playbook approval gates; scripts must read secrets from `.env`, never embed tokens. System services (scheduler, watcher, feedback, auto-improver, feedback) are launched with `--project-scope yano-system`: the runtime reads the flag (`readCliFlags`) and their MQTT presence lives on the stable `pi/yano-system/**` namespace instead of the workspace-derived project key; the scope string is used verbatim in topic names (no spaces or `/` unless a nested topic is intended).
 
 ### External service supervision
 

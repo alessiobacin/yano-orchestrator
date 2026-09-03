@@ -1,6 +1,6 @@
 ---
 name: yano-observer
-description: Contratto read-only per watcher, debugger, auto-improver e suggester di Yano. Usalo ogni volta che un agente esterno deve osservare un progetto, analizzare bug, trace, qualità o feedback e notificare il planner senza modificare codice, test, configurazioni, dati o deployment.
+description: Contratto read-only per watcher, feedback, auto-improver e feedback di Yano. Usalo ogni volta che un agente esterno deve osservare un progetto, analizzare bug, trace, qualità o feedback e notificare il planner senza modificare codice, test, configurazioni, dati o deployment.
 compatibility: "Richiede Yano, trace globale e accesso alla root del progetto; eventuali CLI/browser sono solo per verifiche bounded e non distruttive."
 ---
 

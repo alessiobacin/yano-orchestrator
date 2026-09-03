@@ -80,7 +80,8 @@ import { runDoctor, ensurePlaywrightPrerequisites, ensureCorePrerequisites, ensu
 import { runHerdrInit } from "./init-herdr.mjs";
 import { installYanoCliSkill } from "./install-yano-cli.mjs";
 import { runYanoWatcherRegistry } from "./yano-watcher-registry.mjs";
-import { runYanoDebugger } from "./yano-debugger.mjs";
+import { ensureComputerLocalService } from "./yano-global-services.mjs";
+import { globalDataPath } from "./yano-config.mjs";
 
 function parseArgs(argv) {
 	let name;
@@ -89,6 +90,7 @@ function parseArgs(argv) {
 	let llmp = false;
 	let herdr = false;
 	let noGit = false;
+	let devPc = false;
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i];
 		if (a === "--name") name = argv[++i];
@@ -97,6 +99,7 @@ function parseArgs(argv) {
 		else if (a === "--llmp") llmp = true;
 		else if (a === "--herdr") herdr = true;
 		else if (a === "--no-git") noGit = true;
+		else if (a === "--dev-pc") devPc = true;
 		else if (a === "--help" || a === "-h") {
 			printUsage();
 			process.exit(0);
@@ -105,13 +108,13 @@ function parseArgs(argv) {
 			process.exit(1);
 		}
 	}
-	return { name, target, force, llmp, herdr, noGit };
+	return { name, target, force, llmp, herdr, noGit, devPc };
 }
 
 function printUsage() {
 	console.log(
 		[
-			'Uso: yano init --name "<Nome Progetto>" [--target <dir>] [--force] [--llmp] [--herdr] [--no-git]',
+			'Uso: yano init --name "<Nome Progetto>" [--target <dir>] [--force] [--llmp] [--herdr] [--dev-pc] [--no-git]',
 			'     (in locale, senza npm install -g: node scripts/create-project.mjs --name "<Nome Progetto>" [--target <dir>] [--force] [--llmp] [--herdr] [--no-git])',
 			"",
 			'  --name    Nome del progetto (obbligatorio) — per un progetto esistente viene scritto solo nella',
@@ -130,6 +133,8 @@ function printUsage() {
 			"            se il comando parte da un terminale normale. Richiede init in place: non usare --target.",
 			"  --no-git  Non inizializza un repository Git se la directory non ne contiene già uno; utile per",
 			"            conversation mode, che può usare il DB Yano senza worktree o repository di sviluppo.",
+			"  --dev-pc  Abilita yano-local-pc per questo computer dello sviluppatore; senza questo flag",
+			"            l'agente locale e i relativi MCP non vengono creati.",
 			"",
 			"Progetto esistente: yano init aggiunge solo file Yano mancanti, preserva codice, package.json,",
 			"configurazioni e .env.example; se root agents/ è già dell'applicazione, usa .pi/agents/ per il roster Yano.",
@@ -328,7 +333,7 @@ export async function runCreateProject({ packageRoot, cwd, argv, preflightTools 
 		ensureCodeMem = ensureCodeMemPrerequisite,
 		initializeCodeMem = initializeCodeMemProject,
 	} = preflightTools;
-	const { name, target, force, llmp, herdr, noGit } = parseArgs(argv);
+	const { name, target, force, llmp, herdr, noGit, devPc } = parseArgs(argv);
 	if (!name) {
 		console.error("create-project: --name è obbligatorio (vedi --help).");
 		process.exit(1);
@@ -525,6 +530,13 @@ export async function runCreateProject({ packageRoot, cwd, argv, preflightTools 
 			`${JSON.stringify({ schema_version: 1, extension_version: "pre-init", project: name, created_at: nowIso(), updated_at: nowIso() }, null, 2)}\n`,
 		);
 	}
+	if (devPc) {
+		const devPcMarker = path.join(yanoConfigDir, "dev-pc.json");
+		if (!fs.existsSync(devPcMarker)) fs.writeFileSync(devPcMarker, `${JSON.stringify({ enabled: true, role: "yano-local-pc", platform: process.platform, created_at: nowIso() }, null, 2)}\n`, { mode: 0o600 });
+		const globalMarker = path.join(globalDataPath(), "yano-local-pc", "enabled.json");
+		fs.mkdirSync(path.dirname(globalMarker), { recursive: true, mode: 0o700 });
+		if (!fs.existsSync(globalMarker)) fs.writeFileSync(globalMarker, `${JSON.stringify({ enabled: true, project: name, platform: process.platform, created_at: nowIso() }, null, 2)}\n`, { mode: 0o600 });
+	}
 
 	// 3bis. --llmp (Revisione 36, richiesto dall'operatore): scrive la
 	//    configurazione LOCALE di `pi` per un llmproxy in
@@ -606,10 +618,13 @@ export async function runCreateProject({ packageRoot, cwd, argv, preflightTools 
 	// active, while an idle project remains visible and resumable explicitly.
 	try {
 		await runYanoWatcherRegistry({ argv: ["init", "--project-root", targetDir, "--json"] });
-		await runYanoDebugger({ argv: ["init", "--project-root", targetDir, "--json"] });
-		console.log("create-project: watcher e debugger registrati; il supervisore li avvierà automaticamente con task attivi.");
+		console.log("create-project: watcher registrato; il supervisore lo avvierà automaticamente con task attivi.");
 	} catch (error) {
-		console.warn(`create-project: registrazione watcher/debugger non riuscita (${error instanceof Error ? error.message : String(error)}) — riprova con yano watcher init e yano debugger init.`);
+		console.warn(`create-project: registrazione watcher non riuscita (${error instanceof Error ? error.message : String(error)}) — riprova con yano watcher init.`);
+	}
+	if (devPc) {
+		const localPc = ensureComputerLocalService();
+		console.log(`create-project: --dev-pc — yano-local-pc ${localPc.running ? "attivo" : "predisposto"}.`);
 	}
 
 	// Auto-discovery del sistema operativo (Revisione 32, richiesto

@@ -13,9 +13,8 @@
 // ephemeral-watcher flow — `yano architect provision --install`), never
 // "should be running but is not".
 //
-// This module gives the continuous watcher the same durable-registry +
-// Herdr-tab lifecycle the debugger already has in yano-debugger.mjs
-// (launchHerdrWorker/doInit/doStart/doPause/doResume): `yano watcher
+// This module gives the continuous watcher a durable registry and Herdr-tab
+// lifecycle (launchHerdrWorker/doInit/doStart/doPause/doResume): `yano watcher
 // init|start|pause|resume` register intended state in a small SQLite file
 // and open/reuse a pane in the shared `yano-watcher` Herdr workspace running
 // the existing bare `yano watch ... --away` loop — no LLM, no new agent kind.
@@ -23,12 +22,9 @@
 // state and, unless told not to, relaunches a project whose pane died
 // (self-heal), logging the recovery in that project's own trace.
 //
-// Deliberately mirrors yano-debugger.mjs's shape closely: same primitives
-// (herdrSnapshot/shellQuote/slug), same CLI/REST-would-be split conventions,
-// so the two supervised subsystems do not drift apart in behavior. Kept as
-// its own file/table (watcher_projects, not debugger_projects) because the
-// two registries track different things: the debugger tracks *diagnosed
-// application bugs*, this tracks *whether a polling loop is alive*.
+// The watcher registry owns its own lifecycle and storage.
+// (herdrSnapshot/shellQuote/slug), with one observable lifecycle and one
+// persisted table: watcher_projects tracks whether a polling loop is alive.
 
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -419,7 +415,7 @@ function watcherOnce(info, project) {
 	};
 }
 
-// --- shared operations, mirroring yano-debugger.mjs's doInit/doStart/doPause/doResume ---
+// --- shared watcher operations ---
 
 function doInit(db, info, opts = {}) {
 	const project = ensureProject(db, info, { intervalMs: Math.max(1000, Number(opts.intervalMs || DEFAULT_INTERVAL_MS)), lookbackMs: Math.max(1000, Number(opts.lookbackMs || DEFAULT_LOOKBACK_MS)) });
@@ -545,93 +541,6 @@ async function withSupervisorLock(callback) {
 	}
 }
 
-function externalWorkerRecovery(snapshot) {
-	const results = [];
-	const liveSnapshotAgent = (instance, root, role = null) => {
-		const expectedRoot = path.resolve(root || "");
-		return (snapshot?.agents || []).some((agent) => {
-			if (agent.agent !== "pi" || ["done", "offline", "unknown"].includes(String(agent.agent_status || "").toLowerCase())) return false;
-			const pane = (snapshot?.panes || []).find((candidate) => candidate.pane_id === agent.pane_id);
-			const tab = pane && (snapshot?.tabs || []).find((candidate) => candidate.tab_id === pane.tab_id);
-			const sameInstance = agent.name === instance || pane?.agent === instance || tab?.label === instance;
-			const sameRoot = path.resolve(agent.cwd || pane?.cwd || "") === expectedRoot;
-			const sameRole = !role || String(tab?.label || "").toLowerCase().startsWith(`${role.toLowerCase()}-`) || tab?.label === `${role}-service`;
-			return sameInstance && sameRoot && sameRole;
-		});
-	};
-	const dataRoot = traceRoot();
-	const launch = (args, detail) => {
-		const result = spawnSync(process.execPath, [path.join(PACKAGE_ROOT, "bin", "yano.mjs"), ...args], { encoding: "utf8", maxBuffer: 4_000_000 });
-		results.push({ ...detail, recovered: result.status === 0, error: result.status === 0 ? null : (result.stderr || result.stdout || "external recovery failed").trim() });
-	};
-	// A proposal with an installed Architect instance is durable for the whole
-	// proposal lifecycle: initially project-scoped/ephemeral, then global only
-	// after an explicit promotion. Drafts awaiting a first install are omitted.
-	const architectDb = path.join(dataRoot, "architect", "architect.sqlite");
-	if (fs.existsSync(architectDb)) {
-		try {
-			const { DatabaseSync } = requireSqlite();
-			const externalDb = new DatabaseSync(architectDb, { readOnly: true });
-			const rows = externalDb.prepare("SELECT proposal_id, architect_instance, status FROM architect_proposals WHERE architect_instance IS NOT NULL AND status IN ('provisioning','ready_ephemeral','promotion_candidate','revision_required','persistent')").all();
-			externalDb.close();
-			for (const row of rows) {
-				const live = liveSnapshotAgent(row.architect_instance, row.root, "architect");
-				if (!live) launch(["architect", "start", "--proposal-id", row.proposal_id, "--json"], { role: "architect", proposal_id: row.proposal_id, proposal_status: row.status, instance: row.architect_instance });
-			}
-		} catch (error) { results.push({ role: "architect", recovered: false, error: error instanceof Error ? error.message : String(error) }); }
-	}
-	// Debugger workers marked running have a durable, explicit intent just like
-	// watchers. Recreate them only when their exact instance is no longer live.
-	const debuggerDb = path.join(dataRoot, "debugger", "debugger.sqlite");
-	if (fs.existsSync(debuggerDb)) {
-		try {
-			const { DatabaseSync } = requireSqlite();
-			const externalDb = new DatabaseSync(debuggerDb);
-			const rows = externalDb.prepare("SELECT root, name, worker_instance FROM debugger_projects WHERE worker_status = 'running'").all();
-			for (const row of rows) {
-				// A stale running flag is not a request to resurrect a debugger on a
-				// completed project. Debugger follows the same active-run boundary as
-				// watcher; completed/finalized projects must stay closed.
-				if (!projectHasActiveWork(row.root)) {
-					externalDb.prepare("UPDATE debugger_projects SET worker_status = 'stopped', workspace_id = NULL, worker_tab_id = NULL, worker_pane_id = NULL, updated_at = ? WHERE root = ? AND worker_status = 'running'").run(now(), row.root);
-					continue;
-				}
-				const live = liveSnapshotAgent(row.worker_instance, row.root, "debugger");
-				if (!live) launch(["debugger", "resume", "--project-root", row.root, "--project", row.name, "--json"], { role: "debugger", project: row.name, instance: row.worker_instance });
-			}
-			externalDb.close();
-		} catch (error) { results.push({ role: "debugger", recovered: false, error: error instanceof Error ? error.message : String(error) }); }
-	}
-	// A suggester gets an LLM tab only for a pending analysis. Never recreate an
-	// idle worker merely because an old tab disappeared.
-	const suggesterDb = path.join(dataRoot, "suggester", "suggester.sqlite");
-	if (fs.existsSync(suggesterDb)) {
-		try {
-			const { DatabaseSync } = requireSqlite();
-			const externalDb = new DatabaseSync(suggesterDb, { readOnly: true });
-			const rows = externalDb.prepare("SELECT p.root, p.name, p.worker_instance FROM suggester_projects p WHERE p.worker_status NOT IN ('paused','stopped') AND EXISTS (SELECT 1 FROM suggestions s WHERE s.project_key = p.project_key AND s.status IN ('received','analyzing'))").all();
-			externalDb.close();
-			for (const row of rows) {
-				const live = liveSnapshotAgent(row.worker_instance, row.root, "suggester");
-				if (!live) launch(["suggester", "resume", "--project-root", row.root, "--project", row.name, "--json"], { role: "suggester", project: row.name, instance: row.worker_instance });
-			}
-		} catch (error) { results.push({ role: "suggester", recovered: false, error: error instanceof Error ? error.message : String(error) }); }
-	}
-	// Auto-improver is a scheduled service: recovering it means restarting the
-	// scheduler, never launching a blank audit tab.
-	const autoDb = path.join(dataRoot, "auto-improver", "auto-improver.sqlite");
-	if (fs.existsSync(autoDb)) {
-		try {
-			const { DatabaseSync } = requireSqlite();
-			const externalDb = new DatabaseSync(autoDb, { readOnly: true });
-			const enabled = externalDb.prepare("SELECT COUNT(*) AS count FROM auto_projects WHERE worker_status NOT IN ('paused','stopped')").get().count;
-			externalDb.close();
-			if (enabled) launch(["auto-improve", "supervise", "--json"], { role: "auto-improver", enabled_projects: enabled });
-		} catch (error) { results.push({ role: "auto-improver", recovered: false, error: error instanceof Error ? error.message : String(error) }); }
-	}
-	return results;
-}
-
 function pruneOrphanWatcherTabs(snapshot, rows) {
 	if (!snapshot) return [];
 	const knownRoots = new Set(rows.map((row) => path.resolve(row.root)));
@@ -662,39 +571,6 @@ function activateDefaultWorkers(db, row) {
 	};
 }
 
-function activateDefaultDebuggers(snapshot = herdrSnapshot()) {
-	const file = path.join(traceRoot(), "debugger", "debugger.sqlite");
-	if (!fs.existsSync(file)) return [];
-	const results = [];
-	const isLiveProjectDebugger = (instance, root) => (snapshot?.agents || []).some((agent) => {
-		if (agent.agent !== "pi" || ["done", "offline", "unknown"].includes(String(agent.agent_status || "").toLowerCase())) return false;
-		const pane = (snapshot?.panes || []).find((candidate) => candidate.pane_id === agent.pane_id);
-		const tab = pane && (snapshot?.tabs || []).find((candidate) => candidate.tab_id === pane.tab_id);
-		return path.resolve(agent.cwd || pane?.cwd || "") === path.resolve(root || "")
-			&& (agent.name === instance || pane?.agent === instance || tab?.label === instance);
-	});
-	try {
-		const { DatabaseSync } = requireSqlite();
-		const db = new DatabaseSync(file, { readOnly: true });
-		const rows = db.prepare("SELECT root, name, worker_instance, worker_status FROM debugger_projects WHERE worker_status = 'stopped'").all();
-		db.close();
-		for (const row of rows) {
-			if (!projectHasActiveWork(row.root)) continue;
-			// The registry can lag behind a successful Herdr launch. Never create a
-			// second debugger from a stale `stopped` row: the exact live instance
-			// and canonical project root are authoritative for this decision.
-			const alreadyLive = isLiveProjectDebugger(row.worker_instance || `debugger-${row.name}`, row.root);
-			if (alreadyLive) continue;
-			const args = ["debugger", "start", "--project-root", row.root, "--project", row.name, "--json"];
-			const launched = spawnSync(process.execPath, [path.join(PACKAGE_ROOT, "bin", "yano.mjs"), ...args], { encoding: "utf8", maxBuffer: 4_000_000 });
-			results.push({ role: "debugger", project: row.name, root: row.root, activated: launched.status === 0, error: launched.status === 0 ? null : (launched.stderr || launched.stdout || "debugger start failed").trim() });
-		}
-	} catch (error) {
-		results.push({ role: "debugger", activated: false, error: error instanceof Error ? error.message : String(error) });
-	}
-	return results;
-}
-
 function supervise(db) {
 	return withSupervisorLock(async () => {
 		const rows = db.prepare("SELECT * FROM watcher_projects ORDER BY updated_at DESC").all();
@@ -723,10 +599,8 @@ function supervise(db) {
 			if (row) appendRawTraceRecord({ cwd: row.root, project: resolveTraceProject(row.root), record: { type: "watcher_identity_conflict", payload: conflict } });
 		}
 		const global_services = ensureGlobalYanoServices();
-		// Refresh after global-service recovery: using the pre-recovery snapshot
-		// can relaunch a project debugger that is already alive.
-		const currentSnapshot = herdrSnapshot();
-		const activated = [...rows.map((row) => activateDefaultWorkers(db, row)).filter(Boolean), ...activateDefaultDebuggers(currentSnapshot)];
+		// Refresh the activation state after global-service recovery.
+		const activated = [...rows.map((row) => activateDefaultWorkers(db, row)).filter(Boolean)];
 		const result = {
 			checked_at: now(),
 			herdr_reachable: Boolean(snapshot),
@@ -735,7 +609,7 @@ function supervise(db) {
 			activated,
 			global_services,
 			external_services,
-			external_workers: externalWorkerRecovery(currentSnapshot),
+			external_workers: [],
 			orphan_tabs_removed,
 			agent_identity_repaired,
 			identity_conflicts: identityConflicts,

@@ -267,9 +267,9 @@ manualmente Herdr:
 ```bash
 yano architect projects
 yano watcher projects
-yano debugger projects
+yano feedback projects
 yano auto-improve projects       # alias: yano auto-improver projects
-yano suggester projects
+yano feedback projects
 ```
 
 L'evidence pack auto-improve rileva anche test, build e config lint presenti
@@ -443,5 +443,5 @@ yano trace clear --all --yes
 ```
 
 Per il riferimento completo consulta [`yano-trace.md`](./yano-trace.md). Per
-il flusso di bug applicativi usa [`yano-debugger.md`](./yano-debugger.md) e la
-[guida rapida del debugger](./12-yano-debugger.md).
+il flusso di bug applicativi usa [`yano-feedback.md`](./yano-feedback.md) e la
+[guida rapida del feedback](./12-yano-feedback.md).

@@ -235,11 +235,11 @@ await runner.check("mode planner:<project> launches a project planner with task 
 	assert.ok((cf.args || []).join(" ").includes("--role planner") && (cf.args || []).join(" ").includes("demo-project"), "compose args target role planner for the project scope");
 	assert.match(String(pj.mode), /^planner:/, "registered mode is planner:<project>");
 });
-// Block 9 — `yano invoke --role computer-locale --prompt` is callable from the CLI
-await runner.check("yano invoke --role computer-locale --prompt works from CLI", async () => {
-	const out = cli(["invoke", "--role", "computer-locale", "--prompt", "promemoria tra 10 minuti: pausa caffè"]);
+// Block 9 — `yano invoke --role yano-local-pc --prompt` is callable from the CLI
+await runner.check("yano invoke --role yano-local-pc --prompt works from CLI", async () => {
+	const out = cli(["invoke", "--role", "yano-local-pc", "--prompt", "promemoria tra 10 minuti: pausa caffè"]);
 	const parsed = JSON.parse(out.trim().split("\n").at(-1));
-	assert.equal(parsed.role, "computer-locale");
+	assert.equal(parsed.role, "yano-local-pc");
 	assert.match(String(parsed.prompt), /pausa caff/);
 	assert.ok("status" in parsed);
 });

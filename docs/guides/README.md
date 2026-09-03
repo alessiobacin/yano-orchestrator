@@ -6,6 +6,10 @@ reale del repository. Per le procedure d'uso di Yano da parte dell'utente
 vedi invece [`docs/quick-guides/`](../quick-guides/README.md); per riferimenti
 rapidi ai comandi vedi [`docs/cheat-sheet/`](../cheat-sheet/README.md).
 
+Architect genera capability globali con `--type playbook`, `cli`, `skill` o
+`mcp-server`. Restano ephemeral fino a review, test, installazione, prima
+esecuzione riuscita e approvazione dell'utente.
+
 ## Indice
 
 - [01 — Sviluppare un nuovo comando Yano end-to-end](./01-sviluppare-un-comando-yano-end-to-end.md)

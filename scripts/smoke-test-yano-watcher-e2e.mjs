@@ -81,8 +81,8 @@ try {
 	assert.deepEqual(tickets, ["01-yano-watcher-no-live-target.md"]);
 	const ticket = fs.readFileSync(path.join(issueDir, tickets[0]), "utf8");
 	assert.match(ticket, /Status: open/);
-	assert.match(ticket, /^type: debugger$/m);
-	assert.match(ticket, /^Type: debugger$/m);
+	assert.match(ticket, /^type: human$/m);
+	assert.match(ticket, /^Type: human$/m);
 	assert.match(ticket, /^Kind: task$/m);
 	assert.match(ticket, /focusboard-trace-test/);
 	assert.doesNotMatch(ticket, /e2e-token/);

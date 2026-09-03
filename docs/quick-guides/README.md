@@ -16,10 +16,8 @@ pensate per chi usa Yano per la prima volta e lavora dalla root del progetto.
 9. [Problemi comuni](./09-troubleshooting.md)
 10. [Watcher: ticket per falle di Yano](./10-watcher-falle-yano.md)
 11. [Configurazione globale](./11-configurazione-globale.md)
-12. [Yano Debugger](./12-yano-debugger.md)
 13. [Deployment agent](./13-deployment-agent.md)
 14. [Auto-improve periodico](./14-auto-improve.md)
-15. [Yano suggester](./15-yano-suggester.md)
 16. [Yano Architect: playbook e agenti on-the-fly](./16-yano-architect.md)
 17. [Ripristino automatico di un progetto](./17-ripristino-automatico.md)
 18. [Catalogo playbook: requisiti, bundle e rimozione](./18-catalogo-playbook.md)
@@ -29,11 +27,11 @@ pensate per chi usa Yano per la prima volta e lavora dalla root del progetto.
 22. [Job ricorrenti e Yano Scheduler](./22-job-ricorrenti.md)
 
 Per i riferimenti completi dei comandi (oltre alle controparti compatte qui
-sopra) vedi anche [quick-start](./quick-start.md), [yano-debugger](./yano-debugger.md),
-[yano-auto-improve](./yano-auto-improve.md), [yano-suggester](./yano-suggester.md),
+sopra) vedi anche [quick-start](./quick-start.md), [yano-feedback](./12-yano-feedback.md),
+[yano-auto-improve](./yano-auto-improve.md),
 [yano-model-advisor](./yano-model-advisor.md), [yano-architect](./yano-architect.md),
 [yano-trace](./yano-trace.md), [yano-deployment](./yano-deployment.md),
-[yano-recovery](./yano-recovery.md) e [yano-computer-local](./yano-computer-local.md).
+[yano-recovery](./yano-recovery.md) e [yano-local-pc](./yano-local-pc.md).
 
 Per una spiegazione completa del primo task, consulta anche la
 [quick start estesa](./quick-start.md). Per il comportamento dettagliato del

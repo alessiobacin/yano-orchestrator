@@ -44,9 +44,7 @@
 //   yano gantt              dashboard web locale live dei run/ticket
 //   yano watch              watcher dei ticket stalled
 //   yano trace              attiva, consulta, indicizza e cancella il tracing globale
-//   yano debugger           registra e gestisce bug applicativi con un worker Herdr esterno
 //   yano auto-improve       esegue audit periodici read-only e inoltra report al planner
-//   yano suggester          raccoglie proposte utenti read-only e le inoltra dopo approvazione
 //   yano model-advisor     propone un provider:model pinnato per role-class
 //                        in base ai dati live di llmProxy (costo/coding/
 //                        latenza) — delega a scripts/yano-model-advisor.mjs
@@ -80,10 +78,9 @@ import { runYanoDeps } from "../scripts/yano-deps.mjs";
 import { runGantt } from "../scripts/gantt-server.mjs";
 import { runWatch } from "../scripts/watch-stalls.mjs";
 import { runTrace } from "../scripts/yano-trace.mjs";
-import { runYanoDebugger } from "../scripts/yano-debugger.mjs";
 import { runYanoWatcherRegistry } from "../scripts/yano-watcher-registry.mjs";
 import { runYanoAutoImprove } from "../scripts/yano-auto-improver.mjs";
-import { runYanoSuggester } from "../scripts/yano-suggester.mjs";
+import { runYanoFeedback } from "../scripts/yano-feedback.mjs";
 import { runYanoModelAdvisor } from "../scripts/yano-model-advisor.mjs";
 import { runYanoArchitect } from "../scripts/yano-architect.mjs";
 import { runYanoCatalog } from "../scripts/yano-catalog.mjs";
@@ -97,7 +94,7 @@ import { runYanoProjects } from "../scripts/yano-projects.mjs";
 import { runYanoRules } from "../scripts/yano-rules.mjs";
 import { runYanoScheduler } from "../scripts/yano-scheduler.mjs";
 import { runYanoInvoke } from "../scripts/yano-invoke.mjs";
-import { runYanoComputerLocal } from "../scripts/yano-computer-local.mjs";
+import { runYanoLocalPc } from "../scripts/yano-local-pc.mjs";
 import { runYanoServices } from "../scripts/yano-services.mjs";
 import { runYanoDocsCheck } from "../scripts/yano-docs-check.mjs";
 import { runYanoQaInventory } from "../scripts/yano-qa-inventory.mjs";
@@ -141,12 +138,11 @@ function printTopUsage() {
 			"  qa-inventory scan [--project-root <dir>] [--yano-self-audit] [--json]  Bozza grezza dell'inventario comandi/funzionalità",
 			"  gantt [opzioni]  Dashboard per progetto; --persistent registra il link, --link/--links lo recuperano",
 			"  watch [opzioni]  Osserva stall e segnala falle Yano ( --once | --project-root | --lookback-ms | --interval-ms )",
-			"  architect projects|watcher projects|debugger projects|auto-improve|auto-improver projects",
+			"  architect projects|watcher projects|auto-improve|auto-improver projects",
 			"                   Elenca i progetti attivi dei worker esterni (aggiungi --all per gli offline)",
 			"  trace [opzioni]  Attiva/disattiva, cerca e cancella il tracing globale — `yano trace --help`",
-			"  debugger [opzioni] Gestisce bug applicativi e worker esterni — `yano debugger --help`",
 			"  auto-improve [opzioni] Audit periodici read-only e report al planner — `yano auto-improve --help`",
-			"  suggester [opzioni]  Suggerimenti utenti read-only e gate superadmin — `yano suggester --help`",
+			"  feedback serve|create|list|get|update|delete  CRUD bug e suggestions — API su porta 20002",
 			"  model-advisor [opzioni] Propone un provider:model pinnato da llmProxy per role-class — `yano model-advisor --help`",
 			"  architect [opzioni]  Progetta/provisiona playbook e ruoli globali — `yano architect --help`",
 			"  playbook|agent [opzioni] Catalogo read-only di playbook, ruoli e capability",
@@ -154,7 +150,7 @@ function printTopUsage() {
 			"  rule [opzioni]   Gestisce regole globali e per-progetto — `yano rule --help`",
 			"  schedule [opzioni] Crea job ricorrenti a script; cron persistente e ripulibile — `yano schedule --help`",
 			"  cron [opzioni]  CRUD naturale dei job ricorrenti e supervisore yano-scheduler — `yano cron --help`",
-			"  computer start|status|ask  Computer locale persistente con MCP Apple — `yano computer --help`",
+			"  local-pc start|status|ask  Agente del PC sviluppatore — `yano local-pc --help`",
 			"  services [opzioni] Registro servizi esterni (Docker/pm2/comando) con health-check e restart deterministico — `yano services --help`",
 			"  data [opzioni]    Mostra o migra il data-root globale — `yano data --help`",
 			"  pause [opzioni]  Salva uno snapshot non distruttivo e mette in pausa i run",
@@ -236,8 +232,8 @@ async function main() {
 		await runYanoInvoke({ argv: rest });
 		return;
 	}
-	if (sub === "computer") {
-		await runYanoComputerLocal({ argv: rest });
+	if (sub === "local-pc") {
+		await runYanoLocalPc({ argv: rest });
 		return;
 	}
 	if (sub === "cron") {
@@ -304,12 +300,9 @@ async function main() {
 		await runTrace({ cwd, argv: rest });
 		return;
 	}
-	if (sub === "debugger") {
-		if (rest[0] === "projects" || rest.includes("--projects")) {
-			await runExternalStatus({ role: "debugger", argv: rest });
-			return;
-		}
-		await runYanoDebugger({ argv: rest });
+	if (sub === "feedback" || sub === "bug" || sub === "bugs" || sub === "suggestion" || sub === "suggestions") {
+		const type = sub === "bug" || sub === "bugs" ? "bug" : sub === "suggestion" || sub === "suggestions" ? "suggestion" : null;
+		await runYanoFeedback({ argv: sub === "feedback" ? rest : [rest[0] || "list", ...(type ? ["--type", type] : []), ...rest.slice(1)] });
 		return;
 	}
 	if (sub === "auto-improve" || sub === "auto-improver") {
@@ -318,14 +311,6 @@ async function main() {
 			return;
 		}
 		await runYanoAutoImprove({ argv: rest });
-		return;
-	}
-	if (sub === "suggester") {
-		if (rest[0] === "projects" || rest.includes("--projects")) {
-			await runExternalStatus({ role: "suggester", argv: rest });
-			return;
-		}
-		await runYanoSuggester({ argv: rest });
 		return;
 	}
 	if (sub === "model-advisor") {

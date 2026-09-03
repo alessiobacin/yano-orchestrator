@@ -43,9 +43,10 @@ import { superviseScheduler } from "./yano-scheduler.mjs";
 
 const require = createRequire(import.meta.url);
 const WORKSPACE_LABEL = "yano-watcher";
-const DEFAULT_INTERVAL_MS = 300000; // 5 minuti — override esplicito con --interval-ms
+const DEFAULT_INTERVAL_MS = 60000; // un controllo ogni minuto; override esplicito con --interval-ms
 const DEFAULT_LOOKBACK_MS = 3600000;
 const DEFAULT_PLANNER_STALL_MS = 15 * 60_000;
+const ORPHANED_TICKET_IDLE_MS = 2 * 60_000;
 const PLANNER_RECOVERY_COOLDOWN_MS = 10 * 60_000;
 const IDLE_WATCHER_GRACE_MS = 60 * 60_000;
 const CRON_MARKER = "# yano-watcher-supervisor";
@@ -84,7 +85,7 @@ function openDatabase() {
 			worker_pane_id TEXT,
 			worker_instance TEXT,
 			worker_status TEXT NOT NULL DEFAULT 'stopped',
-			interval_ms INTEGER NOT NULL DEFAULT 300000,
+			interval_ms INTEGER NOT NULL DEFAULT 60000,
 			lookback_ms INTEGER NOT NULL DEFAULT 3600000,
 			last_recovery_at TEXT,
 			last_recovery_reason TEXT,
@@ -97,6 +98,10 @@ function openDatabase() {
 	for (const column of ["last_recovery_at TEXT", "last_recovery_reason TEXT"]) {
 		try { db.exec(`ALTER TABLE watcher_projects ADD COLUMN ${column}`); } catch { /* already present */ }
 	}
+	// Migrate the old implicit five-minute cadence to the control-plane
+	// contract: the cron/supervisor must inspect every registered project every
+	// minute. Explicit per-project overrides remain untouched.
+	db.prepare("UPDATE watcher_projects SET interval_ms = 60000 WHERE interval_ms = 300000").run();
 	return db;
 }
 
@@ -207,7 +212,29 @@ function projectRuns(root) {
 			GROUP BY r.id
 			ORDER BY r.updated_at DESC
 		`).all();
-		return { available: true, runs };
+		const tickets = db.prepare("SELECT id, run_id, title, status, assigned_instance, updated_at FROM tickets ORDER BY updated_at DESC").all();
+		const dependencies = db.prepare("SELECT d.ticket_id, d.depends_on_id, dependency.status AS dependency_status FROM ticket_dependencies d JOIN tickets dependency ON dependency.id = d.depends_on_id").all();
+		const dependenciesByTicket = new Map();
+		for (const dependency of dependencies) {
+			if (!dependenciesByTicket.has(dependency.ticket_id)) dependenciesByTicket.set(dependency.ticket_id, []);
+			dependenciesByTicket.get(dependency.ticket_id).push(dependency);
+		}
+		const byRun = new Map();
+		for (const ticket of tickets) {
+			if (!byRun.has(ticket.run_id)) byRun.set(ticket.run_id, []);
+			byRun.get(ticket.run_id).push(ticket);
+		}
+		return { available: true, runs: runs.map((run) => {
+			const runTickets = byRun.get(run.id) || [];
+			return {
+				...run,
+				tickets: runTickets,
+				active_ticket_count: runTickets.filter((ticket) => ["pending", "running"].includes(ticket.status)).length,
+				running_ticket_count: runTickets.filter((ticket) => ticket.status === "running").length,
+				pending_ticket_count: runTickets.filter((ticket) => ticket.status === "pending").length,
+				ready_pending_tickets: runTickets.filter((ticket) => ticket.status === "pending" && (dependenciesByTicket.get(ticket.id) || []).every((dependency) => dependency.dependency_status === "done")).map((ticket) => ticket.id),
+			};
+		}) };
 	} catch { return { available: false, runs: [] }; }
 	finally { try { db.close(); } catch { /* best effort */ } }
 }
@@ -287,6 +314,30 @@ function plannerStalled(run) {
 	return Number.isFinite(activity) && Date.now() - activity >= (Number(process.env.YANO_PLANNER_STALL_MS) || DEFAULT_PLANNER_STALL_MS);
 }
 
+function ticketAgentStatus(snapshot, root, instance) {
+	if (!snapshot || !instance) return null;
+	const candidates = (snapshot.agents || []).filter((agent) => path.resolve(agent.cwd || "") === path.resolve(root));
+	for (const agent of candidates) {
+		const tab = snapshot.tabs?.find((item) => item.tab_id === agent.tab_id);
+		const identity = [agent.name, agent.instance, agent.terminal_title_stripped, agent.terminal_title, tab?.label].filter(Boolean).join(" ");
+		if (identity === instance || identity.split(/\s+/).some((part) => part === instance)) return String(agent.agent_status || "unknown").toLowerCase();
+	}
+	return null;
+}
+
+function orphanedRunningTickets(run, snapshot, root) {
+	return (run.tickets || []).filter((ticket) => {
+		if (ticket.status !== "running" || !ticket.assigned_instance) return false;
+		const updated = Date.parse(ticket.updated_at || "");
+		if (!Number.isFinite(updated) || Date.now() - updated < ORPHANED_TICKET_IDLE_MS) return false;
+		return ticketAgentStatus(snapshot, root, ticket.assigned_instance) === "idle";
+	});
+}
+
+function readyPendingTickets(run) {
+	return (run.ready_pending_tickets || []).filter(Boolean);
+}
+
 function recoveryCoolingDown(row, reason) {
 	if (row.last_recovery_reason !== reason || !row.last_recovery_at) return false;
 	const elapsed = Date.now() - Date.parse(row.last_recovery_at);
@@ -321,7 +372,11 @@ function recoverPlanner({ row, snapshot, run, reason }) {
 	// duplicate instance. Close only planners that fail the heartbeat gate,
 	// then refresh before selecting or creating the replacement pane.
 	for (const planner of plannerAgentsInWorkspace(current, workspace.workspace_id, row.root)) {
-		if (plannerHeartbeatHealthy(planner)) continue;
+		// A planner process can be technically healthy while its orchestration
+		// state is orphaned (for example a reviewer finished but the final
+		// handoff was rejected). In that case a clean restart is the recovery,
+		// not another optimistic "planner_present" result.
+		if (!["planner_handoff_missing", "planner_ready_queue_stalled"].includes(reason) && plannerHeartbeatHealthy(planner)) continue;
 		const staleTab = current.tabs?.find((item) => item.tab_id === planner.tab_id);
 		if (staleTab) closeHerdrTab(staleTab.tab_id);
 	}
@@ -372,9 +427,12 @@ function reconcileProjectRun(db, row, snapshot) {
 	if (incomplete.length) {
 		const workspace = findProjectWorkspace(snapshot, row.root, row.name);
 		const planners = workspace ? plannerAgentsInWorkspace(snapshot, workspace.workspace_id, row.root) : [];
-		const stalled = incomplete.filter(plannerStalled);
+		const orphaned = incomplete.flatMap((run) => orphanedRunningTickets(run, snapshot, row.root).map((ticket) => ({ run, ticket })));
+		const ready = incomplete.flatMap((run) => readyPendingTickets(run).map((ticketId) => ({ run, ticket_id: ticketId })));
+		const plannersIdle = planners.length > 0 && planners.every((planner) => String(planner.agent_status || "unknown").toLowerCase() === "idle");
 		const held = incomplete.filter((run) => Number(run.open_holds || 0) > 0);
-		const reason = stalled.length ? "planner_stalled" : "planner_missing";
+		const stalled = incomplete.filter((run) => Number(run.open_holds || 0) === 0 && (plannerStalled(run) || orphaned.some((item) => item.run.id === run.id) || (plannersIdle && ready.some((item) => item.run.id === run.id))));
+		const reason = orphaned.length ? "planner_handoff_missing" : ready.length && plannersIdle ? "planner_ready_queue_stalled" : stalled.length ? "planner_stalled" : "planner_missing";
 		if (planners.length && !stalled.length) return { recovery: held.length ? "waiting_for_user" : "planner_present", incomplete_runs: incomplete.map((run) => run.id), planner_statuses: planners.map((planner) => planner.agent_status || "unknown") };
 		if (recoveryCoolingDown(row, reason)) return { recovery: "recovery_cooldown", incomplete_runs: incomplete.map((run) => run.id), recovery_reason: reason, last_recovery_at: row.last_recovery_at };
 		try {
@@ -776,7 +834,7 @@ function usage() {
 	return [
 		"Uso: yano watcher <init|start|status|pause|resume|leave|supervise|cron|projects> [opzioni]",
 		"",
-		"  init --project-root <dir> [--interval-ms 300000] [--lookback-ms 3600000]",
+		"  init --project-root <dir> [--interval-ms 60000] [--lookback-ms 3600000]",
 		"                                                     registra e apre subito la tab del watcher",
 		"  start --project-root <dir> [--dry-run]            apre/riusa la tab Herdr del watcher continuo (yano-watcher)",
 		"  start --project-root <dir> --once                 esegue una sola preflight read-only senza avviare Herdr",

@@ -758,6 +758,19 @@ concludere il round, indica sempre: documenti consultati, file di codice
 analizzati, approfondimenti aggiuntivi, informazioni mancanti/non verificate,
 verifiche eseguite e relativo esito. Non inventare fatti o risultati.`;
 
+const REPORT_ARTIFACT_PROTOCOL = `
+
+## Report di progetto
+
+Il report condiviso del task resta quello indicato dal planner e serve al
+coordinamento dei round. Ogni relazione, valutazione, audit o deliverable
+documentale autonomo deve invece essere salvato nel progetto in
+\`docs/reports/<tipo>-<gg-mm-HH_MM>.md\`, usando data e ora locali italiane
+(giorno-mese-ora_minuti), con un tipo descrittivo e senza nomi generici.
+Prima di crearne uno controlla se esiste già una relazione dello stesso tipo
+nella stessa finestra temporale e aggiornala invece di duplicarla. Riporta
+sempre fonti, evidenze, score/confidenza, limiti e stato; non inventare dati.`;
+
 // Near-identical across specialist.md, security-evaluator.md, docs-sync.md.
 // coder.md keeps its own wording (it's about the SAME ticket layer but the
 // surrounding numbered list differs enough — "se manca uno dei due" vs "se
@@ -3724,7 +3737,7 @@ export default function (pi: ExtensionAPI) {
 			.replaceAll("{{WORKER_TOOLS_INTRO}}", WORKER_TOOLS_INTRO)
 			.replaceAll("{{DIAGRAM_TIP}}", DIAGRAM_TIP)
 			.replaceAll("{{TURN_CLOSE_NOTE}}", TURN_CLOSE_NOTE)
-			.replaceAll("{{TICKET_CLAIM_STEP0}}", TICKET_CLAIM_STEP0) + rulesPrompt + CONTEXT_EFFICIENCY_PROTOCOL + apiRegistryPrompt(identity.cwd) + (codeMem.context ? `\n\n## Orientamento code-mem (consultazione bounded)\nUsa questi risultati per scegliere quali file approfondire. Sono orientamento, non prova definitiva: verifica ogni informazione critica nel codice, nei test e nel runtime. Non riversare l'intero repository nel contesto.\n${codeMem.context}` : "") + loadAgentMemory({ root: identity.cwd, role: identity.role, instance: identity.instance }) +
+			.replaceAll("{{TICKET_CLAIM_STEP0}}", TICKET_CLAIM_STEP0) + rulesPrompt + CONTEXT_EFFICIENCY_PROTOCOL + REPORT_ARTIFACT_PROTOCOL + apiRegistryPrompt(identity.cwd) + (codeMem.context ? `\n\n## Orientamento code-mem (consultazione bounded)\nUsa questi risultati per scegliere quali file approfondire. Sono orientamento, non prova definitiva: verifica ogni informazione critica nel codice, nei test e nel runtime. Non riversare l'intero repository nel contesto.\n${codeMem.context}` : "") + loadAgentMemory({ root: identity.cwd, role: identity.role, instance: identity.instance }) +
 			(identity.role === "planner" && !projectBootstrapDelivered && projectBootstrap ? projectBootstrap : "");
 		if (identity.role === "planner" && projectBootstrap) {
 			projectBootstrapDelivered = true;
@@ -4314,7 +4327,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "auto_improve_complete",
 		label: "Auto-Improve Complete",
-		description: "Complete an auto-improve audit by writing its Markdown report only to the global Yano auto-improver data directory. Available only to the auto-improver role.",
+		description: "Complete an auto-improve audit by writing its Markdown report to the current project's docs/reports directory. Available only to the auto-improver role.",
 		parameters: Type.Object({
 			audit_id: Type.String(),
 			report_file: Type.String(),
@@ -4329,20 +4342,24 @@ export default function (pi: ExtensionAPI) {
 			// root ("reports/AUDIT-....md"). Resolve that form explicitly; an
 			// absolute path is still accepted only after the same containment check.
 			const projectRoot = path.resolve(path.join(globalRoot, "projects", projectKey(identity.cwd, identity.project)));
+			const projectReportsRoot = path.resolve(path.join(identity.cwd, "docs", "reports"));
 			const rawReportFile = String(params.report_file || "");
 			const reportFile = path.resolve(path.isAbsolute(rawReportFile) ? rawReportFile : path.join(projectRoot, rawReportFile));
-			if (reportFile !== globalRoot && !reportFile.startsWith(`${globalRoot}${path.sep}`)) {
-				throw new Error("auto_improve_complete: report_file deve restare nel data-root globale auto-improver.");
+			const inGlobalRoot = reportFile === globalRoot || reportFile.startsWith(`${globalRoot}${path.sep}`);
+			const inProjectReports = reportFile.startsWith(`${projectReportsRoot}${path.sep}`);
+			if (!inGlobalRoot && !inProjectReports) {
+				throw new Error("auto_improve_complete: report_file deve restare nel data-root auto-improver o in docs/reports del progetto.");
 			}
-			if (!reportFile.endsWith(`${path.sep}reports${path.sep}${params.audit_id}.md`)) {
+			if ((!inGlobalRoot && !path.basename(reportFile).startsWith("auto-improvement-")) || (inGlobalRoot && !reportFile.endsWith(`${path.sep}reports${path.sep}${params.audit_id}.md`))) {
 				throw new Error("auto_improve_complete: report_file non corrisponde all'audit richiesto.");
 			}
+			fs.mkdirSync(path.dirname(reportFile), { recursive: true });
 			fs.writeFileSync(reportFile, params.report_markdown.endsWith("\n") ? params.report_markdown : `${params.report_markdown}\n`, { mode: 0o600 });
 			const output = execFileSync("yano", ["auto-improve", "complete", "--project-root", identity.cwd, "--audit-id", params.audit_id, "--report-file", reportFile, "--summary", params.summary, "--json"], { cwd: identity.cwd, encoding: "utf8", timeout: 15_000, maxBuffer: 2 * 1024 * 1024 });
 			return { content: [{ type: "text" as const, text: output.trim() || `auto-improve ${params.audit_id}: completed` }], details: { audit_id: params.audit_id, report_file: reportFile, read_only_project: true } };
 		},
 		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("auto_improve_complete ")) + theme.fg("accent", (args as any).audit_id ?? "?"), 0, 0); },
-		renderResult(_result, _options, theme) { return new Text(theme.fg("success", "✓ audit completed (global report only)"), 0, 0); },
+		renderResult(_result, _options, theme) { return new Text(theme.fg("success", "✓ audit completed (project docs/reports)"), 0, 0); },
 	});
 
 	pi.registerTool({
@@ -5877,7 +5894,7 @@ export default function (pi: ExtensionAPI) {
 			}
 		})();
 		const allowed = target === "planner"
-			? sender === "reviewer" || !coreRoles.has(sender)
+			? sender === "reviewer" || sender === "frontend-reviewer" || sender === "full-stack-reviewer" || !coreRoles.has(sender)
 			: target === "reviewer"
 				? sender === "coder" || sender === "refactoring-specialist" || (sender === "planner" && (isRefactorPlan || isCleanRepoPlan))
 				: target === "refactoring-specialist"
@@ -5891,6 +5908,7 @@ export default function (pi: ExtensionAPI) {
 				"The enforced paths are planner → coder → reviewer → planner, planner → refactoring-specialist → reviewer → planner, " +
 				"planner → repo-curator → reviewer → planner for clean-repo; and " +
 				"planner → frontend-developer → frontend-reviewer → planner; " +
+				"planner → full-stack-developer → full-stack-reviewer → planner; " +
 				"each reviewer may return corrections only to its matching developer role.",
 			);
 		}

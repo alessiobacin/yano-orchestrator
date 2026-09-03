@@ -91,7 +91,7 @@ function assertRoleHandoffAllowed(senderRole, targetRole, slug) {
 	const isRefactorPlan = slug === "refactor-plan";
 	const isCleanRepoPlan = slug === "clean-repo-plan";
 	const allowed = target === "planner"
-		? sender === "reviewer" || !coreRoles.has(sender)
+		? sender === "reviewer" || sender === "frontend-reviewer" || sender === "full-stack-reviewer" || !coreRoles.has(sender)
 		: target === "reviewer"
 			? sender === "coder" || sender === "refactoring-specialist" || (sender === "planner" && (isRefactorPlan || isCleanRepoPlan))
 			: target === "refactoring-specialist"
@@ -313,6 +313,8 @@ async function main() {
 	planAdvance(worktree_path, "planner", "refactor-plan", 1);
 	assert.doesNotThrow(() => agentSendGateCheck(worktree_path, "refactor-plan", "refactoring-specialist", {}, undefined, "planner"));
 	assert.doesNotThrow(() => agentSendGateCheck(worktree_path, "refactor-plan", "reviewer", {}, undefined, "planner"));
+	assert.doesNotThrow(() => agentSendGateCheck(worktree_path, "frontend-plan", "frontend-reviewer", {}, undefined, "planner"));
+	assert.doesNotThrow(() => agentSendGateCheck(worktree_path, "full-stack-plan", "full-stack-reviewer", {}, undefined, "planner"));
 	planAdvance(worktree_path, "planner", "clean-repo-plan", 1);
 	assert.doesNotThrow(() => agentSendGateCheck(worktree_path, "clean-repo-plan", "reviewer", {}, undefined, "planner"));
 	assert.doesNotThrow(() => agentSendGateCheck(worktree_path, "refactor-plan", "reviewer", {}, undefined, "refactoring-specialist"));

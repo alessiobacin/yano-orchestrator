@@ -4,7 +4,7 @@ Controlla periodicamente il flusso degli agenti senza modificare il progetto
 applicativo.
 
 ~~~bash
-yano watcher init --project-root "$PWD" --interval-ms 300000 --lookback-ms 3600000
+yano watcher init --project-root "$PWD" --interval-ms 60000 --lookback-ms 3600000
 yano watcher start --project-root "$PWD"          # apre/riusa la tab Herdr yano-watcher
 yano watcher status --json                        # stato registrato + self-heal di un pane morto
 yano watcher pause --project-root "$PWD"

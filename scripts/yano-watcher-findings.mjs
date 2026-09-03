@@ -135,7 +135,8 @@ export function detectYanoFindings(records, context = {}) {
 			addFinding(failure({ category: "delegation", signal: "no_live_target", severity: "high", summary: "Yano ha tentato di inviare un lavoro ma non ha trovato un destinatario vivo.", record, evidence: context }));
 			continue;
 		}
-		if ((type === "notification_dispatch" || type === "whatsapp_notify") && record.reason === "agent_send_timeout") {
+		const configuredNotificationChannels = Array.isArray(record.channels) ? record.channels.length > 0 : Boolean(record.channels);
+		if ((type === "notification_dispatch" || type === "whatsapp_notify") && record.reason === "agent_send_timeout" && configuredNotificationChannels) {
 			addFinding(failure({ category: "delegation", signal: "delegation_timeout", severity: "high", summary: "Yano ha esaurito il timeout durante la delega a un agente.", record, evidence: context }));
 			continue;
 		}

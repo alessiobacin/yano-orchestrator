@@ -101,6 +101,23 @@ export function inspectGlobalLinkedInstall({ packageRoot, packageName = "yano-or
 	};
 }
 
+// `yano update` must never report success while the global package is still a
+// symlink (or while npm failed to install it at all). Keep this invariant in a
+// separate exported helper so the update smoke test can cover the exact gate.
+export function assertPermanentGlobalInstall({ packageName = "yano-orchestrator", npmRoot } = {}) {
+	const installed = inspectGlobalLinkedInstall({ packageName, npmRoot });
+	if (!installed.found) {
+		throw new Error(`installazione globale di ${packageName} non trovata dopo l'update`);
+	}
+	if (installed.linked) {
+		throw new Error(`installazione globale di ${packageName} ancora collegata tramite symlink (${installed.path})`);
+	}
+	if (!readVersion(path.join(installed.path, "package.json"))) {
+		throw new Error(`installazione globale di ${packageName} priva di package.json/versione (${installed.path})`);
+	}
+	return installed;
+}
+
 function installPermanentGlobalPackage(repoUrl) {
 	const tempDir = mkdtempSync(path.join(os.tmpdir(), "yano-update-"));
 	try {
@@ -286,8 +303,15 @@ async function performUpdate({ packageRoot, argv }) {
 		);
 		process.exit(1);
 	}
-	const installedAfter = inspectGlobalLinkedInstall({ packageName });
-	if (installedAfter.found && !installedAfter.linked) activePackageRoot = installedAfter.path;
+	let installedAfter;
+	try {
+		installedAfter = assertPermanentGlobalInstall({ packageName });
+		activePackageRoot = installedAfter.path;
+	} catch (error) {
+		console.error(`\nyano update: verifica installazione globale permanente fallita (${error instanceof Error ? error.message : String(error)}).`);
+		console.error("L'update viene considerato fallito: nessun link globale deve rimanere attivo.");
+		process.exit(1);
+	}
 	for (const script of ["install-yano-cli.mjs", "install-yano-watcher-cron.mjs", "install-yano-scheduler-cron.mjs"]) {
 		try {
 			execFileSync(process.execPath, [path.join(activePackageRoot, "scripts", script), "--if-global", "--quiet"], {
@@ -360,7 +384,7 @@ async function performUpdate({ packageRoot, argv }) {
 	return {
 		checkOnly: false,
 		currentVersion,
-		newVersion: readVersion(pkgJsonPath) || currentVersion,
+		newVersion: readVersion(path.join(activePackageRoot, "package.json")) || currentVersion,
 		extensionGitDir: gitDir,
 		extensionCommit: hasGitClone ? currentGitCommit(gitDir) : null,
 	};

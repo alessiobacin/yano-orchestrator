@@ -8,6 +8,7 @@ category: internal_tool
 signal: tool_failure
 fingerprint: fcd7df12df76731e06acd9f59985abe5ae0db4bf010b6c262ca8e0849f8fbdbf
 detected_at: 2026-09-03T12:58:48.391Z
+last_seen_at: 2026-09-03T14:06:00.998Z
 source_project: newmiodoc
 source_project_root: /Users/alessiobacin/Development/Code/newMioDOC
 source_project_key: workspace-57a4005feedc

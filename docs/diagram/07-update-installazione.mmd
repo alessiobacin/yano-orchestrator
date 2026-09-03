@@ -3,6 +3,8 @@ flowchart LR
     DETECT --> REMOVE["rimuove solo il link globale"]
     REMOVE --> NPM["npm install -g\nrepository URL"]
     NPM --> PERM["copia npm globale permanente"]
-    PERM --> PI["clone Pi extension separato"]
+    PERM -->|verifica directory + package.json + versione| GATE{"gate superato?"}
+    GATE -->|no| FAIL["exit 1: update fallito"]
+    GATE -->|si| PI["clone Pi extension separato"]
     PI --> HOST["host: Herdr + Pi + Git\ncron/Task Scheduler"]
     DOCKER["Docker/Compose\nMQTT + servizi stateless"] -. complementare .-> HOST

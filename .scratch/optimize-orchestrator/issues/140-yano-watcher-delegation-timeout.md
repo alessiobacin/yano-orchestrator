@@ -4,11 +4,11 @@ kind: task
 created_by: yano-watcher
 status: open
 severity: high
-category: internal_tool
-signal: tool_failure
-fingerprint: 5c85abdce0cd4b65e1ca05bd5baf336e0680bf5b01aa01bf3b6e00eafc832caf
-detected_at: 2026-09-03T12:57:51.485Z
-last_seen_at: 2026-09-03T14:21:46.887Z
+category: delegation
+signal: delegation_timeout
+fingerprint: 7e271253177498392a1a66c80bece2234b9b0365d69ce109546e21dad22df104
+detected_at: 2026-09-03T13:28:58.265Z
+last_seen_at: 2026-09-03T14:21:46.877Z
 source_project: newmiodoc
 source_project_root: /Users/alessiobacin/Development/Code/newMioDOC
 source_project_key: workspace-57a4005feedc
@@ -19,13 +19,13 @@ instance: planner-01
 evidence_record_id: unknown
 ---
 
-# Un tool interno di Yano è terminato con errore.
+# Yano ha esaurito il timeout durante la delega a un agente.
 
 Type: human
 Kind: task
 Created-by: yano-watcher
 Status: open
-Fingerprint: 5c85abdce0cd4b65e1ca05bd5baf336e0680bf5b01aa01bf3b6e00eafc832caf
+Fingerprint: 7e271253177498392a1a66c80bece2234b9b0365d69ce109546e21dad22df104
 
 ## Sintesi
 
@@ -33,25 +33,41 @@ Il watcher ha rilevato un comportamento attribuibile al flusso interno di Yano, 
 
 ## Evidenza osservabile
 
-- Segnale: `tool_failure`
-- Categoria: `internal_tool`
+- Segnale: `delegation_timeout`
+- Categoria: `delegation`
 - Progetto osservato: `newmiodoc` (/Users/alessiobacin/Development/Code/newMioDOC)
-- Timestamp del record: `2026-09-03T12:57:19.258Z`
+- Timestamp del record: `2026-09-03T13:28:07.674Z`
 - Record di trace: `unknown`
 
 ```json
 {
-  "ts": "2026-09-03T12:57:19.258Z",
-  "seq": 293,
+  "ts": "2026-09-03T13:28:07.674Z",
+  "seq": 644,
   "instance": "planner-01",
   "role": "planner",
   "project": "newmiodoc",
   "project_key": "workspace-57a4005feedc",
   "trace_mode": "full",
-  "type": "tool_execution_end",
-  "tool_call_id": "call_01a0675829f572409fba9af1",
-  "tool": "agent_send",
-  "ok": false
+  "type": "notification_dispatch",
+  "ok": false,
+  "detail": "whatsapp: non configurato — variabili mancanti nel .env: EVOLUTION_INSTANCE_NAME, DESTINATION_PHONE_NUMBER; telegram: non configurato — variabili mancanti nel .env: TELEGRAM_BOT_TOKEN, TELEGRAM_DESTINATION_CHAT_ID; email: non configurato — variabili mancanti nel .env: SENDGRID_API_KEY, SENDGRID_FROM_EMAIL, SENDGRID_TO_EMAIL",
+  "channels": {
+    "whatsapp": {
+      "ok": false,
+      "detail": "non configurato — variabili mancanti nel .env: EVOLUTION_INSTANCE_NAME, DESTINATION_PHONE_NUMBER"
+    },
+    "telegram": {
+      "ok": false,
+      "detail": "non configurato — variabili mancanti nel .env: TELEGRAM_BOT_TOKEN, TELEGRAM_DESTINATION_CHAT_ID"
+    },
+    "email": {
+      "ok": false,
+      "detail": "non configurato — variabili mancanti nel .env: SENDGRID_API_KEY, SENDGRID_FROM_EMAIL, SENDGRID_TO_EMAIL"
+    }
+  },
+  "reason": "agent_send_timeout",
+  "assignment_id": "01M1KNJ6C5WXNRJKPJ92662RE0",
+  "target": "coder-01"
 }
 ```
 

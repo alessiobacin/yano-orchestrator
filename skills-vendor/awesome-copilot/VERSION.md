@@ -64,7 +64,7 @@ esisteva un problema di MCP da risolvere):
 1. **La SKILL** (questo file) — *è* scopabile per ruolo, e lo è:
    `scripts/launch-planner.mjs` aggiunge `--skill
    <percorso-di-questa-cartella>` SOLO quando il ruolo risolto è
-   `reviewer` o `frontend-developer` (vedi `CHROME_DEVTOOLS_SKILL_ROLES` in
+   `reviewer`, `frontend-developer` o `e2e-simulator` (vedi `CHROME_DEVTOOLS_SKILL_ROLES` in
    quel file), mai per planner/coder/altri specialisti. Verificato da
    `scripts/check-skill-isolation.mjs`.
 2. **Il server MCP** — *non è* scopabile per ruolo (limite di

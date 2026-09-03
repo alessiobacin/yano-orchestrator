@@ -118,7 +118,7 @@ bounded e poi il processo resta in polling read-only ogni dieci minuti:
 
 ~~~bash
 yano watch --project-root /path/progetto \
-  --lookback-ms 3600000 --interval-ms 300000 --away
+  --lookback-ms 3600000 --interval-ms 60000 --away
 ~~~
 
 Il polling zero-token controlla stall, heartbeat e segnali Yano ad alta
@@ -164,7 +164,7 @@ validazione bounded positiva associata a `--validation-run`.
 
 ## Watcher persistente su un progetto esistente (registro)
 
-`yano watch --interval-ms 300000 --away` lanciato a mano in un terminale o in
+`yano watch --interval-ms 60000 --away` lanciato a mano in un terminale o in
 una tab Herdr qualsiasi **non sopravvive** a un riavvio: se il terminale si
 chiude, il Mac va in sleep o la tab/pane muore, il polling si ferma senza che
 nulla lo segnali — `yano watcher projects` mostra solo presenza Herdr/Pi già
@@ -176,7 +176,7 @@ piccolo registro persistente (stessa logica già in uso per
 `yano feedback init|start|pause|resume`, vedi `docs/quick-guides/yano-feedback.md`):
 
 ~~~bash
-yano watcher init --project-root /path/progetto --interval-ms 300000 --lookback-ms 3600000
+yano watcher init --project-root /path/progetto --interval-ms 60000 --lookback-ms 3600000
 yano watcher start --project-root /path/progetto
 ~~~
 

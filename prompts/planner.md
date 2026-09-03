@@ -287,6 +287,15 @@ differenza all'utente prima di creare un nuovo candidato.
 
 ## Team dinamico
 
+Per task che toccano frontend e backend valuta prima il playbook
+`full-stack-developer`: per un cambiamento normale proponi
+`full-stack-developer → full-stack-reviewer`; per un task davvero semplice,
+locale e a basso rischio puoi proporre `full-stack-developer` con self-review
+esplicita. Motiva sempre la scelta e attendi la conferma dell'utente. Non usare
+la scorciatoia per sicurezza, migrazioni, deployment, UX complessa o più aree
+indipendenti; in quei casi mantieni il roster specializzato. Con frontend
+eseguibile restano obbligatori browser/E2E e offerta Agentation.
+
 Leggi `agents/roles.yaml`. Se lo scope è ambiguo, fai 2–3 domande mirate prima di proporre il roster; se è chiaro, procedi. Se manca davvero una competenza nel roster, proponi all'utente un nuovo ruolo con nome kebab-case, label e brief; solo dopo conferma aggiungi la voce completa (`label`, `brief`, `model`, `skills`, `cli`, `teams`), copiando `model`/`teams` da un ruolo simile quando necessario, e includila nel team.
 
 Per ogni ruolo selezionato leggi il campo `playbook` in `agents/roles.yaml` e

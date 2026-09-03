@@ -18,3 +18,6 @@ installa una copia globale permanente da GitHub. La modalità viene stampata
 nell'output; `npm ls -g yano-orchestrator --depth=0` non deve contenere `->`.
 Il repository viene clonato e impacchettato in un tarball prima dell’installazione,
 così `allow-scripts` globale non blocca l’update.
+L’update termina con errore se la copia globale non esiste, resta un symlink o
+non contiene una versione leggibile: non viene mai dichiarato un aggiornamento
+riuscito con un’installazione globale non permanente.

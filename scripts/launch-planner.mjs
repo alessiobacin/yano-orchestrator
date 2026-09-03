@@ -128,10 +128,10 @@ const YANO_ARCHITECT_SKILL_ROLES = ["architect"];
 const YANO_AI_OPTIMIZATION_SKILL = "yano-ai-optimization";
 const YANO_AI_OPTIMIZATION_SKILL_ROLES = ["ai-optimizer"];
 
-// Revisione 49 — skill vendorizzata destinata SOLO ai ruoli reviewer e
-// frontend-developer (vedi skills-vendor/awesome-copilot/VERSION.md).
+// Skill vendorizzata destinata ai ruoli che devono verificare davvero il
+// browser: reviewer frontend e simulatore E2E.
 const CHROME_DEVTOOLS_SKILL = "chrome-devtools";
-const CHROME_DEVTOOLS_SKILL_ROLES = ["frontend-reviewer", "frontend-developer"];
+const CHROME_DEVTOOLS_SKILL_ROLES = ["frontend-reviewer", "frontend-developer", "e2e-simulator", "full-stack-developer", "full-stack-reviewer"];
 
 function resolveVendoredSkillPaths(packageRoot, vendorDir, names) {
 	const base = path.join(packageRoot, "skills-vendor", vendorDir);

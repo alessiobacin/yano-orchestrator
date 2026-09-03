@@ -271,7 +271,7 @@ asserzioni). Per il progetto già in esecuzione, rilanciare tutte le istanze
 con lo stesso scope MQTT; il codice non può rendere visibili tra loro due reti
 `pi/<project>/...` diverse senza violare l'isolamento tra progetti.
 
-## Revisione 49 — chrome-devtools MCP + skill vendorizzata per reviewer e frontend-developer (verifica reale nel browser, non solo lettura del codice)
+## Revisione 49 — chrome-devtools MCP + skill vendorizzata per ruoli browser (verifica reale nel browser, non solo lettura del codice)
 
 **Richiesta esplicita dell'operatore**: dare a `reviewer` e `frontend-developer`
 la capacità di **verificare davvero, in un browser**, che il frontend
@@ -330,7 +330,7 @@ peso per metà del problema:
    `skills-vendor/awesome-copilot/chrome-devtools/` (vedi VERSION.md lì
    dentro per il dettaglio completo). `scripts/launch-planner.mjs` ora
    attacca `--skill <percorso>` SOLO quando il ruolo risolto è `reviewer` o
-   `frontend-developer` (`CHROME_DEVTOOLS_SKILL_ROLES`), esattamente come
+   `frontend-developer` ed `e2e-simulator` (`CHROME_DEVTOOLS_SKILL_ROLES`), esattamente come
    già fa per le 5 skill mattpocock col ruolo `planner`.
    `scripts/check-skill-isolation.mjs` è stato esteso (controlli 7-11,
    in aggiunta ai 6 già esistenti per mattpocock) per verificare la stessa

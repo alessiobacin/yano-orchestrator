@@ -278,10 +278,32 @@ roles:
     label: "E2E User Simulator"
     brief: "Scrivi e mantieni test end-to-end (es. Playwright/Cypress) che simulano il flusso reale di un utente sul frontend, coordinandoti con frontend-developer per i selettori/flussi UI da coprire."
     model: { provider: llmproxy, model: llmproxy }
-    skills: [e2e-testing-patterns, playwright-best-practices, playwright-cli, yano-planner-trace-analysis, yano-cli]
+    skills: [e2e-testing-patterns, playwright-best-practices, playwright-cli, chrome-devtools, yano-planner-trace-analysis, yano-cli]
     cli: [git, npm, npx, playwright-cli]
     mcp: [chrome-devtools]
     teams: [qa, frontend]
+
+  full-stack-developer:
+    activation: lazy
+    playbook: full-stack-developer
+    label: "Full-stack Developer"
+    brief: "Implementa in un unico worktree task bounded che coinvolgono frontend e backend. Prima restringe il perimetro leggendo memoria e documenti; poi modifica davvero API, persistenza e UI quando servono, esegue test backend e verifiche browser pertinenti, aggiorna i documenti applicabili e consegna al full-stack-reviewer salvo topology single-developer approvata dal planner."
+    model: { provider: llmproxy, model: llmproxy }
+    skills: [tdd-development, playwright-best-practices, playwright-cli, chrome-devtools, yano-planner-trace-analysis, yano-code-mem, yano-cli]
+    cli: [git, npm, npx]
+    mcp: [chrome-devtools]
+    teams: [core, frontend, backend]
+
+  full-stack-reviewer:
+    activation: lazy
+    playbook: full-stack-developer
+    label: "Full-stack Reviewer"
+    brief: "Revisiona in modo indipendente cambi cross-layer separando Spec e Standards: verifica API, persistenza, UI, test, browser/E2E, regressioni e documentazione. Respinge con evidenze riproducibili oppure approva e informa il planner; non sostituisce il frontend-reviewer quando il task richiede una review visuale Agentation dedicata."
+    model: { provider: llmproxy, model: llmproxy }
+    skills: [code-review, playwright-best-practices, playwright-cli, chrome-devtools, yano-planner-trace-analysis, yano-code-mem, yano-cli]
+    cli: [git, npm, npx]
+    mcp: [chrome-devtools]
+    teams: [core, frontend, backend]
 
   # Fase 2 - Infrastruttura & Deployment
   dockerizer:

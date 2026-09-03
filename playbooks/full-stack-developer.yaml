@@ -1,0 +1,85 @@
+---
+schema_version: 1
+id: full-stack-developer
+label: Full-stack implementation with proportional review
+description: >-
+  Delivers a bounded change across frontend and backend with one full-stack
+  developer, then applies the smallest review topology justified by risk:
+  full-stack-reviewer for normal changes, or an explicit single-agent review
+  for genuinely simple changes. UI changes still require browser/E2E evidence
+  and the Agentation gate; documentation is verified before finalization.
+enforcement:
+  status: partial
+  note: Runtime gates worktrees, tickets, evidence and finalization; the planner
+    must record why the selected topology is proportional to scope and risk.
+contract:
+  execution: sequential
+  checkpoint: every_state_transition
+  evidence: [scope, inputs, commands, exit_code, output, changed_state, blockers]
+  report_sections: [summary, scope, evidence, review, result, blockers, handoff]
+  budgets:
+    max_commands: 100
+    max_files: 250
+    max_minutes: 60
+    max_tokens: 22000
+  verification:
+    mode: delivery
+    required: true
+  recovery: [resume_from_last_checkpoint, preserve_evidence, bounded_retry]
+  topology_options:
+    - id: developer-reviewer
+      roles: [full-stack-developer, full-stack-reviewer]
+      when: normal cross-layer change or non-trivial risk
+    - id: single-developer
+      roles: [full-stack-developer]
+      when: simple, local, low-risk change with no meaningful review surface
+states:
+  - { id: received, owner: planner, terminal: false }
+  - { id: preflight, owner: planner, terminal: false }
+  - { id: implementing, owner: full-stack-developer, terminal: false }
+  - { id: review, owner: full-stack-reviewer, terminal: false }
+  - { id: completed, owner: planner, terminal: true }
+  - { id: blocked, owner: planner_and_human, terminal: true }
+transitions:
+  - id: scope
+    from: received
+    to: preflight
+    actor: planner
+    requires: [objective_received, frontend_backend_scope_classified, topology_recorded]
+  - id: implement
+    from: preflight
+    to: implementing
+    actor: planner
+    requires: [required_capabilities_ready, worktree_created, phase_unlocked]
+  - id: submit_review
+    from: implementing
+    to: review
+    actor: full-stack-developer
+    requires: [backend_tests_run, frontend_checks_run_or_not_applicable, docs_updated_or_handoff, report_updated]
+  - id: accept_reviewed
+    from: review
+    to: completed
+    actor: planner
+    requires: [full_stack_review_approved, regression_evidence, docs_synced, e2e_run_or_skip_reason, user_confirmation]
+  - id: accept_simple
+    from: implementing
+    to: completed
+    actor: planner
+    requires: [single_agent_review_reason, regression_evidence, docs_synced, e2e_run_or_skip_reason, user_confirmation]
+  - id: reject
+    from: review
+    to: blocked
+    actor: full-stack-reviewer
+    requires: [concrete_findings, report_updated]
+failure_routes:
+  - { condition: backend_regression, action: return_to_full_stack_developer, terminal: false }
+  - { condition: frontend_regression, action: return_to_full_stack_developer, terminal: false }
+  - { condition: review_budget_exhausted, action: stop_and_escalate, terminal: true }
+invariants:
+  - isolated_worktree
+  - one_developer_owns_the_cross_layer_change
+  - reviewer_is_distinct_for_normal_risk
+  - frontend_scope_requires_browser_and_e2e_gate
+  - agentation_review_is_offered_when_frontend_scope_exists
+  - docs_sync_is_final
+  - no_finalize_before_explicit_user_confirmation

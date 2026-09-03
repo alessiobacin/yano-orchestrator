@@ -48,6 +48,11 @@ separati e avvia lo scheduler detached. La tab/istanza può essere riusata, ma g
 riprendono transcript precedenti, così il confine read-only resta verificabile. Per
 verificare il comando senza Herdr:
 
+Il report finale viene salvato nel progetto osservato in
+`docs/reports/auto-improvement-<gg-mm-HH_MM>.md`; l'evidence pack tecnico resta
+nel data-root globale di Yano per consentire audit e recovery senza appesantire
+la repository.
+
 Il supervisore globale esegue anche `yano auto-improve supervise`: dopo un
 riavvio ricrea la tab persistente di un worker `idle` e lo scheduler, senza
 creare un nuovo audit prima della scadenza. Un audit precedente in

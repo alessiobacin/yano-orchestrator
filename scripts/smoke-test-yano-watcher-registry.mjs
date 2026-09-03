@@ -19,7 +19,7 @@ async function call(sub, ...args) {
 
 try {
 	const initialized = await call("init", "--project", "llmproxy", "--lookback-ms", "3600000", "--json");
-	assert.equal(initialized.project.interval_ms, 300000, "un watcher senza override usa cinque minuti");
+	assert.equal(initialized.project.interval_ms, 60000, "un watcher senza override controlla ogni minuto");
 	assert.equal(initialized.project.lookback_ms, 3600000);
 	assert.equal(initialized.project.worker_status, "running");
 

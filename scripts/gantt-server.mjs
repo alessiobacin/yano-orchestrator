@@ -89,7 +89,12 @@ function buildSnapshot(cwd, explicitProject = null) {
 	let DatabaseSync;
 	try { ({ DatabaseSync } = yanoRequire("node:sqlite")); } catch { return { project, runs: [], ok: false, db_path: dbPath, error: "node:sqlite unavailable" }; }
 	const db = new DatabaseSync(dbPath, { readOnly: true });
-	const runs = db.prepare("SELECT * FROM runs WHERE project = ? ORDER BY created_at ASC").all(project);
+	// The project display name is user-facing and may preserve casing
+	// (`newMioDOC`), while the orchestrator scope persisted by the planner is
+	// normalized (`newmiodoc`). The DB is the authoritative source; matching
+	// case-insensitively prevents a valid project dashboard from appearing
+	// empty merely because the display casing differs.
+	const runs = db.prepare("SELECT * FROM runs WHERE lower(project) = lower(?) ORDER BY created_at ASC").all(project);
 	const enriched = runs.map((r) => {
 		const tickets = db.prepare("SELECT * FROM tickets WHERE run_id = ? ORDER BY created_at ASC").all(r.id);
 		const holds = db.prepare("SELECT * FROM decision_holds WHERE run_id = ? AND status='open'").all(r.id);

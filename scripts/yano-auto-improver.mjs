@@ -314,7 +314,9 @@ function initialRecommendations(evidence) {
 function writeReportSkeleton(info, auditId, evidence, recommendations) {
 	const dir = projectDataRoot(info.key);
 	fs.mkdirSync(path.join(dir, "reports"), { recursive: true, mode: 0o700 });
-	const reportPath = path.join(dir, "reports", `${auditId}.md`);
+	const projectReports = path.join(info.root, "docs", "reports");
+	fs.mkdirSync(projectReports, { recursive: true, mode: 0o700 });
+	const reportPath = path.join(projectReports, `auto-improvement-${italianReportStamp()}.md`);
 	const lines = [
 		`# Auto-improve audit ${auditId}`,
 		"",
@@ -351,6 +353,11 @@ function writeReportSkeleton(info, auditId, evidence, recommendations) {
 	];
 	fs.writeFileSync(reportPath, `${lines.join("\n")}\n`, { mode: 0o600 });
 	return reportPath;
+}
+
+function italianReportStamp(date = new Date()) {
+	const two = (value) => String(value).padStart(2, "0");
+	return `${two(date.getDate())}-${two(date.getMonth() + 1)}-${two(date.getHours())}_${two(date.getMinutes())}`;
 }
 
 function shellQuote(valueToQuote) {
@@ -404,7 +411,7 @@ function launchWorker(info, row, auditId, evidencePath, reportPath, dryRun = fal
 	const serviceOnly = !auditId;
 	const prompt = serviceOnly
 		? `Il servizio auto-improver per ${info.name} è stato ripristinato dopo una perdita di Herdr. Non avviare un audit: l'ultimo audit è completato e il prossimo è pianificato per ${row.next_run_at || "la prossima scadenza"}. Rimani inattivo e read-only; non modificare il progetto. Se ricevi un audit esplicito, usa esclusivamente gli strumenti consentiti e completa soltanto il report globale.`
-		: `Esegui l'audit auto-improve ${auditId} in modo esclusivamente read-only e con valutazione a 360 gradi. Leggi evidence pack ${evidencePath} e analizza direttamente ${info.root} senza modificarlo. Oltre a codice, test, performance, sicurezza, documentazione e UX, identifica la missione/capability principale del progetto e confrontala con almeno 3 software o servizi comparabili. Usa auto_improve_web_search per trovare candidati e auto_improve_web_fetch per verificare solo fonti ufficiali HTTPS: repository, documentazione o package registry. Per ogni confronto valuta feature, qualità del retrieval/risultato, esperienza utente, esperienza LLM/agent, tool/API, MCP, connettori, plugin/estensioni, integrazioni, privacy, deployment, performance, test, maturità e licenza. Produci una gap matrix tra progetto attuale e alternative e proposte concrete di feature, correzioni, tool, connettori e plugin mancanti, ciascuna con valore, complessità, rischio, confidenza e requires_human_decision. Distingui sempre evidenza verificata, inferenza e limite non verificabile; non inventare fonti o feature. Se il web non è disponibile, documenta le query e il limite invece di fingere il confronto. Completa il report globale ${reportPath} usando il tool auto_improve_complete, che è l'unico write autorizzato e scrive solo nel data-root globale. Non usare bash, edit, write, git, build, worktree o comandi equivalenti. Invia il risultato al planner.`;
+		: `Esegui l'audit auto-improve ${auditId} in modo esclusivamente read-only e con valutazione a 360 gradi. Leggi evidence pack ${evidencePath} e analizza direttamente ${info.root} senza modificarlo. Oltre a codice, test, performance, sicurezza, documentazione e UX, identifica la missione/capability principale del progetto e confrontala con almeno 3 software o servizi comparabili. Usa auto_improve_web_search per trovare candidati e auto_improve_web_fetch per verificare solo fonti ufficiali HTTPS: repository, documentazione o package registry. Per ogni confronto valuta feature, qualità del retrieval/risultato, esperienza utente, esperienza LLM/agent, tool/API, MCP, connettori, plugin/estensioni, integrazioni, privacy, deployment, performance, test, maturità e licenza. Produci una gap matrix tra progetto attuale e alternative e proposte concrete di feature, correzioni, tool, connettori e plugin mancanti, ciascuna con valore, complessità, rischio, confidenza e requires_human_decision. Distingui sempre evidenza verificata, inferenza e limite non verificabile; non inventare fonti o feature. Se il web non è disponibile, documenta le query e il limite invece di fingere il confronto. Completa il report ${reportPath} usando il tool auto_improve_complete; è l'unica scrittura autorizzata e riguarda esclusivamente il report in docs/reports del progetto. Non usare bash, edit, write, git, build, worktree o comandi equivalenti. Invia il risultato al planner.`;
 	// Never resume an old Pi transcript: an auto-improve audit is a fresh,
 	// bounded read-only inspection. The Herdr tab/instance may be reused, but
 	// `--continue` could resurrect stale implementation context and commands.
@@ -585,21 +592,22 @@ async function notifyPlanner(info, audit, summary) {
 	finally { client.end(true); }
 }
 
-function assertTempPath(file) {
+function assertTempPath(file, projectRoot = process.cwd()) {
 	const resolved = path.resolve(file);
 	const root = path.resolve(dataRoot()) + path.sep;
-	if (!resolved.startsWith(root)) throw new Error("yano auto-improve: report e summary devono restare nella directory globale <YANO_DATA_DIR>/auto-improver");
+	const projectReports = path.join(path.resolve(projectRoot), "docs", "reports") + path.sep;
+	if (!resolved.startsWith(root) && !resolved.startsWith(projectReports)) throw new Error("yano auto-improve: report fuori dal data-root globale o da docs/reports del progetto");
 	return resolved;
 }
 
 async function completeAudit(db, opts) {
 	const audit = db.prepare("SELECT a.*, p.name, p.root, p.notify FROM auto_audits a JOIN auto_projects p ON p.project_key = a.project_key WHERE a.audit_id = ?").get(opts.auditId);
 	if (!audit) throw new Error(`yano auto-improve: audit non trovato: ${opts.auditId}`);
-	const reportPath = assertTempPath(opts.reportFile || audit.report_path);
+	const reportPath = assertTempPath(opts.reportFile || audit.report_path, audit.root);
 	if (!fs.existsSync(reportPath)) throw new Error(`yano auto-improve: report non trovato: ${reportPath}`);
 	let summary = opts.summary || "Report auto-improve completato; consultare il report completo.";
-	if (opts.summaryFile && fs.existsSync(assertTempPath(opts.summaryFile))) {
-		const summaryText = fs.readFileSync(assertTempPath(opts.summaryFile), "utf8").slice(0, 4000);
+	if (opts.summaryFile && fs.existsSync(assertTempPath(opts.summaryFile, audit.root))) {
+		const summaryText = fs.readFileSync(assertTempPath(opts.summaryFile, audit.root), "utf8").slice(0, 4000);
 		const parsed = json(summaryText, null);
 		summary = typeof parsed?.summary === "string" ? parsed.summary : summaryText;
 	}

@@ -48,7 +48,7 @@ const YANO_AUTO_IMPROVEMENT_SKILL_ROLES = ["auto-improver"];
 const YANO_ARCHITECT_SKILL = "yano-architect";
 const YANO_ARCHITECT_SKILL_ROLES = ["architect"];
 const CHROME_DEVTOOLS_SKILL = "chrome-devtools";
-const CHROME_DEVTOOLS_SKILL_ROLES = ["frontend-reviewer", "frontend-developer"];
+const CHROME_DEVTOOLS_SKILL_ROLES = ["frontend-reviewer", "frontend-developer", "e2e-simulator", "full-stack-developer", "full-stack-reviewer"];
 
 function read(relPath) {
 	return readFileSync(path.join(repoRoot, relPath), "utf8");
@@ -156,7 +156,7 @@ for (const forbidden of [".pi/skills", path.join("agents", "skills"), ".agents/s
 }
 console.log("   OK");
 
-console.log("8. agents/roles.yaml: SOLO frontend-reviewer e frontend-developer hanno la skill chrome-devtools dichiarata...");
+console.log("8. agents/roles.yaml: i ruoli browser frontend ed E2E hanno la skill chrome-devtools dichiarata...");
 for (const [roleName, cfg] of Object.entries(roles)) {
 	const hasIt = (cfg.skills ?? []).includes(CHROME_DEVTOOLS_SKILL);
 	if (CHROME_DEVTOOLS_SKILL_ROLES.includes(roleName)) {
@@ -175,7 +175,7 @@ for (const roleName of CHROME_DEVTOOLS_SKILL_ROLES) {
 }
 console.log("   OK");
 
-console.log("10. launch-planner.mjs --print-only: reviewer/frontend-developer ricevono --skill chrome-devtools, planner/coder mai...");
+console.log("10. launch-planner.mjs --print-only: i ruoli browser ricevono --skill chrome-devtools, planner/coder mai...");
 const chromeDevToolsPath = path.join(repoRoot, "skills-vendor", "awesome-copilot", CHROME_DEVTOOLS_SKILL);
 for (const roleName of CHROME_DEVTOOLS_SKILL_ROLES) {
 	const printedRole = execFileSync(
@@ -193,7 +193,7 @@ assert.ok(!printed.includes(chromeDevToolsPath), "--role planner NON deve includ
 assert.ok(!printedCoder.includes(chromeDevToolsPath), "--role coder NON deve includere --skill chrome-devtools");
 console.log("   OK");
 
-console.log("11. nessun altro script/prompt referenzia skills-vendor/awesome-copilot con un ruolo diverso da reviewer/frontend-developer...");
+console.log("11. nessun altro script/prompt referenzia skills-vendor/awesome-copilot con un ruolo non-browser...");
 let grepOut2 = "";
 try {
 	grepOut2 = exec2("grep", ["-rl", "--exclude-dir=.worktrees", "skills-vendor/awesome-copilot", repoRoot, "--include=*.md", "--include=*.mjs", "--include=*.yaml"], {

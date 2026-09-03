@@ -16,14 +16,25 @@ assert.equal(llmProxyAutoModel({ modelRegistry: { find: () => null } }), null, "
 
 let selected = null;
 const events = [];
+const ctx = { modelRegistry: { find: () => autoModel }, model: { provider: "llmproxy", id: "text-only-pin" } };
 const switched = await switchImageTurnToAuto({
 	event: { images: [{ type: "image" }] },
-	ctx: { modelRegistry: { find: () => autoModel }, model: { provider: "llmproxy", id: "text-only-pin" } },
-	setModel: async (model) => { selected = model; return true; },
+	ctx,
+	setModel: async (model) => { selected = model; ctx.model = model; return true; },
 	log: (type, data) => events.push({ type, data }),
 });
 assert.equal(switched.switched, true, "an image turn switches the live Pi session");
 assert.equal(selected, autoModel, "the live session receives llmproxy auto");
 assert.equal(events[0].type, "vision_model_switched", "the switch is logged");
+
+const restored = await switchImageTurnToAuto({
+	event: { message: { content: [{ type: "text", text: "continua" }] } },
+	ctx,
+	setModel: async (model) => { selected = model; ctx.model = model; return true; },
+	log: (type, data) => events.push({ type, data }),
+});
+assert.equal(restored.restored, true, "the next text-only turn restores the previous model");
+assert.deepEqual(selected, { provider: "llmproxy", id: "text-only-pin" }, "the original pinned model is restored after the image turn");
+assert.equal(events.at(-1).type, "vision_model_restored", "the restoration is logged");
 
 console.log("Vision routing smoke test passed.");

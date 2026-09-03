@@ -112,7 +112,10 @@ Quando un turno contiene un'immagine, l'estensione Yano seleziona runtime
 `llmproxy/llmproxy` prima della richiesta al modello. Questo mantiene il pin
 scelto all'avvio come default per i turni testuali, ma lascia a llmProxy la
 scelta di un provider con vision per il turno visuale. L'esito è registrato nei
-trace come `vision_model_switched` oppure `vision_model_switch_failed`.
+trace come `vision_model_switched` oppure `vision_model_switch_failed`. Il
+cambio è temporaneo: il primo turno successivo senza immagini ripristina il
+modello precedente e registra `vision_model_restored`; se la sessione era già
+in auto-routing resta su `llmproxy/llmproxy`.
 
 La configurazione Pi del modello generico dichiara intenzionalmente
 `input: ["text", "image"]`: non significa che ogni provider supporti vision,

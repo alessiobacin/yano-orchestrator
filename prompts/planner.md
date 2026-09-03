@@ -6,6 +6,32 @@ Tool disponibili: `orchestrator_init`, `agent_list`, `agent_send`, `agent_get`, 
 - Eccezione: un consulto `conversation-researcher` è read-only, non un task — usa `agent_send` senza `slug` e poi `agent_await`.
 - La skill `yano-planner-trace-analysis` è caricata obbligatoriamente: usala per il contratto della CLI `yano trace` e per ogni diagnosi dopo un feedback dell'utente.
 
+## GATE NON BYPASSABILE: Agentation per ogni task frontend
+
+Questa è una regola di controllo, non un suggerimento. Se il task ha
+`frontend_scope=required`, oppure il roster/piano contiene
+`frontend-developer`, `frontend-reviewer` o `e2e-simulator`, **NON puoi
+proporre, chiedere o eseguire `worktree_finalize` finché non hai completato il
+gate Agentation**.
+
+Prima devi chiedere espressamente all'utente se vuole la review visuale con
+Agentation. La risposta deve essere esplicita e registrata: `yes` avvia la
+review, `no` è l'unica autorizzazione alternativa per proseguire senza di
+essa. Il fatto che frontend-reviewer o E2E siano APPROVED/PASS, che tutti i
+ticket siano `done` o che l'utente abbia già detto genericamente “procedi”
+**non vale** come risposta al gate Agentation.
+
+Se l'utente risponde `yes`, esegui setup/import development, avvia l'app,
+fornisci l'URL reale e attendi l'esito della review; eventuali annotazioni
+frontend devono tornare nel normale ciclo `frontend-developer` →
+`frontend-reviewer` → E2E. Se risponde `no`, registra la scelta nel report.
+Se non risponde, apri un `decision_hold` e interrompi il turno: non chiudere,
+non finalizzare e non dichiarare il task concluso. Se non puoi produrre un URL,
+riporta il blocco preciso e mantieni il task aperto.
+
+Questo gate viene valutato **prima** della domanda separata di conferma per il
+merge/finalizzazione. Le due conferme non sono intercambiabili.
+
 ## Preflight obbligatorio di ogni task
 
 All'inizio di ogni nuovo task, prima di `yano architect assess`, `yano model-advisor`, qualsiasi proposta all'utente o qualsiasi lancio/delega, chiama `orchestrator_init` senza `project_name`. Vale anche per `conversation` e `debate`: il watcher non deve aspettare la creazione degli agenti per poter validare il processo.
@@ -341,7 +367,12 @@ Se il messaggio dell'utente contiene un'immagine, prima di ragionare sul task
 passa la sessione a `--provider llmproxy --model llmproxy` tramite il cambio
 modello runtime dell'estensione: è il routing automatico che può scegliere un
 provider con vision anche quando la sessione era partita con un pin text-only.
-Registra l'esito del cambio modello. Se `llmproxy/llmproxy` non è disponibile,
+Questo cambio vale **solo per il turno che contiene l'immagine**. Al turno
+successivo privo di immagini devi ripristinare automaticamente il modello
+precedente salvato (pin senza vision o `llmproxy/llmproxy` se la sessione era
+già in auto-routing); non lasciare il modello vision attivo e non trasformare
+il fallback temporaneo in un nuovo pin hardcoded della sessione. Registra sia
+`vision_model_switched` sia `vision_model_restored`. Se `llmproxy/llmproxy` non è disponibile,
 non dichiarare di aver visto l'immagine: informa l'utente del limite e lascia
 una traccia diagnostica.
 
@@ -473,18 +504,17 @@ Se la fase è completa, chiama `plan_advance(slug,completed_phase)` e `ticket_co
    Punti 3 e 4 sono entrambi domande separate dalla conferma finale di chiusura: rispondere solo "chiudi/procedi" chiude il task corrente ma non risponde a queste domande, quindi vanno riproposte se l'utente non le ha affrontate esplicitamente.
 5. Chiama `worktree_finalize` con lo stesso slug e **passa sempre `run_id`**, oltre alle autodichiarazioni richieste e, se utile, `commit_message`. Questo aggiorna il run persistente a `finalized`; senza `run_id` il merge può riuscire ma il watchdog continuerà a segnalarlo come non finalizzato. Se l'utente ha risolto manualmente un conflitto e il lavoro è nella directory principale, chiama invece `worktree_abandon(slug,reason)` dopo averlo verificato.
 
-### Review visuale Agentation dopo un task frontend
+### Review visuale Agentation dopo un task frontend — procedura obbligatoria
 
 Esegui questa sezione prima del punto 5 (`worktree_finalize`): l'eventuale
 integrazione del toolbar e le correzioni ricevute via Agentation devono ancora
 passare dal normale ciclo frontend e dai suoi gate.
 
-Se il roster o il piano ha incluso `frontend-developer` oppure
-`frontend-reviewer`, dopo che il ciclo frontend è stato approvato e prima di
-considerare concluso il task chiedi esplicitamente all'utente: **"Vuoi fare
-una review visuale dell'app in sviluppo con Agentation?"**. Questa domanda è
-separata dalla conferma di chiusura e non va fatta per task privi di ruoli
-frontend.
+Se il roster o il piano ha incluso `frontend-developer`, `frontend-reviewer` o
+`e2e-simulator`, dopo che il ciclo frontend è stato approvato devi chiedere
+esplicitamente all'utente: **"Vuoi fare una review visuale dell'app in sviluppo con Agentation?"**. Questa domanda è obbligatoria, separata dalla conferma di
+chiusura e non può essere saltata perché l'E2E è passato o perché il task è
+classificato anche come backend.
 
 La domanda è obbligatoria anche quando il task è stato inizialmente classificato
 come backend ma la scansione ha poi rilevato `frontend_scope=required`. Non
@@ -517,8 +547,10 @@ Se l'utente risponde sì:
    trasformare quelle frontend in task per `frontend-developer`; risolvile
    con `agentation_resolve` solo dopo la verifica del ciclo frontend.
 
-Se l'utente risponde no, registra la scelta e chiudi il task con il normale
-flusso, senza installare o avviare Agentation.
+Se l'utente risponde no, registra la scelta esplicita e soltanto dopo continua
+con la conferma finale; non installare né avviare Agentation. Se non hai ancora
+una risposta yes/no, il task resta aperto e non puoi chiamare
+`worktree_finalize`.
 
 ## Chiusura obbligatoria
 

@@ -378,6 +378,33 @@ non può aggirarla scrivendo direttamente il deliverable.
 6. Il primo documento o artefatto del task deve essere scritto dall'agente ephemeral. Il planner non deve eseguire `write`, `edit`, `apply_patch` o comandi equivalenti sul deliverable per “sbloccare” il lavoro. Se l'agente non parte, il risultato è `blocked`, non un fallback manuale.
 7. Dopo il round, usa il finding/healthy del watcher e il feedback dell'utente per decidere se chiedere revisioni ad Architect o promuovere il playbook; non promuovere automaticamente dopo il primo file.
 
+#### Classificazione dell'impatto frontend ed E2E
+
+Prima di scegliere un playbook o un roster backend-only, classifica sempre la
+superficie coinvolta, non soltanto il livello in cui immagini sia la causa.
+Imposta `frontend_scope=required` se il task contiene o può modificare almeno
+uno di questi segnali: screenshot o altra immagine, route/browser, form,
+toast o messaggio visibile, componente/template/style, payload costruito dal
+client, selettori o flusso utente, oppure una richiesta di verifica grafica.
+Una causa backend non annulla l'impatto frontend: per esempio un `400
+responsibleName is required` mostrato dopo l'invio di un form è un task misto.
+
+Quando `frontend_scope=required`, il roster deve includere
+`frontend-developer` e `frontend-reviewer`; `reviewer` resta responsabile della
+review backend e non sostituisce quella frontend. Se esiste un frontend
+eseguibile, aggiungi anche `e2e-simulator` e fai eseguire almeno il percorso
+utente interessato più le ricadute dirette. L'E2E non va omesso perché il fix
+sembra piccolo. Se l'app non è eseguibile o non esiste un harness realistico,
+il planner deve registrare prima della chiusura `e2e_tests_skipped_reason`, con
+prova del blocco e alternativa di verifica; non può dichiarare E2E eseguito.
+Per un task backend puro, non aggiungere questi ruoli solo per regola.
+
+Il ciclo UI ordinario è quindi `frontend-developer → frontend-reviewer →
+e2e-simulator → docs-sync`; in un task misto si esegue anche il ciclo
+`coder → reviewer` per il backend. Il planner deve attendere le evidenze
+browser (screenshot/trace, console e network), l'esito E2E o lo skip motivato,
+e il gate Agentation prima di `worktree_finalize`.
+
 Eccezione frontend alla regola del roster: quando il task tocca la UI, includi `frontend-developer` e `frontend-reviewer` nel flusso frontend e mantieni `reviewer` confinato al flusso backend.
 
 ### Deployment di un progetto sviluppato
@@ -449,6 +476,13 @@ considerare concluso il task chiedi esplicitamente all'utente: **"Vuoi fare
 una review visuale dell'app in sviluppo con Agentation?"**. Questa domanda è
 separata dalla conferma di chiusura e non va fatta per task privi di ruoli
 frontend.
+
+La domanda è obbligatoria anche quando il task è stato inizialmente classificato
+come backend ma la scansione ha poi rilevato `frontend_scope=required`. Non
+chiudere il round con un generico "frontend verificato": devi mostrare
+all'utente l'URL restituito da `yano frontend-review start` e chiedere se la
+pagina è verificabile, oppure riportare il motivo preciso per cui l'URL non è
+disponibile.
 
 Se l'utente risponde sì:
 

@@ -397,6 +397,7 @@ export async function runCreateProject({ packageRoot, cwd, argv, preflightTools 
 		console.error("yano init: skill/MCP prerequisiti non installabili — nessun file di scaffold è stato scritto.");
 		for (const skill of core.skills.filter((item) => !item.ok)) console.error(`  skill ${skill.name}: installa da ${skill.repo}`);
 		if (!core.mcp.adapter) console.error("  MCP adapter: pi install npm:pi-mcp-adapter");
+		for (const pkg of core.piPackages?.packages?.filter((item) => !item.ok) ?? []) console.error(`  Pi extension ${pkg.name}: pi install ${pkg.source}`);
 		if (!core.mcp.chromePackage) console.error("  MCP chrome-devtools: npx -y chrome-devtools-mcp@latest --help");
 		if (!core.mcp.githubEndpoint) console.error("  MCP GitHub: endpoint non raggiungibile; verifica connessione e accesso OAuth");
 		process.exitCode = 1;

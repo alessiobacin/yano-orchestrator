@@ -3,8 +3,9 @@ schema_version: 1
 id: frontend-browser
 label: Frontend implementation and browser review
 description: Frontend flow using frontend-developer and
-  frontend-reviewer with two-axis Spec/Standards review, Playwright CLI and
-  Chrome DevTools evidence; backend reviewer is not substituted.
+  frontend-reviewer with two-axis Spec/Standards review, an explicit
+  e2e-simulator verification step, Playwright CLI and Chrome DevTools
+  evidence; backend reviewer is not substituted.
 enforcement:
   status: partial
   note: Browser commands are recorded as evidence by the planner;
@@ -52,6 +53,9 @@ states:
   - id: browser_review
     owner: frontend-reviewer
     terminal: false
+  - id: e2e_verification
+    owner: e2e-simulator
+    terminal: false
   - id: completed
     owner: planner
     terminal: true
@@ -86,13 +90,32 @@ transitions:
       - spec_reviewed
       - frontend_standards_reviewed
       - review_findings_classified
-  - id: accept
+  - id: start_e2e_verification
     from: browser_review
+    to: e2e_verification
+    actor: planner
+    requires:
+      - frontend_reviewer_approved
+      - console_and_network_checked
+      - e2e_required_or_skip_reason_recorded
+  - id: submit_e2e_verification
+    from: e2e_verification
+    to: completed
+    actor: planner
+    requires:
+      - e2e_tests_run_or_explicit_skip_reason
+      - e2e_evidence_recorded
+      - agentation_review_offered_or_not_applicable
+      - docs_synced_or_skipped_with_reason
+  - id: accept
+    from: e2e_verification
     to: completed
     actor: planner
     requires:
       - frontend_reviewer_approved
       - console_and_network_checked
+      - e2e_tests_run_or_explicit_skip_reason
+      - agentation_review_offered_or_not_applicable
       - docs_synced_or_skipped_with_reason
   - id: reject
     from: browser_review
@@ -114,4 +137,6 @@ invariants:
   - code_smells_are_heuristics_not_automatic_blockers
   - snapshot_first
   - no_fixed_waits_when_web_assertion_exists
+  - ui_affecting_tasks_require_e2e_or_explicit_skip_reason
+  - agentation_review_is_offered_before_frontend_finalize
   - no_finalize_before_explicit_user_confirmation

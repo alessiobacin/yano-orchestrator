@@ -4,7 +4,9 @@ id: backend-change
 label: Backend change with TDD and review
 description: "Deterministic flow for backend implementation: contract,
   two-axis Spec/Standards review, tests, isolated change, reviewer approval,
-  regression evidence and documentation."
+  regression evidence and documentation. If the requested behavior has a
+  frontend impact, the planner switches to the conditional frontend flow
+  before finalization."
 enforcement:
   status: partial
   note: Runtime gates plan phases, tickets, evidence and finalization;
@@ -39,6 +41,14 @@ contract:
     - resume_from_last_checkpoint
     - preserve_evidence
     - bounded_retry
+  conditional_gates:
+    - id: frontend_impact
+      when: "user-visible UI, browser route, screenshot/image, form, toast, client payload, component, style, or frontend behavior is affected"
+      then:
+        - include_frontend_developer_and_frontend_reviewer
+        - run_e2e_or_record_explicit_skip_reason
+        - offer_agentation_visual_review_before_finalize
+      note: "Classify by affected surface, not only by root-cause layer. A backend validation error shown by a frontend form is a mixed frontend/backend task."
 states:
   - id: received
     owner: planner
@@ -114,5 +124,8 @@ invariants:
   - spec_and_standards_are_reported_separately
   - code_smells_are_heuristics_not_automatic_blockers
   - docs_sync_last
+  - frontend_impact_is_classified_before_backend_only_roster
+  - frontend_impact_requires_frontend_flow_and_e2e_or_explicit_skip_reason
+  - agentation_review_is_offered_when_frontend_scope_exists
   - coder_and_reviewer_use_distinct_pinned_llm_models
   - no_finalize_before_explicit_user_confirmation

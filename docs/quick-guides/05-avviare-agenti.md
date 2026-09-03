@@ -49,9 +49,10 @@ separata.
 
 ## Review visuale Agentation
 
-Dopo un task frontend il planner chiede se vuoi una review dell'app in
-development. Se accetti, il planner esegue `yano frontend-review start`, che
-installa la devDependency `agentation`, avvia lo script dev inferito e stampa
-l'URL. Il frontend developer monta il toolbar nel root React in modalità
-development; puoi quindi annotare la pagina e il planner riceve le
-annotazioni tramite il server MCP `agentation`.
+Dopo `frontend-developer`, `frontend-reviewer` ed E2E, il planner deve chiedere
+esplicitamente: “Vuoi fare una review visuale dell'app in sviluppo con
+Agentation?”. Se accetti, esegue `yano frontend-review setup` per
+installare/verificare `agentation` come devDependency e l'import/mount solo in
+development, poi `yano frontend-review start` per avviare l'app. Deve fornire
+l'URL reale restituito dal comando, non un URL ipotizzato. Puoi annotare la
+pagina e il planner riceve le annotazioni tramite il server MCP `agentation`.

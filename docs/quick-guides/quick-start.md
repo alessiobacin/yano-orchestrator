@@ -104,10 +104,13 @@ resta `agents/roles.yaml` nella root.
 
 ## 2. Avvia il broker MQTT
 
-Per una review visuale opzionale dopo un task frontend, il planner chiede il
-consenso dell'utente e, se accettato, usa `yano frontend-review start`. Il
-comando installa `agentation` nel progetto React, avvia lo script `dev`,
-`start` o `serve` individuato e stampa l'URL da annotare.
+Per ogni task con impatto frontend, dopo la verifica E2E, il planner chiede il
+consenso dell'utente: “Vuoi fare una review visuale dell'app in sviluppo con
+Agentation?”. Se accetti, usa `yano frontend-review setup` per installare e
+verificare `agentation` e l'import/mount solo in development, poi
+`yano frontend-review start` per avviare lo script rilevato. Il planner deve
+fornire l'URL reale restituito dal comando, non inventarlo; le annotazioni
+vengono ricevute dal planner tramite il server MCP Agentation.
 
 Con il broker Docker incluso:
 

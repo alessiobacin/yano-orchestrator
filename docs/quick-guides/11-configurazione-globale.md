@@ -101,3 +101,11 @@ yano watch --project-root /path/progetto --once
 Non vengono stampati i valori dei segreti. In un checkout sorgente si può
 usare anche `.env`; il `.env` del progetto osservato non viene usato per
 indirizzare i ticket di manutenzione Yano.
+
+## Estensioni Pi richieste dalla versione Yano
+
+`yano doctor` verifica anche il catalogo delle estensioni Pi richieste dalla
+versione installata, incluse `pi-image-paste` e
+`@guwidoe/pi-clipboard-image` per incollare screenshot nella chat. Se una
+estensione manca, `yano doctor` mostra il comando `pi install` corretto; il
+preflight di `yano init` la installa automaticamente e ripete il controllo.

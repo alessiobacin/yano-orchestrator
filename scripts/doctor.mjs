@@ -54,6 +54,21 @@ const ESSENTIAL_SKILLS = [
 	{ name: "playwright-cli", repo: PLAYWRIGHT_CLI_SKILL_REPO },
 ];
 const ESSENTIAL_MCP_SERVERS = ["chrome-devtools", "github", "agentation"];
+// Pi extensions used by the current Yano installation. Keep this catalog in
+// Yano so `doctor` can detect drift in the user's Pi installation and `init`
+// can repair it, instead of discovering a missing capability only after an
+// agent starts. In particular, pi-image-paste and pi-clipboard-image are what
+// make screenshots from the developer clipboard available to Pi agents.
+export const REQUIRED_PI_PACKAGES = [
+	{ source: "npm:pi-skills-sh", name: "pi-skills-sh", purpose: "skill discovery" },
+	{ source: "npm:@guwidoe/pi-clipboard-image", name: "@guwidoe/pi-clipboard-image", purpose: "clipboard image capture" },
+	{ source: "npm:pi-paster", name: "pi-paster", purpose: "paste text/images into Pi" },
+	{ source: "npm:pi-goal", name: "pi-goal", purpose: "goal/session support" },
+	{ source: "npm:pi-cmux", name: "pi-cmux", purpose: "multiplexer integration" },
+	{ source: "npm:@mammothb/pi-mermaid", name: "@mammothb/pi-mermaid", purpose: "Mermaid rendering" },
+	{ source: "npm:pi-mcp-adapter", name: "pi-mcp-adapter", purpose: "MCP adapter" },
+	{ source: "npm:pi-image-paste", name: "pi-image-paste", purpose: "image paste into chat" },
+];
 const LAZY_SKILL_SOURCES = {
 	"playwright-cli": PLAYWRIGHT_CLI_SKILL_REPO,
 	"chrome-devtools": CHROME_SKILLS_REPO,
@@ -293,6 +308,31 @@ function checkPiMcpAdapter() {
 	} catch { return false; }
 }
 
+export function checkRequiredPiPackages() {
+	try {
+		const result = spawnSync("pi", ["list"], { encoding: "utf8", timeout: 10_000 });
+		const output = `${result.stdout || ""}\n${result.stderr || ""}`;
+		return REQUIRED_PI_PACKAGES.map((pkg) => ({
+			...pkg,
+			ok: new RegExp(`(^|\\n)\\s*${pkg.source.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}(\\s|$)`, "m").test(output),
+		}));
+	} catch {
+		return REQUIRED_PI_PACKAGES.map((pkg) => ({ ...pkg, ok: false }));
+	}
+}
+
+export function ensureRequiredPiPackages({ install = false } = {}) {
+	let packages = checkRequiredPiPackages();
+	if (install) {
+		for (const pkg of packages.filter((item) => !item.ok)) {
+			console.log(`yano init: installo estensione Pi ${pkg.name} (${pkg.purpose})...`);
+			runInstall("pi", ["install", pkg.source]);
+		}
+		packages = checkRequiredPiPackages();
+	}
+	return { ok: packages.every((pkg) => pkg.ok), packages };
+}
+
 function checkMcpServerPackage() {
 	try {
 		const result = spawnSync("npx", ["-y", "chrome-devtools-mcp@latest", "--help"], { stdio: "ignore", timeout: 30_000 });
@@ -349,19 +389,17 @@ export function ensureCorePrerequisites({ packageRoot, cwd, install = false } = 
 		}
 	}
 	const afterSkills = checkEssentialSkills(packageRoot);
-	let adapter = checkPiMcpAdapter();
-	if (install && !adapter) {
-		console.log("yano init: installo pi-mcp-adapter...");
-		adapter = runInstall("pi", ["install", "npm:pi-mcp-adapter"]) && checkPiMcpAdapter();
-	}
+	const piPackages = ensureRequiredPiPackages({ install });
+	const adapter = piPackages.packages.find((pkg) => pkg.name === "pi-mcp-adapter")?.ok ?? checkPiMcpAdapter();
 	const chromePackage = checkMcpServerPackage();
 	const agentationPackage = checkAgentationMcpPackage();
 	const githubEndpoint = checkHttpEndpoint("https://api.githubcopilot.com/mcp/");
 	const mcp = readMcpConfig(cwd ?? process.cwd());
 	const declared = ESSENTIAL_MCP_SERVERS.filter((name) => Object.hasOwn(mcp.servers, name));
 	return {
-		ok: afterSkills.every((skill) => skill.ok) && adapter && chromePackage && agentationPackage && githubEndpoint && (!mcp.file || declared.length === ESSENTIAL_MCP_SERVERS.length || install),
+		ok: afterSkills.every((skill) => skill.ok) && piPackages.ok && adapter && chromePackage && agentationPackage && githubEndpoint && (!mcp.file || declared.length === ESSENTIAL_MCP_SERVERS.length || install),
 		skills: afterSkills,
+		piPackages,
 		mcp: { adapter, chromePackage, agentationPackage, githubEndpoint, config: mcp.file, declared, missing: ESSENTIAL_MCP_SERVERS.filter((name) => !declared.includes(name)) },
 	};
 }
@@ -579,6 +617,10 @@ export async function runDoctor({ cwd = process.cwd(), json = false, autoStartBr
 	for (const skill of core.skills) {
 		rows.push([`skill ${skill.name}`, skill.ok, skill.ok ? "presente" : `mancante — installa da ${skill.repo}`]);
 		if (!skill.ok) ok = false;
+	}
+	for (const pkg of core.piPackages.packages) {
+		rows.push([`Pi extension ${pkg.name}`, pkg.ok, pkg.ok ? `${pkg.purpose}; installata` : `mancante — pi install ${pkg.source}`]);
+		if (!pkg.ok) ok = false;
 	}
 	rows.push(["pi-mcp-adapter", core.mcp.adapter, core.mcp.adapter ? "installato" : "mancante — pi install npm:pi-mcp-adapter"]);
 	rows.push(["MCP chrome-devtools", core.mcp.chromePackage, core.mcp.chromePackage ? "pacchetto risolvibile" : "mancante — npx -y chrome-devtools-mcp@latest --help"]);

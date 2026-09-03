@@ -1,0 +1,82 @@
+schema_version: 1
+id: performance-optimization-loop
+label: Continuous performance optimization loop
+description: >-
+  Generic, sequential and evidence-driven loop for reducing latency, context,
+  token usage and cost while preserving output quality, correctness, reliability
+  and security. The original baseline remains immutable; every candidate is
+  tested in an isolated worktree before it can become the next reference.
+catalog:
+  scope: global
+  reusable: true
+  intents: [performance optimization, latency reduction, token optimization, context optimization, cost optimization]
+  exclusions: [unmeasured speed claims, production mutation, quality regression, blind model replacement]
+  parameters:
+    - project_root
+    - benchmark_command
+    - quality_oracle
+    - baseline_runs
+    - promotion_threshold
+    - plateau_threshold
+    - plateau_rounds
+    - stagnation_threshold
+    - stagnation_rounds
+    - max_cost_increase
+enforcement:
+  status: partial
+  note: >-
+    The planner validates parameters, worktree isolation, benchmark evidence,
+    quality gates and the stop condition; runtime promotion is never inferred
+    from a single noisy run.
+contract:
+  execution: sequential
+  checkpoint: every_round_and_state_transition
+  evidence: [scope, parameters, worktrees, commands, exit_code, repetitions, metric, score, confidence, limitation]
+  report_sections: [summary, parameters, baseline, candidate, bottleneck, change, before_after, quality, tokens, cost, tests, decision, risks, next_round]
+  budgets: {max_commands: 180, max_files: 300, max_minutes: 180, max_tokens: 30000}
+  verification: {mode: repeated_benchmark_with_quality_guard, required: true}
+  recovery: [resume_from_persisted_round, preserve_baseline, preserve_candidate, preserve_measurements, bounded_retry, planner_handoff_on_block]
+states:
+  - {id: received, owner: planner, terminal: false}
+  - {id: parameter_confirmation, owner: planner_and_human, terminal: false}
+  - {id: workspace_prepared, owner: planner, terminal: false}
+  - {id: baseline_measured, owner: speed-benchmarker, terminal: false}
+  - {id: bottleneck_selected, owner: speed-benchmarker, terminal: false}
+  - {id: candidate_implemented, owner: coder, terminal: false}
+  - {id: candidate_reviewed, owner: reviewer, terminal: false}
+  - {id: candidate_measured, owner: speed-benchmarker, terminal: false}
+  - {id: quality_verified, owner: qa-functional-verifier, terminal: false}
+  - {id: promoted, owner: planner, terminal: false}
+  - {id: stopped, owner: planner, terminal: true}
+  - {id: blocked, owner: planner_and_human, terminal: true}
+transitions:
+  - {id: confirm_parameters, from: received, to: parameter_confirmation, actor: planner, requires: [project_identified, defaults_proposed, user_answer_or_existing_policy_recorded]}
+  - {id: prepare, from: parameter_confirmation, to: workspace_prepared, actor: planner, requires: [parameters_confirmed, original_worktree_immutable, candidate_worktree_isolated]}
+  - {id: measure_baseline, from: workspace_prepared, to: baseline_measured, actor: speed-benchmarker, requires: [benchmark_reproducible, minimum_repetitions_completed, quality_oracle_available]}
+  - {id: select_bottleneck, from: baseline_measured, to: bottleneck_selected, actor: speed-benchmarker, requires: [phase_metrics_recorded, one_hypothesis_only, opinion_scored]}
+  - {id: implement, from: bottleneck_selected, to: candidate_implemented, actor: coder, requires: [candidate_only, change_scope_bounded, no_production_mutation]}
+  - {id: review, from: candidate_implemented, to: candidate_reviewed, actor: reviewer, requires: [diff_reviewed, regression_risks_classified, tests_defined]}
+  - {id: measure_candidate, from: candidate_reviewed, to: candidate_measured, actor: speed-benchmarker, requires: [same_benchmark_configuration, minimum_repetitions_completed, baseline_preserved]}
+  - {id: verify_quality, from: candidate_measured, to: quality_verified, actor: qa-functional-verifier, requires: [quality_compared, functional_tests_passed, concurrency_tests_passed_or_reason_recorded]}
+  - {id: promote, from: quality_verified, to: promoted, actor: planner, requires: [speed_and_token_metrics_compared, cost_within_limit, no_quality_regression, promotion_rule_satisfied, report_written]}
+  - {id: next_round, from: promoted, to: bottleneck_selected, actor: planner, requires: [reference_baseline_updated, counters_updated, next_hypothesis_allowed]}
+  - {id: stop, from: quality_verified, to: stopped, actor: planner, requires: [stop_condition_satisfied, last_improvement_preserved, final_report_written]}
+  - {id: block, from: [parameter_confirmation, baseline_measured, candidate_measured, quality_verified], to: blocked, actor: planner_and_human, requires: [blocker_recorded, partial_report_persisted]}
+failure_routes:
+  - {condition: benchmark_not_reproducible, action: record_limitation_and_stop_without_change, terminal: true}
+  - {condition: quality_regression, action: discard_candidate_and_keep_reference, terminal: false}
+  - {condition: cost_increase_above_limit, action: discard_candidate_and_keep_reference, terminal: false}
+  - {condition: dependency_or_plugin_needed, action: research_existing_options_before_install, terminal: false}
+invariants:
+  - {id: original_baseline_immutable, description: The original worktree is never modified, promoted or deleted during the loop.}
+  - {id: two_isolated_worktrees, description: Benchmark baseline and candidate in separate isolated worktrees with recorded paths and commits.}
+  - {id: one_change_per_round, description: Each round tests one bounded optimization hypothesis only.}
+  - {id: quality_before_speed, description: A faster candidate is rejected when output quality, correctness, reliability or security regresses.}
+  - {id: token_and_context_efficiency, description: Token count, context size and reasoning/tool overhead are first-class metrics alongside latency and cost.}
+  - {id: no_invention, description: Missing benchmark, quality or cost evidence is reported as unknown and never fabricated.}
+  - {id: every_opinion_scored, description: Every bottleneck hypothesis, recommendation and risk has score X/10 and confidence X/10.}
+  - {id: promote_large_gain, description: A measured improvement >= promotion_threshold is promoted immediately.}
+  - {id: promote_plateau, description: "Improvements in [stagnation_threshold, promotion_threshold) are retried for plateau_rounds; after that count the latest candidate becomes the baseline."}
+  - {id: stop_low_gain, description: Improvements <= stagnation_threshold for stagnation_rounds consecutive rounds promote the latest improvement as final baseline and stop the loop.}
+  - {id: no_global_mutation, description: The project checkout, production environment and global Yano installation are never changed by the loop.}
+  - {id: report_each_promotion, description: Every promotion writes a dedicated dated report describing exactly what changed and why.}

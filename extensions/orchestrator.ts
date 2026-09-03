@@ -2600,6 +2600,10 @@ function yanoFindUnfinalizedRuns(storage: OrchestratorStorage, project: string, 
 	for (const run of storage.listRuns(project)) {
 		if (run.status !== "completed") continue;
 		if (run.finalization_status === "finalized" || run.finalization_status === "not_applicable") continue;
+		// An open human hold means the planner is alive and intentionally waiting
+		// for the operator (for example Agentation or finalization approval). Do
+		// not wake it or spend an LLM turn; the hold is durable across restarts.
+		if (storage.listDecisionHolds(run.id, "open").length > 0) continue;
 		const elapsed = nowMs - Date.parse(run.updated_at);
 		if (elapsed >= graceMs) {
 			found.push({ run_id: run.id, objective: run.objective, completed_at: run.updated_at, elapsed_ms: elapsed });

@@ -255,7 +255,7 @@ Se `agent_send` restituisce un avviso `⚠️` perché non esiste un'istanza viv
 
 ## Conferme dell'utente e `decision_hold`
 
-`yano watcher supervise` (il supervisore globale che riconcilia ogni progetto registrato, in esecuzione ogni minuto) considera "stalled" un run `active` senza attività SQLite registrata da 15 minuti — a meno che esista un `decision_holds` aperto per quel run. Se lo classifica stalled, reinietta un comando `yano start ...` di recovery **nello stesso pane Herdr** dove sei in esecuzione: un'attesa legittima della risposta dell'utente, se non protetta da un hold, rischia di essere scambiata per un blocco reale e di sprecare un turno per "recuperare" un'istanza che non era affatto bloccata.
+`yano watcher supervise` (il supervisore globale che riconcilia ogni progetto registrato, in esecuzione ogni minuto) considera "stalled" un run `active` senza attività SQLite registrata da 15 minuti — a meno che esista un `decision_holds` aperto per quel run. Anche un run `completed` senza finalizzazione viene ignorato dal watchdog quando ha un `decision_hold` aperto: in quel caso il planner è vivo e sta aspettando l'utente, quindi non deve essere risvegliato né rilanciato. Se lo classifica stalled, reinietta un comando `yano start ...` di recovery **nello stesso pane Herdr** dove sei in esecuzione: un'attesa legittima della risposta dell'utente, se non protetta da un hold, rischia di essere scambiata per un blocco reale e di sprecare un turno per "recuperare" un'istanza che non era affatto bloccata. Ogni domanda che sospende il flusso deve quindi avere prima un `decision_hold_create` persistente.
 
 Regola operativa: da quando esiste un `run_id` per il task corrente (dopo `run_create`) e finché il run non è finalizzato, ogni volta che questo documento dice "attendi conferma"/"attendi la scelta dell'utente" — inclusi, ma non solo, la proposta di roster/fasi/modelli, la granularità `to-tickets`, la conferma pre-lancio di un debate, il riuso del worktree, o una domanda ad-hoc che poni a metà round (per esempio se sostituire un modello risultato non disponibile) — apri prima `decision_hold_create({run_id, question, owner:"user"})`. Alla risposta dell'utente chiudi il hold con `decision_hold_answer`; se il gate diventa superfluo (istruzioni cambiate, task annullato) usa `decision_hold_cancel`. Non serve aprirne uno se il task non ha ancora un `run_id` (framing iniziale, proposta di roster prima di `to-tickets`): finché non esiste alcun run per il progetto, la riconciliazione del supervisore lo considera legittimamente idle e non tenta alcun recovery.
 
@@ -321,6 +321,19 @@ esplicita. Motiva sempre la scelta e attendi la conferma dell'utente. Non usare
 la scorciatoia per sicurezza, migrazioni, deployment, UX complessa o più aree
 indipendenti; in quei casi mantieni il roster specializzato. Con frontend
 eseguibile restano obbligatori browser/E2E e offerta Agentation.
+
+Per richieste di riduzione di latenza, token, contesto o costo valuta il
+playbook generico `performance-optimization-loop`. Non associarlo a Yano: è
+riutilizzabile per qualsiasi repository. Prima di avviarlo proponi i parametri
+di `prompts/performance-optimization-loop.md` e chiedi conferma o valori
+diversi. Usa una baseline originale immutabile e un candidate separato; non
+modificare checkout principale, produzione o installazione globale. Promuovi
+subito miglioramenti >=3%; tra >1% e <3% ritenta per 3 round e poi promuovi
+l'ultimo candidate; con miglioramento <=1% per 5 round consecutivi promuovi
+l'ultimo miglioramento e termina. Token, contesto, latenza, costo e qualità
+sono metriche obbligatorie, così come la ricerca di codice, prompt e passaggi
+ridondanti. Ogni ipotesi deve avere score e confidence, ogni promozione un
+report in `docs/reports/`.
 
 Leggi `agents/roles.yaml`. Se lo scope è ambiguo, fai 2–3 domande mirate prima di proporre il roster; se è chiaro, procedi. Se manca davvero una competenza nel roster, proponi all'utente un nuovo ruolo con nome kebab-case, label e brief; solo dopo conferma aggiungi la voce completa (`label`, `brief`, `model`, `skills`, `cli`, `teams`), copiando `model`/`teams` da un ruolo simile quando necessario, e includila nel team.
 

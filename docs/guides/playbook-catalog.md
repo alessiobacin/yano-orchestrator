@@ -25,6 +25,7 @@ workflow instead of launching every specialist.
 | `security-review` | security-evaluator, dependency-health | scanner/audit evidence, concrete finding or clean result |
 | `documentation-release` | docs-sync, architecture-diagrammer, release-notes-writer | source-to-doc diff, examples/diagram/changelog verification |
 | `performance-observability` | observability-agent, speed-benchmarker | before/after measurements with units, environment and sample context |
+| `performance-optimization-loop` | planner + speed-benchmarker, coder, reviewer, qa-functional-verifier, docs-sync | two isolated worktrees, repeated baseline/candidate benchmark, latency/token/context/cost/quality comparison, plateau and stop counters, report for every round and promotion |
 | `ai-application-optimization` | ai-optimizer | AI inventory, token/context/latency/cost baseline, task granularity, model routing, quality guardrails and before/after verification |
 | `architect-provisioning` | architect | proposal scope, capability readiness, watcher validation, user feedback and explicit promotion evidence |
 | `knowledge-authoring` | market-researcher, seo-strategist, website-content-strategist, business-docs-author, business-docs-reviewer | catalog-first intent match, parameterized project context, research evidence, structured deliverables and review; variants `single-author`, `research-and-author`, `full-team` |

@@ -525,8 +525,7 @@ passare dal normale ciclo frontend e dai suoi gate.
 
 Se il roster o il piano ha incluso `frontend-developer`, `frontend-reviewer` o
 `e2e-simulator`, dopo che il ciclo frontend è stato approvato devi chiedere
-esplicitamente all'utente, nello stesso turno finale: **"Vuoi fare una review
-visuale dell'app in sviluppo con Agentation?"**. Questa domanda è obbligatoria,
+esplicitamente all'utente, nello stesso turno finale: **"Vuoi fare una review visuale dell'app in sviluppo con Agentation?"**. Questa domanda è obbligatoria,
 separata dalla conferma di chiusura e non può essere saltata perché l'E2E è
 passato, perché il task è classificato anche come backend o perché un agente ha
 scritto che il ciclo è concluso. Non puoi chiamare `worktree_finalize` prima

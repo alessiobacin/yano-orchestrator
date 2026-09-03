@@ -82,6 +82,7 @@ flowchart TD
     subgraph STORAGE["Durable project workspace"]
         SQLITE["SQLite orchestrator.db\nruns / specs / tickets / DAG\nPlaybooks / holds / evidence / outbox"]
         CODE_MEM_STORE["memory/\nCode Mem SQLite + generated projections\nPi start/capture hook (best effort)"]
+        AGENT_MEMORY[".pi/.../memory/\nproject.md + roles/<role>.md + instances/<instance>.md\nuser-preferences.md; bounded Markdown per turn"]
         WORKTREES[".worktrees/<slug>\nGit isolated branches"]
         REPORTS[".pi/.../reports\nround evidence"]
     end
@@ -199,6 +200,7 @@ flowchart TD
     GLOBAL_CONFIG --> WHATSAPP
     GLOBAL_CONFIG --> SENDGRID
     CLI --> WATCHER_ONCE
+    CLI --> AGENT_MEMORY
     WATCHER_ONCE --> WATCHER
     WATCHER --> WATCHER_ONCE
     CLI --> feedback

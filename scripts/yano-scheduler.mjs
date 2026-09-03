@@ -26,6 +26,7 @@
 // the project planner with the task text — the historical behaviour.
 
 import { spawn, spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -42,7 +43,7 @@ const LOCAL_PC_PROJECT = "yano-local-pc";
 const LOCAL_PC_ROOT = path.join(globalDataPath(), "yano-local-pc");
 const SCHEDULER_ROOT = path.join(globalDataPath(), "yano-scheduler");
 const SCHEDULER_AGENT_NAME = `${SCHEDULER_INSTANCE}-${LOCAL_PC_PROJECT}`.slice(0, 32);
-const DEFAULT_DB = { version: 2, jobs: [], supervisor: { instance: SCHEDULER_INSTANCE, workspace: null, tab_id: null, last_seen_at: null, last_recovered_at: null } };
+const DEFAULT_DB = { version: 3, jobs: [], supervisor: { instance: SCHEDULER_INSTANCE, workspace: null, tab_id: null, last_seen_at: null, last_recovered_at: null } };
 
 function nowIso(now = new Date()) { return now.toISOString(); }
 function schedulerDataDir(env = process.env) { return path.join(globalDataPath({ env }), "scheduler"); }
@@ -70,6 +71,16 @@ function writeStore(file, store) {
 function value(argv, flag) { const i = argv.indexOf(flag); return i < 0 ? null : argv[i + 1] || null; }
 function requireValue(argv, flag) { return value(argv, flag) || fail(`${flag} richiede un valore.`); }
 function idPart(value) { return String(value).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "job"; }
+function executionId(job, now) { return `scheduled-${idPart(job.id)}-${now.toISOString().replace(/[^0-9]/g, "").slice(0, 12)}-${randomUUID().slice(0, 8)}`; }
+function runHistory(job) { if (!Array.isArray(job.instances)) job.instances = []; return job.instances; }
+function recordInstance(job, run, now, extra = {}) {
+	const instanceId = run.instance || executionId(job, now);
+	const record = { instance_id: instanceId, schedule_id: job.id, schedule_name: job.name, started_at: nowIso(now), status: run.status === 0 ? "dispatched" : "failed", result: run, ...extra };
+	const history = runHistory(job);
+	history.push(record);
+	if (history.length > 200) history.splice(0, history.length - 200);
+	return record;
+}
 
 // ── Security validator (vincoli di sicurezza non negoziabili) ────────────────
 const SHELL_META_RE = /[|;&$`<>()]|\n/;
@@ -134,12 +145,12 @@ export function validateScriptPath(scriptPath, { exists = existsSync } = {}) {
 
 // ── Tick: the one-minute dispatcher ──────────────────────────────────────────
 function dispatch(job, now, spawn = spawnSync, env = process.env) {
-	const instance = `scheduled-${idPart(job.id)}-${now.toISOString().replace(/[^0-9]/g, "").slice(0, 12)}`;
+	const instance = executionId(job, now);
 	if (job.script_path) {
 		// Script-first: execute the registered script; only after a successful
 		// run route onward per the declared mode (script decides routing; the
 		// scheduler never guesses a destination).
-		const run = executeScript(job.script_path, { env: { ...env, YANO_JOB_ID: job.id, YANO_JOB_NAME: job.name, YANO_JOB_MODE: job.mode, YANO_JOB_PROJECT_ROOT: job.project_root } });
+		const run = { ...executeScript(job.script_path, { env: { ...env, YANO_JOB_ID: job.id, YANO_JOB_NAME: job.name, YANO_JOB_MODE: job.mode, YANO_JOB_PROJECT_ROOT: job.project_root } }), instance };
 		if (!run.ok && run.fallback) {
 			// Fallback loggato (spec A): script mancante/invalido/ineseguibile —
 			// NIENTE planner automatico con testo libero: il job va in errore e
@@ -187,7 +198,8 @@ function retryRecoverableFailures(store, now, spawn, env) {
 		const run = dispatch(job, now, spawn, env);
 		job.last_retry_at = nowIso(now);
 		job.last_status = run.status === 0 ? "dispatched" : "failed";
-		job.last_result = { ...run, automatic_retry: true, retry_of: job.last_run_slot || null };
+		job.last_result = { ...run, automatic_retry: true, retry_of: job.last_result?.instance || job.last_run_slot || null };
+		recordInstance(job, job.last_result, now, { retry_of: job.last_result.retry_of, automatic_retry: true });
 		retried.push({ id: job.id, status: job.last_status, run: job.last_result });
 	}
 	return retried;
@@ -279,8 +291,9 @@ export function tick({ env = process.env, now = new Date(), spawn = spawnSync } 
 		if (!job.enabled || !cronMatches(job.cron, now) || job.last_run_slot === slot) continue;
 		const run = dispatch(job, now, spawn, env);
 		job.last_run_slot = slot; job.last_run_at = nowIso(now);
-		if (job.last_status !== "failed") job.last_status = run.status === 0 ? "dispatched" : "failed";
+		job.last_status = run.status === 0 ? "dispatched" : "failed";
 		job.last_result = run;
+		recordInstance(job, run, now);
 		if (job.one_shot) { job.enabled = false; job.one_shot_reason = "eseguito una volta"; run.one_shot_disabled = true; }
 		results.push({ id: job.id, name: job.name, enabled: job.enabled, ...run, status: job.last_status, one_shot_disabled: run.one_shot_disabled });
 	}
@@ -388,7 +401,7 @@ export function schedulerCronRemove({ spawn = spawnSync, platform = process.plat
 
 function usage() {
 	return [
-		"Uso: yano schedule <add|list|remove|enable|disable|run|tick|supervise|cron> [opzioni]",
+		"Uso: yano schedule <add|list|instances|retry|remove|enable|disable|run|tick|supervise|cron> [opzioni]",
 		"Oppure: yano cron --add <frase naturale> [--project-root <dir>] | --list | --remove <id> | --enable <id> | --disable <id> | --run <id> | --supervise | --status",
 		"",
 		"  add --name <nome> --project-root <dir> --script <path> --mode <self|planner:<progetto>|yano-local-pc>",
@@ -397,6 +410,8 @@ function usage() {
 		"  add-natural: sintassi storica testo+cron (job legacy, dispatch planner come in passato).",
 		"  run --id <id> [--json]      Esegue LO SCRIPT registrato subito (test prima di renderlo ricorrente).",
 		"  list [--json]               Mostra i job con script_path, mode, expected_consequence e stato.",
+		"  instances --id <job-id> [--limit N] [--json]  Mostra le ultime istanze e il loro status.",
+		"  retry --id <instance-id> [--json]              Ripete un dispatch e collega retry_of.",
 		"  remove|enable|disable --id <id>",
 		"  tick [--json]               Dispatcher one-minute (cron di sistema → `yano schedule tick`).",
 		"  supervise [--json]          Supervise + tick.",
@@ -448,7 +463,7 @@ export async function runYanoScheduler({ argv, env = process.env, now = new Date
 			timeout_ms: value(rest, "--timeout-ms") ? Number(value(rest, "--timeout-ms")) : 120000,
 			expected_consequence: value(rest, "--expected-consequence") || (scriptPath ? `${path.basename(scriptPath)} eseguito` : `task inviato al planner del progetto ${path.basename(projectRoot)}`),
 			created_at: nowIso(now), updated_at: nowIso(now),
-			last_run_at: null, last_run_slot: null, last_status: null,
+			last_run_at: null, last_run_slot: null, last_status: null, instances: [],
 		};
 		if (draft.script_path) {
 			// Validazione obbligatoria (vincolo: niente job non validati): il
@@ -462,13 +477,31 @@ export async function runYanoScheduler({ argv, env = process.env, now = new Date
 		store.jobs.push(draft); writeStore(file, store);
 		result = { created: draft, cron: schedulerCronInstall({ spawn }) };
 	} else if (sub === "list") result = readStore(env).store.jobs;
+	else if (sub === "instances") {
+		const { store } = readStore(env); const scheduleId = value(rest, "--id") || value(rest, "--schedule-id");
+		const limitRaw = value(rest, "--limit"); const limit = limitRaw === null ? 20 : Number(limitRaw);
+		if (!Number.isInteger(limit) || limit < 1 || limit > 1000) fail("--limit deve essere un intero tra 1 e 1000.");
+		let instances = store.jobs.flatMap((job) => runHistory(job).map((item) => ({ ...item, schedule_id: job.id, schedule_name: job.name })));
+		if (scheduleId) instances = instances.filter((item) => item.schedule_id === scheduleId);
+		instances.sort((a, b) => String(b.started_at).localeCompare(String(a.started_at)));
+		result = instances.slice(0, limit);
+	}
+	else if (sub === "retry") {
+		const { file, store } = readStore(env); const instanceId = requireValue(rest, "--id");
+		const scheduleId = value(rest, "--schedule-id");
+		const job = store.jobs.find((candidate) => (!scheduleId || candidate.id === scheduleId) && runHistory(candidate).some((item) => item.instance_id === instanceId));
+		if (!job) fail(`istanza schedule non trovata: ${instanceId}`);
+		const run = dispatch(job, new Date(), spawn, env); const retry = recordInstance(job, run, now, { retry_of: instanceId, manual_retry: true });
+		job.last_run_at = nowIso(now); job.last_status = run.status === 0 ? "dispatched" : "failed"; job.last_result = { ...run, manual_retry: true, retry_of: instanceId }; job.updated_at = nowIso(now);
+		writeStore(file, store); result = { schedule_id: job.id, instance_id: retry.instance_id, retry_of: instanceId, status: retry.status, run: retry.result };
+	}
 	else if (["remove", "enable", "disable", "run"].includes(sub)) {
 		const { file, store } = readStore(env); const job = store.jobs.find((item) => item.id === requireValue(rest, "--id")); if (!job) fail("job non trovato.");
 		if (sub === "remove") { store.jobs = store.jobs.filter((item) => item !== job); writeStore(file, store); result = { removed: job.id }; }
 		else if (sub === "run") {
 			// `run` = test dello script registrato prima di renderlo ricorrente (D).
 			const run = dispatch(job, new Date(), spawn, env);
-			job.last_run_at = nowIso(now); job.last_status = run.status === 0 ? "dispatched" : "failed"; job.last_result = run;
+			job.last_run_at = nowIso(now); job.last_status = run.status === 0 ? "dispatched" : "failed"; job.last_result = run; recordInstance(job, run, now, { manual_run: true });
 			writeStore(file, store); result = { id: job.id, run };
 		}
 		else { job.enabled = sub === "enable"; job.updated_at = nowIso(now); writeStore(file, store); result = { id: job.id, enabled: job.enabled }; }

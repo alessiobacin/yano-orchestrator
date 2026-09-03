@@ -38,6 +38,7 @@ vincoli e procedure complete usare la [documentazione](../../README.md), la
 - [29-playbook.md](./29-playbook.md)
 - [30-agent.md](./30-agent.md)
 - [31-scheduler.md](./31-scheduler.md)
+- [32-memory.md](./32-memory.md)
 - [32-yano-local-pc.md](./32-yano-local-pc.md)
 - [33-services.md](./33-services.md)
 

@@ -45,6 +45,11 @@ try {
 	assert.equal(supervised.dispatched.length, 1, "due job is dispatched exactly once in its scheduled minute");
 	assert.ok(launches.some((launch) => launch.args.includes("--role") && launch.args.includes("scheduler")), "recovery launches the persistent scheduler role");
 	assert.ok(launches.some((launch) => launch.args.includes("local-pc") && launch.args.includes("--planner")), "a due job is sent to the persistent Local PC planner");
+	const executions = await runYanoScheduler({ argv: ["instances", "--id", created.created.id, "--limit", "1", "--json"], env, spawn });
+	assert.equal(executions.length, 1, "instances --limit limits the execution history");
+	assert.equal(executions[0].instance_id, supervised.dispatched[0].instance, "execution history exposes the dispatch instance id");
+	const retried = await runYanoScheduler({ argv: ["retry", "--id", executions[0].instance_id, "--json"], env, now: new Date("2026-09-02T12:01:00Z"), spawn });
+	assert.equal(retried.retry_of, executions[0].instance_id, "manual retry preserves the original instance id");
 	assert.equal(schedulerCronStatus({ spawn }).installed, true);
 	console.log("smoke-test-yano-scheduler: ok (natural CRUD, durable registry, cron and self-healing agent)");
 } finally { fs.rmSync(root, { recursive: true, force: true }); }

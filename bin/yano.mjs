@@ -100,6 +100,7 @@ import { runYanoDocsCheck } from "../scripts/yano-docs-check.mjs";
 import { runYanoQaInventory } from "../scripts/yano-qa-inventory.mjs";
 import { runYanoAgentMcp } from "../scripts/yano-agent-mcp.mjs";
 import { runFrontendReview } from "../scripts/yano-frontend-review.mjs";
+import { runYanoMemory } from "../scripts/yano-memory-cli.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, "..");
@@ -130,6 +131,7 @@ function printTopUsage() {
 			'  leave [--project-root <dir>] --yes Rimuove definitivamente il progetto corrente dal registro watcher',
 			"  copy-prompts     Copia prompts/ dal pacchetto installato nel progetto corrente, per personalizzarli",
 			"  frontend-review setup|start  Prepara Agentation e avvia il frontend dev con URL inferito",
+			"  memory agents|list|show|create|update|delete  Consulta e gestisce le memorie Yano",
 			"  status|logs|fleet|mcp          Viste read-only del progetto e della flotta",
 			"  projects [--json]             Conta i progetti Yano con agenti live in Herdr",
 			"  skills install|status        Installa/verifica yano-cli negli harness globali",
@@ -214,6 +216,10 @@ async function main() {
 	}
 	if (sub === "frontend-review") {
 		await runFrontendReview({ cwd, argv: rest });
+		return;
+	}
+	if (sub === "memory") {
+		runYanoMemory({ cwd, argv: rest });
 		return;
 	}
 	if (sub === "projects") {

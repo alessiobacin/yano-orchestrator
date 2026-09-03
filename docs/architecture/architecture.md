@@ -135,6 +135,12 @@ install`/`yano cron --install`), con lo stesso contratto idempotente
 (`/Create /F` non duplica l'attività) e lo stesso nome derivato in modo
 stabile dal marker POSIX già usato per identificare la riga di crontab.
 
+Ogni dispatch di uno schedule registra una `instance_id` e uno status nel
+registro persistente. `yano schedule instances --id <schedule-id> --limit N`
+restituisce la cronologia bounded delle esecuzioni; `yano schedule retry
+--id <instance-id>` crea una nuova esecuzione collegata all’istanza originale
+e ne conserva l’audit trail.
+
 The operation never deletes application files, worktrees, SQLite state or trace
 history. Once a canonical replacement is ready, it may close only stale
 duplicate singleton tabs for the same project (`planner`, `architect` or
@@ -239,6 +245,14 @@ start and captures completed agent responses on a best-effort basis; it cannot
 block a Yano/Pi session. Yano also injects `yano-code-mem` into every launched
 role so agents retrieve and save memory with the same evidence and secrecy
 rules.
+
+In addition to Code Mem, the orchestrator maintains bounded per-agent Markdown
+memory under `.pi/extensions/yano-orchestrator/memory/`. Role memory is shared
+by replacement instances of the same role, preferences are stored separately,
+and instance diagnostics survive a kill. The `turn_end` hook updates these
+files after every LLM round; the `before_agent_start` hook loads only a bounded
+window and requires confirmation before repeating a remembered non-trivial
+choice. These files are ignored by Git and never contain credentials.
 
 When upgrading from a pre-platform-data release, `yano data migrate --dry-run`
 previews and `yano data migrate --yes` copies the old package `temp/` into the

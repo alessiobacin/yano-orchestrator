@@ -52,6 +52,7 @@ import { loadPlaybook } from "../scripts/playbook-loader.mjs";
 import { fetchPublicSource, searchPublicAlternatives } from "../scripts/yano-auto-improve-web.mjs";
 import { ensureTraceProject, getTraceConfig, projectKey, setTraceMode, traceEnabled, traceRoot } from "../scripts/yano-trace-storage.mjs";
 import { loadYanoRules } from "../scripts/yano-rules.mjs";
+import { loadAgentMemory, updateAgentMemory } from "../scripts/yano-agent-memory.mjs";
 
 // ESM-safe lazy require, used only inside SQLiteOrchestratorStorage's
 // constructor to resolve node:sqlite on first actual use (see the
@@ -3632,7 +3633,7 @@ export default function (pi: ExtensionAPI) {
 			.replaceAll("{{WORKER_TOOLS_INTRO}}", WORKER_TOOLS_INTRO)
 			.replaceAll("{{DIAGRAM_TIP}}", DIAGRAM_TIP)
 			.replaceAll("{{TURN_CLOSE_NOTE}}", TURN_CLOSE_NOTE)
-			.replaceAll("{{TICKET_CLAIM_STEP0}}", TICKET_CLAIM_STEP0) + rulesPrompt;
+			.replaceAll("{{TICKET_CLAIM_STEP0}}", TICKET_CLAIM_STEP0) + rulesPrompt + loadAgentMemory({ root: identity.cwd, role: identity.role, instance: identity.instance });
 		herdrReportAgent(identity.displayName, "working", identity.instance);
 		// had_pending_inbound:false qui è il segnale diagnostico chiave per "un
 		// agente è partito da solo": significa che questo turno sta iniziando
@@ -3647,6 +3648,13 @@ export default function (pi: ExtensionAPI) {
 	// usage estimate reflects the latest provider response.
 	pi.on("turn_end", async (_event: any, ctx: any) => {
 		logContextUsage(ctx, "turn_end", { turn_index: _event?.turnIndex ?? null });
+		try {
+			const branch = ctx?.sessionManager?.getBranch?.() ?? [];
+			const memory = updateAgentMemory({ root: identity!.cwd, project: identity!.project, role: identity!.role, instance: identity!.instance, turnIndex: _event?.turnIndex ?? null, branch });
+			logEvent("agent_memory_updated", { turn_index: _event?.turnIndex ?? null, project_memory_chars: memory.project_chars, role_memory_chars: memory.role_chars, preferences_updated: memory.preferences_updated, memory_files: memory.files });
+		} catch (error) {
+			logEvent("agent_memory_update_failed", { turn_index: _event?.turnIndex ?? null, error: error instanceof Error ? error.message : String(error) });
+		}
 	});
 
 	pi.on("session_before_compact", async (event: any, ctx: any) => {

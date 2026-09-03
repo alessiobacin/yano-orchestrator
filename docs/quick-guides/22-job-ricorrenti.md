@@ -61,6 +61,10 @@ yano schedule list --json         # job con script_path, mode, expected_conseque
 yano schedule disable --id <job-id>
 yano schedule enable --id <job-id>
 yano schedule remove --id <job-id>
+
+# Cronologia e retry delle esecuzioni
+yano schedule instances --id <job-id> --limit 20 --json
+yano schedule retry --id <instance-id> --json
 ```
 
 Regola d'oro: **prima di rendere ricorrente uno script, eseguilo con

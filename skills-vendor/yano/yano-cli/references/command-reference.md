@@ -83,6 +83,10 @@ yano start --instance planner-01 --role planner
 yano start --instance coder-01 --role coder
 yano start --instance reviewer-01 --role reviewer
 yano start --instance <id> --role <generated-role> --proposal-id <proposal-id>
+
+# Persistent agent memory (project/role/instance/preferences)
+yano memory agents|list|show|create|update|delete [--project-root <dir>] [--scope project|role|preferences|instance]
+yano memory show --scope instance --instance <id> --role <role> --project-root <dir>
 ```
 
 `init` requires the `cm` Code Mem executable. After its deterministic
@@ -173,6 +177,8 @@ rule requires its ID from `--list --json`.
 # Folder script persistente: <data>/scheduler/scripts/ (un upgrade non lo cancella).
 yano schedule add --name <nome> --project-root <dir> --script <path> --mode <self|planner:<progetto>|yano-local-pc> [--cron '0 14,21 * * *'] [--once] [--timeout-ms N] [--expected-consequence <testo>] [--json]
 yano schedule run <id> [--json]        # esegue lo script registrato SUBITO (test prima di renderlo ricorrente)
+yano schedule instances --id <job-id> [--limit N] [--json] # cronologia esecuzioni e status
+yano schedule retry --id <instance-id> [--json]            # retry manuale collegato all'istanza originale
 yano schedule list [--json]            # job con script_path, mode, expected_consequence, enabled, last_status
 yano schedule remove --id <id>|enable --id <id>|disable --id <id>
 yano schedule tick [--json]            # dispatcher one-minute (cron di sistema -> `yano schedule tick`)

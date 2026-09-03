@@ -55,6 +55,7 @@ Use the smallest command that answers the request. Typical translations are:
 | Start an agent in Herdr | `yano start --herdr --instance <id> --role <role>` | verifies workspace label + project root before tab creation |
 | Prepare a visual frontend review | `yano frontend-review start` | installs project-local React `agentation`, infers the dev script/URL and starts the development app after user consent |
 | Start an instance on the persistent Local PC runtime | `yano local-pc status` | `yano-local-pc` and its `planner-01` are supervised in the persistent `yano-local-pc` workspace; scheduler and watcher remain in their own service workspaces |
+| List or inspect agent memory | `yano memory agents --project-root <dir>`, then `yano memory show --scope instance --instance <id> --role <role>` | Lists project, role and instance Markdown memories; memory is bounded and survives agent restart |
 | Check or change trace capture | `yano trace status`, `yano trace enable --mode full` | global per-user data root and effective mode |
 | Investigate a specific failure | `yano trace context ... --json`, then `yano trace search ... --mode hybrid --json` | filtered evidence before broad history |
 | Pause and resume work | `yano pause ... --yes`, then `yano resume ... --yes` | checkpoint, assignments, missing agents; never use `end` as pause |

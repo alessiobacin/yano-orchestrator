@@ -10,6 +10,8 @@ yano schedule run <job-id>
 
 # Gestione
 yano schedule list --json            # script_path, mode, expected_consequence, stato
+yano schedule instances --id <job-id> --limit 20 --json  # ultime istanze e status
+yano schedule retry --id <instance-id> --json             # retry manuale dell'istanza
 yano schedule disable --id <job-id>
 yano schedule enable --id <job-id>
 yano schedule remove --id <job-id>

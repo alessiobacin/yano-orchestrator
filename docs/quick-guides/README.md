@@ -18,6 +18,7 @@ pensate per chi usa Yano per la prima volta e lavora dalla root del progetto.
 11. [Configurazione globale](./11-configurazione-globale.md)
 13. [Deployment agent](./13-deployment-agent.md)
 14. [Auto-improve periodico](./14-auto-improve.md)
+15. [Memoria persistente degli agenti](./23-memoria-agenti.md)
 16. [Yano Architect: playbook e agenti on-the-fly](./16-yano-architect.md)
 17. [Ripristino automatico di un progetto](./17-ripristino-automatico.md)
 18. [Catalogo playbook: requisiti, bundle e rimozione](./18-catalogo-playbook.md)
@@ -29,6 +30,7 @@ pensate per chi usa Yano per la prima volta e lavora dalla root del progetto.
 Per i riferimenti completi dei comandi (oltre alle controparti compatte qui
 sopra) vedi anche [quick-start](./quick-start.md), [yano-feedback](./12-yano-feedback.md),
 [yano-auto-improve](./yano-auto-improve.md),
+[memoria agenti](./23-memoria-agenti.md),
 [yano-model-advisor](./yano-model-advisor.md), [yano-architect](./yano-architect.md),
 [yano-trace](./yano-trace.md), [yano-deployment](./yano-deployment.md),
 [yano-recovery](./yano-recovery.md) e [yano-local-pc](./yano-local-pc.md).

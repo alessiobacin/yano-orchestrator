@@ -8,7 +8,7 @@ category: internal_tool
 signal: tool_failure
 fingerprint: f98ea0b8d7dee42215d737fe830cb75c4b63790e6a1cc4012d1d8a11f9552f89
 detected_at: 2026-09-03T21:39:10.426Z
-last_seen_at: 2026-09-03T22:00:29.199Z
+last_seen_at: 2026-09-04T00:02:22.987Z
 source_project: newbiz-website
 source_project_root: /Users/alessiobacin/Development/Code/newbiz-vendite/newbiz-website
 source_project_key: workspace-701fce3575c4

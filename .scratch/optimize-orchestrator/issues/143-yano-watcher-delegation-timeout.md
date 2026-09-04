@@ -4,28 +4,28 @@ kind: task
 created_by: yano-watcher
 status: open
 severity: high
-category: internal_tool
-signal: tool_failure
-fingerprint: 6ccc9062f3fe70d5fa6e39f1f373b0e1360a487cbc57275cbb7c4649d5ecb70d
-detected_at: 2026-09-03T21:39:10.927Z
-last_seen_at: 2026-09-04T00:02:22.999Z
+category: delegation
+signal: delegation_timeout
+fingerprint: 21bc9a897e676d98147cde872c3ac604c0aa221aaa55070d1f13756893485421
+detected_at: 2026-09-03T22:16:37.674Z
+last_seen_at: 2026-09-03T23:14:51.428Z
 source_project: newbiz-website
 source_project_root: /Users/alessiobacin/Development/Code/newbiz-vendite/newbiz-website
 source_project_key: workspace-701fce3575c4
 run_id: unknown
 round: unknown
 task: unknown
-instance: planner-01
+instance: reviewer-01
 evidence_record_id: unknown
 ---
 
-# Un tool interno di Yano è terminato con errore.
+# Yano ha esaurito il timeout durante la delega a un agente.
 
 Type: human
 Kind: task
 Created-by: yano-watcher
 Status: open
-Fingerprint: 6ccc9062f3fe70d5fa6e39f1f373b0e1360a487cbc57275cbb7c4649d5ecb70d
+Fingerprint: 21bc9a897e676d98147cde872c3ac604c0aa221aaa55070d1f13756893485421
 
 ## Sintesi
 
@@ -33,25 +33,41 @@ Il watcher ha rilevato un comportamento attribuibile al flusso interno di Yano, 
 
 ## Evidenza osservabile
 
-- Segnale: `tool_failure`
-- Categoria: `internal_tool`
+- Segnale: `delegation_timeout`
+- Categoria: `delegation`
 - Progetto osservato: `newbiz-website` (/Users/alessiobacin/Development/Code/newbiz-vendite/newbiz-website)
-- Timestamp del record: `2026-09-03T21:34:16.205Z`
+- Timestamp del record: `2026-09-03T22:14:56.541Z`
 - Record di trace: `unknown`
 
 ```json
 {
-  "ts": "2026-09-03T21:34:16.205Z",
-  "seq": 690,
-  "instance": "planner-01",
-  "role": "planner",
+  "ts": "2026-09-03T22:14:56.541Z",
+  "seq": 336,
+  "instance": "reviewer-01",
+  "role": "reviewer",
   "project": "newbiz-website",
   "project_key": "workspace-701fce3575c4",
   "trace_mode": "full",
-  "type": "tool_execution_end",
-  "tool_call_id": "call_821f2c697d6b4a6baa2268ee",
-  "tool": "agent_send",
-  "ok": false
+  "type": "notification_dispatch",
+  "ok": true,
+  "detail": "whatsapp: non configurato — variabili mancanti nel .env: EVOLUTION_INSTANCE_NAME, DESTINATION_PHONE_NUMBER; telegram: non configurato — variabili mancanti nel .env: TELEGRAM_BOT_TOKEN, TELEGRAM_DESTINATION_CHAT_ID; email: inviato",
+  "channels": {
+    "whatsapp": {
+      "ok": false,
+      "detail": "non configurato — variabili mancanti nel .env: EVOLUTION_INSTANCE_NAME, DESTINATION_PHONE_NUMBER"
+    },
+    "telegram": {
+      "ok": false,
+      "detail": "non configurato — variabili mancanti nel .env: TELEGRAM_BOT_TOKEN, TELEGRAM_DESTINATION_CHAT_ID"
+    },
+    "email": {
+      "ok": true,
+      "detail": "inviato"
+    }
+  },
+  "reason": "agent_send_timeout",
+  "assignment_id": "01M1MKPS9MR8NW690XBREB0KD1",
+  "target": "role:planner"
 }
 ```
 

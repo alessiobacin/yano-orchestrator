@@ -6,16 +6,16 @@ status: open
 severity: high
 category: internal_tool
 signal: tool_failure
-fingerprint: 6ccc9062f3fe70d5fa6e39f1f373b0e1360a487cbc57275cbb7c4649d5ecb70d
-detected_at: 2026-09-03T21:39:10.927Z
-last_seen_at: 2026-09-04T00:02:22.999Z
+fingerprint: e0762ea6a93fed27ae10244170750b406cbe69ddfc5042b4dc0ddfadf9a503d5
+detected_at: 2026-09-03T22:21:52.789Z
+last_seen_at: 2026-09-03T23:17:04.807Z
 source_project: newbiz-website
 source_project_root: /Users/alessiobacin/Development/Code/newbiz-vendite/newbiz-website
 source_project_key: workspace-701fce3575c4
 run_id: unknown
 round: unknown
 task: unknown
-instance: planner-01
+instance: frontend-developer-01
 evidence_record_id: unknown
 ---
 
@@ -25,7 +25,7 @@ Type: human
 Kind: task
 Created-by: yano-watcher
 Status: open
-Fingerprint: 6ccc9062f3fe70d5fa6e39f1f373b0e1360a487cbc57275cbb7c4649d5ecb70d
+Fingerprint: e0762ea6a93fed27ae10244170750b406cbe69ddfc5042b4dc0ddfadf9a503d5
 
 ## Sintesi
 
@@ -36,21 +36,21 @@ Il watcher ha rilevato un comportamento attribuibile al flusso interno di Yano, 
 - Segnale: `tool_failure`
 - Categoria: `internal_tool`
 - Progetto osservato: `newbiz-website` (/Users/alessiobacin/Development/Code/newbiz-vendite/newbiz-website)
-- Timestamp del record: `2026-09-03T21:34:16.205Z`
+- Timestamp del record: `2026-09-03T22:17:36.062Z`
 - Record di trace: `unknown`
 
 ```json
 {
-  "ts": "2026-09-03T21:34:16.205Z",
-  "seq": 690,
-  "instance": "planner-01",
-  "role": "planner",
+  "ts": "2026-09-03T22:17:36.062Z",
+  "seq": 746,
+  "instance": "frontend-developer-01",
+  "role": "frontend-developer",
   "project": "newbiz-website",
   "project_key": "workspace-701fce3575c4",
   "trace_mode": "full",
   "type": "tool_execution_end",
-  "tool_call_id": "call_821f2c697d6b4a6baa2268ee",
-  "tool": "agent_send",
+  "tool_call_id": "chatcmpl-tool-b1d985001c090947",
+  "tool": "plan_advance",
   "ok": false
 }
 ```

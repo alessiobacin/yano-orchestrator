@@ -759,7 +759,10 @@ for an explicit `yano resume`.
   `completed` run is terminal: `pending_finalize` is an administrative/user
   state and never causes an automatic planner wake-up.
 - Registered projects without an active run are supervised without creating or
-  waking a planner session; planner liveness recovery is scoped to active work.
+  waking a planner session, unless a durable user decision hold is still open;
+  in that case planner liveness recovery remains enabled until the hold closes.
+- After terminal work, the watcher closes only verified dead or idle agent tabs
+  assigned to terminal tickets, preserving logs and leaving live user work untouched.
 - The standalone `yano-watcher` can turn high-confidence Yano orchestration
   faults into deduplicated maintenance tickets and Telegram alerts; it never
   changes project ticket state or attempts an automatic fix.

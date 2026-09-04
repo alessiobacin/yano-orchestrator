@@ -293,7 +293,13 @@ function runNeedsPlanner(run) {
 	return run.status === "active";
 }
 
-export { runNeedsPlanner };
+export { runNeedsPlanner, projectNeedsPlanner };
+
+function projectNeedsPlanner(root) {
+	const state = projectRuns(root);
+	if (!state.available) return false;
+	return state.runs.some((run) => runNeedsPlanner(run) || Number(run.open_holds || 0) > 0);
+}
 
 export function findProjectWorkspace(snapshot, root, project) {
 	// Workspace labels are user-facing and are not a stable identity: Herdr
@@ -365,9 +371,9 @@ function plannerHeartbeatHealthy(planner) {
 export function ensureRegisteredPlanner(row, snapshot, db = null) {
 	if (!snapshot || !fs.existsSync(row.root)) return { recovery: "project_unavailable" };
 	// A registered project may be idle or contain only terminal runs. Planner
-	// liveness is required for active work, not as a reason to manufacture a
-	// fresh planner session for every completed project.
-	if (!projectHasActiveWork(row.root)) return { recovery: "no_active_run", planner_status: "not_required" };
+	// liveness is required for active work or an open user decision hold, not as
+	// a reason to manufacture a fresh planner session for every completed project.
+	if (!projectNeedsPlanner(row.root)) return { recovery: "no_active_run", planner_status: "not_required" };
 	const workspace = findProjectWorkspace(snapshot, row.root, row.name);
 	const planners = workspace ? plannerAgentsInWorkspace(snapshot, workspace.workspace_id, row.root) : [];
 	const healthy = planners.find(plannerHeartbeatHealthy);
@@ -394,6 +400,47 @@ export function ensureRegisteredPlanner(row, snapshot, db = null) {
 	const recovered = recoverPlanner({ row, snapshot: herdrSnapshot() || snapshot, run: { id: "planner-presence", status: "active", finalization_status: "not_started" }, reason });
 	if (db) db.prepare("UPDATE watcher_projects SET last_recovery_at = ?, last_recovery_reason = ?, updated_at = ? WHERE project_key = ?").run(now(), reason, now(), row.project_key);
 	return { recovery: "planner_recovered", ...recovered };
+}
+
+function paneHasLivePiProcess(paneId) {
+	if (!paneId) return false;
+	const result = spawnSync("herdr", ["pane", "process-info", "--pane", paneId], { encoding: "utf8" });
+	try {
+		const processes = JSON.parse(result.stdout || "")?.result?.process_info?.foreground_processes || [];
+		return processes.some((item) => item?.argv0 === "pi" || item?.argv?.some((arg) => /(?:^|\/)pi(?:\.m?js)?$/.test(String(arg))));
+	} catch { return false; }
+}
+
+function cleanupCompletedAgentTabs(snapshot, row, runs, plannerRequired) {
+	if (!snapshot) return [];
+	const terminalAssignments = new Set(runs.flatMap((run) => (run.tickets || [])
+		.filter((ticket) => ["done", "failed"].includes(ticket.status) && ticket.assigned_instance)
+		.map((ticket) => ticket.assigned_instance)));
+	const isTerminalAssignment = (instance) => [...terminalAssignments].some((assigned) =>
+		instance === assigned || instance.startsWith(`${assigned}-`) || assigned.startsWith(`${instance}-`));
+	const removed = [];
+	for (const agent of snapshot.agents || []) {
+		if (path.resolve(agent.cwd || "") !== path.resolve(row.root)) continue;
+		const instance = String(agent.name || agent.instance || agent.terminal_title_stripped || "");
+		const isPlanner = /planner/i.test(instance);
+		const terminalTask = isTerminalAssignment(instance);
+		const status = String(agent.agent_status || "unknown").toLowerCase();
+		const dead = !paneHasLivePiProcess(agent.pane_id);
+		// Never close a live planner needed by an open hold/active run. For
+		// specialists, close only terminal-task sessions or dead panes; a live
+		// unassigned/busy pane is left untouched to avoid killing user work.
+		if (isPlanner && plannerRequired && !dead) continue;
+		if (!terminalTask && !dead) continue;
+		if (!dead && !["idle", "offline", "unknown", "stopped", "done"].includes(status)) continue;
+		const tab = snapshot.tabs?.find((item) => item.tab_id === agent.tab_id);
+		if (!tab) continue;
+		const closed = closeHerdrTab(tab.tab_id);
+		removed.push({ tab_id: tab.tab_id, pane_id: agent.pane_id, instance, reason: dead ? "dead_process" : "terminal_ticket", ...closed });
+	}
+	if (removed.length) {
+		try { appendRawTraceRecord({ cwd: row.root, project: row.name, record: { type: "watcher_completed_agent_tabs_closed", record_type: "event", source: "yano-watcher-registry", instance: "yano-watcher", closed: removed } }); } catch { /* best effort */ }
+	}
+	return removed;
 }
 
 function plannerStalled(run) {
@@ -778,8 +825,11 @@ function doStatusForRow(db, row, { heal = true, snapshot: suppliedSnapshot = nul
 				return { ...base, live: "config_drift", drift: true, recovered: false, worker_config_repaired: false, recover_error: error instanceof Error ? error.message : String(error) };
 			}
 		}
+		const runs = projectRuns(row.root).runs;
+		const plannerRequired = projectNeedsPlanner(row.root);
+		const agent_tabs_closed = heal ? cleanupCompletedAgentTabs(snapshot, row, runs, plannerRequired) : [];
 		const planner = heal ? (() => { try { return ensureRegisteredPlanner(row, snapshot, db); } catch (error) { return { recovery: "planner_recovery_failed", recovery_error: error instanceof Error ? error.message : String(error) }; } })() : { recovery: "not_checked" };
-		return { ...base, live: "running", identity_conflicts, planner, ...reconcileProjectRun(db, row, snapshot) };
+		return { ...base, live: "running", identity_conflicts, planner, agent_tabs_closed, ...reconcileProjectRun(db, row, snapshot) };
 	}
 	const drifted = { ...base, live: "not_found", drift: true };
 	if (!heal) return drifted;

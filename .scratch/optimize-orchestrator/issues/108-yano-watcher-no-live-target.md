@@ -8,7 +8,7 @@ category: delegation
 signal: no_live_target
 fingerprint: 40ace8864846a038f488c75027def63965a2fcb7fb2088b9cf712c521d1250e1
 detected_at: 2026-09-02T07:44:13.017Z
-last_seen_at: 2026-09-04T18:58:55.707Z
+last_seen_at: 2026-09-04T19:38:57.886Z
 source_project: yano-orchestrator
 source_project_root: /Users/alessiobacin/Development/testCode/yano-orchestrator
 source_project_key: workspace-d3dda6a0cb4d

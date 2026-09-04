@@ -358,12 +358,24 @@ function plannerHeartbeatHealthy(planner) {
 	return ["idle", "working"].includes(String(explanation?.state || status).toLowerCase()) && explanation?.warning == null && explanation?.visible_blocker !== true;
 }
 
-function ensureRegisteredPlanner(row, snapshot) {
+export function ensureRegisteredPlanner(row, snapshot, db = null) {
 	if (!snapshot || !fs.existsSync(row.root)) return { recovery: "project_unavailable" };
 	const workspace = findProjectWorkspace(snapshot, row.root, row.name);
 	const planners = workspace ? plannerAgentsInWorkspace(snapshot, workspace.workspace_id, row.root) : [];
 	const healthy = planners.find(plannerHeartbeatHealthy);
 	if (healthy) return { recovery: "planner_healthy", planner_status: healthy.agent_status || "unknown", planner_instance: healthy.name || null };
+	const reason = "planner_missing_or_stale_heartbeat";
+	// Unlike reconcileProjectRun, this check used to run unconditionally on
+	// every one-minute supervisor pass. A momentarily flaky heartbeat read
+	// (snapshot lag right after Mac sleep/Herdr restart, or a just-recovered
+	// planner that has not published its first heartbeat yet) made it close
+	// and relaunch the planner tab again and again — once per minute, forever
+	// — each relaunch paying for a fresh multi-hundred-MB recovery snapshot.
+	// The same cooldown reconcileProjectRun already respects must gate this
+	// path too, or the two recovery entry points race each other.
+	if (recoveryCoolingDown(row, reason)) {
+		return { recovery: "recovery_cooldown", recovery_reason: reason, last_recovery_at: row.last_recovery_at };
+	}
 	// A dead/blocked planner tab must not be reused as if it were live. Close it
 	// first; recoverPlanner will create a clean planner-01 pane in the verified
 	// project workspace and launch the normal guarded Yano command.
@@ -371,7 +383,8 @@ function ensureRegisteredPlanner(row, snapshot) {
 		const tab = snapshot.tabs?.find((item) => item.tab_id === planner.tab_id);
 		if (tab) closeHerdrTab(tab.tab_id);
 	}
-	const recovered = recoverPlanner({ row, snapshot: herdrSnapshot() || snapshot, run: { id: "planner-presence", status: "active", finalization_status: "not_started" }, reason: "planner_missing_or_stale_heartbeat" });
+	const recovered = recoverPlanner({ row, snapshot: herdrSnapshot() || snapshot, run: { id: "planner-presence", status: "active", finalization_status: "not_started" }, reason });
+	if (db) db.prepare("UPDATE watcher_projects SET last_recovery_at = ?, last_recovery_reason = ?, updated_at = ? WHERE project_key = ?").run(now(), reason, now(), row.project_key);
 	return { recovery: "planner_recovered", ...recovered };
 }
 
@@ -757,7 +770,7 @@ function doStatusForRow(db, row, { heal = true, snapshot: suppliedSnapshot = nul
 				return { ...base, live: "config_drift", drift: true, recovered: false, worker_config_repaired: false, recover_error: error instanceof Error ? error.message : String(error) };
 			}
 		}
-		const planner = heal ? (() => { try { return ensureRegisteredPlanner(row, snapshot); } catch (error) { return { recovery: "planner_recovery_failed", recovery_error: error instanceof Error ? error.message : String(error) }; } })() : { recovery: "not_checked" };
+		const planner = heal ? (() => { try { return ensureRegisteredPlanner(row, snapshot, db); } catch (error) { return { recovery: "planner_recovery_failed", recovery_error: error instanceof Error ? error.message : String(error) }; } })() : { recovery: "not_checked" };
 		return { ...base, live: "running", identity_conflicts, planner, ...reconcileProjectRun(db, row, snapshot) };
 	}
 	const drifted = { ...base, live: "not_found", drift: true };

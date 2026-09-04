@@ -30,7 +30,10 @@ export async function askLocalPc(prompt, { timeoutMs = 120000, broker = brokerUr
 	// tab may be recovering independently; do not drop a scheduled request
 	// when planner-01 is already healthy and able to receive MQTT.
 	if (!service.running && !service.planner?.running) throw new Error(`Local PC non attivo (${service.error || "avvio fallito"}).`);
-	const targetInstance = planner ? "planner-01" : INSTANCE;
+	// The persistent planner is the sole LLM process for the Local PC control
+	// plane. `yano-local-pc` remains the logical service name, never a second
+	// short-lived Pi session that can churn under the minute supervisor.
+	const targetInstance = "planner-01";
 	const requestId = `${planner ? "planner" : "computer"}-${crypto.randomUUID()}`;
 	const replyTopic = `pi/${SCOPE}/cli/${requestId}/response`;
 	const commandTopic = `pi/${SCOPE}/agents/${targetInstance}/commands`;

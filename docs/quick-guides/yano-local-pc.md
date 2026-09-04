@@ -1,8 +1,9 @@
 # Local PC
 
-`yano-local-pc` è un servizio globale persistente nel workspace Herdr
-`yano-local-pc`. È gestito dal self-heal di Yano insieme a watcher,
-feedback e scheduler e viene ricreato se la tab o il processo vengono chiusi.
+`yano-local-pc` è il servizio logico globale persistente nel workspace Herdr
+`yano-local-pc`. L’unico processo LLM persistente del control plane è il suo
+`planner-01`: il servizio non avvia un secondo agente Pi usa-e-getta. Watcher,
+feedback e scheduler verificano e ripristinano sempre quel planner.
 
 I server Apple sono caricati esclusivamente dalla configurazione runtime del
 servizio, mai dai `.mcp.json` dei progetti. Sono disponibili Notes, Messages,
@@ -24,9 +25,9 @@ yano local-pc status
 yano local-pc ask --prompt "Controlla oggi promemoria e calendario e indicami conflitti"
 ```
 
-Lo scheduler chiama l'istanza esatta `yano-local-pc` tramite `agent_send`.
-Le richieste dell'utente dalla CLI usano lo stesso runtime globale
-`yano-local-pc`; non viene mai usato lo scope di un progetto applicativo.
+Lo scheduler e `yano local-pc ask` inviano al planner persistente `planner-01`
+nel runtime logico `yano-local-pc`; non viene mai usato lo scope di un progetto
+applicativo.
 Operazioni che modificano o inviano dati richiedono conferma esplicita.
 
 Nel widget bottom dell'interfaccia Pi/Herdr, Yano mostra a destra il semaforo

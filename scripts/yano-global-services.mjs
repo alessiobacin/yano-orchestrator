@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import path from "node:path";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
 import { globalDataPath, resolveYanoConfig } from "./yano-config.mjs";
 import { materializeAgentMcp } from "./yano-agent-mcp.mjs";
 import { herdrSnapshot as snapshot } from "./yano-herdr-client.mjs";
@@ -24,6 +24,30 @@ const SYSTEM_PROJECT = "yano-local-pc";
 function computerRuntimeRoot() { return path.join(globalDataPath(), "yano-local-pc"); }
 function serviceRuntimeRoot(name) { return path.join(globalDataPath(), name); }
 function serviceLogPath() { return path.join(globalDataPath(), "logs", "global-services.jsonl"); }
+function serviceLockPath(service) { return path.join(globalDataPath(), "locks", `global-service-${service.instance}.lock`); }
+function acquireServiceLock(service) {
+	const lock = serviceLockPath(service);
+	mkdirSync(path.dirname(lock), { recursive: true, mode: 0o700 });
+	try {
+		const fd = openSync(lock, "wx");
+		writeFileSync(fd, `${process.pid}\n${Date.now()}\n`);
+		return { fd, lock };
+	} catch (error) {
+		if (error?.code !== "EEXIST") throw error;
+		try {
+			const age = Date.now() - readFileSync(lock, "utf8").split(/\s+/).map(Number)[1];
+			if (Number.isFinite(age) && age > 120_000) unlinkSync(lock);
+			else return null;
+		} catch { return null; }
+		try { const fd = openSync(lock, "wx"); writeFileSync(fd, `${process.pid}\n${Date.now()}\n`); return { fd, lock }; }
+		catch { return null; }
+	}
+}
+function releaseServiceLock(handle) {
+	if (!handle) return;
+	try { closeSync(handle.fd); } catch {}
+	try { unlinkSync(handle.lock); } catch {}
+}
 function logService(event, details = {}) {
 	try {
 		mkdirSync(path.dirname(serviceLogPath()), { recursive: true, mode: 0o700 });
@@ -80,7 +104,6 @@ const SERVICES = [
 	{ instance: "watcher-service", agentName: "watcher-service", role: "watcher", workspace: WATCHER_WORKSPACE, tab: "watcher-service", cwd: serviceRuntimeRoot(WATCHER_WORKSPACE), project: WATCHER_WORKSPACE },
 	{ instance: "scheduler-service", agentName: "scheduler-service", role: "scheduler", workspace: SCHEDULER_WORKSPACE, tab: "scheduler-service", cwd: serviceRuntimeRoot(SCHEDULER_WORKSPACE), project: SCHEDULER_WORKSPACE },
 	{ instance: "planner-01", agentName: "planner-01", role: "planner", workspace: COMPUTER_WORKSPACE, tab: "planner-01", cwd: computerRuntimeRoot(), project: SYSTEM_PROJECT },
-	{ instance: COMPUTER_INSTANCE, agentName: COMPUTER_INSTANCE, role: COMPUTER_ROLE, workspace: COMPUTER_WORKSPACE, tab: COMPUTER_TAB, cwd: computerRuntimeRoot(), project: SYSTEM_PROJECT },
 ];
 
 function run(command, args, options = {}) {
@@ -145,7 +168,7 @@ function closeInitialDuplicates(state, workspaceId, canonicalTabId, service) {
 	}
 }
 
-function ensureService(service) {
+function ensureServiceUnlocked(service) {
 	if (service.workspace === COMPUTER_WORKSPACE) ensureComputerRuntime();
 	else mkdirSync(service.cwd || serviceRuntimeRoot(service.workspace), { recursive: true, mode: 0o700 });
 	logService("service_check_started", { service: service.instance, role: service.role, workspace: service.workspace, cwd: service.cwd, project: service.project });
@@ -226,11 +249,36 @@ function ensureService(service) {
 	return { service: service.instance, running: Boolean(live && afterHealth.healthy), recovered: true, health: afterHealth, workspace_id: workspaceId, tab_id: tab.tab_id, pane_id: pane.pane_id, error: live && afterHealth.healthy || started.status === 0 ? null : (started.stderr || started.stdout || "Herdr non ha avviato l'agente").trim() };
 }
 
+// The minute watcher and scheduler both supervise the same always-on panes.
+// A filesystem lock makes this idempotent across processes: the second caller
+// must observe, never close/recreate, a pane while the first caller is probing.
+function ensureService(service) {
+	const lock = acquireServiceLock(service);
+	if (!lock) {
+		logService("service_check_skipped_locked", { service: service.instance });
+		return { service: service.instance, running: false, recovered: false, skipped: true, reason: "concurrent_supervision" };
+	}
+	try { return ensureServiceUnlocked(service); } finally { releaseServiceLock(lock); }
+}
+
 export function ensureGlobalYanoServices() { return SERVICES.map(ensureService); }
 export function ensureComputerLocalService() {
-	const localPc = ensureService(SERVICES.find((service) => service.instance === COMPUTER_INSTANCE));
 	const planner = ensureService(SERVICES.find((service) => service.instance === "planner-01"));
-	return { ...localPc, planner };
+	// `yano-local-pc` is the logical control-plane service, not a second
+	// disposable LLM session. Generic schedules and CLI requests are handled
+	// by its persistent planner; launching another Pi here caused a churn loop
+	// because the no-task bootstrap session correctly terminated.
+	return {
+		service: COMPUTER_INSTANCE,
+		running: Boolean(planner.running),
+		recovered: planner.recovered,
+		delegated_to: "planner-01",
+		workspace_id: planner.workspace_id,
+		tab_id: planner.tab_id,
+		pane_id: planner.pane_id,
+		health: planner.health,
+		planner,
+	};
 }
 
 export function globalServiceLogPath() { return serviceLogPath(); }

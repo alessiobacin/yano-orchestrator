@@ -28,6 +28,7 @@
 
 import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -38,6 +39,12 @@ import { ensureGlobalYanoServices } from "./yano-global-services.mjs";
 import { superviseExternalServices, getService } from "./yano-services.mjs";
 import { herdrSnapshot } from "./yano-herdr-client.mjs";
 import { applyRetention } from "./yano-data.mjs";
+
+// Cron launches with a minimal PATH. Herdr is commonly installed in the
+// user's ~/.local/bin, so make the runtime independent from the interactive
+// shell profile before any Herdr probe or recovery command is attempted.
+const herdrBinDir = path.join(os.homedir(), ".local", "bin");
+if (!String(process.env.PATH || "").split(path.delimiter).includes(herdrBinDir)) process.env.PATH = [herdrBinDir, process.env.PATH || ""].filter(Boolean).join(path.delimiter);
 import { installOneMinuteWindowsJob, removeOneMinuteWindowsJob, statusOneMinuteWindowsJob } from "./yano-os-scheduler.mjs";
 import { agentTabIdentityAudit, findAgentIdentityConflicts, formatAgentIdentityConflicts } from "./yano-agent-identity.mjs";
 import { superviseScheduler } from "./yano-scheduler.mjs";
@@ -215,7 +222,7 @@ function projectRuns(root) {
 			GROUP BY r.id
 			ORDER BY r.updated_at DESC
 		`).all();
-		const tickets = db.prepare("SELECT id, run_id, title, status, assigned_instance, updated_at FROM tickets ORDER BY updated_at DESC").all();
+		const tickets = db.prepare("SELECT id, run_id, title, status, assigned_instance, required_playbook, updated_at FROM tickets ORDER BY updated_at DESC").all();
 		const dependencies = db.prepare("SELECT d.ticket_id, d.depends_on_id, dependency.status AS dependency_status FROM ticket_dependencies d JOIN tickets dependency ON dependency.id = d.depends_on_id").all();
 		const dependenciesByTicket = new Map();
 		for (const dependency of dependencies) {
@@ -227,11 +234,32 @@ function projectRuns(root) {
 			if (!byRun.has(ticket.run_id)) byRun.set(ticket.run_id, []);
 			byRun.get(ticket.run_id).push(ticket);
 		}
+		const bindings = new Map(db.prepare("SELECT run_id, playbook_id, checksum, snapshot FROM playbook_bindings").all().map((binding) => {
+			let snapshot = null; try { snapshot = JSON.parse(binding.snapshot); } catch {}
+			return [binding.run_id, { ...binding, snapshot }];
+		}));
+		const runtimeStates = new Map(db.prepare("SELECT run_id, state_id, generation, updated_at FROM playbook_runtime_state").all().map((state) => [state.run_id, state]));
 		return { available: true, runs: runs.map((run) => {
 			const runTickets = byRun.get(run.id) || [];
+			const binding = bindings.get(run.id) || null;
+			const flowViolations = [];
+			for (const ticket of runTickets) {
+				const deps = dependenciesByTicket.get(ticket.id) || [];
+				if (["running", "done"].includes(ticket.status)) {
+					const unfinished = deps.filter((dependency) => dependency.dependency_status !== "done");
+					if (unfinished.length) flowViolations.push({ kind: "ticket_out_of_order", ticket_id: ticket.id, status: ticket.status, unfinished_dependencies: unfinished.map((item) => ({ ticket_id: item.depends_on_id, status: item.dependency_status })) });
+				}
+				if (binding?.playbook_id && ticket.required_playbook && ticket.required_playbook !== binding.playbook_id) flowViolations.push({ kind: "ticket_playbook_mismatch", ticket_id: ticket.id, required_playbook: ticket.required_playbook, bound_playbook: binding.playbook_id });
+			}
+			const runtime = runtimeStates.get(run.id) || null;
+			const terminalStates = new Set((binding?.snapshot?.states || []).filter((state) => state.terminal === true).map((state) => state.id));
+			if (run.status === "active" && runtime?.state_id && terminalStates.has(runtime.state_id) && runtime.state_id !== "blocked") flowViolations.push({ kind: "active_run_in_terminal_playbook_state", state_id: runtime.state_id });
 			return {
 				...run,
 				tickets: runTickets,
+				playbook_binding: binding ? { playbook_id: binding.playbook_id, checksum: binding.checksum } : null,
+				playbook_state: runtime,
+				playbook_flow: { status: flowViolations.length ? "violation" : "ordered", violations: flowViolations },
 				active_ticket_count: runTickets.filter((ticket) => ["pending", "running"].includes(ticket.status)).length,
 				running_ticket_count: runTickets.filter((ticket) => ticket.status === "running").length,
 				pending_ticket_count: runTickets.filter((ticket) => ticket.status === "pending").length,
@@ -376,6 +404,28 @@ function notifyPlannerOfOrphanedTickets(row, snapshot, run, orphaned) {
 	return launched.status === 0 ? { notified: true, planner_pane_id: planner.pane_id, planner_instance: planner.name || "planner-01", ticket_ids: orphaned.map((item) => item.ticket.id) } : { notified: false, reason: "planner_notification_failed", error: (launched.stderr || "").trim() };
 }
 
+async function notifyYanoOrchestratorPlanner(flow, sourceProject) {
+	const root = PACKAGE_ROOT;
+	let snapshot = herdrSnapshot();
+	const row = { name: "yano-orchestrator", root, project_key: projectKey(root, "yano-orchestrator") };
+	let workspace = findProjectWorkspace(snapshot, root, "yano-orchestrator");
+	let planner = workspace && plannerAgentsInWorkspace(snapshot, workspace.workspace_id, root).find(plannerHeartbeatHealthy);
+	if (!planner) {
+		try {
+			recoverPlanner({ row, snapshot, run: { id: "playbook-flow-audit", status: "active", finalization_status: "not_started" }, reason: "playbook_flow_violation" });
+			snapshot = herdrSnapshot() || snapshot;
+			workspace = findProjectWorkspace(snapshot, root, "yano-orchestrator");
+			planner = workspace && plannerAgentsInWorkspace(snapshot, workspace.workspace_id, root).find(plannerHeartbeatHealthy);
+		} catch (error) { return { notified: false, reason: "planner_recovery_failed", error: error instanceof Error ? error.message : String(error) }; }
+	}
+	if (!planner?.name) return { notified: false, reason: "planner_not_live" };
+	const scope = projectKey(root, "yano-orchestrator");
+	const prompt = `[yano-watcher playbook audit] Violazione deterministica del flusso rilevata nel progetto ${sourceProject}. Run ${flow.run_id}. Evidenze: ${JSON.stringify(flow)}. Analizza e correggi il problema nel codice/configurazione di Yano; non modificare il progetto sorgente e non creare ticket duplicati.`;
+	const client = await mqtt.connectAsync(process.env.PI_ORCH_BROKER_URL || "mqtt://127.0.0.1:1883", { connectTimeout: 3000 });
+	try { await client.publishAsync(`pi/${scope}/agents/${planner.name}/commands`, JSON.stringify({ type: "watcher_playbook_flow_violation", sender_instance: "yano-watcher", sender_role: "watcher", source_project: sourceProject, ...flow, prompt }), { qos: 1 }); return { notified: true, planner_instance: planner.name }; }
+	finally { await client.endAsync(); }
+}
+
 function readyPendingTickets(run) {
 	return (run.ready_pending_tickets || []).filter(Boolean);
 }
@@ -482,6 +532,10 @@ function reconcileProjectRun(db, row, snapshot) {
 	if (!available) return { recovery: "waiting_for_initialization", watcher_kept: true };
 	if (!runs.length) return { recovery: "project_idle", watcher_kept: true };
 	const incomplete = runs.filter(runNeedsPlanner);
+	const flowViolations = runs.flatMap((run) => (run.playbook_flow?.violations || []).map((violation) => ({ run_id: run.id, ...violation })));
+	if (flowViolations.length) {
+		try { appendRawTraceRecord({ cwd: row.root, project: row.name, record: { type: "playbook_flow_violation", record_type: "event", source: "yano-watcher-registry", instance: "yano-watcher", project: row.name, violations: flowViolations } }); } catch { /* audit must not stop supervision */ }
+	}
 	if (incomplete.length) {
 		const workspace = findProjectWorkspace(snapshot, row.root, row.name);
 		const planners = workspace ? plannerAgentsInWorkspace(snapshot, workspace.workspace_id, row.root) : [];
@@ -497,7 +551,7 @@ function reconcileProjectRun(db, row, snapshot) {
 			try { appendRawTraceRecord({ cwd: row.root, project: row.name, record: { type: "watcher_specialist_recovery_requested", record_type: "event", source: "yano-watcher-registry", instance: "yano-watcher", run_id: targetRun.id, tickets: orphaned.map((item) => item.ticket.id), notification } }); } catch { /* best effort */ }
 			return { recovery: "specialist_recovery_requested", incomplete_runs: incomplete.map((run) => run.id), notification, planner_statuses: planners.map((planner) => planner.agent_status || "unknown") };
 		}
-		if (planners.length && !stalled.length) return { recovery: held.length ? "waiting_for_user" : "planner_present", incomplete_runs: incomplete.map((run) => run.id), planner_statuses: planners.map((planner) => planner.agent_status || "unknown") };
+		if (planners.length && !stalled.length) return { recovery: held.length ? "waiting_for_user" : "planner_present", incomplete_runs: incomplete.map((run) => run.id), planner_statuses: planners.map((planner) => planner.agent_status || "unknown"), playbook_flow: flowViolations.length ? "violation" : "ordered", playbook_flow_violations: flowViolations };
 		if (recoveryCoolingDown(row, reason)) return { recovery: "recovery_cooldown", incomplete_runs: incomplete.map((run) => run.id), recovery_reason: reason, last_recovery_at: row.last_recovery_at };
 		try {
 			const recovered = recoverPlanner({ row, snapshot, run: (stalled[0] || incomplete[0]), reason });
@@ -508,7 +562,7 @@ function reconcileProjectRun(db, row, snapshot) {
 			return { recovery: "planner_recovery_failed", incomplete_runs: incomplete.map((run) => run.id), recovery_error: error instanceof Error ? error.message : String(error) };
 		}
 	}
-	return { recovery: "project_completed", watcher_kept: true };
+	return { recovery: "project_completed", watcher_kept: true, playbook_flow: flowViolations.length ? "violation" : "ordered", playbook_flow_violations: flowViolations };
 }
 
 function findOrCreateWatcherWorkspace(snapshot, root, dryRun = false) {
@@ -858,11 +912,20 @@ function supervise(db) {
 		const activated = [...rows.map((row) => activateDefaultWorkers(db, row)).filter(Boolean)];
 		let feedback_queue;
 		try { feedback_queue = await superviseFeedbackQueue(rows, repairedSnapshot); } catch (error) { feedback_queue = { error: error instanceof Error ? error.message : String(error) }; }
+		const projectResults = rows.map((row) => doStatusForRow(db, row, { heal: true, snapshot: repairedSnapshot }));
+		const playbook_flow_alerts = [];
+		for (let index = 0; index < projectResults.length; index++) {
+			const item = projectResults[index];
+			if (!item.playbook_flow_violations?.length) continue;
+			try { playbook_flow_alerts.push({ project: rows[index].name, ...await notifyYanoOrchestratorPlanner(item.playbook_flow_violations[0], rows[index].name) }); }
+			catch (error) { playbook_flow_alerts.push({ project: rows[index].name, notified: false, reason: error instanceof Error ? error.message : String(error) }); }
+		}
 		const result = {
 			checked_at: now(),
 			herdr_reachable: Boolean(snapshot),
 			herdr_service_registered: herdrServiceRegistered,
-			projects: rows.map((row) => doStatusForRow(db, row, { heal: true, snapshot: repairedSnapshot })),
+			projects: projectResults,
+			playbook_flow_alerts,
 			activated,
 			feedback_queue,
 			global_services,
@@ -888,7 +951,7 @@ function readCrontab() {
 }
 
 function cronCommand() {
-	return `${shellQuote(process.execPath)} ${shellQuote(path.join(PACKAGE_ROOT, "bin", "yano.mjs"))} watcher supervise --json >/dev/null 2>&1 ${CRON_MARKER}`;
+	return `PATH=${shellQuote(herdrBinDir)}:\$PATH ${shellQuote(process.execPath)} ${shellQuote(path.join(PACKAGE_ROOT, "bin", "yano.mjs"))} watcher supervise --json >/dev/null 2>&1 ${CRON_MARKER}`;
 }
 
 function cronInstall() {

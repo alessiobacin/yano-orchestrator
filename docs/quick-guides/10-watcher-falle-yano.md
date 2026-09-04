@@ -407,6 +407,13 @@ ticket markdown.
 
 Il watcher non corregge, non chiude ticket e non modifica il codice: segnala e
 prepara il contesto per il futuro `yano-feedback` o per un LLM incaricato.
+
+In aggiunta, ogni passata verifica deterministicamente l’ordine del playbook:
+un ticket `running` o `done` non può precedere dipendenze incomplete, il
+playbook richiesto deve coincidere con il binding immutabile del run e un run
+attivo non può trovarsi in uno stato terminale. La violazione produce
+`playbook_flow_violation` nel trace e viene inoltrata al percorso di
+manutenzione del planner di `yano-orchestrator`.
 yano watcher supervise --json
 ```
 

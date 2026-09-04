@@ -28,6 +28,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { globalDataPath } from "./yano-config.mjs";
@@ -405,7 +406,7 @@ function readCrontab(spawn = spawnSync) {
 	if (/no crontab for|can't open crontab/i.test(`${result.stdout || ""}\n${result.stderr || ""}`)) return "";
 	fail(`impossibile leggere il crontab${result.stderr ? `: ${result.stderr.trim()}` : ""}`);
 }
-function cronCommand() { return `${shellQuote(process.execPath)} ${shellQuote(path.join(PACKAGE_ROOT, "bin", "yano.mjs"))} cron --supervise --json >/dev/null 2>&1 ${CRON_MARKER}`; }
+function cronCommand() { return `PATH=${shellQuote(path.join(os.homedir(), ".local", "bin"))}:\$PATH ${shellQuote(process.execPath)} ${shellQuote(path.join(PACKAGE_ROOT, "bin", "yano.mjs"))} cron --supervise --json >/dev/null 2>&1 ${CRON_MARKER}`; }
 export function schedulerCronInstall({ spawn = spawnSync, platform = process.platform } = {}) {
 	const windows = installOneMinuteWindowsJob({ marker: CRON_MARKER, command: cronCommand(), platform, spawn });
 	if (windows) return windows;

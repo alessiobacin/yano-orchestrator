@@ -91,7 +91,7 @@ delega all'esistente `yano local-pc ask` (broker-aware, timeout, mai hang).
 
 Il supervisore globale gira ogni minuto: ricrea la tab `scheduler-service` nel
 workspace persistente `yano-scheduler` se manca. Il runtime `yano-local-pc`
-contiene invece soltanto l’agente PC e il suo `planner-01` (evitando l'errore Herdr
+contiene invece il solo `planner-01` persistente del control plane (evitando l'errore Herdr
 `agent_kind_mismatch`) e fa tick dei job in scadenza. Lo stato della riga cron
 marcata si controlla con `yano schedule cron status`; `yano schedule cron
 install|remove` gestiscono la riga di sistema (su Windows `schtasks`), mentre

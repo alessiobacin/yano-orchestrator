@@ -2619,20 +2619,14 @@ interface UnfinalizedRunInfo {
 }
 
 function yanoFindUnfinalizedRuns(storage: OrchestratorStorage, project: string, nowMs: number, graceMs: number): UnfinalizedRunInfo[] {
-	const found: UnfinalizedRunInfo[] = [];
-	for (const run of storage.listRuns(project)) {
-		if (run.status !== "completed") continue;
-		if (run.finalization_status === "finalized" || run.finalization_status === "not_applicable") continue;
-		// An open human hold means the planner is alive and intentionally waiting
-		// for the operator (for example Agentation or finalization approval). Do
-		// not wake it or spend an LLM turn; the hold is durable across restarts.
-		if (storage.listDecisionHolds(run.id, "open").length > 0) continue;
-		const elapsed = nowMs - Date.parse(run.updated_at);
-		if (elapsed >= graceMs) {
-			found.push({ run_id: run.id, objective: run.objective, completed_at: run.updated_at, elapsed_ms: elapsed });
-		}
-	}
-	return found;
+	// Completed is terminal. Finalization is an administrative/user gate, not an
+	// operational liveness signal; returning it here used to wake planners
+	// forever after a manual merge or an answered decision hold.
+	void storage;
+	void project;
+	void nowMs;
+	void graceMs;
+	return [];
 }
 
 // ━━ Watchdog: detect tickets whose assigned instance is confirmably GONE

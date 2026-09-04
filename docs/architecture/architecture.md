@@ -755,7 +755,11 @@ for an explicit `yano resume`.
 
 - MQTT presence uses retained status plus LWT; stale peers are removed locally. Each heartbeat reconciles the agent's `busy`/`idle` status and load from SQLite ticket ownership, so a planner completing a worker's ticket cannot leave a stale `busy` card behind. Presence publishes are serialized so an older transition cannot overwrite a newer one.
 - `yano fleet` applies the same live-heartbeat rule to retained cards and does not report offline or stale agents as live; it reports their ignored-card count as a diagnostic.
-- The planner watchdog detects stalled tickets, unfinalized runs and orphaned assignments.
+- The planner watchdog detects stalled tickets and orphaned assignments. A
+  `completed` run is terminal: `pending_finalize` is an administrative/user
+  state and never causes an automatic planner wake-up.
+- Registered projects without an active run are supervised without creating or
+  waking a planner session; planner liveness recovery is scoped to active work.
 - The standalone `yano-watcher` can turn high-confidence Yano orchestration
   faults into deduplicated maintenance tickets and Telegram alerts; it never
   changes project ticket state or attempts an automatic fix.

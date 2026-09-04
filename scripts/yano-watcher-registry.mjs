@@ -288,8 +288,12 @@ function projectHasActiveWork(root) {
 }
 
 function runNeedsPlanner(run) {
-	return run.status === "active" || (run.status === "completed" && !["finalized", "not_applicable"].includes(run.finalization_status));
+	// A completed run is terminal. `pending_finalize` is an administrative
+	// state, not evidence of live work, so it must never trigger an LLM wake-up.
+	return run.status === "active";
 }
+
+export { runNeedsPlanner };
 
 export function findProjectWorkspace(snapshot, root, project) {
 	// Workspace labels are user-facing and are not a stable identity: Herdr
@@ -360,6 +364,10 @@ function plannerHeartbeatHealthy(planner) {
 
 export function ensureRegisteredPlanner(row, snapshot, db = null) {
 	if (!snapshot || !fs.existsSync(row.root)) return { recovery: "project_unavailable" };
+	// A registered project may be idle or contain only terminal runs. Planner
+	// liveness is required for active work, not as a reason to manufacture a
+	// fresh planner session for every completed project.
+	if (!projectHasActiveWork(row.root)) return { recovery: "no_active_run", planner_status: "not_required" };
 	const workspace = findProjectWorkspace(snapshot, row.root, row.name);
 	const planners = workspace ? plannerAgentsInWorkspace(snapshot, workspace.workspace_id, row.root) : [];
 	const healthy = planners.find(plannerHeartbeatHealthy);

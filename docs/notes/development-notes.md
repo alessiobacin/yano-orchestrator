@@ -975,9 +975,11 @@ fatto lui il lavoro di coding** invece di rilanciarne uno:
 
 ### Punto 1 — rilevamento istantaneo + kill/relaunch
 
-I due controlli watchdog esistenti (Revisione 29: ticket `running` senza
-`ticket_complete` da 15+ minuti; Revisione 40: run `completed` senza finalize
-da 10+ minuti) condividono lo stesso limite: sono euristiche sul tempo
+Il controllo watchdog operativo rileva ticket `running` senza
+`ticket_complete` da 15+ minuti. I run `completed` restano terminali anche se
+`finalization_status=pending_finalize`: il finalize è un gate amministrativo e
+non deve riattivare il planner o generare falsi allarmi watchdog. I controlli
+basati sul tempo condividono comunque un limite: sono euristiche sul tempo
 trascorso, perché l'unico segnale che avevano era "nessun evento arriva più".
 Ma per il caso specifico di un'istanza CHE NON C'È PIÙ (pane herdr chiuso,
 processo `pi` morto — non "lento", proprio assente), esiste un segnale

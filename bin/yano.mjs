@@ -333,7 +333,7 @@ async function main() {
 			console.log(`Uso: yano ${sub} start|stop`);
 			return;
 		}
-		await runFeedbackDashboard({ type: sub === "bug-dash" ? "bug" : "suggestion", argv: rest });
+		await runFeedbackDashboard({ type: sub === "bug-dash" ? "bug" : "suggestion", argv: rest, cwd });
 		return;
 	}
 	if (sub === "frontend-dash") {

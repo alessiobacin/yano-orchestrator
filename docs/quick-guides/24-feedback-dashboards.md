@@ -9,6 +9,11 @@ yano bug-dash stop
 yano suggest-dash stop
 ```
 
+Eseguiti dalla cartella di un progetto, entrambi i comandi ricavano
+automaticamente il suo `project-id`, stampano l'URL completo e aprono il
+browser. Per non aprire il browser si può usare `--no-open`; per un progetto
+diverso si può usare `--project-id <id>`.
+
 La dashboard bug usa la porta preferita 11000 e fallback 11000-11999; quella
 delle suggestions usa 12000 e fallback 12000-12999. Gli URL sono sempre
 `/<project-id>/`, quindi il progetto non viene identificato dalla porta.

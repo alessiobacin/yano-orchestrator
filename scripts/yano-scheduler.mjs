@@ -87,6 +87,13 @@ function recordInstance(job, run, now, extra = {}) {
 	if (history.length > 200) history.splice(0, history.length - 200);
 	return record;
 }
+function durableAcceptance(instance) {
+	if (instance?.result?.durable_pending === true) return true;
+	try {
+		const parsed = JSON.parse(instance?.result?.stdout || "");
+		return parsed?.accepted === true && parsed?.durable_pending === true;
+	} catch { return false; }
+}
 
 // ── Security validator (vincoli di sicurezza non negoziabili) ────────────────
 const SHELL_META_RE = /[|;&$`<>()]|\n/;
@@ -203,8 +210,14 @@ function recoverStaleDispatches(store, now, spawn, env) {
 	const recovered = [];
 	const timeoutMs = Number(env.YANO_SCHEDULE_DISPATCH_TIMEOUT_MS) || 180_000;
 	for (const job of store.jobs) {
+		if (!job.enabled) continue;
 		for (const instance of runHistory(job)) {
 			if (instance.status !== "dispatched" || !instance.started_at) continue;
+			if (durableAcceptance(instance)) {
+				instance.status = "dispatched_acknowledged";
+				instance.acknowledged_at ||= nowIso(now);
+				continue;
+			}
 			const age = now.getTime() - Date.parse(instance.started_at);
 			if (!Number.isFinite(age) || age < timeoutMs) continue;
 			if (instance.recovery_attempted_at && now.getTime() - Date.parse(instance.recovery_attempted_at) < 60_000) continue;

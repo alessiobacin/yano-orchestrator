@@ -248,7 +248,7 @@ worker.
 
 ```text
 yano watch --project-root <dir> --lookback-ms 3600000 --once
-yano watch --project-root <dir> --lookback-ms 3600000 --interval-ms 300000 --away --context-compact-ratio 0.82
+yano watch --project-root <dir> --lookback-ms 3600000 --interval-ms 300000 --away --context-compact-ratio 0.50
 yano trace events --project <name> --instance yano-watcher --type yano_watcher_scan --limit 20 --json
 ```
 
@@ -257,7 +257,7 @@ lookback, interval, findings, stalls, and live-agent counts. A quiet scan is
 not evidence that the worker tab is absent; inspect the event and Herdr status.
 Each agent trace also records bounded `context_usage` metadata (effective
 tokens/window/ratio, serialized size and entry count). Above the configured
-ratio (default `0.82`, override with `--context-compact-ratio` or
+ratio (default `0.50`, override with `--context-compact-ratio` or
 `YANO_WATCH_CONTEXT_COMPACT_RATIO`) the watcher sends a control request to the
 agent, which invokes Pi native `ctx.compact()` and records
 `context_compaction_completed` or `context_compaction_failed`. This is

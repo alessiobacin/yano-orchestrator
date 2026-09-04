@@ -66,12 +66,12 @@ l'estensione esegue `ctx.compact()` e registra
 `context_compaction_completed`/`context_compaction_failed`. La compaction nativa
 di Pi riassume la parte vecchia della sessione e riprende con il contesto
 ridotto, preservando run, ticket, worktree e report. La soglia predefinita è
-`0.82` e si configura così:
+`0.50` e si configura così:
 
 ```bash
 yano watch --project-root /path/al/progetto --interval-ms 60000 --away \
-  --context-compact-ratio 0.82
-# oppure: YANO_WATCH_CONTEXT_COMPACT_RATIO=0.82
+  --context-compact-ratio 0.50
+# oppure: YANO_WATCH_CONTEXT_COMPACT_RATIO=0.50
 ```
 
 ## Escalation delle falle di Yano

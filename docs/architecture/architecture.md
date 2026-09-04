@@ -100,6 +100,7 @@ documentazione.
 7. Ticket/DAG and Playbook state are persisted in SQLite. Generation fencing, idempotency keys and the effect outbox make retries resumable.
 8. The planner advances phases and runs the mandatory closing evidence checklist before `worktree_finalize` merges the reviewed branch.
 9. If the task involved frontend roles, the planner asks whether the user wants a visual development review. On consent, `yano frontend-review start` installs the React dev dependency, infers and starts the frontend URL, and the planner consumes Agentation annotations through MCP; a refusal leaves the normal frontend review flow unchanged.
+10. Bugs and suggestions are persisted in the shared feedback control plane. The bug and suggestions dashboards use project paths, audit every manual mutation, encrypt E2E credentials at rest, and leave classification/resolution to the planner. The deterministic watcher supervises queued feedback and orphaned specialist tickets without waking a planner that is waiting on a user hold.
 
 ### Project repair and reconciliation
 

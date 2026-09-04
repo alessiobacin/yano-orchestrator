@@ -397,6 +397,7 @@ async function routeYanoWatcherFindingToPlanner(finding, { yanoRepo, sourceProje
 			project_id: finding.project_key || sourceProject.name,
 			message: `${finding.summary}\n\n${description}`,
 			resolution: "user_confirmation",
+			require_credentials: false,
 		});
 		return { routed: true, feedback_id: result.id, duplicate: false };
 	} catch (error) {

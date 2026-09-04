@@ -4318,6 +4318,8 @@ export default function (pi: ExtensionAPI) {
 			message: Type.String({ description: "Faithful user report, including route and observed behaviour." }),
 			resolution: Type.Optional(Type.Union([Type.Literal("automatic"), Type.Literal("user_confirmation")])),
 			screenshots: Type.Optional(Type.Array(Type.Any({ description: "Screenshot path, HTTPS URL, or attachment descriptor." }))),
+			username: Type.Optional(Type.String({ description: "Credenziale utente per i test E2E; obbligatoria per i bug." })),
+			password: Type.Optional(Type.String({ description: "Password per i test E2E; obbligatoria per i bug e salvata cifrata." })),
 		}),
 		async execute(_callId, params) {
 			if (!identity || identity.role !== "planner") throw new Error("feedback_create: tool riservato al planner.");
@@ -4329,6 +4331,8 @@ export default function (pi: ExtensionAPI) {
 					message: params.message,
 					resolution: params.resolution,
 					screenshots: params.screenshots?.length ? params.screenshots : currentInputScreenshots,
+					test_username: params.username,
+					test_password: params.password,
 					notify: false,
 				});
 				claimFeedback(db, result.id);

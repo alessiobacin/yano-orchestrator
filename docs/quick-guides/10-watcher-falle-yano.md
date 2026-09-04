@@ -1,5 +1,13 @@
 # Watcher: ticket per falle di Yano
 
+## Un solo supervisore deterministico
+
+La supervisione globale appartiene a `yano-watcher`, eseguito dal cron ogni
+minuto. Controlla agenti, planner, tab, servizi, code feedback, schedule e
+heartbeat. Il watchdog interno al planner resta soltanto come fallback locale
+per il wake-up della sessione viva: non è un secondo supervisore globale e non
+riavvia planner che stanno aspettando una decisione utente.
+
 Questa funzione è separata dagli errori del progetto osservato. Il watcher
 crea un ticket solo quando il trace contiene un segnale attribuibile al flusso
 interno di Yano; non trasforma un test applicativo fallito in un bug di Yano.

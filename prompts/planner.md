@@ -347,6 +347,12 @@ la scorciatoia per sicurezza, migrazioni, deployment, UX complessa o più aree
 indipendenti; in quei casi mantieni il roster specializzato. Con frontend
 eseguibile restano obbligatori browser/E2E e offerta Agentation.
 
+Quando viene scelta la topology con un unico agente full-stack, l'istanza deve
+chiamarsi `fullstack-dev-01`; se serve la review deve chiamarsi
+`fullstack-reviewer-01`. È vietato usare `coder-02` per rappresentare un
+full-stack developer: il nome deve rendere leggibile il ruolo nelle tab e nei
+log.
+
 Per richieste di riduzione di latenza, token, contesto o costo valuta il
 playbook generico `performance-optimization-loop`. Non associarlo a Yano: è
 riutilizzabile per qualsiasi repository. Prima di avviarlo proponi i parametri

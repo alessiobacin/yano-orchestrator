@@ -48,6 +48,12 @@ flowchart TD
     FRONTEND_REVIEWER --> REVIEW_SKILL
     PLANNER --> MCP
     PLANNER --> AGENTATION["Agentation MCP\nproject-wide server\nhttp://localhost:4747"]
+    USER --> BUGDASH["Bug dashboard\n11000/<project-id>/"]
+    USER --> SUGGDASH["Suggestions dashboard\n12000/<project-id>/"]
+    BUGDASH --> FEEDBACK["Feedback registry\nREST + audit + encrypted E2E creds"]
+    SUGGDASH --> FEEDBACK
+    FEEDBACK --> PLANNER
+    WATCHER["Deterministic watcher/cron"] --> FEEDBACK
 
     subgraph BUS["MQTT 5 — pi/<project>/..."]
         PRESENCE["retained presence + LWT"]

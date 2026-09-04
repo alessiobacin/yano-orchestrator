@@ -81,6 +81,8 @@ import { runTrace } from "../scripts/yano-trace.mjs";
 import { runYanoWatcherRegistry } from "../scripts/yano-watcher-registry.mjs";
 import { runYanoAutoImprove } from "../scripts/yano-auto-improver.mjs";
 import { runYanoFeedback } from "../scripts/yano-feedback.mjs";
+import { runFeedbackDashboard } from "../scripts/yano-feedback-dashboard.mjs";
+import { runFrontendDashboard } from "../scripts/yano-frontend-dashboard.mjs";
 import { runYanoModelAdvisor } from "../scripts/yano-model-advisor.mjs";
 import { runYanoArchitect } from "../scripts/yano-architect.mjs";
 import { runYanoCatalog } from "../scripts/yano-catalog.mjs";
@@ -147,6 +149,9 @@ function printTopUsage() {
 			"  trace [opzioni]  Attiva/disattiva, cerca e cancella il tracing globale — `yano trace --help`",
 			"  auto-improve [opzioni] Audit periodici read-only e report al planner — `yano auto-improve --help`",
 			"  feedback serve|create|list|get|update|delete  CRUD bug e suggestions — API su porta 20002",
+			"  bug-dash start|stop       Kanban bug globale (11000, fallback 11000-11999)",
+			"  suggest-dash start|stop   Kanban suggestions globale (12000, fallback 12000-12999)",
+			"  frontend-dash start|stop|list  Reverse proxy development + Agentation (10000-10999)",
 			"  model-advisor [opzioni] Propone un provider:model pinnato da llmProxy per role-class — `yano model-advisor --help`",
 			"  architect [opzioni]  Progetta/provisiona playbook e ruoli globali — `yano architect --help`",
 			"  playbook|agent [opzioni] Catalogo read-only di playbook, ruoli e capability",
@@ -158,7 +163,7 @@ function printTopUsage() {
 			"  services [opzioni] Registro servizi esterni (Docker/pm2/comando) con health-check e restart deterministico — `yano services --help`",
 			"  api discover|list|show|add|verify|refresh|update|delete  REST API da Postman/OpenAPI — `yano api --help`",
 			"  test-env allocate|show|release  Alloca porte isolate per E2E/review in un worktree",
-			"  data [opzioni]    Mostra o migra il data-root globale — `yano data --help`",
+			"  data path|usage|migrate  Misura o migra il data-root globale — `yano data --help`",
 			"  pause [opzioni]  Salva uno snapshot non distruttivo e mette in pausa i run",
 			"  resume [opzioni] Ripristina uno snapshot e riapre gli agenti mancanti",
 			"  recovery [opzioni] Ispeziona gli snapshot e lo stato di ripristino",
@@ -321,6 +326,22 @@ async function main() {
 	if (sub === "feedback" || sub === "bug" || sub === "bugs" || sub === "suggestion" || sub === "suggestions") {
 		const type = sub === "bug" || sub === "bugs" ? "bug" : sub === "suggestion" || sub === "suggestions" ? "suggestion" : null;
 		await runYanoFeedback({ argv: sub === "feedback" ? rest : [rest[0] || "list", ...(type ? ["--type", type] : []), ...rest.slice(1)] });
+		return;
+	}
+	if (sub === "bug-dash" || sub === "suggest-dash") {
+		if (rest.includes("--help") || rest.includes("-h")) {
+			console.log(`Uso: yano ${sub} start|stop`);
+			return;
+		}
+		await runFeedbackDashboard({ type: sub === "bug-dash" ? "bug" : "suggestion", argv: rest });
+		return;
+	}
+	if (sub === "frontend-dash") {
+		if (rest.includes("--help") || rest.includes("-h")) {
+			console.log("Uso: yano frontend-dash start|stop|list --project-path <path> [--project-id ID] [--command CMD] [--frontend-command CMD] [--backend-command CMD] [--backend-port PORT] [--target-port PORT]");
+			return;
+		}
+		await runFrontendDashboard({ argv: rest });
 		return;
 	}
 	if (sub === "auto-improve" || sub === "auto-improver") {

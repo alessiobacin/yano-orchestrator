@@ -51,6 +51,36 @@ yano config list --all
 
 `list` oscura automaticamente token e chiavi API.
 
+## Retention e archivio opzionale
+
+La retention automatica viene eseguita una volta al giorno dal watcher
+deterministico. I valori predefiniti sono 30 giorni per i trace, 14 giorni per
+i recovery e 30 giorni per i log. Per spostare i dati scaduti in un archivio
+accessibile agli agenti Yano:
+
+```bash
+yano config set YANO_DATA_BACKUP_DIR /Volumes/backup/yano-backup/macOsx-Alessio
+```
+
+Se `YANO_DATA_BACKUP_DIR` non è configurata, i dati scaduti vengono eliminati
+dopo la soglia. Per cambiare le soglie:
+
+```bash
+yano config set YANO_TRACE_RETENTION_DAYS 30
+yano config set YANO_RECOVERY_RETENTION_DAYS 14
+yano config set YANO_LOG_RETENTION_DAYS 30
+```
+
+Per controllare prima cosa verrebbe trattato e per eseguire manualmente:
+
+```bash
+yano data retain --dry-run
+yano data retain --yes
+```
+
+Il backup conserva la struttura `retired/<area>/...`; il registro feedback e i
+run non finalizzati non vengono eliminati dalla retention ordinaria.
+
 ## Salvare variabili
 
 Variabili normali:

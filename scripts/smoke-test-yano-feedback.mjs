@@ -19,6 +19,8 @@ const suggestion = await createFeedback(db, { type: "suggestion", project_id: "w
 		project_id: "workspace-smoke",
 		message: "Toast rosso",
 		resolution: "automatic",
+		test_username: "smoke-user",
+		test_password: "smoke-password",
 		screenshots: [{ path: screenshot }, { url: "https://example.test/bug.png" }],
 	});
 	assert.equal(bug.screenshots.length, 2);
@@ -26,8 +28,8 @@ const suggestion = await createFeedback(db, { type: "suggestion", project_id: "w
 	assert.equal(fs.existsSync(bug.screenshots[0].path), true);
 	assert.equal(bug.screenshots[1].url, "https://example.test/bug.png");
 assert.equal(JSON.parse(db.prepare("SELECT screenshots FROM feedback WHERE id=?").get(bug.id).screenshots).length, 2);
-const first = await createFeedback(db, { type: "bug", project_id: "workspace-queue", message: "primo", resolution: "automatic", notify: false });
-const second = await createFeedback(db, { type: "bug", project_id: "workspace-queue", message: "secondo", resolution: "automatic", notify: false });
+const first = await createFeedback(db, { type: "bug", project_id: "workspace-queue", message: "primo", resolution: "automatic", notify: false, test_username: "smoke-user", test_password: "smoke-password" });
+const second = await createFeedback(db, { type: "bug", project_id: "workspace-queue", message: "secondo", resolution: "automatic", notify: false, test_username: "smoke-user", test_password: "smoke-password" });
 assert.equal(listFeedback(db, { project_id: "workspace-queue", type: "bug", statuses: ["pending_planner"] })[0].id, first.id);
 assert.equal(claimFeedback(db, first.id).status, "processing");
 assert.equal(listFeedback(db, { project_id: "workspace-queue", type: "bug", statuses: ["pending_planner"] })[0].id, second.id);

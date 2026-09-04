@@ -37,9 +37,12 @@ import { projectDbPath } from "./yano-project.mjs";
 import { ensureGlobalYanoServices } from "./yano-global-services.mjs";
 import { superviseExternalServices, getService } from "./yano-services.mjs";
 import { herdrSnapshot } from "./yano-herdr-client.mjs";
+import { applyRetention } from "./yano-data.mjs";
 import { installOneMinuteWindowsJob, removeOneMinuteWindowsJob, statusOneMinuteWindowsJob } from "./yano-os-scheduler.mjs";
 import { agentTabIdentityAudit, findAgentIdentityConflicts, formatAgentIdentityConflicts } from "./yano-agent-identity.mjs";
 import { superviseScheduler } from "./yano-scheduler.mjs";
+import mqtt from "mqtt";
+import { claimFeedback, listFeedback, openDatabase as openFeedbackDatabase } from "./yano-feedback.mjs";
 
 const require = createRequire(import.meta.url);
 const WORKSPACE_LABEL = "yano-watcher";
@@ -349,12 +352,28 @@ function ticketAgentStatus(snapshot, root, instance) {
 }
 
 function orphanedRunningTickets(run, snapshot, root) {
+	if (!snapshot) return [];
 	return (run.tickets || []).filter((ticket) => {
 		if (ticket.status !== "running" || !ticket.assigned_instance) return false;
 		const updated = Date.parse(ticket.updated_at || "");
 		if (!Number.isFinite(updated) || Date.now() - updated < ORPHANED_TICKET_IDLE_MS) return false;
-		return ticketAgentStatus(snapshot, root, ticket.assigned_instance) === "idle";
+		// A missing agent is also orphaned. Previously only an explicitly idle
+		// Herdr card matched, so a killed lazy worker (notably the performance
+		// benchmarker) could leave the DAG running forever with no recovery signal.
+		return [null, "unknown", "idle", "offline", "dead"].includes(ticketAgentStatus(snapshot, root, ticket.assigned_instance));
 	});
+}
+
+function notifyPlannerOfOrphanedTickets(row, snapshot, run, orphaned) {
+	const workspace = findProjectWorkspace(snapshot, row.root, row.name);
+	const planner = workspace && plannerAgentsInWorkspace(snapshot, workspace.workspace_id, row.root).find(plannerHeartbeatHealthy);
+	if (!planner?.pane_id) return { notified: false, reason: "planner_not_live" };
+	const ticketText = orphaned.map((item) => `${item.ticket.id} (${item.ticket.assigned_instance})`).join(", ");
+	const prompt = `[yano-watcher specialist recovery] Il run ${run.id} ha ticket running senza worker vivo: ${ticketText}. Non creare ticket duplicati. Riprendi dal checkpoint, chiudi/riavvia solo gli agenti specialistici mancanti e continua il flusso fino alla risposta finale. Il planner è già vivo: non riavviare il planner.`;
+	const scope = projectKey(row.root, row.name);
+	const code = `import mqtt from ${JSON.stringify("mqtt")}; const c=await mqtt.connectAsync(process.env.PI_ORCH_BROKER_URL||"mqtt://127.0.0.1:1883",{connectTimeout:3000}); await c.publishAsync(${JSON.stringify(`pi/${scope}/agents/${planner.name || "planner-01"}/commands`)},JSON.stringify(${JSON.stringify({ type: "watcher_specialist_recovery", sender_instance: "yano-watcher", sender_role: "watcher", project: row.name, run_id: run.id, prompt })}),{qos:1}); await c.endAsync();`;
+	const launched = spawnSync(process.execPath, ["--input-type=module", "-e", code], { cwd: row.root, encoding: "utf8", timeout: 5000 });
+	return launched.status === 0 ? { notified: true, planner_pane_id: planner.pane_id, planner_instance: planner.name || "planner-01", ticket_ids: orphaned.map((item) => item.ticket.id) } : { notified: false, reason: "planner_notification_failed", error: (launched.stderr || "").trim() };
 }
 
 function readyPendingTickets(run) {
@@ -472,6 +491,12 @@ function reconcileProjectRun(db, row, snapshot) {
 		const held = incomplete.filter((run) => Number(run.open_holds || 0) > 0);
 		const stalled = incomplete.filter((run) => Number(run.open_holds || 0) === 0 && (plannerStalled(run) || orphaned.some((item) => item.run.id === run.id) || (plannersIdle && ready.some((item) => item.run.id === run.id))));
 		const reason = orphaned.length ? "planner_handoff_missing" : ready.length && plannersIdle ? "planner_ready_queue_stalled" : stalled.length ? "planner_stalled" : "planner_missing";
+		if (orphaned.length && planners.some(plannerHeartbeatHealthy)) {
+			const targetRun = orphaned[0].run;
+			const notification = notifyPlannerOfOrphanedTickets(row, snapshot, targetRun, orphaned.filter((item) => item.run.id === targetRun.id));
+			try { appendRawTraceRecord({ cwd: row.root, project: row.name, record: { type: "watcher_specialist_recovery_requested", record_type: "event", source: "yano-watcher-registry", instance: "yano-watcher", run_id: targetRun.id, tickets: orphaned.map((item) => item.ticket.id), notification } }); } catch { /* best effort */ }
+			return { recovery: "specialist_recovery_requested", incomplete_runs: incomplete.map((run) => run.id), notification, planner_statuses: planners.map((planner) => planner.agent_status || "unknown") };
+		}
 		if (planners.length && !stalled.length) return { recovery: held.length ? "waiting_for_user" : "planner_present", incomplete_runs: incomplete.map((run) => run.id), planner_statuses: planners.map((planner) => planner.agent_status || "unknown") };
 		if (recoveryCoolingDown(row, reason)) return { recovery: "recovery_cooldown", incomplete_runs: incomplete.map((run) => run.id), recovery_reason: reason, last_recovery_at: row.last_recovery_at };
 		try {
@@ -640,19 +665,19 @@ function doResume(db, info, existing, opts = {}) {
 // closes the original gap: a stopped watcher used to be invisible until
 // someone happened to check `herdr agent list`; now the routine status call
 // itself notices and repairs it.
-function doStatusForRow(db, row, { heal = true } = {}) {
+function doStatusForRow(db, row, { heal = true, snapshot: suppliedSnapshot = null } = {}) {
 	const info = infoFromRow(row);
 	const base = { ...row, live: null, drift: false, recovered: false };
 	if (row.worker_status !== "running") return base; // paused/stopped/planned: respect the explicit state, nothing to heal
 	if (!row.worker_pane_id) return { ...base, live: "unknown", drift: false }; // e.g. started with --foreground: not Herdr-managed, nothing this check can observe
-	const snapshot = herdrSnapshot();
+	const snapshot = suppliedSnapshot || herdrSnapshot();
 	if (!snapshot) return { ...base, live: "unknown", note: "Herdr non raggiungibile: impossibile verificare lo stato reale" };
 	const identity_conflicts = findAgentIdentityConflicts(snapshot).filter((conflict) => path.resolve(conflict.root) === path.resolve(row.root));
 	const tab = snapshot.tabs?.find((item) => item.tab_id === row.worker_tab_id);
 	const pane = tab && snapshot.panes?.find((item) => item.pane_id === row.worker_pane_id);
 	if (tab && pane) {
 		const planner = heal ? (() => { try { return ensureRegisteredPlanner(row, snapshot); } catch (error) { return { recovery: "planner_recovery_failed", recovery_error: error instanceof Error ? error.message : String(error) }; } })() : { recovery: "not_checked" };
-		return { ...base, live: "running", identity_conflicts, planner, ...reconcileProjectRun(db, row, herdrSnapshot() || snapshot) };
+		return { ...base, live: "running", identity_conflicts, planner, ...reconcileProjectRun(db, row, snapshot) };
 	}
 	const drifted = { ...base, live: "not_found", drift: true };
 	if (!heal) return drifted;
@@ -667,6 +692,17 @@ function doStatusForRow(db, row, { heal = true } = {}) {
 
 function supervisorLockPath() { return path.join(traceRoot(), "watcher", "supervisor.lock"); }
 function supervisorHeartbeatPath() { return path.join(traceRoot(), "watcher", "supervisor-heartbeat.json"); }
+function retentionMarkerPath() { return path.join(traceRoot(), "retention", "last-run.json"); }
+function superviseRetention() {
+	const marker = retentionMarkerPath();
+	let last = 0;
+	try { last = Date.parse(JSON.parse(fs.readFileSync(marker, "utf8")).completed_at || "") || 0; } catch {}
+	if (Date.now() - last < 86_400_000) return { skipped: true, reason: "daily_cadence", last_run_at: last ? new Date(last).toISOString() : null };
+	const result = applyRetention({ root: traceRoot(), yes: true });
+	fs.mkdirSync(path.dirname(marker), { recursive: true, mode: 0o700 });
+	fs.writeFileSync(marker, JSON.stringify({ completed_at: now(), files: result.files.length, bytes: result.bytes, action: result.action || "none", backup: result.backup }, null, 2), { mode: 0o600 });
+	return { ...result, scheduled: true };
+}
 
 async function withSupervisorLock(callback) {
 	const lock = supervisorLockPath();
@@ -689,7 +725,16 @@ async function withSupervisorLock(callback) {
 			// age fallback remains for old lock files written before PID metadata
 			// existed, but a live long-running supervisor is never overlapped just
 			// because one pass needs more than two minutes.
-			if (!ownerAlive || (age > 120_000 && !Number.isInteger(ownerPid))) {
+			if (!ownerAlive || age > 120_000) {
+				// A live PID is not proof of a healthy supervisor: synchronous Herdr
+				// probes or a deadlocked child can keep it alive indefinitely. The
+				// supervisor is intentionally bounded; terminate only this control
+				// process after two minutes, never a project agent.
+				if (ownerAlive && ownerPid !== process.pid) {
+					try { process.kill(ownerPid, "SIGTERM"); } catch {}
+					for (let attempt = 0; attempt < 5; attempt++) { try { process.kill(ownerPid, 0); } catch { break; } spawnSync("sleep", ["0.1"], { encoding: "utf8" }); }
+					try { process.kill(ownerPid, "SIGKILL"); } catch {}
+				}
 				fs.unlinkSync(lock);
 				fd = fs.openSync(lock, "wx");
 				fs.writeSync(fd, `${process.pid}\n${now()}\n`);
@@ -699,7 +744,9 @@ async function withSupervisorLock(callback) {
 		}
 	}
 	try {
-		return await callback();
+		try { fs.writeFileSync(supervisorHeartbeatPath(), JSON.stringify({ checked_at: now(), pid: process.pid, status: "running" }, null, 2), { mode: 0o600 }); } catch { /* best effort */ }
+		const heartbeatTimer = setInterval(() => { try { fs.writeFileSync(supervisorHeartbeatPath(), JSON.stringify({ checked_at: now(), pid: process.pid, status: "running" }, null, 2), { mode: 0o600 }); } catch {} }, 30_000);
+		try { return await callback(); } finally { clearInterval(heartbeatTimer); }
 	} finally {
 		try { if (fd !== undefined) fs.closeSync(fd); } catch { /* best effort */ }
 		try { fs.unlinkSync(lock); } catch { /* best effort */ }
@@ -711,6 +758,11 @@ function pruneOrphanWatcherTabs(snapshot, rows) {
 	const knownRoots = new Set(rows.map((row) => path.resolve(row.root)));
 	const removed = [];
 	for (const tab of snapshot.tabs || []) {
+		if (/^(debugger|suggester)(-|$)/i.test(tab.label || "")) {
+			const closed = closeHerdrTab(tab.tab_id);
+			removed.push({ tab_id: tab.tab_id, label: tab.label, root: null, obsolete_agent: true, ...closed });
+			continue;
+		}
 		if (!/^watcher-/i.test(tab.label || "")) continue;
 		const pane = (snapshot.panes || []).find((item) => item.tab_id === tab.tab_id);
 		const root = pane?.cwd ? path.resolve(pane.cwd) : null;
@@ -734,6 +786,29 @@ function activateDefaultWorkers(db, row) {
 		activated: true,
 		watcher: { worker_status: watcher.worker_status, instance: watcher.instance || null },
 	};
+}
+
+async function superviseFeedbackQueue(rows, snapshot) {
+	const result = { checked: 0, delivered: 0, claimed: [], deferred: [] };
+	let feedbackDb;
+	try { feedbackDb = openFeedbackDatabase(); } catch (error) { return { ...result, error: error instanceof Error ? error.message : String(error) }; }
+	const pending = listFeedback(feedbackDb, { statuses: ["pending_planner", "queued", "retry"] });
+	if (!pending.length) { feedbackDb.close(); return result; }
+	let client;
+	try { client = await mqtt.connectAsync(process.env.PI_ORCH_BROKER_URL || "mqtt://127.0.0.1:1883", { connectTimeout: 3000 }); } catch (error) { feedbackDb.close(); return { ...result, checked: pending.length, error: error instanceof Error ? error.message : String(error) }; }
+	try {
+		for (const item of pending) {
+			result.checked++;
+			const row = rows.find((candidate) => candidate.project_key === item.project_id || candidate.name === item.project_id || slug(candidate.name) === slug(item.project_id));
+			const workspace = row && findProjectWorkspace(snapshot, row.root, row.name);
+			const planner = workspace && plannerAgentsInWorkspace(snapshot, workspace.workspace_id, row.root).find(plannerHeartbeatHealthy);
+			if (!planner) { result.deferred.push({ id: item.id, project_id: item.project_id, reason: "planner_not_live" }); continue; }
+			const scope = row?.project_key || item.project_id;
+			await client.publishAsync(`pi/${scope}/agents/${planner.name || "planner-01"}/commands`, JSON.stringify({ type: "feedback_received", feedback_type: item.type, feedback_id: item.id, project_id: item.project_id, message: item.message, resolution: item.resolution, screenshots: item.screenshots || [], requires_user_confirmation: item.type === "suggestion" || item.resolution === "user_confirmation", sender_instance: "yano-watcher", sender_role: "watcher" }), { qos: 1 });
+			claimFeedback(feedbackDb, item.id); result.delivered++; result.claimed.push(item.id);
+		}
+	} finally { try { await client.endAsync(); } catch {} feedbackDb.close(); }
+	return result;
 }
 
 function supervise(db) {
@@ -772,21 +847,27 @@ function supervise(db) {
 		let scheduler;
 		try { scheduler = await superviseScheduler({ now: new Date() }); }
 		catch (error) { scheduler = { checked_at: now(), error: error instanceof Error ? error.message : String(error) }; }
+		let retention;
+		try { retention = superviseRetention(); } catch (error) { retention = { error: error instanceof Error ? error.message : String(error) }; }
 		try {
 			const logPath = path.join(path.dirname(dbPath()), "..", "logs", "watcher-global.jsonl");
 			fs.mkdirSync(path.dirname(logPath), { recursive: true, mode: 0o700 });
-			fs.appendFileSync(logPath, `${JSON.stringify({ timestamp: new Date().toISOString(), event: "global_watch_supervision", scheduler, global_services, projects: rows.length })}\n`, { mode: 0o600 });
+			fs.appendFileSync(logPath, `${JSON.stringify({ timestamp: new Date().toISOString(), event: "global_watch_supervision", scheduler, retention, global_services, projects: rows.length })}\n`, { mode: 0o600 });
 		} catch { /* recovery must not be blocked by logging */ }
 		// Refresh the activation state after global-service recovery.
 		const activated = [...rows.map((row) => activateDefaultWorkers(db, row)).filter(Boolean)];
+		let feedback_queue;
+		try { feedback_queue = await superviseFeedbackQueue(rows, repairedSnapshot); } catch (error) { feedback_queue = { error: error instanceof Error ? error.message : String(error) }; }
 		const result = {
 			checked_at: now(),
 			herdr_reachable: Boolean(snapshot),
 			herdr_service_registered: herdrServiceRegistered,
-			projects: rows.map((row) => doStatusForRow(db, row, { heal: true })),
+			projects: rows.map((row) => doStatusForRow(db, row, { heal: true, snapshot: repairedSnapshot })),
 			activated,
+			feedback_queue,
 			global_services,
 			scheduler,
+			retention,
 			external_services,
 			external_workers: [],
 			orphan_tabs_removed,
@@ -794,7 +875,7 @@ function supervise(db) {
 			identity_conflicts: identityConflicts,
 			errors: formatAgentIdentityConflicts(identityConflicts),
 		};
-		try { fs.writeFileSync(supervisorHeartbeatPath(), JSON.stringify({ checked_at: result.checked_at, pid: process.pid, project_count: rows.length, external_recoveries: result.external_workers }, null, 2), { mode: 0o600 }); } catch { /* best effort */ }
+		try { fs.writeFileSync(supervisorHeartbeatPath(), JSON.stringify({ checked_at: result.checked_at, pid: process.pid, status: "idle", project_count: rows.length, external_recoveries: result.external_workers }, null, 2), { mode: 0o600 }); } catch { /* best effort */ }
 		return result;
 	});
 }

@@ -478,7 +478,7 @@ configured polling cadence remains active after that pass.
 
 Every Pi session also emits bounded `context_usage` telemetry to its per-agent
 trace log. The external watcher uses the latest `context_ratio` for each live
-agent and, above `YANO_WATCH_CONTEXT_COMPACT_RATIO` (default `0.82`), sends a
+agent and, above `YANO_WATCH_CONTEXT_COMPACT_RATIO` (default `0.50`), sends a
 `context_compact_request` control message to that agent. The agent owns the
 session operation and invokes Pi's native `ctx.compact()`, recording
 `context_compaction_completed` or `context_compaction_failed`; the native

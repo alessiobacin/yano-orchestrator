@@ -201,7 +201,7 @@ yano gantt --links             # tutti i link Gantt persistenti registrati
 yano watch --once              # one stalled-ticket scan
 # when an agent target is offline, agent_send escalates to planner or watcher
 # context telemetry is written per agent; watcher can request native Pi compaction
-yano watch --once --context-compact-ratio 0.82
+yano watch --once --context-compact-ratio 0.50
 # yano watch --help and yano watcher <subcommand> --help are read-only
 # senza orchestrator.db un watcher ordinario resta in attesa senza errore;
 # solo una validazione esplicita usa lo stato blocked e l'escalation

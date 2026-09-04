@@ -92,7 +92,7 @@ heartbeat. La compaction è generale e non dipende dal playbook:
 
 ```bash
 yano watch --project-root /path/progetto --interval-ms 60000 --away \
-  --context-compact-ratio 0.82
+  --context-compact-ratio 0.50
 ```
 
 Quando la soglia è superata, il watcher registra
@@ -101,7 +101,7 @@ l'estensione chiama la compaction nativa di Pi. Il risultato è visibile come
 `context_compaction_completed` con `restart_mode: pi_native_compaction`, seguito
 da una nuova misura più bassa. Se l'agente non è live, il watcher instrada il
 finding al planner per il recovery della sessione. La soglia predefinita è
-`0.82` e può essere impostata anche con
+`0.50` e può essere impostata anche con
 `YANO_WATCH_CONTEXT_COMPACT_RATIO`; `--lookback-ms` continua a definire la
 finestra osservata, mentre `--interval-ms` definisce la cadenza.
 

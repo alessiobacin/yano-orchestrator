@@ -256,7 +256,7 @@ il rapporto supera la soglia configurata:
 
 ```bash
 yano watch --project-root /path/progetto --interval-ms 60000 --away \
-  --context-compact-ratio 0.82
+  --context-compact-ratio 0.50
 ```
 
 La stessa soglia può essere impostata con `YANO_WATCH_CONTEXT_COMPACT_RATIO`.

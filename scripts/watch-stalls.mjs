@@ -25,7 +25,7 @@
 //   yano watch [--project <slug>] [--project-root <dir>]
 //              [--lookback-ms 86400000] [--stall-ms 900000]
 //              [--interval-ms 300000] [--once] [--away]
-//              [--context-compact-ratio 0.82]
+//              [--context-compact-ratio 0.50]
 //              [--validation-run <id>] [--playbook-proposal <id>]
 //   (in locale: node scripts/watch-stalls.mjs [stesse opzioni])
 //
@@ -225,7 +225,7 @@ function installAgentFallbackMonitor({ client, cwd, project, packageRoot, runtim
 }
 
 function parseArgs(argv) {
-	const o = { project: null, projectRoot: null, lookbackMs: 86_400_000, stallMs: 900000, intervalMs: 300000, once: false, away: false, contextCompactRatio: Number(process.env.YANO_WATCH_CONTEXT_COMPACT_RATIO) || 0.82, validationRun: null, playbookProposal: null, playbookId: null, playbookChecksum: null, validationRound: null };
+	const o = { project: null, projectRoot: null, lookbackMs: 86_400_000, stallMs: 900000, intervalMs: 300000, once: false, away: false, contextCompactRatio: Number(process.env.YANO_WATCH_CONTEXT_COMPACT_RATIO) || 0.5, validationRun: null, playbookProposal: null, playbookId: null, playbookChecksum: null, validationRound: null };
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i];
 		if (a === "--project") o.project = argv[++i];
@@ -705,7 +705,7 @@ export function watchUsage() {
 		"  --lookback-ms <ms>               finestra temporale della scansione",
 		"  --stall-ms <ms>                  soglia per un ticket stalled",
 		"  --interval-ms <ms>               intervallo del polling persistente",
-		"  --context-compact-ratio <0..1>   soglia watcher per compaction automatica (default 0.82; env YANO_WATCH_CONTEXT_COMPACT_RATIO)",
+		"  --context-compact-ratio <0..1>   soglia watcher per compaction automatica (default 0.50; env YANO_WATCH_CONTEXT_COMPACT_RATIO)",
 		"  --once                           esegue una sola scansione e termina",
 		"  --away                           nasconde gli heartbeat senza finding",
 		"  --help, -h                       mostra questo messaggio",
@@ -1115,7 +1115,7 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 		}
 		const ratioThreshold = Number.isFinite(opts.contextCompactRatio) && opts.contextCompactRatio > 0 && opts.contextCompactRatio < 1
 			? opts.contextCompactRatio
-			: 0.82;
+			: 0.5;
 		const lastCompactionByInstance = new Map();
 		const allTraceRecords = readTraceRecords({ cwd: watchCwd, project, limit: 100000 });
 		for (const record of allTraceRecords) {

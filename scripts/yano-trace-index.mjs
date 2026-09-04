@@ -727,16 +727,29 @@ export async function searchTraceRecords({
 		const queryTokens = tokenize(query);
 		const now = Date.now();
 		const rankRow = (row, source) => {
+			// Round 2: embedding_json è parsato SOLO se serve davvero (mode
+			// non-keyword, dove vector è definito). In keyword mode vector è
+			// null, quindi il parse era 100% sprecato per ogni riga — il
+			// risultato semantic restava 0 comunque (cosineSimilarity(null)
+			// ⇒ -1 ⇒ max(0,-1)=0). Stesso output osservabile.
 			let stored = [];
-			try { stored = JSON.parse(row.embedding_json); } catch { /* stale/corrupt vector is simply not semantic */ }
+			if (vector) {
+				try { stored = JSON.parse(row.embedding_json); } catch { /* stale/corrupt vector is simply not semantic */ }
+			}
 			const semantic = vector ? Math.max(0, cosineSimilarity(vector, stored)) : 0;
-			const lexical = lexicalScore(queryTokens, row.text || `${row.title || ""} ${row.body || ""}`);
+			const lexical = lexicalScore(queryTokens, rowSearchableText(row));
 			const ageDays = row.ts || row.updated_at ? Math.max(0, (now - new Date(row.ts || row.updated_at).getTime()) / 86_400_000) : 365;
 			const recency = 1 / (1 + ageDays / 30);
 			const salience = source === "memory" ? Number(row.salience || 0.5) : 0.5;
 			const score = mode === "keyword" ? lexical : mode === "semantic" ? semantic : (semantic * 0.65) + (lexical * 0.25) + (recency * 0.05) + (salience * 0.05);
+			// Round 2: payload_json è parsato SOLO quando il risultato lo
+			// espone davvero (includePayload && source === "trace"); prima era
+			// parsato per OGNI riga anche quando includePayload=false, e il
+			// valore veniva scartato — parse sprecato per riga per query.
 			let payload = null;
-			try { payload = JSON.parse(row.payload_json); } catch { /* memory rows have no payload_json */ }
+			if (includePayload && source === "trace") {
+				try { payload = JSON.parse(row.payload_json); } catch { /* memory rows have no payload_json */ }
+			}
 			let sourceRecordIds = [];
 			try { sourceRecordIds = JSON.parse(row.source_record_ids_json || "[]"); } catch { /* malformed derived memory provenance */ }
 			return {
@@ -751,7 +764,13 @@ export async function searchTraceRecords({
 				...(includePayload && source === "trace" ? { payload } : {}),
 			};
 		};
-		const results = [...rows.map((row) => rankRow(row, "trace")), ...memoryRows.map((row) => rankRow(row, "memory"))]
+		// Round 2 — pre-filtro lessicale cheap: in keyword mode scarta subito le
+		// righe senza NESSUN token della query (equivalente al filtro finale
+		// lexical_score > 0, come da prova nel report). In hybrid/semantic il
+		// gate NON si applica (cambierebbe il top-N via semantic/recency).
+		const prefilteredRows = mode === "keyword" ? rows.filter((row) => hasSharedLexicalToken(queryTokens, rowSearchableText(row))) : rows;
+		const prefilteredMemoryRows = mode === "keyword" ? memoryRows.filter((row) => hasSharedLexicalToken(queryTokens, rowSearchableText(row))) : memoryRows;
+		const results = [...prefilteredRows.map((row) => rankRow(row, "trace")), ...prefilteredMemoryRows.map((row) => rankRow(row, "memory"))]
 			.filter((row) => mode === "keyword" ? row.lexical_score > 0 : row.score >= 0)
 			.sort((left, right) => right.score - left.score).slice(0, Math.max(1, Number(limit) || 10));
 		return { ok: true, db_path: traceIndexPath(), model, query, mode, embedding_warning: embeddingWarning, total: rows.length + memoryRows.length, results, filters: { project: allProjects ? null : (project || tracePaths({ cwd }).project), all_projects: allProjects, run, round, task, instance, type, since: since?.toISOString?.() || null }, ...(explain ? { explanation: "hybrid = semantic 65% + lexical 25% + recency 5% + salience 5%; memory rows are consolidated and provenance-preserving" } : {}) };
@@ -764,10 +783,53 @@ function tokenize(value) {
 	return [...new Set(String(value || "").toLowerCase().normalize("NFKD").replace(/[^\p{L}\p{N}_-]+/gu, " ").split(/\s+/).filter((token) => token.length >= 3))];
 }
 
+// Revisione Round 2 (performance-optimization-loop): la normalizzazione del
+// testo documento (lowercase/NFKD) era rieseguita per ogni riga a ogni query.
+// Con un corpus N=2000 e 5 query la stessa stringa veniva normalizzata decine
+// di migliaia di volte inutilmente. Ora la normalizzazione è memoizzata per
+// stringa esatta — l'output di normalizedText() è bit-identico a quello della
+// funzione precedente (String(value || "").toLowerCase()), quindi il
+// comportamento osservabile non cambia (equivalenza dimostrata: stessa
+// funzione, stesso argomento ⇒ stesso risultato). Cache bounded (128k entry)
+// per non crescere senza limite su corpus grandi.
+const _normalizedTextCache = new Map();
+const _NORMALIZED_CACHE_LIMIT = 128_000;
+function normalizedText(value) {
+	const raw = String(value || "");
+	const cached = _normalizedTextCache.get(raw);
+	if (cached !== undefined) return cached;
+	const normalized = raw.toLowerCase();
+	if (_normalizedTextCache.size >= _NORMALIZED_CACHE_LIMIT) _normalizedTextCache.clear();
+	_normalizedTextCache.set(raw, normalized);
+	return normalized;
+}
+
 function lexicalScore(queryTokens, text) {
 	if (!queryTokens.length) return 0;
-	const haystack = String(text || "").toLowerCase();
+	const haystack = normalizedText(text);
 	return queryTokens.reduce((score, token) => score + (haystack.includes(token) ? 1 : 0), 0) / queryTokens.length;
+}
+
+// Round 2: pre-filtro lessicale cheap (nessun token della query condiviso ⇒
+// riga irrilevante). In keyword mode il ranking finale esclude comunque ogni
+// riga con `lexical_score > 0` falso, quindi scartare prima le righe con 0
+// token condivisi è equivalente per costruzione (stesso insieme di righe
+// raggiunge lo score finale ⇒ stesso ordinamento e stesso top-N). In hybrid
+// mode NON si applica: una riga con lexical=0 può comunque vincere via score
+// semantico/recency, quindi il gate cambierebbe il top-N — non applicarlo è
+// la scelta che preserva l'equivalenza osservabile.
+function hasSharedLexicalToken(queryTokens, text) {
+	if (!queryTokens.length) return true;
+	const haystack = normalizedText(text);
+	return queryTokens.some((token) => haystack.includes(token));
+}
+
+// Round 2: con un corpus N=2000 e rankRow chiamato per riga, il testo su cui
+// gira il pre-filtro deve essere lo stesso usato da lexicalScore (row.text,
+// con fallback title+body per le righe memory) — centralizzato qui per
+// evitare divergenze.
+function rowSearchableText(row) {
+	return row.text || `${row.title || ""} ${row.body || ""}`;
 }
 
 export function clearTraceIndexData({ cwd = process.cwd(), project, allProjects = false, run = null, round = null, task = null, instance = null, type = null, before = null, all = false } = {}) {

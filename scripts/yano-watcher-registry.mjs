@@ -174,6 +174,19 @@ function closeHerdrTab(tabId) {
 		: { closed: false, tab_id: tabId, error: (result.stderr || result.stdout || "Herdr non ha chiuso la tab").trim() };
 }
 
+function watcherProcessMatches(row, paneId) {
+	if (!paneId) return null;
+	const result = spawnSync("herdr", ["pane", "process-info", "--pane", paneId], { encoding: "utf8", maxBuffer: 2_000_000 });
+	if (result.status !== 0) return null;
+	try {
+		const payload = JSON.parse(result.stdout || "");
+		const processes = payload?.result?.process_info?.foreground_processes || [];
+		if (!processes.length) return null;
+		const command = processes.map((item) => item.cmdline || item.argv?.join(" ") || "").join(" ");
+		return command.includes("yano watch") && command.includes(`--project-root ${row.root}`) && command.includes(`--interval-ms ${Math.max(1000, Number(row.interval_ms))}`) && command.includes(`--lookback-ms ${Math.max(1000, Number(row.lookback_ms))}`);
+	} catch { return null; }
+}
+
 function repairAgentTabIdentities(snapshot) {
 	const repaired = [];
 	for (const conflict of agentTabIdentityAudit(snapshot)) {
@@ -730,6 +743,20 @@ function doStatusForRow(db, row, { heal = true, snapshot: suppliedSnapshot = nul
 	const tab = snapshot.tabs?.find((item) => item.tab_id === row.worker_tab_id);
 	const pane = tab && snapshot.panes?.find((item) => item.pane_id === row.worker_pane_id);
 	if (tab && pane) {
+		// The registry is authoritative for cadence. Older workers may still be
+		// alive with the former five-minute interval after an upgrade; keeping
+		// them marked healthy silently defeats the one-minute supervisor contract.
+		const watcherMatches = watcherProcessMatches(row, pane.pane_id);
+		if (watcherMatches === false) {
+			const closed = closeHerdrTab(tab.tab_id);
+			try { appendRawTraceRecord({ cwd: row.root, project: row.name, record: { type: "watcher_worker_restarted_for_config_drift", record_type: "event", source: "yano-watcher-registry", expected_interval_ms: row.interval_ms, expected_lookback_ms: row.lookback_ms, previous_tab_id: tab.tab_id, close: closed } }); } catch { /* best effort */ }
+			try {
+				const relaunched = launchHerdrWorker({ project: infoFromRow(row), root: row.root, db, row, intervalMs: row.interval_ms, lookbackMs: row.lookback_ms, dryRun: false });
+				return { ...base, live: "restarted", drift: true, recovered: true, worker_config_repaired: true, ...relaunched, ...reconcileProjectRun(db, row, herdrSnapshot()) };
+			} catch (error) {
+				return { ...base, live: "config_drift", drift: true, recovered: false, worker_config_repaired: false, recover_error: error instanceof Error ? error.message : String(error) };
+			}
+		}
 		const planner = heal ? (() => { try { return ensureRegisteredPlanner(row, snapshot); } catch (error) { return { recovery: "planner_recovery_failed", recovery_error: error instanceof Error ? error.message : String(error) }; } })() : { recovery: "not_checked" };
 		return { ...base, live: "running", identity_conflicts, planner, ...reconcileProjectRun(db, row, snapshot) };
 	}

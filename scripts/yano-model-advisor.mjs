@@ -379,12 +379,17 @@ function reasonFor(entry, roleClass, { cheapest, affordableCeiling, bandRelaxed,
  * problem — an empty/unusable catalog yields `{ ranked: [], band_relaxed: false }`,
  * which callers (recommend()) treat as "use auto".
  */
-export function scoreCatalog(catalog, { roleClass, requireVision = false } = {}) {
+export function scoreCatalog(catalog, { roleClass, requireVision = false, excludeProviderId = null } = {}) {
 	if (roleClass !== "coordinator" && roleClass !== "support") {
 		throw new Error(`yano model-advisor: roleClass non valido "${roleClass}" (ammessi: coordinator, support)`);
 	}
 	const providers = Array.isArray(catalog?.providers) ? catalog.providers : [];
-	const pool = providers.filter((p) => p.available && (!requireVision || p.vision));
+	const excludeId = excludeProviderId ? String(excludeProviderId).trim() : null;
+	// Escalation (a provider just failed a ticket repeatedly and we want a
+	// genuinely different one) is the reason this exists — an empty ranked
+	// pool because the only available provider IS the excluded one is a
+	// correct, meaningful result, not a bug to work around.
+	const pool = providers.filter((p) => p.available && (!requireVision || p.vision) && (!excludeId || String(p.id ?? "").trim() !== excludeId));
 	if (pool.length === 0) return { ranked: [], band_relaxed: false };
 
 	const withBlended = pool.map((p) => ({ ...p, blended_price_usd_per_1m: blendedPrice(p) }));
@@ -429,7 +434,7 @@ export function scoreCatalog(catalog, { roleClass, requireVision = false } = {})
 // problem (only for a genuine programmer error like an invalid roleClass).
 // ---------------------------------------------------------------------------
 
-export async function recommend({ roleClass, requireVision = false, baseUrl, apiKey, fetchFn, timeoutMs, spawnFn } = {}) {
+export async function recommend({ roleClass, requireVision = false, excludeProviderId = null, baseUrl, apiKey, fetchFn, timeoutMs, spawnFn } = {}) {
 	if (roleClass !== "coordinator" && roleClass !== "support") {
 		throw new Error(`yano model-advisor: roleClass non valido "${roleClass}" (ammessi: coordinator, support)`);
 	}
@@ -445,12 +450,12 @@ export async function recommend({ roleClass, requireVision = false, baseUrl, api
 		};
 	}
 
-	const { ranked, band_relaxed } = scoreCatalog(catalog, { roleClass, requireVision });
+	const { ranked, band_relaxed } = scoreCatalog(catalog, { roleClass, requireVision, excludeProviderId });
 	if (ranked.length === 0) {
 		return {
 			recommended: null,
 			alternatives: [],
-			auto_fallback: { ...autoFallback, reason: "catalogo llmProxy raggiungibile ma nessun provider disponibile/idoneo — uso auto" },
+			auto_fallback: { ...autoFallback, reason: excludeProviderId ? `catalogo llmProxy raggiungibile ma nessuna alternativa a "${excludeProviderId}" disponibile/idonea — uso auto` : "catalogo llmProxy raggiungibile ma nessun provider disponibile/idoneo — uso auto" },
 			catalog_ok: true,
 		};
 	}

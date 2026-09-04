@@ -484,12 +484,42 @@ async function runScenario(cwd, project) {
 	await coder.call("ticket_complete", { ticket_id: recoveryTicket.id, status: "failed", result_summary: "worker offline" });
 	const requeued = await planner.call("ticket_requeue", { ticket_id: recoveryTicket.id, reason: "replace offline worker", max_retries: 1 });
 	ok(requeued.details.ticket.id === recoveryTicket.id && requeued.details.ticket.status === "pending" && requeued.details.recovery.recovery_generation === 1, "worker replacement requeues the same ticket with a new recovery generation");
+	ok(!requeued.details.escalation?.active, "an ordinary requeue within budget is not an escalation");
 	const recoveryCard = await planner.call("ticket_recovery_get", { ticket_id: recoveryTicket.id });
 	ok(recoveryCard.details.recovery.retry_count === 1 && recoveryCard.details.recovery.status === "available", "retry budget is persisted for the replacement ticket");
+	ok(!recoveryCard.details.recovery.escalation_used, "escalation has not been used yet");
+
+	console.log("\n=== TEST 5b — retry budget exhaustion escalates to a different model/strategy before failing the run ===");
 	await coder.call("ticket_claim", { ticket_id: recoveryTicket.id });
 	await coder.call("ticket_complete", { ticket_id: recoveryTicket.id, status: "failed", result_summary: "replacement also failed" });
-	const exhausted = await planner.callExpectError("ticket_requeue", { ticket_id: recoveryTicket.id, reason: "retry budget exhausted", max_retries: 1 });
-	ok(/recovery budget exhausted/.test(exhausted.message), "recovery budget exhaustion stops automatic requeue");
+	// This used to throw "recovery budget exhausted" and fail the run
+	// immediately. It must now escalate once — same-strategy retries clearly
+	// were not working, so the system tries a different model/approach
+	// before giving up, and tells the human it is doing so, instead of the
+	// run silently going quiet with a failed ticket nobody hears about.
+	const escalated = await planner.call("ticket_requeue", { ticket_id: recoveryTicket.id, reason: "retry budget exhausted", max_retries: 1 });
+	ok(escalated.details.escalation?.active === true, "hitting the retry budget for the first time escalates instead of failing outright");
+	ok(escalated.details.ticket.status === "pending", "the escalated attempt is requeued as a fresh dispatch, not abandoned");
+	const escalatedRunStatus = await planner.call("run_status", { run_id: recoveryRun.id });
+	ok(escalatedRunStatus.details.run.status === "active", "the run stays active during the escalation attempt — it is not a failure yet");
+	const escalatedCard = await planner.call("ticket_recovery_get", { ticket_id: recoveryTicket.id });
+	ok(escalatedCard.details.recovery.escalation_used === 1, "escalation_used is persisted so a second exhaustion cannot escalate again");
+	ok(escalatedCard.details.recovery.retry_count === 0 && escalatedCard.details.recovery.replan_round === 0, "the escalated attempt gets a clean retry/replan budget, judged on its own merits");
+
+	// The escalated attempt got a CLEAN budget (max_retries: 1 again, not a
+	// continuation of the exhausted one), so its own first failure is still
+	// an ordinary requeue, not exhaustion — the escalation is judged fairly
+	// on its own terms, exactly like a first attempt would be.
+	await coder.call("ticket_claim", { ticket_id: recoveryTicket.id });
+	await coder.call("ticket_complete", { ticket_id: recoveryTicket.id, status: "failed", result_summary: "the escalated attempt's first try also failed" });
+	const requeuedAfterEscalation = await planner.call("ticket_requeue", { ticket_id: recoveryTicket.id, reason: "retry the escalated attempt", max_retries: 1 });
+	ok(!requeuedAfterEscalation.details.escalation?.active, "the escalated attempt's own budget is not exhausted yet — this is still an ordinary requeue");
+	ok(requeuedAfterEscalation.details.recovery.escalation_used === 1, "escalation_used stays set through ordinary requeues of the escalated attempt");
+
+	await coder.call("ticket_claim", { ticket_id: recoveryTicket.id });
+	await coder.call("ticket_complete", { ticket_id: recoveryTicket.id, status: "failed", result_summary: "the escalated attempt also failed" });
+	const exhausted = await planner.callExpectError("ticket_requeue", { ticket_id: recoveryTicket.id, reason: "retry budget exhausted after escalation", max_retries: 1 });
+	ok(/recovery budget exhausted/.test(exhausted.message), "a second exhaustion, after escalation was already used, stops automatic requeue for good");
 	const exhaustedStatus = await planner.call("run_status", { run_id: recoveryRun.id });
 	ok(exhaustedStatus.details.run.status === "failed" && exhaustedStatus.details.checkpoints.some((checkpoint) => checkpoint.label === "recovery_budget_exhausted"), "budget exhaustion persists a terminal run checkpoint");
 

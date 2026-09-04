@@ -58,6 +58,7 @@ import { collectCodeMemContext } from "../scripts/yano-code-mem-context.mjs";
 import { getProjectApi, listProjectApis, resolveApiSecret } from "../scripts/yano-api-registry.mjs";
 import { llmProxyAutoModel, switchImageTurnToAuto } from "../scripts/yano-vision-routing.mjs";
 import { switchPinnedModelToAuto } from "../scripts/yano-model-fallback.mjs";
+import { recommend as recommendModel } from "../scripts/yano-model-advisor.mjs";
 import { openDatabase as openFeedbackDatabase, createFeedback as createFeedbackRecord, claimFeedback, listFeedback } from "../scripts/yano-feedback.mjs";
 
 // ESM-safe lazy require, used only inside SQLiteOrchestratorStorage's
@@ -1175,7 +1176,7 @@ async function findExistingWorktree(projectCwd: string, wtPath: string): Promise
 // Herdr elsewhere in this file.
 
 const YANO_SCHEMA_VERSION = 1;
-const YANO_STORAGE_SCHEMA_VERSION = 10;
+const YANO_STORAGE_SCHEMA_VERSION = 11;
 const YANO_EXTENSION_VERSION = "0.1.0-slice1";
 
 function loadRuntimePackageVersion(): string | null {
@@ -1521,6 +1522,7 @@ CREATE TABLE IF NOT EXISTS ticket_recovery_state (
 	 max_replans INTEGER NOT NULL DEFAULT 3,
 	 recovery_generation INTEGER NOT NULL DEFAULT 0,
 	 status TEXT NOT NULL DEFAULT 'available' CHECK (status IN ('available','exhausted')),
+	 escalation_used INTEGER NOT NULL DEFAULT 0,
 	 last_failure TEXT,
 	 updated_at TEXT NOT NULL
 );
@@ -1791,6 +1793,7 @@ class SQLiteOrchestratorStorage implements OrchestratorStorage {
 			}
 			if (current < 9) this.db.exec("ALTER TABLE tickets ADD COLUMN required_playbook TEXT");
 			if (current < 10) this.db.exec("ALTER TABLE runs ADD COLUMN finalization_status TEXT NOT NULL DEFAULT 'not_started'");
+			if (current < 11) this.db.exec("ALTER TABLE ticket_recovery_state ADD COLUMN escalation_used INTEGER NOT NULL DEFAULT 0");
 			// Advance the marker only after every additive statement succeeds.
 			this.db.prepare("UPDATE schema_meta SET value = ? WHERE key = 'schema_version'").run(String(YANO_STORAGE_SCHEMA_VERSION));
 		}
@@ -1931,16 +1934,35 @@ class SQLiteOrchestratorStorage implements OrchestratorStorage {
 		const now = nowIso();
 		this.db.exec("BEGIN IMMEDIATE");
 		try {
-			const current = this.getTicketRecovery(id) ?? { retry_count: 0, replan_round: 0, recovery_generation: 0, max_replans: input.max_replans ?? 3, status: "available" };
+			const current = this.getTicketRecovery(id) ?? { retry_count: 0, replan_round: 0, recovery_generation: 0, max_replans: input.max_replans ?? 3, status: "available", escalation_used: 0 };
 			const retries = Number(current.retry_count) + 1;
 			const maxReplans = input.max_replans ?? Number(current.max_replans ?? 3);
-			if (retries > input.max_retries || Number(current.replan_round ?? 0) >= maxReplans || current.status === "exhausted") {
+			const budgetExhausted = retries > input.max_retries || Number(current.replan_round ?? 0) >= maxReplans || current.status === "exhausted";
+			const escalationAlreadyUsed = Number(current.escalation_used ?? 0) > 0;
+			if (budgetExhausted && escalationAlreadyUsed) {
 				this.db.prepare("INSERT INTO ticket_recovery_state (ticket_id, run_id, retry_count, replan_round, max_retries, max_replans, recovery_generation, status, last_failure, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'exhausted', ?, ?) ON CONFLICT(ticket_id) DO UPDATE SET retry_count=excluded.retry_count, max_retries=excluded.max_retries, max_replans=excluded.max_replans, status='exhausted', last_failure=excluded.last_failure, updated_at=excluded.updated_at").run(id, ticket.run_id, retries, Number(current.replan_round ?? 0), input.max_retries, maxReplans, Number(current.recovery_generation ?? 0), input.reason, now);
 				this.db.prepare("UPDATE runs SET status = 'failed', finalization_status = 'not_applicable', updated_at = ? WHERE id = ? AND status = 'active'").run(now, ticket.run_id);
-				this.db.prepare("INSERT INTO checkpoints (run_id, label, payload, created_at) VALUES (?, 'recovery_budget_exhausted', ?, ?)").run(ticket.run_id, JSON.stringify({ ticket_id: id, retry_count: retries, max_retries: input.max_retries, reason: input.reason }), now);
-				this.recordEvent(ticket.run_id, "recovery_budget_exhausted", { ticket_id: id, retry_count: retries, max_retries: input.max_retries, reason: input.reason }, id);
+				this.db.prepare("INSERT INTO checkpoints (run_id, label, payload, created_at) VALUES (?, 'recovery_budget_exhausted', ?, ?)").run(ticket.run_id, JSON.stringify({ ticket_id: id, retry_count: retries, max_retries: input.max_retries, reason: input.reason, escalation_used: true }), now);
+				this.recordEvent(ticket.run_id, "recovery_budget_exhausted", { ticket_id: id, retry_count: retries, max_retries: input.max_retries, reason: input.reason, escalation_used: true }, id);
 				this.db.exec("COMMIT");
 				throw new Error(`ticket_requeue: recovery budget exhausted for "${id}".`);
+			}
+			if (budgetExhausted) {
+				// First time this ticket hits its budget: the same strategy
+				// clearly is not working, but failing the whole run outright
+				// here — before ever trying something different — is exactly
+				// the silent dead-end this escalation step exists to avoid.
+				// Give the escalated attempt a CLEAN retry/replan budget (not
+				// a continuation of the exhausted one) so it is judged on its
+				// own merits, and mark escalation_used so a second exhaustion
+				// after this one is final — no infinite escalation loop.
+				const generation = Number(current.recovery_generation ?? 0) + 1;
+				this.db.prepare("INSERT INTO ticket_recovery_state (ticket_id, run_id, retry_count, replan_round, max_retries, max_replans, recovery_generation, status, escalation_used, last_failure, updated_at) VALUES (?, ?, 0, 0, ?, ?, ?, 'available', 1, ?, ?) ON CONFLICT(ticket_id) DO UPDATE SET retry_count=0, replan_round=0, max_retries=excluded.max_retries, max_replans=excluded.max_replans, recovery_generation=excluded.recovery_generation, status='available', escalation_used=1, last_failure=excluded.last_failure, updated_at=excluded.updated_at").run(id, ticket.run_id, input.max_retries, maxReplans, generation, input.reason, now);
+				this.db.prepare("UPDATE tickets SET status = 'pending', assigned_instance = NULL, result_summary = ?, updated_at = ? WHERE id = ? AND status = 'failed'").run(`requeued (escalation): ${input.reason}`, now, id);
+				const updatedTicket = this.getTicket(id);
+				this.recordEvent(ticket.run_id, "recovery_escalation_started", { ticket_id: id, recovery_generation: generation, retry_count: retries, reason: input.reason }, id);
+				this.db.exec("COMMIT");
+				return { ticket: updatedTicket, recovery: this.getTicketRecovery(id), escalation: { active: true, reason: input.reason } };
 			}
 			const generation = Number(current.recovery_generation ?? 0) + 1;
 			this.db.prepare("INSERT INTO ticket_recovery_state (ticket_id, run_id, retry_count, replan_round, max_retries, max_replans, recovery_generation, status, last_failure, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'available', ?, ?) ON CONFLICT(ticket_id) DO UPDATE SET retry_count=excluded.retry_count, max_retries=excluded.max_retries, max_replans=excluded.max_replans, recovery_generation=excluded.recovery_generation, status='available', last_failure=excluded.last_failure, updated_at=excluded.updated_at").run(id, ticket.run_id, retries, Number(current.replan_round ?? 0), input.max_retries, maxReplans, generation, input.reason, now);
@@ -7048,8 +7070,41 @@ export default function (pi: ExtensionAPI) {
 		parameters: Type.Object({ ticket_id: Type.String(), reason: Type.String(), max_retries: Type.Integer({ minimum: 1 }), max_replans: Type.Optional(Type.Integer({ minimum: 1 })) }),
 		async execute(_callId, params) {
 			if (!identity || identity.role !== "planner") throw new Error("ticket_requeue: only planner may replace a failed worker.");
-			const result = ensureYanoStorage().requeueTicketForRecovery(params.ticket_id, params) as any;
-			return { content: [{ type: "text" as const, text: `ticket_requeue: ${params.ticket_id} is pending (recovery generation ${result.recovery.recovery_generation}).` }], details: { ...result, recovery: redactRuntimeProjection(result.recovery) } };
+			let result: any;
+			try {
+				result = ensureYanoStorage().requeueTicketForRecovery(params.ticket_id, params);
+			} catch (error) {
+				// Final exhaustion (escalation already used and it also failed).
+				// This used to fail the run silently — nobody heard about it
+				// unless they happened to check run_status. Tell the human.
+				const message = error instanceof Error ? error.message : String(error);
+				if (/recovery budget exhausted/.test(message)) {
+					const notifyText = `⚠️ Ticket "${params.ticket_id}" ha esaurito i tentativi anche dopo aver provato un modello/strategia diversa. Il run è stato marcato failed. Motivo: ${params.reason}`;
+					const notifyResult = await sendNotifications(notifyText);
+					logEvent("notification_dispatch", { ticket_id: params.ticket_id, ok: notifyResult.ok, detail: notifyResult.detail, channels: notifyResult.channels, reason: "recovery_budget_exhausted_final" });
+				}
+				throw error;
+			}
+			if (result.escalation?.active) {
+				// First exhaustion: try a different provider before giving up.
+				// recommend() never throws for a data/network problem — it
+				// degrades to auto_fallback — so this is safe even when
+				// llmProxy is unreachable; the escalation itself still
+				// happens either way, just without a specific pin to suggest.
+				let modelSuggestion: any = null;
+				try { modelSuggestion = await recommendModel({ roleClass: "support" }); } catch { modelSuggestion = null; }
+				const pinned = modelSuggestion?.recommended?.pinned_id || null;
+				const notifyText = pinned
+					? `🔁 Ticket "${params.ticket_id}" ha esaurito i tentativi normali. Provo un modello diverso (${pinned}) e un approccio diverso prima di arrendermi. Motivo: ${params.reason}`
+					: `🔁 Ticket "${params.ticket_id}" ha esaurito i tentativi normali. Provo un approccio diverso prima di arrendermi (nessun modello alternativo disponibile da llmProxy in questo momento). Motivo: ${params.reason}`;
+				const notifyResult = await sendNotifications(notifyText);
+				logEvent("notification_dispatch", { ticket_id: params.ticket_id, ok: notifyResult.ok, detail: notifyResult.detail, channels: notifyResult.channels, reason: "recovery_escalation_started" });
+				result = { ...result, escalation: { ...result.escalation, recommended_model: pinned } };
+			}
+			const statusText = result.escalation?.active
+				? `ticket_requeue: ${params.ticket_id} is pending after ESCALATION — try a different model/approach this time${result.escalation.recommended_model ? ` (suggested: ${result.escalation.recommended_model})` : ""}, not the same strategy that already failed twice (recovery generation ${result.recovery.recovery_generation}).`
+				: `ticket_requeue: ${params.ticket_id} is pending (recovery generation ${result.recovery.recovery_generation}).`;
+			return { content: [{ type: "text" as const, text: statusText }], details: { ...result, recovery: redactRuntimeProjection(result.recovery) } };
 		},
 		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("ticket_requeue ")) + theme.fg("accent", (args as any).ticket_id ?? "?"), 0, 0); },
 		renderResult(result, _options, theme) { return new Text(theme.fg("success", "→ ") + theme.fg("accent", String((result.details as any)?.recovery?.recovery_generation ?? "?")), 0, 0); },

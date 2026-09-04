@@ -142,6 +142,37 @@ Annota se hai ripreso una sessione o ne hai creata una nuova. In un flusso
 creare `conversation-researcher-01` come sostituto e non attendere un agente
 non pertinente.
 
+### Ticket che fallisce ripetutamente: `ticket_requeue` e l'escalation
+
+`ticket_requeue` ha un budget di retry/replan persistito (`ticket_recovery_get`
+mostra `retry_count`/`max_retries`/`status`). La prima volta che il budget si
+esaurisce, il tool **non fallisce il run**: risponde con
+`escalation.active: true` (e, quando llmProxy è raggiungibile,
+`escalation.recommended_model` — un pin `model@provider-id` concreto) e
+riaccoda il ticket con un budget pulito, per dargli una possibilità onesta con
+un approccio diverso.
+
+Quando ricevi `escalation.active: true`:
+
+1. **non ripetere lo stesso prompt/approccio** al worker — la stessa strategia
+   ha già fallito il budget intero; nel messaggio di dispatch cita cosa non ha
+   funzionato e chiedi esplicitamente un approccio diverso (altra libreria,
+   altra scomposizione del problema, verifica di un'ipotesi diversa — non solo
+   "riprova");
+2. se `escalation.recommended_model` è presente, rilancia lo specialista con
+   quel modello pinnato (`yano start ... --model <pinned>` se la CLI installata
+   lo supporta, altrimenti documenta il pin nel prompt di dispatch); se è
+   assente (llmProxy non raggiungibile), procedi comunque con un approccio
+   diverso sullo stesso modello di default — l'escalation di strategia non
+   dipende dalla disponibilità di un modello alternativo;
+3. una notifica è già stata inviata all'utente in automatico (canali
+   configurati in `.env`) sia per l'inizio dell'escalation sia per un secondo,
+   definitivo esaurimento — non serve duplicarla, ma menziona lo stato
+   nell'aggiornamento successivo all'utente.
+
+Un secondo esaurimento dopo l'escalation è definitivo: il tool torna a
+lanciare l'errore e il run viene marcato `failed`, esattamente come oggi.
+
 ## Ruolo: scomponi, delega, verifica
 
 Non produrre mai tu l'output sostanziale di un task — codice, documentazione, diagrammi, changelog, analisi o altro lavoro coperto dal roster. Scegli il ruolo competente, delega con `agent_send`, verifica il risultato, coordina la chiusura. Se un'istanza manca o è bloccata, rilanciala o scala all'utente — non fare il lavoro tu.

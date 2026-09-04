@@ -8,7 +8,7 @@ category: delegation
 signal: delegation_timeout
 fingerprint: 73b0b1c00b94be3088957449fd3aecd06ad38ba577257bb252c14da9b856245a
 detected_at: 2026-09-02T08:14:53.969Z
-last_seen_at: 2026-09-04T19:43:27.745Z
+last_seen_at: 2026-09-04T21:34:26.316Z
 source_project: yano-orchestrator
 source_project_root: /Users/alessiobacin/Development/testCode/yano-orchestrator
 source_project_key: workspace-d3dda6a0cb4d

@@ -411,7 +411,7 @@ function paneHasLivePiProcess(paneId) {
 	} catch { return false; }
 }
 
-function cleanupCompletedAgentTabs(snapshot, row, runs, plannerRequired) {
+function cleanupCompletedAgentTabs(snapshot, row, runs) {
 	if (!snapshot) return [];
 	const terminalAssignments = new Set(runs.flatMap((run) => (run.tickets || [])
 		.filter((ticket) => ["done", "failed"].includes(ticket.status) && ticket.assigned_instance)
@@ -426,10 +426,11 @@ function cleanupCompletedAgentTabs(snapshot, row, runs, plannerRequired) {
 		const terminalTask = isTerminalAssignment(instance);
 		const status = String(agent.agent_status || "unknown").toLowerCase();
 		const dead = !paneHasLivePiProcess(agent.pane_id);
-		// Never close a live planner needed by an open hold/active run. For
-		// specialists, close only terminal-task sessions or dead panes; a live
-		// unassigned/busy pane is left untouched to avoid killing user work.
-		if (isPlanner && plannerRequired && !dead) continue;
+		// Planner tabs are persistent project control surfaces. Never close them
+		// merely because a run completed or the process is temporarily absent;
+		// when an active run/hold needs recovery, ensureRegisteredPlanner() owns
+		// the explicit blocked-planner close/relaunch decision below.
+		if (isPlanner) continue;
 		if (!terminalTask && !dead) continue;
 		if (!dead && !["idle", "offline", "unknown", "stopped", "done"].includes(status)) continue;
 		const tab = snapshot.tabs?.find((item) => item.tab_id === agent.tab_id);
@@ -826,8 +827,7 @@ function doStatusForRow(db, row, { heal = true, snapshot: suppliedSnapshot = nul
 			}
 		}
 		const runs = projectRuns(row.root).runs;
-		const plannerRequired = projectNeedsPlanner(row.root);
-		const agent_tabs_closed = heal ? cleanupCompletedAgentTabs(snapshot, row, runs, plannerRequired) : [];
+		const agent_tabs_closed = heal ? cleanupCompletedAgentTabs(snapshot, row, runs) : [];
 		const planner = heal ? (() => { try { return ensureRegisteredPlanner(row, snapshot, db); } catch (error) { return { recovery: "planner_recovery_failed", recovery_error: error instanceof Error ? error.message : String(error) }; } })() : { recovery: "not_checked" };
 		return { ...base, live: "running", identity_conflicts, planner, agent_tabs_closed, ...reconcileProjectRun(db, row, snapshot) };
 	}

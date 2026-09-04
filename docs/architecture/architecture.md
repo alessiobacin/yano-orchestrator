@@ -761,8 +761,10 @@ for an explicit `yano resume`.
 - Registered projects without an active run are supervised without creating or
   waking a planner session, unless a durable user decision hold is still open;
   in that case planner liveness recovery remains enabled until the hold closes.
-- After terminal work, the watcher closes only verified dead or idle agent tabs
-  assigned to terminal tickets, preserving logs and leaving live user work untouched.
+- After terminal work, the watcher closes only verified dead or idle specialist
+  tabs assigned to terminal tickets, preserving the persistent planner tab and
+  leaving live user work untouched. Planner closure/relaunch is reserved for
+  an active run or open hold whose planner is actually blocked or absent.
 - The standalone `yano-watcher` can turn high-confidence Yano orchestration
   faults into deduplicated maintenance tickets and Telegram alerts; it never
   changes project ticket state or attempts an automatic fix.

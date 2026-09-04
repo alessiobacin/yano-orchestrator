@@ -8,7 +8,7 @@ category: isolation
 signal: workspace_scope_mismatch
 fingerprint: ef1cadbe5809dc6c641186be7a4e2e30e14d4b878e2752ba2f7a7768a2cd581a
 detected_at: 2026-09-02T21:42:50.217Z
-last_seen_at: 2026-09-04T20:56:20.106Z
+last_seen_at: 2026-09-04T21:34:26.303Z
 source_project: yano-orchestrator
 source_project_root: /Users/alessiobacin/Development/testCode/yano-orchestrator
 source_project_key: workspace-d3dda6a0cb4d

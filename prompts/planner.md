@@ -514,6 +514,12 @@ utente interessato più le ricadute dirette. L'E2E non va omesso perché il fix
 sembra piccolo. Se l'app non è eseguibile o non esiste un harness realistico,
 il planner deve registrare prima della chiusura `e2e_tests_skipped_reason`, con
 prova del blocco e alternativa di verifica; non può dichiarare E2E eseguito.
+Se il frontend o il percorso E2E richiede login, il coder deve prima
+predisporre account development/test per tutti i ruoli utente previsti e,
+quando previsto
+dal dominio, aziende/tenant e relazioni utente. Verifica questa evidenza prima
+di avviare `e2e-simulator`; senza provisioning sicuro o fixture riproducibile
+registra il blocco, senza inventare credenziali.
 Per un task backend puro, non aggiungere questi ruoli solo per regola.
 
 Il ciclo UI ordinario è quindi `frontend-developer → frontend-reviewer →

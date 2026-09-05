@@ -97,6 +97,7 @@ transitions:
     requires:
       - frontend_reviewer_approved
       - console_and_network_checked
+      - test_accounts_ready_or_explicit_block_recorded
       - e2e_required_or_skip_reason_recorded
   - id: submit_e2e_verification
     from: e2e_verification
@@ -105,6 +106,7 @@ transitions:
     requires:
       - e2e_tests_run_or_explicit_skip_reason
       - e2e_evidence_recorded
+      - test_accounts_ready_or_explicit_block_recorded
       - agentation_review_offered_or_not_applicable
       - docs_synced_or_skipped_with_reason
   - id: accept
@@ -138,5 +140,6 @@ invariants:
   - snapshot_first
   - no_fixed_waits_when_web_assertion_exists
   - ui_affecting_tasks_require_e2e_or_explicit_skip_reason
+  - authenticated_e2e_requires_test_accounts_or_explicit_block
   - agentation_review_is_offered_before_frontend_finalize
   - no_finalize_before_explicit_user_confirmation

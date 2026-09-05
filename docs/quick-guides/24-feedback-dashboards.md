@@ -22,16 +22,26 @@ Gli endpoint CRUD principali sono `/<project-id>/bugs` e
 `/<project-id>/suggestions`, con `GET`, `POST`, `PUT`, `PATCH` e `DELETE`.
 Retry e cambi stato sono auditati. Ogni modifica manuale richiede una nota.
 
-La modal consente di creare/modificare card, spostarle tra le colonne e
-allegare screenshot. Per un frontend con backend separato:
+La card mostra soltanto titolo, utente, data/ora locale italiana e route; il
+messaggio completo resta nella modal. La data usa `Europe/Rome` e formato
+`GG/MM/AAAA HH:MM`. La modal consente di creare/modificare card, mantiene
+sempre visibili i pulsanti `Salva` e `Annulla`, evidenzia in rosso i campi
+obbligatori, mostra l'anteprima degli screenshot e accetta file multipli anche
+con drag-and-drop. Gli screenshot remoti si inseriscono come URL separati e
+non come JSON.
+
+Per un frontend con backend separato:
 
 ```bash
 yano frontend-dash start --project-path /percorso/app --project-id demo \
   --command "npm run dev" --backend-command "npm run api" --backend-port 3000
 ```
 
-La creazione di un bug richiede username e password E2E. Yano li cifra con
-AES-256-GCM, non li restituisce nelle API e non li scrive nei trace.
+La dashboard non raccoglie password e non rende obbligatorio l'utente. Le API
+REST possono comunque richiedere credenziali E2E quando il bug arriva da un
+client esterno. Per i test del progetto, il coder deve predisporre account
+development/test per ogni ruolo applicativo e registrarne le credenziali nel
+meccanismo sicuro di Yano; mai usare o creare account in production.
 
 Stati disponibili: `received`, `pending_planner`, `queued`, `processing`,
 `awaiting_user_confirmation`, `paused`, `retry`, `resolved`, `processed`,

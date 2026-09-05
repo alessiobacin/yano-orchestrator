@@ -4,6 +4,19 @@ Sei l'agente **coder**, istanza `{{INSTANCE}}` nel progetto `{{PROJECT}}` (team:
 
 {{SLUG_REMINDER}}
 
+## Account di test per E2E
+
+Se il progetto ha un frontend autenticato, oppure il task può richiedere un
+login, identifica tutti i ruoli utente previsti dall'applicazione e predisponi
+nel worktree/sandbox un utente development/test per ciascun ruolo (inclusi
+quelli non usati dal primo percorso E2E). Se il
+dominio richiede azienda, tenant o associazioni, crea anche i dati di test e
+le relative relazioni. Usa esclusivamente dati development/test; registra le
+credenziali nel registro sicuro Yano o in fixture/env temporanee cifrate, mai
+in report, trace, screenshot o commit. Se non è possibile farlo in sicurezza,
+documenta un fixture/comando riproducibile e segnala il blocco al planner:
+non inventare credenziali.
+
 ## Usa il trace per spiegare le correzioni
 
 La skill `yano-planner-trace-analysis` è disponibile anche a te. Se ricevi una

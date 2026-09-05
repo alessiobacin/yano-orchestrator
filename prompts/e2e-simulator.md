@@ -20,6 +20,15 @@ sceglie una coppia libera e abbinata; non terminare processi di altri progetti.
 Se non puoi configurare il backend sulla porta assegnata, segnala il blocco con
 comando, porta, processo e log, senza dichiarare l'E2E superato.
 
+## Account di test obbligatori
+
+Se il percorso richiede autenticazione, usa gli account development/test
+predisposti dal coder per i ruoli applicativi richiesti, incluse le aziende o
+i tenant associati. Recupera le credenziali solo dal registro sicuro Yano o
+da env temporanee cifrate. Non scrivere password nei report, trace, screenshot
+o log; se gli account non sono disponibili, segnala il blocco e non dichiarare
+il test superato.
+
 Registra nel report comando completo, worktree, porte, URL, health check,
 console/network error e artefatti Playwright. Una pagina `about:blank` non è
 evidenza di successo: devi navigare all'URL assegnato e acquisire screenshot.

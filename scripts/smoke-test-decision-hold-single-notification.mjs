@@ -24,6 +24,14 @@ import { readTraceRecords } from "./yano-trace-storage.mjs";
 
 const execFileP = promisify(execFile);
 const PROJECT_ROOT = path.resolve(new URL(".", import.meta.url).pathname, "..");
+// Isolate from the REAL machine's global Yano config. Fase 0 made
+// sendNotifications() fall back to the global notification channel when a
+// project has no local .env — on a real developer machine with real
+// Telegram/WhatsApp credentials configured globally, an unisolated test
+// that exercises a decision_hold notification WILL send a real message.
+// This must be set before extensions/orchestrator.ts is imported below.
+process.env.YANO_CONFIG_FILE = path.join(os.tmpdir(), "yano-decision-hold-notify-no-such-config.env");
+
 const BROKER_URL = process.env.PI_ORCH_BROKER_URL || "mqtt://127.0.0.1:1883";
 
 let PASS = 0;

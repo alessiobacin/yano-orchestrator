@@ -41,6 +41,16 @@ import assert from "node:assert/strict";
 import mqtt from "mqtt";
 import { projectKey } from "./yano-trace-storage.mjs";
 
+// Isolate from the REAL machine's global Yano config. Fase 0 made
+// sendNotifications() fall back to the global notification channel when a
+// project has no local .env — on a real developer machine with real
+// Telegram/WhatsApp credentials configured globally, an unisolated test
+// that reaches a notification code path WILL send a real message. Must be
+// set before extensions/orchestrator.ts is imported anywhere below.
+// (Dependency-free: does not assume node:path/node:os are imported here.)
+if (!process.env.YANO_CONFIG_FILE) process.env.YANO_CONFIG_FILE = `${process.env.TMPDIR || "/tmp"}/yano-test-isolation-no-such-config.env`;
+
+
 const execFileP = promisify(execFile);
 const PROJECT_ROOT = path.resolve(new URL(".", import.meta.url).pathname, "..");
 const BROKER_URL = process.env.PI_ORCH_BROKER_URL || "mqtt://127.0.0.1:1883";

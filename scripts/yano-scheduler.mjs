@@ -30,7 +30,7 @@ import { randomUUID } from "node:crypto";
 import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { globalDataPath } from "./yano-config.mjs";
 import { dailyLogPath } from "./yano-data.mjs";
 import { ensureComputerLocalService } from "./yano-global-services.mjs";
@@ -74,6 +74,58 @@ export function writeStore(file, store) {
 	const temp = `${file}.${process.pid}.tmp`;
 	writeFileSync(temp, `${JSON.stringify(store, null, 2)}\n`, { mode: 0o600 });
 	renameSync(temp, file);
+}
+
+// Fase 9 — the daily digest (0 6 * * * Europe/Rome) is a default Yano job,
+// not something the user has to remember to register. It must survive
+// exactly like the other "default infra" this module already restores: a
+// missing entry is re-created idempotently, never duplicated, on every
+// supervise() pass. The trusted scripts folder normally holds only
+// user-provided automation (validateScriptSecurity enforces this boundary);
+// this writes a tiny, fully Yano-generated bridge stub there — never
+// arbitrary content — that simply calls into the real, package-shipped
+// digest engine by absolute path, so a `yano update` picks up logic changes
+// without needing to re-run this bootstrap.
+const DEFAULT_DIGEST_JOB_ID = "yano-daily-digest";
+export function ensureDefaultDigestJob({ env = process.env, packageRoot = PACKAGE_ROOT, now = new Date() } = {}) {
+	const { file, store } = readStore(env);
+	if (store.jobs.some((job) => job.id === DEFAULT_DIGEST_JOB_ID)) return { created: false };
+	const scriptsDir = schedulerScriptsDir(env);
+	mkdirSync(scriptsDir, { recursive: true, mode: 0o700 });
+	const scriptPath = path.join(scriptsDir, "yano-daily-digest.mjs");
+	const digestModule = pathToFileURL(path.join(packageRoot, "scripts", "yano-digest.mjs")).href;
+	writeFileSync(scriptPath, [
+		"#!/usr/bin/env node",
+		`import { runDigest } from ${JSON.stringify(digestModule)};`,
+		"const { sent } = await runDigest();",
+		"console.log(JSON.stringify({ ok: sent.ok, detail: sent.detail }));",
+		"process.exit(sent.ok ? 0 : 1);",
+		"",
+	].join("\n"), { mode: 0o700 });
+	const draft = {
+		id: DEFAULT_DIGEST_JOB_ID,
+		name: "Digest giornaliero Yano",
+		system: true,
+		project_root: LOCAL_PC_ROOT,
+		cron: "0 6 * * *",
+		timezone: "Europe/Rome",
+		task: "Genera e invia il digest giornaliero cross-progetto sul canale di notifica globale.",
+		enabled: true,
+		script_path: scriptPath,
+		mode: "self",
+		one_shot: null,
+		timeout_ms: 60000,
+		expected_consequence: "notifica del digest giornaliero inviata sul canale globale",
+		created_at: nowIso(now),
+		updated_at: nowIso(now),
+		last_run_at: null,
+		last_run_slot: null,
+		last_status: null,
+		instances: [],
+	};
+	store.jobs.push(draft);
+	writeStore(file, store);
+	return { created: true, job: draft };
 }
 
 // The one-minute scheduler pass (superviseScheduler → tick/recoverStaleDispatches)
@@ -398,7 +450,7 @@ function superviseAgent(store, now, spawn = spawnSync) {
 export function tick({ env = process.env, now = new Date(), spawn = spawnSync } = {}) {
 	const { file, store } = readStore(env); const slot = minuteSlot(now); const results = [];
 	for (const job of store.jobs) {
-		if (!job.enabled || !cronMatches(job.cron, now) || job.last_run_slot === slot) continue;
+		if (!job.enabled || !cronMatches(job.cron, now, job.timezone || null) || job.last_run_slot === slot) continue;
 		const run = dispatch(job, now, spawn, env);
 		job.last_run_slot = slot; job.last_run_at = nowIso(now);
 		job.last_status = run.status === 0 ? "dispatched" : "failed";
@@ -469,13 +521,26 @@ export function validCron(expression) {
 	}));
 }
 
-export function cronMatches(expression, now = new Date()) {
+const WEEKDAY_INDEX = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+// A job whose creator meant a specific wall-clock time in a NAMED zone (the
+// daily digest is explicitly "alle 6:00 di Roma", not "alle 6:00 wherever
+// this server's system clock happens to be set") must not silently drift to
+// local-server time. Every existing job omits `timezone` and keeps matching
+// against plain local Date getters exactly as before — this is additive.
+function zonedParts(now, timeZone) {
+	if (!timeZone) return { minute: now.getMinutes(), hour: now.getHours(), date: now.getDate(), month: now.getMonth() + 1, day: now.getDay() };
+	const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone, hour12: false, year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric", weekday: "short" }).formatToParts(now).map((part) => [part.type, part.value]));
+	return { minute: Number(parts.minute), hour: Number(parts.hour) % 24, date: Number(parts.day), month: Number(parts.month), day: WEEKDAY_INDEX[parts.weekday] };
+}
+export function cronMatches(expression, now = new Date(), timeZone = null) {
 	const fields = String(expression || "").trim().split(/\s+/);
-	return fields.length === 5 && matchesField(fields[0], now.getMinutes(), 0, 59)
-		&& matchesField(fields[1], now.getHours(), 0, 23)
-		&& matchesField(fields[2], now.getDate(), 1, 31)
-		&& matchesField(fields[3], now.getMonth() + 1, 1, 12)
-		&& matchesField(fields[4], now.getDay(), 0, 6);
+	if (fields.length !== 5) return false;
+	const parts = zonedParts(now, timeZone);
+	return matchesField(fields[0], parts.minute, 0, 59)
+		&& matchesField(fields[1], parts.hour, 0, 23)
+		&& matchesField(fields[2], parts.date, 1, 31)
+		&& matchesField(fields[3], parts.month, 1, 12)
+		&& matchesField(fields[4], parts.day, 0, 6);
 }
 function minuteSlot(now) { return `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}-${now.getHours()}-${now.getMinutes()}`; }
 
@@ -693,6 +758,13 @@ export async function superviseScheduler({ env = process.env, now = new Date(), 
 }
 
 async function superviseSchedulerLocked({ env, now, spawn }) {
+	// Default infra check (mirrors the pattern already used for global
+	// services/architect/auto-improver teardown/log rotation): re-create the
+	// daily digest job whenever it is missing — first install, or a jobs.json
+	// that was reset/migrated — never duplicate it if already present.
+	let digest_bootstrap;
+	try { digest_bootstrap = ensureDefaultDigestJob({ env, now }); }
+	catch (error) { digest_bootstrap = { created: false, error: error instanceof Error ? error.message : String(error) }; }
 	const { file, store } = readStore(env);
 	const agent = superviseAgent(store, now, spawn);
 	// The scheduler's own minute tick must also guarantee that its execution
@@ -716,7 +788,7 @@ async function superviseSchedulerLocked({ env, now, spawn }) {
 	if (retries.length || stale_recoveries.length) writeStore(file, store);
 	const jobs = tick({ env, now, spawn });
 	const refreshed = readStore(env); refreshed.store.supervisor = store.supervisor; writeStore(refreshed.file, refreshed.store);
-	return { checked_at: nowIso(now), agent, local_pc: localPc, connectivity, connectivity_recovery, retries, stale_recoveries, ...jobs };
+	return { checked_at: nowIso(now), agent, local_pc: localPc, connectivity, connectivity_recovery, retries, stale_recoveries, digest_bootstrap, ...jobs };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) runYanoScheduler({ argv: process.argv.slice(2) }).catch((error) => { console.error(error.message); process.exitCode = 1; });

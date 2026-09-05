@@ -223,7 +223,7 @@ function closeUnusedInitialTab(snapshot, workspaceId, keepTabId) {
 	return closeHerdrTab(initial.tab_id);
 }
 
-function projectRuns(root) {
+export function projectRuns(root) {
 	const db = openProjectDatabase(root);
 	if (!db) return { available: false, runs: [] };
 	try {
@@ -287,6 +287,26 @@ function projectRuns(root) {
 
 function projectHasActiveWork(root) {
 	return projectRuns(root).runs.some(runNeedsPlanner);
+}
+
+// Fase 9 (digest giornaliero) — the run-level open_holds COUNT already
+// computed by projectRuns() is enough to decide "does this project need a
+// planner", but the digest needs the actual question text so the user can
+// act without opening the project. A separate, minimal read-only query
+// avoids reshaping projectRuns()'s existing contract for every other caller.
+export function projectOpenHolds(root) {
+	const db = openProjectDatabase(root);
+	if (!db) return [];
+	try {
+		return db.prepare("SELECT id, run_id, question, created_at FROM decision_holds WHERE status = 'open' ORDER BY created_at ASC").all();
+	} catch { return []; }
+	finally { try { db.close(); } catch { /* best effort */ } }
+}
+
+export function listWatcherProjectRows() {
+	const db = openDatabase();
+	try { return db.prepare("SELECT * FROM watcher_projects ORDER BY name, root").all(); }
+	finally { try { db.close(); } catch { /* best effort */ } }
 }
 
 function runNeedsPlanner(run) {
@@ -1020,7 +1040,7 @@ export function trackHerdrReachability(reachable) {
 const PROJECT_LOG_ALERT_BYTES = Number(process.env.YANO_PROJECT_LOG_ALERT_BYTES) || 2 * 1024 * 1024 * 1024;
 const PROJECT_LOG_ALERT_COOLDOWN_MS = 7 * 86_400_000; // re-arm weekly, not every minute
 function projectLogSizeStatePath() { return path.join(traceRoot(), "watcher", "project-log-sizes.json"); }
-function readProjectLogSizeState() {
+export function readProjectLogSizeState() {
 	try { return JSON.parse(fs.readFileSync(projectLogSizeStatePath(), "utf8")); } catch { return {}; }
 }
 function writeProjectLogSizeState(state) {

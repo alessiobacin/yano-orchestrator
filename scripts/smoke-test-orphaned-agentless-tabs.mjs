@@ -15,7 +15,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { cleanupCompletedAgentTabs } from "./yano-watcher-registry.mjs";
+import { cleanupCompletedAgentTabs, doStatusForRow } from "./yano-watcher-registry.mjs";
+import { projectDbPath } from "./yano-project.mjs";
 
 console.log("Regression: orphaned agent-less tabs are swept; human/planner tabs never are");
 let passed = 0;
@@ -147,6 +148,52 @@ check("an agent-less tab in a DIFFERENT project's workspace is never touched", (
 	const removed = cleanupCompletedAgentTabs(snapshot, row, runs);
 	assert.ok(!removed.some((item) => item.tab_id === "t-other-project"), "workspace scoping prevents cross-project orphan closure");
 });
+
+// Real evidence (2026-09-05): the project with 12 orphaned tabs had its
+// watcher PAUSED — doStatusForRow() used to return immediately for any
+// worker_status other than "running" ("respect the explicit state, nothing
+// to heal"), which meant this exact cleanup never ran for it at all,
+// regardless of how the sweep itself behaved. Prove the fix against a REAL
+// project SQLite DB (not the bare cleanupCompletedAgentTabs() unit above).
+{
+	const pausedRoot = fs.mkdtempSync(path.join(os.tmpdir(), "yano-paused-project-"));
+	const pausedRow = { root: pausedRoot, name: "paused-fixture", worker_status: "paused", worker_pane_id: "p-worker-paused" };
+	const { DatabaseSync } = process.getBuiltinModule ? process.getBuiltinModule("node:sqlite") : await import("node:sqlite");
+	fs.mkdirSync(path.dirname(projectDbPath(pausedRoot)), { recursive: true });
+	const db = new DatabaseSync(projectDbPath(pausedRoot));
+	db.exec(`
+		CREATE TABLE runs (id TEXT PRIMARY KEY, project TEXT, objective TEXT, status TEXT, finalization_status TEXT, updated_at TEXT);
+		CREATE TABLE events (id TEXT PRIMARY KEY, run_id TEXT, created_at TEXT);
+		CREATE TABLE decision_holds (id TEXT PRIMARY KEY, run_id TEXT, ticket_id TEXT, question TEXT, status TEXT, created_at TEXT);
+		CREATE TABLE tickets (id TEXT PRIMARY KEY, run_id TEXT, title TEXT, status TEXT, assigned_instance TEXT, required_playbook TEXT, updated_at TEXT);
+		CREATE TABLE ticket_dependencies (ticket_id TEXT, depends_on_id TEXT);
+		CREATE TABLE playbook_bindings (run_id TEXT, playbook_id TEXT, checksum TEXT, snapshot TEXT);
+		CREATE TABLE playbook_runtime_state (run_id TEXT, state_id TEXT, generation INTEGER, updated_at TEXT);
+	`);
+	const nowIso = new Date().toISOString();
+	db.prepare("INSERT INTO runs VALUES (?,?,?,?,?,?)").run("run-1", "paused-fixture", "Old finished work", "done", "finalized", nowIso);
+	db.prepare("INSERT INTO tickets VALUES (?,?,?,?,?,?,?)").run("t-1", "run-1", "Old task", "done", "coder-09-paused-fixture", null, nowIso);
+	db.close();
+
+	const snapshot = {
+		agents: [],
+		tabs: [{ tab_id: "t-dead-in-paused", workspace_id: "w-paused", label: "coder-09-paused-fixture" }],
+		workspaces: [{ workspace_id: "w-paused", label: "paused-fixture" }],
+		panes: [],
+	};
+
+	check("a PAUSED project's dead agent-less tabs are still swept — pausing the watcher's polling loop must not preserve dead terminal clutter", () => {
+		const result = doStatusForRow(null, pausedRow, { heal: true, snapshot });
+		assert.ok(result.agent_tabs_closed?.some((item) => item.tab_id === "t-dead-in-paused"), "the dead tab in the paused project is closed");
+	});
+
+	check("a PAUSED project's worker/cadence fields are untouched by this cleanup (only agent tabs are swept, never the watcher's own state)", () => {
+		const result = doStatusForRow(null, pausedRow, { heal: true, snapshot });
+		assert.equal(result.worker_status, "paused", "the explicit pause is never overridden by this cleanup");
+	});
+
+	fs.rmSync(pausedRoot, { recursive: true, force: true });
+}
 
 delete process.env.YANO_TEST_ALIVE_PANES;
 fs.rmSync(fakeBin, { recursive: true, force: true });

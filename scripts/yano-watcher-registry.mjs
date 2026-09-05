@@ -876,10 +876,23 @@ function doResume(db, info, existing, opts = {}) {
 // closes the original gap: a stopped watcher used to be invisible until
 // someone happened to check `herdr agent list`; now the routine status call
 // itself notices and repairs it.
-function doStatusForRow(db, row, { heal = true, snapshot: suppliedSnapshot = null } = {}) {
+export function doStatusForRow(db, row, { heal = true, snapshot: suppliedSnapshot = null } = {}) {
 	const info = infoFromRow(row);
 	const base = { ...row, live: null, drift: false, recovered: false };
-	if (row.worker_status !== "running") return base; // paused/stopped/planned: respect the explicit state, nothing to heal
+	if (row.worker_status !== "running") {
+		// Respect the explicit pause/stop of the WATCHER's own polling loop —
+		// its worker tab and cadence are untouched here. But a paused watcher
+		// says nothing about whether the project's coder/reviewer/docs-sync
+		// agent tabs from past work are still relevant: those accumulate dead
+		// tabs exactly like an actively-watched project (real evidence,
+		// 2026-09-05: a project the user had paused had 12 orphaned tabs never
+		// once swept, since this whole function used to return immediately).
+		if (!heal) return base;
+		const pausedSnapshot = suppliedSnapshot || herdrSnapshot();
+		if (!pausedSnapshot) return base;
+		const agent_tabs_closed = cleanupCompletedAgentTabs(pausedSnapshot, row, projectRuns(row.root).runs);
+		return agent_tabs_closed.length ? { ...base, agent_tabs_closed } : base;
+	}
 	if (!row.worker_pane_id) return { ...base, live: "unknown", drift: false }; // e.g. started with --foreground: not Herdr-managed, nothing this check can observe
 	const snapshot = suppliedSnapshot || herdrSnapshot();
 	if (!snapshot) return { ...base, live: "unknown", note: "Herdr non raggiungibile: impossibile verificare lo stato reale" };

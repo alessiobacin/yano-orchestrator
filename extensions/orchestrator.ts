@@ -1451,7 +1451,7 @@ interface OrchestratorStorage {
 	claimPlaybookEffect(id: number, input: { owner: string; token: string; lease_until: string }): unknown;
 	failPlaybookEffect(id: number, input: { owner: string; token: string; error: string; max_attempts: number; next_attempt_at?: string }): unknown;
 	ackPlaybookEffect(id: number, input: { idempotency_key: string; generation: number; actor_role?: string }): unknown;
-	createDecisionHold(input: { id?: string; idempotency_key: string; run_id: string; ticket_id?: string | null; generation?: number; question: string; context?: unknown; owner: string; expires_at?: string | null }): DecisionHoldRecord;
+	createDecisionHold(input: { id?: string; idempotency_key: string; run_id: string; ticket_id?: string | null; generation?: number; question: string; context?: unknown; owner: string; expires_at?: string | null }): DecisionHoldRecord & { created: boolean };
 	getDecisionHold(id: string): DecisionHoldRecord | null;
 	listDecisionHolds(run_id: string, status?: DecisionHoldStatus): DecisionHoldRecord[];
 	answerDecisionHold(id: string, input: { generation: number; idempotency_key: string; answer: string; resolution_metadata?: unknown; expected_checksum?: string; principal?: string }): DecisionHoldRecord;
@@ -2355,7 +2355,7 @@ class SQLiteOrchestratorStorage implements OrchestratorStorage {
 		};
 	}
 
-	createDecisionHold(input: { id?: string; idempotency_key: string; run_id: string; ticket_id?: string | null; generation?: number; question: string; context?: unknown; owner: string; expires_at?: string | null }): DecisionHoldRecord {
+	createDecisionHold(input: { id?: string; idempotency_key: string; run_id: string; ticket_id?: string | null; generation?: number; question: string; context?: unknown; owner: string; expires_at?: string | null }): DecisionHoldRecord & { created: boolean } {
 		if (!input.idempotency_key.trim()) throw new Error("decision_hold_create: idempotency_key is required.");
 		if (!this.getRun(input.run_id)) throw new Error(`decision_hold_create: no run "${input.run_id}".`);
 		if (input.ticket_id) {
@@ -2364,8 +2364,13 @@ class SQLiteOrchestratorStorage implements OrchestratorStorage {
 			if (ticket.run_id !== input.run_id) throw new Error("decision_hold_create: ticket belongs to another run.");
 		}
 		const id = input.id || `hold-${crypto.createHash("sha256").update(`${input.run_id}:${input.idempotency_key}`).digest("hex").slice(0, 32)}`;
+		// `created` distinguishes a genuinely new hold from an idempotent replay
+		// of the same (run_id, idempotency_key) — the caller (the
+		// decision_hold_create tool) uses it to guarantee the "I'm waiting for
+		// your reply" notification fires exactly once per hold, never once per
+		// call.
 		const existing = this.getDecisionHold(id);
-		if (existing) return existing;
+		if (existing) return { ...existing, created: false };
 		const now = nowIso();
 		const rec: DecisionHoldRecord = {
 			id, run_id: input.run_id, ticket_id: input.ticket_id ?? null, generation: input.generation ?? 0,
@@ -2378,11 +2383,11 @@ class SQLiteOrchestratorStorage implements OrchestratorStorage {
 				.run(rec.id, rec.run_id, rec.ticket_id, rec.generation, rec.question, JSON.stringify(rec.context), rec.owner, rec.status, null, JSON.stringify(rec.resolution_metadata), rec.created_at, rec.expires_at, rec.updated_at);
 			this.db.prepare("INSERT INTO decision_hold_operations (hold_id, operation, idempotency_key, created_at) VALUES (?, 'create', ?, ?)").run(rec.id, input.idempotency_key, now);
 			this.db.exec("COMMIT");
-			return rec;
+			return { ...rec, created: true };
 		} catch (error) {
 			try { this.db.exec("ROLLBACK"); } catch { /* preserve original error */ }
 			const retry = this.getDecisionHold(id);
-			if (retry) return retry;
+			if (retry) return { ...retry, created: false };
 			throw error;
 		}
 	}
@@ -7149,6 +7154,17 @@ export default function (pi: ExtensionAPI) {
 			const storage = ensureYanoStorage();
 			const hold = storage.createDecisionHold({ ...params, ticket_id: params.ticket_id ?? null, context: params.context ?? {}, idempotency_key: params.idempotency_key });
 			storage.recordEvent(hold.run_id, "decision_hold_created", { hold_id: hold.id, generation: hold.generation, owner: hold.owner, expires_at: hold.expires_at }, hold.ticket_id);
+			// Exactly one "I'm waiting for your reply" notification per hold, ever
+			// — gated on storage-level `created` (true only the one time this
+			// call actually inserted a new row), never on anything the calling
+			// agent could retry into firing twice. Silent (never throws) if no
+			// channel is configured, same contract as every other notification
+			// path in this file.
+			if (hold.created) {
+				const notifyText = `❓ Il progetto "${identity.project}" ha una domanda in attesa di risposta: "${hold.question}" (hold ${hold.id}). Non serve fare nulla finché non rispondi — nessun altro processo interverrà su questo hold.`;
+				const notifyResult = await sendNotifications(notifyText);
+				logEvent("notification_dispatch", { hold_id: hold.id, ok: notifyResult.ok, detail: notifyResult.detail, channels: notifyResult.channels, reason: "decision_hold_waiting_for_user" });
+			}
 			return { content: [{ type: "text" as const, text: `decision hold ${hold.id}: ${hold.status} (generation ${hold.generation})` }], details: { hold: redactRuntimeProjection(hold) } };
 		},
 		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("decision_hold_create ")) + theme.fg("accent", (args as any).run_id ?? "?"), 0, 0); },

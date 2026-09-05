@@ -411,7 +411,7 @@ function paneHasLivePiProcess(paneId) {
 	} catch { return false; }
 }
 
-function cleanupCompletedAgentTabs(snapshot, row, runs) {
+export function cleanupCompletedAgentTabs(snapshot, row, runs) {
 	if (!snapshot) return [];
 	const terminalAssignments = new Set(runs.flatMap((run) => (run.tickets || [])
 		.filter((ticket) => ["done", "failed"].includes(ticket.status) && ticket.assigned_instance)

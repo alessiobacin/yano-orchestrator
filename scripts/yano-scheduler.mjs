@@ -27,7 +27,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -58,7 +58,7 @@ export function schedulerScriptsDir(env = process.env) { return path.join(schedu
 function shellQuote(value) { return `'${String(value).replace(/'/g, `'\\''`)}'`; }
 function fail(message) { throw new Error(`yano schedule: ${message}`); }
 
-function readStore(env) {
+export function readStore(env) {
 	const file = schedulerPath(env);
 	if (!existsSync(file)) return { file, store: structuredClone(DEFAULT_DB) };
 	try {
@@ -68,20 +68,63 @@ function readStore(env) {
 		return { file, store: { ...structuredClone(DEFAULT_DB), ...parsed, jobs: Array.isArray(parsed.jobs) ? parsed.jobs : [], supervisor } };
 	} catch { fail(`registro non leggibile: ${file}`); }
 }
-function writeStore(file, store) {
+export function writeStore(file, store) {
 	mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
 	const temp = `${file}.${process.pid}.tmp`;
 	writeFileSync(temp, `${JSON.stringify(store, null, 2)}\n`, { mode: 0o600 });
 	renameSync(temp, file);
+}
+
+// The one-minute scheduler pass (superviseScheduler → tick/recoverStaleDispatches)
+// is installed under TWO independent crontab markers today (yano-scheduler-supervisor
+// AND yano-watcher-supervisor, since the watcher's own supervise() also calls
+// superviseScheduler()). Without a lock, two concurrent processes can both read
+// jobs.json, both see a job as due/stale, and both dispatch it — a real
+// contributing cause of the 2026-09 incident where a daily job was re-fired
+// dozens of times. This lock makes a superviseScheduler() pass exclusive; a
+// contended pass is skipped outright (the next minute's cron — from either
+// marker — will simply pick the work back up).
+function schedulerSuperviseLockPath(env = process.env) { return path.join(schedulerDataDir(env), "supervise.lock"); }
+function acquireSchedulerSuperviseLock(env = process.env) {
+	const lock = schedulerSuperviseLockPath(env);
+	mkdirSync(path.dirname(lock), { recursive: true, mode: 0o700 });
+	const claim = () => { const fd = openSync(lock, "wx"); writeFileSync(fd, `${process.pid}\n${Date.now()}\n`); return { fd, lock }; };
+	try { return claim(); } catch (error) {
+		if (error?.code !== "EEXIST") throw error;
+		try {
+			const age = Date.now() - Number(readFileSync(lock, "utf8").split(/\s+/)[1]);
+			if (!Number.isFinite(age) || age <= 120_000) return null;
+			unlinkSync(lock);
+		} catch { return null; }
+		try { return claim(); } catch { return null; }
+	}
+}
+function releaseSchedulerSuperviseLock(handle) {
+	if (!handle) return;
+	try { closeSync(handle.fd); } catch { /* best effort */ }
+	try { unlinkSync(handle.lock); } catch { /* best effort */ }
 }
 function value(argv, flag) { const i = argv.indexOf(flag); return i < 0 ? null : argv[i + 1] || null; }
 function requireValue(argv, flag) { return value(argv, flag) || fail(`${flag} richiede un valore.`); }
 function idPart(value) { return String(value).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "job"; }
 function executionId(job, now) { return `scheduled-${idPart(job.id)}-${now.toISOString().replace(/[^0-9]/g, "").slice(0, 12)}-${randomUUID().slice(0, 8)}`; }
 function runHistory(job) { if (!Array.isArray(job.instances)) job.instances = []; return job.instances; }
+// "self" jobs run synchronously and produce their outcome via exit code alone
+// — there is no further async acknowledgement to wait for. Recording their
+// success as "dispatched" (a PENDING state meant for planner:/yano-local-pc
+// async handoffs) made recoverStaleDispatches() treat any self-mode script
+// whose stdout doesn't happen to match the {accepted,durable_pending} contract
+// as stuck, and re-run it forever. Real incident (2026-09-05): a working daily
+// script got re-executed ~every 3-4 minutes for two hours, resending a real
+// Telegram notification each time. "completed" is a terminal instance status
+// that recoverStaleDispatches() never revisits; job.last_status (what `tick()`
+// reports back and what existing callers assert on) is unaffected.
+function isSynchronousSelfJob(job) { return job?.mode === "self"; }
 function recordInstance(job, run, now, extra = {}) {
 	const instanceId = run.instance || executionId(job, now);
-	const record = { instance_id: instanceId, schedule_id: job.id, schedule_name: job.name, started_at: nowIso(now), status: run.status === 0 ? "dispatched" : "failed", result: run, ...extra };
+	const dispatchedOk = run.status === 0;
+	const status = !dispatchedOk ? "failed" : (isSynchronousSelfJob(job) ? "completed" : "dispatched");
+	const record = { instance_id: instanceId, schedule_id: job.id, schedule_name: job.name, started_at: nowIso(now), status, result: run, ...extra };
 	const history = runHistory(job);
 	history.push(record);
 	if (history.length > 200) history.splice(0, history.length - 200);
@@ -206,7 +249,16 @@ function launchPlannerAndWait(args, env, timeoutMs) {
 	return { status: result.status ?? 1, stdout: result.stdout || "", stderr: result.stderr || "" };
 }
 
-function recoverStaleDispatches(store, now, spawn, env) {
+// Automatic retries of a genuinely stuck async dispatch (planner:/yano-local-pc
+// modes awaiting an ack that never arrives) are capped: past this many
+// consecutive automatic retries for the SAME due occurrence, the job is marked
+// permanently failed instead of being retried forever every ~timeoutMs. The
+// counter resets the next time tick() dispatches the job normally (a fresh
+// occurrence deserves a fresh budget). This is a second, independent guard —
+// the primary fix for the 2026-09 incident is recordInstance()'s "completed"
+// status above, which stops self-mode jobs from ever reaching this loop.
+export const MAX_STALE_RECOVERIES = Math.max(1, Number(process.env.YANO_SCHEDULE_MAX_STALE_RECOVERIES) || 3);
+export function recoverStaleDispatches(store, now, spawn, env) {
 	const recovered = [];
 	const timeoutMs = Number(env.YANO_SCHEDULE_DISPATCH_TIMEOUT_MS) || 180_000;
 	for (const job of store.jobs) {
@@ -221,11 +273,21 @@ function recoverStaleDispatches(store, now, spawn, env) {
 			const age = now.getTime() - Date.parse(instance.started_at);
 			if (!Number.isFinite(age) || age < timeoutMs) continue;
 			if (instance.recovery_attempted_at && now.getTime() - Date.parse(instance.recovery_attempted_at) < 60_000) continue;
+			const attempts = Number(job.consecutive_stale_recoveries || 0);
+			if (attempts >= MAX_STALE_RECOVERIES) {
+				instance.status = "dispatch_failed_permanently";
+				instance.result = { ...(instance.result || {}), status: 1, error: `dispatch_timeout: nessuna conferma dopo ${attempts} tentativi automatici; retry sospesi fino alla prossima occorrenza schedulata`, permanent_failure: true };
+				job.last_status = "failed";
+				job.last_result = { ...instance.result, instance: instance.instance_id, permanent_failure: true };
+				if (!job.permanent_failure_notified_at) { job.permanent_failure_notified_at = nowIso(now); recovered.push({ schedule_id: job.id, stale_instance_id: instance.instance_id, permanent_failure: true }); }
+				continue;
+			}
 			instance.status = "failed";
 			instance.recovery_attempted_at = nowIso(now);
 			instance.result = { ...(instance.result || {}), status: 1, error: "dispatch_timeout: nessun esito osservabile entro la finestra di consegna", recovered_by: "scheduler-supervisor" };
 			const run = dispatch(job, now, spawn, env);
 			const retry = recordInstance(job, run, now, { retry_of: instance.instance_id, automatic_retry: true, recovery_reason: "dispatch_timeout" });
+			job.consecutive_stale_recoveries = attempts + 1;
 			job.last_run_at = nowIso(now); job.last_status = run.status === 0 ? "dispatched" : "failed"; job.last_result = { ...run, automatic_retry: true, retry_of: instance.instance_id };
 			recovered.push({ schedule_id: job.id, stale_instance_id: instance.instance_id, retry });
 			break;
@@ -340,6 +402,9 @@ export function tick({ env = process.env, now = new Date(), spawn = spawnSync } 
 		job.last_run_slot = slot; job.last_run_at = nowIso(now);
 		job.last_status = run.status === 0 ? "dispatched" : "failed";
 		job.last_result = run;
+		// A freshly-triggered occurrence gets a clean stale-recovery budget.
+		job.consecutive_stale_recoveries = 0;
+		job.permanent_failure_notified_at = null;
 		recordInstance(job, run, now);
 		if (job.one_shot) { job.enabled = false; job.one_shot_reason = "eseguito una volta"; run.one_shot_disabled = true; }
 		results.push({ id: job.id, name: job.name, enabled: job.enabled, ...run, status: job.last_status, one_shot_disabled: run.one_shot_disabled });
@@ -499,7 +564,10 @@ export async function runYanoScheduler({ argv, env = process.env, now = new Date
 		// One-shot: a cron-shaped slot is still required so the tick matcher
 		// knows WHEN; the job disables itself after its single run.
 		const oneShot = rest.includes("--once") || rest.includes("--one-shot");
-		const projectRoot = path.resolve(value(rest, "--project-root") || process.cwd()); if (!existsSync(projectRoot)) fail(`project root inesistente: ${projectRoot}`);
+		// --project-root is REQUIRED, never defaulted to cwd: a scheduling agent
+		// invoked without a clear target must ask the user which project, not
+		// silently guess "wherever this process happens to be running".
+		const projectRoot = path.resolve(requireValue(rest, "--project-root")); if (!existsSync(projectRoot)) fail(`project root inesistente: ${projectRoot}`);
 		const scriptPath = value(rest, "--script");
 		const task = parsedNatural?.task || (scriptPath ? (value(rest, "--task") || `esegue ${path.basename(scriptPath)}`) : requireValue(rest, "--task")); const name = value(rest, "--name") || task.slice(0, 72);
 		const mode = value(rest, "--mode") || (scriptPath ? "self" : null);
@@ -609,6 +677,21 @@ export async function autoPauseOrResume({ store, env, now, connectivity, spawn, 
 }
 
 export async function superviseScheduler({ env = process.env, now = new Date(), spawn = spawnSync } = {}) {
+	// Both the scheduler's own crontab entry AND the watcher's crontab entry
+	// (which also calls this function as part of its consolidated pass) can
+	// invoke this in the same minute. Without exclusivity, two concurrent
+	// passes can both see the same stale/due job and both dispatch it — see
+	// recoverStaleDispatches() above for the 2026-09 incident this guards
+	// against. A contended pass is skipped, not queued: the next minute's
+	// cron (from either marker) picks the work back up.
+	const lock = acquireSchedulerSuperviseLock(env);
+	if (!lock) return { checked_at: nowIso(now), skipped_locked: true, dispatched: [] };
+	try {
+		return await superviseSchedulerLocked({ env, now, spawn });
+	} finally { releaseSchedulerSuperviseLock(lock); }
+}
+
+async function superviseSchedulerLocked({ env, now, spawn }) {
 	const { file, store } = readStore(env);
 	const agent = superviseAgent(store, now, spawn);
 	// The scheduler's own minute tick must also guarantee that its execution

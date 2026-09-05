@@ -158,7 +158,9 @@ Quando ricevi `escalation.active: true`:
    ha già fallito il budget intero; nel messaggio di dispatch cita cosa non ha
    funzionato e chiedi esplicitamente un approccio diverso (altra libreria,
    altra scomposizione del problema, verifica di un'ipotesi diversa — non solo
-   "riprova");
+   "riprova"). Se conosci il `provider-id` del pin usato dal worker fallito,
+   passalo come `current_provider_id` a `ticket_requeue`: senza questo, il
+   modello suggerito potrebbe essere lo stesso provider appena fallito;
 2. se `escalation.recommended_model` è presente, rilancia lo specialista con
    quel modello pinnato (`yano start ... --model <pinned>` se la CLI installata
    lo supporta, altrimenti documenta il pin nel prompt di dispatch); se è

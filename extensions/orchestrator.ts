@@ -7061,7 +7061,7 @@ export default function (pi: ExtensionAPI) {
 		name: "ticket_requeue",
 		label: "Requeue Ticket Recovery",
 		description: "Requeue a failed ticket on the same id with a persisted recovery generation and bounded retry budget.",
-		parameters: Type.Object({ ticket_id: Type.String(), reason: Type.String(), max_retries: Type.Integer({ minimum: 1 }), max_replans: Type.Optional(Type.Integer({ minimum: 1 })) }),
+		parameters: Type.Object({ ticket_id: Type.String(), reason: Type.String(), max_retries: Type.Integer({ minimum: 1 }), max_replans: Type.Optional(Type.Integer({ minimum: 1 })), current_provider_id: Type.Optional(Type.String({ description: "provider-id (from the pinned model@provider-id the failed worker used, if any) to exclude from the escalation suggestion — without this the recommendation can suggest the same provider that just failed" })) }),
 		async execute(_callId, params) {
 			if (!identity || identity.role !== "planner") throw new Error("ticket_requeue: only planner may replace a failed worker.");
 			let result: any;
@@ -7086,7 +7086,7 @@ export default function (pi: ExtensionAPI) {
 				// llmProxy is unreachable; the escalation itself still
 				// happens either way, just without a specific pin to suggest.
 				let modelSuggestion: any = null;
-				try { modelSuggestion = await recommendModel({ roleClass: "support" }); } catch { modelSuggestion = null; }
+				try { modelSuggestion = await recommendModel({ roleClass: "support", excludeProviderId: (params as any).current_provider_id || null }); } catch { modelSuggestion = null; }
 				const pinned = modelSuggestion?.recommended?.pinned_id || null;
 				const notifyText = pinned
 					? `🔁 Ticket "${params.ticket_id}" ha esaurito i tentativi normali. Provo un modello diverso (${pinned}) e un approccio diverso prima di arrendermi. Motivo: ${params.reason}`

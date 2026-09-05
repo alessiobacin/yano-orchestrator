@@ -60,6 +60,7 @@ import { llmProxyAutoModel, switchImageTurnToAuto } from "../scripts/yano-vision
 import { switchPinnedModelToAuto } from "../scripts/yano-model-fallback.mjs";
 import { recommend as recommendModel } from "../scripts/yano-model-advisor.mjs";
 import { openDatabase as openFeedbackDatabase, createFeedback as createFeedbackRecord, claimFeedback, listFeedback } from "../scripts/yano-feedback.mjs";
+import { globalConfigPath, loadConfigFile } from "../scripts/yano-config.mjs";
 
 // ESM-safe lazy require, used only inside SQLiteOrchestratorStorage's
 // constructor to resolve node:sqlite on first actual use (see the
@@ -5209,10 +5210,26 @@ export default function (pi: ExtensionAPI) {
 		return result;
 	}
 
+	// Cached for the lifetime of the process: the global config file is only
+	// ever changed via `yano config set`/`unset`, never by a running agent, so
+	// re-reading it on every notification send would be pure overhead.
+	let cachedGlobalConfig: Record<string, string> | null = null;
+	function globalYanoConfig(): Record<string, string> {
+		if (!cachedGlobalConfig) cachedGlobalConfig = loadConfigFile(globalConfigPath());
+		return cachedGlobalConfig;
+	}
+
 	function getEnvVar(cwd: string, key: string): string | undefined {
-		// process.env takes precedence over .env — the usual dotenv convention,
-		// lets a real shell/CI env override the file without editing it.
-		return process.env[key] || loadEnvFile(cwd)[key] || undefined;
+		// Precedence: process.env (shell/CI override) > this project's own .env
+		// > the global `yano config` default (see yano-config.mjs's CONFIG_SPECS
+		// — EVOLUTION_*/TELEGRAM_*/SENDGRID_* are already valid global keys).
+		// A project that configures its own channel is never overridden by the
+		// global default; a project with none configured falls back to it —
+		// this is what lets the user set ONE default notification channel once
+		// (`yano config set TELEGRAM_BOT_TOKEN ...`) instead of repeating it in
+		// every project's .env, while still letting a specific project opt into
+		// its own separate channel.
+		return process.env[key] || loadEnvFile(cwd)[key] || globalYanoConfig()[key] || undefined;
 	}
 
 	async function sendWhatsAppNotification(message: string): Promise<{ ok: boolean; detail: string }> {

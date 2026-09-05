@@ -50,7 +50,7 @@ fs.writeFileSync(path.join(fakeBin, "herdr"), [
 ].join("\n"));
 fs.chmodSync(path.join(fakeBin, "herdr"), 0o700);
 process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH || ""}`;
-process.env.YANO_TEST_ALIVE_PANES = "p-coder-running";
+process.env.YANO_TEST_ALIVE_PANES = "p-coder-running,p-real-coder";
 
 const row = { root: "/tmp/fixture-project", name: "fixture-project" };
 
@@ -111,6 +111,23 @@ check("an agent instance from a DIFFERENT project's cwd is never touched", () =>
 	const runs = [{ tickets: [{ status: "done", assigned_instance: "coder-01" }] }];
 	const removed = cleanupCompletedAgentTabs(snapshotWith(agents), row, runs);
 	assert.deepEqual(removed, [], "cwd scoping prevents cross-project tab closure");
+});
+
+check("REAL Herdr shape (2026-09-05 audit): a genuine snapshot has no agent.name/agent.instance and a generic terminal_title_stripped — the tab's own label must be used, or a finished agent is never closed", () => {
+	// This is not a hypothetical: it is what herdr api snapshot actually
+	// returns in production. agent.name/agent.instance are simply absent, and
+	// agent.terminal_title_stripped is Pi's own generic pane title ("π -
+	// <project>"), never the role/instance identity — before this fix, EVERY
+	// real project's live-agent sweep was silently a no-op (every closure
+	// that ever happened came from the separate agent-less/orphaned-tab pass
+	// instead, which already read the tab's label).
+	const agents = [{ cwd: row.root, tab_id: "t-real-coder", pane_id: "p-real-coder", agent_status: "idle", terminal_title_stripped: "π - fixture-project" }];
+	const tabs = [{ tab_id: "t-real-coder", workspace_id: "w1", label: "coder-07-fixture-project" }];
+	const runs = [{ tickets: [{ status: "done", assigned_instance: "coder-07" }] }];
+	const removed = cleanupCompletedAgentTabs({ agents, tabs }, row, runs);
+	assert.equal(removed.length, 1, "the real-shaped agent is still correctly matched and closed, via the tab's label");
+	assert.equal(removed[0].instance, "coder-07-fixture-project");
+	assert.equal(removed[0].reason, "terminal_ticket", "closed because the ticket is done (agent is alive), not because it looked dead");
 });
 
 delete process.env.YANO_TEST_ALIVE_PANES;

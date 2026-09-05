@@ -470,8 +470,18 @@ export function cleanupCompletedAgentTabs(snapshot, row, runs) {
 	const closedTabIds = new Set();
 	const agentsInProject = (snapshot.agents || []).filter((agent) => path.resolve(agent.cwd || "") === path.resolve(row.root));
 	for (const agent of agentsInProject) {
-		const instance = String(agent.name || agent.instance || agent.terminal_title_stripped || "");
 		const tab = snapshot.tabs?.find((item) => item.tab_id === agent.tab_id);
+		// A real Herdr snapshot does not populate agent.name/agent.instance, and
+		// agent.terminal_title_stripped is a generic Pi pane title ("π -
+		// <project>"), not the role identity — none of these ever matched a
+		// ticket's assigned_instance in production. Real evidence (2026-09-05):
+		// this made the ENTIRE live-agent branch below a no-op for every real
+		// project — every closed tab up to this point came from the agent-less
+		// second pass instead, which already (correctly) reads the tab's own
+		// label. Yano's own tab-naming convention names a tab after its exact
+		// instance, so prefer that; only fall back to the agent's own fields
+		// when a tab genuinely cannot be found for this agent.
+		const instance = String(tab?.label || agent.name || agent.instance || agent.terminal_title_stripped || "");
 		const isProtected = /planner/i.test(instance) || isProtectedTabLabel(tab?.label);
 		const terminalTask = isTerminalAssignment(instance);
 		const status = String(agent.agent_status || "unknown").toLowerCase();

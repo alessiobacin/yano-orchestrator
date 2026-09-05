@@ -451,6 +451,14 @@ function paneHasLivePiProcess(paneId) {
 	} catch { return false; }
 }
 
+// A tab is never touched — regardless of any other condition below — if it
+// is the planner's own persistent control surface, or the user's own manual
+// terminal pane (conventionally labelled "human" across every project).
+function isProtectedTabLabel(label) {
+	const text = String(label || "").trim().toLowerCase();
+	return text === "human" || /planner/i.test(text);
+}
+
 export function cleanupCompletedAgentTabs(snapshot, row, runs) {
 	if (!snapshot) return [];
 	const terminalAssignments = new Set(runs.flatMap((run) => (run.tickets || [])
@@ -459,24 +467,51 @@ export function cleanupCompletedAgentTabs(snapshot, row, runs) {
 	const isTerminalAssignment = (instance) => [...terminalAssignments].some((assigned) =>
 		instance === assigned || instance.startsWith(`${assigned}-`) || assigned.startsWith(`${instance}-`));
 	const removed = [];
-	for (const agent of snapshot.agents || []) {
-		if (path.resolve(agent.cwd || "") !== path.resolve(row.root)) continue;
+	const closedTabIds = new Set();
+	const agentsInProject = (snapshot.agents || []).filter((agent) => path.resolve(agent.cwd || "") === path.resolve(row.root));
+	for (const agent of agentsInProject) {
 		const instance = String(agent.name || agent.instance || agent.terminal_title_stripped || "");
-		const isPlanner = /planner/i.test(instance);
+		const tab = snapshot.tabs?.find((item) => item.tab_id === agent.tab_id);
+		const isProtected = /planner/i.test(instance) || isProtectedTabLabel(tab?.label);
 		const terminalTask = isTerminalAssignment(instance);
 		const status = String(agent.agent_status || "unknown").toLowerCase();
 		const dead = !paneHasLivePiProcess(agent.pane_id);
-		// Planner tabs are persistent project control surfaces. Never close them
-		// merely because a run completed or the process is temporarily absent;
-		// when an active run/hold needs recovery, ensureRegisteredPlanner() owns
-		// the explicit blocked-planner close/relaunch decision below.
-		if (isPlanner) continue;
+		// Planner tabs are persistent project control surfaces, and a "human"
+		// tab is the user's own manual terminal — never close either merely
+		// because a run completed or the process is temporarily absent; when an
+		// active run/hold needs recovery, ensureRegisteredPlanner() owns the
+		// explicit blocked-planner close/relaunch decision below.
+		if (isProtected) continue;
 		if (!terminalTask && !dead) continue;
 		if (!dead && !["idle", "offline", "unknown", "stopped", "done"].includes(status)) continue;
-		const tab = snapshot.tabs?.find((item) => item.tab_id === agent.tab_id);
 		if (!tab) continue;
 		const closed = closeHerdrTab(tab.tab_id);
+		closedTabIds.add(tab.tab_id);
 		removed.push({ tab_id: tab.tab_id, pane_id: agent.pane_id, instance, reason: dead ? "dead_process" : "terminal_ticket", ...closed });
+	}
+	// A Pi process that has fully exited disappears from snapshot.agents
+	// entirely (Herdr does not keep a "dead agent" placeholder) — its TAB,
+	// however, lingers forever with no owning agent at all, invisible to the
+	// loop above. Real evidence (2026-09-05 audit): article-writer alone had
+	// 12 such agent-less tabs (duplicated coder-02/docs-sync instances whose
+	// process had long since exited). Sweep the project's own workspace
+	// directly for these; a tab is only closed here when ticket history
+	// confirms its assigned instance's work is actually done/failed — a
+	// same-minute freshly-launched instance that has not registered its Pi
+	// agent yet has no terminal-assignment match, so it is never touched.
+	const workspace = findProjectWorkspace(snapshot, row.root, row.name);
+	if (workspace) {
+		const liveTabIds = new Set(agentsInProject.map((agent) => agent.tab_id));
+		for (const tab of snapshot.tabs || []) {
+			if (tab.workspace_id !== workspace.workspace_id) continue;
+			if (liveTabIds.has(tab.tab_id) || closedTabIds.has(tab.tab_id)) continue;
+			if (isProtectedTabLabel(tab.label)) continue;
+			const instance = String(tab.label || "");
+			if (!instance || !isTerminalAssignment(instance)) continue;
+			const closed = closeHerdrTab(tab.tab_id);
+			closedTabIds.add(tab.tab_id);
+			removed.push({ tab_id: tab.tab_id, pane_id: null, instance, reason: "orphaned_agentless_terminal_ticket", ...closed });
+		}
 	}
 	if (removed.length) {
 		try { appendRawTraceRecord({ cwd: row.root, project: row.name, record: { type: "watcher_completed_agent_tabs_closed", record_type: "event", source: "yano-watcher-registry", instance: "yano-watcher", closed: removed } }); } catch { /* best effort */ }

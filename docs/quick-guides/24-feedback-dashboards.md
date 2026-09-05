@@ -22,13 +22,21 @@ Gli endpoint CRUD principali sono `/<project-id>/bugs` e
 `/<project-id>/suggestions`, con `GET`, `POST`, `PUT`, `PATCH` e `DELETE`.
 Retry e cambi stato sono auditati. Ogni modifica manuale richiede una nota.
 
-La card mostra soltanto titolo, utente, data/ora locale italiana e route; il
-messaggio completo resta nella modal. La data usa `Europe/Rome` e formato
-`GG/MM/AAAA HH:MM`. La modal consente di creare/modificare card, mantiene
-sempre visibili i pulsanti `Salva` e `Annulla`, evidenzia in rosso i campi
-obbligatori, mostra l'anteprima degli screenshot e accetta file multipli anche
-con drag-and-drop. Gli screenshot remoti si inseriscono come URL separati e
-non come JSON.
+La card mostra titolo, severità (colore del bordo e chip: grigio `low`, teal
+`medium`, arancio `high`, rosso `critical`), utente, data/ora locale italiana
+e route; il messaggio completo resta nella modal. La data usa `Europe/Rome` e
+formato `GG/MM/AAAA HH:MM`. Ogni colonna mostra il numero di elementi e uno
+stato vuoto esplicito quando non ne contiene. Un campo di ricerca filtra le
+card per titolo, messaggio o route senza ricaricare la board; un indicatore
+in header mostra l'orario dell'ultimo aggiornamento (poll ogni 5s). Trascinare
+una card in un'altra colonna cambia lo stato via drag-and-drop (registra in
+automatico una nota d'audit "Spostato in ... via drag & drop"); cliccarla
+apre comunque la modal completa per una modifica più dettagliata. La modal
+consente di creare/modificare card, mantiene sempre visibili i pulsanti
+`Salva` e `Annulla`, evidenzia in rosso i campi obbligatori, mostra
+l'anteprima degli screenshot e accetta file multipli anche con
+drag-and-drop. Gli screenshot remoti si inseriscono come URL separati e non
+come JSON.
 
 Per un frontend con backend separato:
 
@@ -43,6 +51,27 @@ client esterno. Per i test del progetto, il coder deve predisporre account
 development/test per ogni ruolo applicativo e registrarne le credenziali nel
 meccanismo sicuro di Yano; mai usare o creare account in production.
 
-Stati disponibili: `received`, `pending_planner`, `queued`, `processing`,
-`awaiting_user_confirmation`, `paused`, `retry`, `resolved`, `processed`,
-`failed`, `cancelled`.
+Stati comuni: `received`, `pending_planner`, `queued`, `processing`,
+`awaiting_user_confirmation`, `paused`, `retry`, `cancelled`. Lo stato
+terminale differisce per tipo — non sono intercambiabili, ognuna delle due
+dashboard espone solo la propria colonna:
+
+| Tipo | Stato terminale | Colonna esposta da |
+|------|------------------|---------------------|
+| bug (`BUG-...`) | `resolved` | `bug-dash` (non ha colonna `processed`) |
+| suggestion (`SUG-...`) | `processed` | `suggest-dash` (non ha colonna `resolved`) |
+
+`failed` esiste solo per i bug. Il planner non deve mai scegliere lo stato
+sbagliato per il tipo: un record chiuso con lo stato dell'altro tipo sparisce
+dalla propria board (nessuna colonna corrisponde). Se il planner chiama
+`worktree_finalize` passando `feedback_id` (con `user_confirmed: true`,
+oppure `automatic_backend: true` per un bug puro backend), lo stato
+terminale corretto viene scelto e scritto automaticamente in base al
+prefisso dell'id — non serve un aggiornamento manuale separato in quel caso.
+
+Sia i bug sia le suggestion sono ciascuno una coda FIFO per progetto: quando
+il planner del progetto diventa inattivo, o riceve la notifica MQTT
+`feedback_received`, il codice orchestratore preleva e assegna
+automaticamente il record persistito più vecchio (i bug hanno priorità sulle
+suggestion quando entrambe le code hanno qualcosa in attesa e non è arrivata
+una notifica specifica per l'altro tipo).

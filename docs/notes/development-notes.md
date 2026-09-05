@@ -5159,3 +5159,94 @@ maggior parte del lavoro descritto sopra.
 Riferimenti diagrammi: `docs/diagram/09-heartbeat-liveness.mmd`,
 `10-digest-giornaliero.mmd`, `11-notifica-canale-globale.mmd`,
 `12-pulizia-tab-agenti.mmd`, `13-scheduler-dispatch-dedup.mmd`.
+
+## Revisione 66 — `bug-dash`/`suggest-dash` non avevano mai renderizzato in un browser
+
+Audit richiesto su `bug-dash`/`suggest-dash`. La scoperta più grave è emersa
+solo aprendo davvero la dashboard in un browser (mai fatto dai test
+precedenti, che confrontavano solo sottostringhe dell'HTML servito, mai
+l'eseguibilità del suo JavaScript): lo `<script>` inline aveva **due
+SyntaxError fatali**, presenti da prima di questa revisione, che
+impedivano l'esecuzione di QUALUNQUE riga dello script — la Kanban board
+non ha probabilmente mai renderizzato nulla in nessun browser, per nessun
+progetto. Causa 1: dentro il template literal esterno di `page()`
+(`scripts/yano-feedback-dashboard.mjs`), le regex `\n`, `\s`, `\[`, `\]`,
+`\(`, `\)`, `\/` usate da `titleOf()`/`shot()` avevano un solo backslash —
+la stringa esterna le "consumava" prima di raggiungere il browser (`\n`
+diventava un vero a-capo dentro un letterale regex, `\s`/`\[`/ecc.
+perdevano il backslash), producendo regex non valide lato client. Solo
+`cleanUrl()` era già corretta (doppio backslash). Causa 2: l'handler di
+submit del form costruiva gli screenshot con
+`files.map(file=>({data:await new Promise(...)}))` — una arrow function
+`await`-ante ma non dichiarata `async` — un secondo `SyntaxError`
+indipendente, che avrebbe comunque rotto il salvataggio di ogni bug/
+suggestion con screenshot allegati anche fosse stata l'unica causa. Oltre
+al fix sintattico, la funzione ora usa correttamente
+`await Promise.all(files.map(async file=>(...)))`: prima, anche
+"corretta" solo nella sintassi, avrebbe inserito Promise non risolte
+nell'array `screenshots` invece dei dati letti.
+`scripts/smoke-test-feedback-dashboard.mjs` ora fa parsare lo `<script>`
+servito con `node:vm` per entrambi i tipi — verificato che questo nuovo
+controllo fallisce davvero contro il codice pre-fix e passa contro quello
+corretto, cioè è una guardia di regressione reale, non decorativa.
+
+**Colonna `pending_planner` mancante.** Anche a sintassi corretta, ogni
+bug/suggestion appena creato — lo stato più comune in assoluto, dato che
+`notifyPlanner()` lascia il record in `pending_planner` ogni volta che
+nessun planner risulta sottoscritto nella finestra di ~250ms — non aveva
+nessuna colonna Kanban in cui apparire: la lista stati di `page()` iniziava
+con `received`, saltando `pending_planner` del tutto. Aggiunta a entrambe
+le dashboard.
+
+**Le suggestion REST non venivano mai consegnate al planner.**
+`wakeNextQueuedFeedback()` in `extensions/orchestrator.ts` — la funzione che
+consegna al planner inattivo il record persistito più vecchio, sia su
+`planner_turn_end` sia su notifica MQTT `feedback_received` — interrogava
+sempre e solo `listFeedback(db, { type: "bug", ... })`. Una suggestion
+persistita mentre il planner era occupato restava in `pending_planner`/
+`queued` per sempre: nessun meccanismo la riproponeva mai, a differenza dei
+bug (una coda FIFO reale). La logica di dequeue è stata estratta in
+`claimNextQueuedFeedback()`/`buildQueuedFeedbackWakeMessage()`
+(`scripts/yano-feedback.mjs`), così testabile senza l'harness MQTT/Pi; ora
+controlla entrambe le code (bug con priorità quando nessuna notifica
+specifica è arrivata, il tipo della notifica quando è arrivata), con un
+messaggio di wake distinto per tipo.
+
+**Stato terminale sbagliato per i bug automatici.** `worktree_finalize` con
+`automatic_backend: true` scriveva `status='processed'` per un bug — ma
+`bug-dash` non ha mai avuto una colonna `processed` (solo `resolved`): un bug
+chiuso in automatico spariva silenziosamente dalla propria Kanban invece di
+comparire come risolto. `terminalStatusForFeedbackId()` deriva ora lo stato
+corretto dal prefisso dell'id (`BUG-`→`resolved`, `SUG-`→`processed`), usato
+sia dal ramo automatico sia — estensione nuova — da qualunque
+`worktree_finalize` confermato (`user_confirmed: true`) che passi
+`feedback_id`: prima, il percorso "frontend/misto confermato dall'utente" e
+qualunque suggestion non chiudevano mai il record via codice, lasciando
+l'istruzione del prompt ("aggiornane lo stato con la CLI/API") come unico
+percorso, mai verificato in modo deterministico.
+
+**Dashboard: drag-and-drop reale, non decorativo.** Le card avevano
+`draggable="true"` ma nessuna colonna aveva `ondragover`/`ondrop`: trascinare
+una card non faceva nulla. Aggiunti anche colore/chip per severità (assente
+prima: ogni card aveva lo stesso bordo teal indipendentemente dalla
+severità), contatore per colonna, stato vuoto esplicito, campo di ricerca
+client-side e un indicatore dell'ultimo aggiornamento — stesso stack
+single-file HTML/CSS/JS inline, nessuna nuova dipendenza.
+
+**Verifica end-to-end.** `scripts/smoke-test-feedback-e2e-flow.mjs` avvia
+`bug-dash`/`suggest-dash` come veri processi figli separati (esattamente come
+`yano bug-dash start`), crea un bug e una suggestion via le loro API HTTP
+reali, dimostra che `claimNextQueuedFeedback()` (il meccanismo che userebbe
+davvero un planner) ora consegna entrambi, simula la chiusura via
+`worktree_finalize` e verifica che ciascuno atterri sulla propria colonna
+terminale reale (`resolved` per il bug, `processed` per la suggestion) senza
+mai comparire sull'altra dashboard.
+
+**Verifica manuale in browser.** Nessuno dei test sopra esegue davvero il
+JavaScript servito in un motore browser — è proprio per questo che i due
+`SyntaxError` sono rimasti invisibili. Avviata un'istanza isolata di
+`bug-dash` (dati di test, mai il registro reale) e verificato dal vivo:
+board popolata correttamente per severità/colonna/conteggio, filtro di
+ricerca che aggiorna anche i conteggi, drag-and-drop di una card reale con
+un vero `DragEvent`/`DataTransfer` che sposta davvero lo stato via API, e
+apertura/chiusura della modale "Nuovo".

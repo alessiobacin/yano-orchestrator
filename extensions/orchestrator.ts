@@ -59,7 +59,7 @@ import { getProjectApi, listProjectApis, resolveApiSecret } from "../scripts/yan
 import { llmProxyAutoModel, switchImageTurnToAuto } from "../scripts/yano-vision-routing.mjs";
 import { switchPinnedModelToAuto } from "../scripts/yano-model-fallback.mjs";
 import { recommend as recommendModel } from "../scripts/yano-model-advisor.mjs";
-import { openDatabase as openFeedbackDatabase, createFeedback as createFeedbackRecord, claimFeedback, listFeedback } from "../scripts/yano-feedback.mjs";
+import { openDatabase as openFeedbackDatabase, createFeedback as createFeedbackRecord, claimFeedback, claimNextQueuedFeedback, listFeedback, terminalStatusForFeedbackId } from "../scripts/yano-feedback.mjs";
 import { globalConfigPath, loadConfigFile } from "../scripts/yano-config.mjs";
 
 // ESM-safe lazy require, used only inside SQLiteOrchestratorStorage's
@@ -3065,18 +3065,24 @@ export default function (pi: ExtensionAPI) {
 		}
 		return true;
 	}
-	function wakeNextQueuedFeedback(reason: string): void {
+	// Dequeues the oldest pending bug/suggestion for this project (see
+	// claimNextQueuedFeedback in yano-feedback.mjs — extracted there so the
+	// dequeue-and-classify decision is unit-testable). Before 2026-09-06 this
+	// only ever looked at type="bug", so a suggestion sitting in
+	// "pending_planner"/"queued" was NEVER surfaced to the planner no matter
+	// how long it stayed idle — bugs got a FIFO catch-up, suggestions got
+	// silently stuck forever. preferredType lets a live feedback_received
+	// notification check the queue matching what just arrived first, while
+	// still respecting that queue's own FIFO order (see the smoke test).
+	function wakeNextQueuedFeedback(reason: string, preferredType?: "bug" | "suggestion"): void {
 		if (!identity || identity.role !== "planner" || computeSelfStatus() !== "idle") return;
 		let db: any = null;
 		try {
 			db = openFeedbackDatabase();
-			const next = listFeedback(db, { project_id: identity.project, type: "bug", statuses: ["pending_planner", "queued"] })[0];
-			if (!next) return;
-			const claimed = claimFeedback(db, next.id);
-			if (!claimed || claimed.status !== "processing") return;
-			const screenshotNote = claimed.screenshots?.length ? `\nScreenshot allegati: ${JSON.stringify(claimed.screenshots)}` : "";
-			pi.sendMessage({ customType: "feedback-inbound", content: `[bug ${claimed.id}] Bug persistito in coda FIFO. Risolvilo ora prima di restare inattivo.\n\n${claimed.message}${screenshotNote}\n\nClassifica prima l'impatto: backend puro oppure frontend/misto.`, display: true, details: { feedback_id: claimed.id, reason } }, { deliverAs: "followUp", triggerTurn: true });
-			logEvent("feedback_queue_wake", { feedback_id: claimed.id, reason, status: claimed.status });
+			const result = claimNextQueuedFeedback(db, identity.project, { preferredType });
+			if (!result) return;
+			pi.sendMessage({ customType: "feedback-inbound", content: result.message, display: true, details: { feedback_id: result.claimed.id, reason, feedback_type: result.type } }, { deliverAs: "followUp", triggerTurn: true });
+			logEvent("feedback_queue_wake", { feedback_id: result.claimed.id, reason, status: result.claimed.status, feedback_type: result.type });
 		} catch (error) {
 			logEvent("feedback_queue_wake_failed", { reason, error: error instanceof Error ? error.message : String(error) });
 		} finally { try { db?.close(); } catch { /* best effort */ } }
@@ -3084,7 +3090,7 @@ export default function (pi: ExtensionAPI) {
 	function handleFeedbackReceived(payload: any): void {
 		if (!identity || identity.role !== "planner" || payload?.project_id !== identity.project) return;
 		logEvent("feedback_received", { feedback_id: payload.feedback_id ?? null, feedback_type: payload.feedback_type ?? null, screenshot_count: Array.isArray(payload.screenshots) ? payload.screenshots.length : 0, planner_status: computeSelfStatus() });
-		wakeNextQueuedFeedback("feedback_received");
+		wakeNextQueuedFeedback("feedback_received", payload?.feedback_type === "suggestion" ? "suggestion" : "bug");
 	}
 
 	function scheduleEviction(assignment_id: string): void {
@@ -5480,7 +5486,7 @@ export default function (pi: ExtensionAPI) {
 			notify_message: Type.Optional(Type.String({ description: "Custom completion message sent to all configured notification channels. Defaults to a generic one naming the task slug." })),
 			user_confirmed: Type.Boolean({ description: "You explicitly asked the user to confirm this result is what they wanted, and they confirmed — required, no exceptions." }),
 			automatic_backend: Type.Optional(Type.Boolean({ description: "Planner-only bug exception: true only for a persisted pure-backend, deterministic, non-destructive bug with all required tests/review green." })),
-			feedback_id: Type.Optional(Type.String({ description: "Persisted BUG-... id when finalizing a bug; required with automatic_backend." })),
+			feedback_id: Type.Optional(Type.String({ description: "Persisted BUG-... or SUG-... id when this task closes a bug/suggestion. Required with automatic_backend. When present and user_confirmed is true, the record is moved to its terminal status automatically (resolved for a bug, processed for a suggestion) — no separate CLI/API call needed." })),
 			frontend_scope: Type.Optional(Type.Union([Type.Literal("required"), Type.Literal("not_applicable")])),
 			agentation_review_status: Type.Optional(Type.Union([Type.Literal("verified"), Type.Literal("declined")])),
 			agentation_url: Type.Optional(Type.String({ description: "The development URL shown to the user for the Agentation review." })),
@@ -5671,9 +5677,15 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			logEvent("worktree_finalize", { slug, worktree_path: wtPath, branch, merged: true, conflict: false });
-			if (automaticBackendBug && params.feedback_id) {
+			// Revisione 66 — before this, only the automatic_backend bug path ever
+			// closed a feedback record (and it wrote 'processed', which bug-dash
+			// doesn't even have a column for — an auto-finalized bug silently
+			// vanished from its own Kanban board instead of showing as resolved).
+			// Any confirmed finalize that names a feedback_id now closes it too,
+			// with the status its own dashboard actually expects.
+			if (params.feedback_id && (automaticBackendBug || params.user_confirmed)) {
 				const feedbackDb = openFeedbackDatabase();
-				try { feedbackDb.prepare("UPDATE feedback SET status='processed',updated_at=? WHERE id=?").run(nowIso(), params.feedback_id); }
+				try { feedbackDb.prepare("UPDATE feedback SET status=?,updated_at=? WHERE id=?").run(terminalStatusForFeedbackId(params.feedback_id), nowIso(), params.feedback_id); }
 				finally { feedbackDb.close(); }
 			}
 			if (params.run_id && finalizationStorage) {

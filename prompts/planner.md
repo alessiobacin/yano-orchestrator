@@ -219,8 +219,17 @@ input persistito, non un agente. Verifica sempre `project_id`, messaggio e stato
 lavoro agli agenti appropriati. Le suggestions richiedono sempre conferma
 esplicita dell'utente prima di qualsiasi modifica. Un bug con `automatic` può
 essere processato subito; con `user_confirmation` devi aprire un decision
-hold. Porta il record a `processed` solo dopo la verifica del lavoro; altrimenti
-lascialo persistito e aggiornane lo stato con la CLI/API.
+hold. Lo stato terminale differisce per tipo: un bug risolto va a `resolved`,
+una suggestion attuata (approvata e trasformata in nuova feature) va a
+`processed` — sono le uniche colonne che i rispettivi `bug-dash`/`suggest-dash`
+espongono per un record chiuso; l'altro nome, in quel dashboard, non esiste e
+il record sparirebbe dalla board. Se chiami `worktree_finalize` passando
+`feedback_id` (con `user_confirmed: true`, oppure `automatic_backend: true`
+per un bug puro backend), lo stato terminale corretto viene scritto
+automaticamente in base al prefisso (`BUG-`→`resolved`, `SUG-`→`processed`):
+non serve una chiamata separata. Se invece chiudi un record senza passare da
+un worktree (ad esempio una suggestion rifiutata dall'utente), aggiornane lo
+stato esplicitamente con la CLI/API.
 
 Se l'utente descrive un bug o una suggestion direttamente nella chat del
 planner, devi prima chiamare `feedback_create`, prima di analizzare, diagnosticare
@@ -230,9 +239,15 @@ stata allegata alla chat e non arriva dall'API REST: prima persisti il record
 con l'allegato, poi avvia triage e risoluzione. Non chiedere di reinviare un
 bug già persistito.
 
-I bug REST sono una coda FIFO per progetto. Se sei inattivo, prendi subito il
-bug più vecchio; se sei occupato, non interrompere il run corrente: al termine
-controlla sempre la coda e prendi il successivo prima di restare inattivo. Puoi
+I bug e le suggestion REST sono ciascuno una coda FIFO per progetto, e non
+devi interrogare tu stesso l'API per scoprire se c'è lavoro in attesa: quando
+diventi inattivo o arriva una notifica MQTT `feedback_received`, il codice
+orchestratore prende automaticamente il record persistito più vecchio (i bug
+hanno priorità sulle suggestion quando entrambe le code hanno qualcosa in
+attesa e non è arrivata una notifica specifica) e te lo consegna come messaggio
+in coda, con istruzioni diverse per tipo. Se sei occupato, non interrompere il
+run corrente: al termine controlla sempre la coda (questo avviene comunque in
+automatico) e prendi il successivo prima di restare inattivo. Puoi
 avviare coder aggiuntivi se il coder già attivo è occupato. Ogni bug deve avere
 un worktree, un report e un commit separati. Classifica il bug prima di fissarlo:
 un backend puro, non distruttivo, con test deterministici, regressioni e review

@@ -34,6 +34,15 @@ export function openDatabase() {
 }
 function now() { return new Date().toISOString(); }
 function id(type) { return `${type === "bug" ? "BUG" : "SUG"}-${crypto.randomUUID()}`; }
+// The two Kanban dashboards (yano-feedback-dashboard.mjs) use different
+// terminal-status columns by design: a bug is "resolved", a suggestion is
+// "processed" (it was actioned into a new feature, not "fixed"). Any code
+// path that closes a feedback record — currently only
+// worktree_finalize(feedback_id, user_confirmed:true) in
+// extensions/orchestrator.ts — must pick the status matching the record's own
+// prefix, or the record silently disappears from its own dashboard (bug-dash
+// has no "processed" column; suggest-dash has no "resolved" column).
+export function terminalStatusForFeedbackId(feedbackId) { return String(feedbackId || "").startsWith("BUG-") ? "resolved" : "processed"; }
 function clean(value) { return String(value ?? "").trim().slice(0, MAX_MESSAGE); }
 function decodeRow(value) {
 	if (!value) return value;
@@ -54,6 +63,28 @@ export function claimFeedback(db, feedbackId) {
 	if (!current || !["received", "pending_planner", "queued"].includes(current.status)) return current;
 	db.prepare("UPDATE feedback SET status='processing',updated_at=? WHERE id=? AND status IN ('received','pending_planner','queued')").run(now(), feedbackId);
 	return row(db, feedbackId);
+}
+export function buildQueuedFeedbackWakeMessage(claimed, type) {
+	const screenshotNote = claimed.screenshots?.length ? `\nScreenshot allegati: ${JSON.stringify(claimed.screenshots)}` : "";
+	if (type === "bug") return `[bug ${claimed.id}] Bug persistito in coda FIFO. Risolvilo ora prima di restare inattivo.\n\n${claimed.message}${screenshotNote}\n\nClassifica prima l'impatto: backend puro oppure frontend/misto.`;
+	return `[suggestion ${claimed.id}] Suggestion persistita in coda. Valutala ora prima di restare inattivo: richiede sempre conferma esplicita dell'utente prima di qualsiasi modifica.\n\n${claimed.message}${screenshotNote}\n\nSe l'utente conferma, pianifica l'implementazione come nuova feature; se rifiuta, chiudi il record con una nota (yano feedback update --status cancelled).`;
+}
+// Dequeues the oldest pending bug/suggestion for a project and claims it, so a
+// planner that just went idle (or just received a live feedback_received
+// notification) always finds out about BOTH kinds of persisted feedback, not
+// only bugs. Extracted out of extensions/orchestrator.ts's
+// wakeNextQueuedFeedback() so this decision can be unit-tested without the
+// MQTT/Pi harness (see scripts/smoke-test-feedback-queue-wake.mjs).
+export function claimNextQueuedFeedback(db, projectId, { preferredType = null } = {}) {
+	const order = preferredType === "bug" || preferredType === "suggestion" ? [preferredType, preferredType === "bug" ? "suggestion" : "bug"] : ["bug", "suggestion"];
+	for (const type of order) {
+		const next = listFeedback(db, { project_id: projectId, type, statuses: ["pending_planner", "queued"] })[0];
+		if (!next) continue;
+		const claimed = claimFeedback(db, next.id);
+		if (!claimed || claimed.status !== "processing") continue;
+		return { type, claimed, message: buildQueuedFeedbackWakeMessage(claimed, type) };
+	}
+	return null;
 }
 function attachmentRoot(feedbackId) { return path.join(path.dirname(dbPath()), "attachments", feedbackId); }
 function safeName(name) { return path.basename(String(name || "screenshot" )).replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 120) || "screenshot"; }

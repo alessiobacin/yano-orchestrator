@@ -15,6 +15,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import mqtt from "mqtt";
 import { buildTraceOverview, projectKey, readTraceRecords, resolveTraceProject, traceRoot } from "./yano-trace-storage.mjs";
+import { herdrSnapshot as fetchHerdrSnapshot } from "./yano-herdr-client.mjs";
 import { projectDbPath, resolveYanoWorkspaceDir, slugifyProject } from "./yano-project.mjs";
 import { ensureProjectDatabase } from "./yano-project-db.mjs";
 
@@ -220,14 +221,17 @@ function ensureWorkerPane(snapshot, info, worker) {
 	return current;
 }
 
+// Delegates to the shared, retrying client (scripts/yano-herdr-client.mjs) —
+// see .scratch/optimize-orchestrator/issues/118. This used to be an
+// independent reimplementation (no retry/backoff) with a different maxBuffer
+// than yano-external-status.mjs's own copy; two divergent copies of the same
+// logic is exactly the kind of drift risk this consolidation removes. The
+// commandExists() short-circuit is kept here (not pushed into the shared
+// client) so a genuinely-missing herdr binary fails fast instead of paying
+// the client's retry/backoff delay across the ~20 call sites in this file.
 function herdrSnapshot() {
 	if (!commandExists("herdr")) return null;
-	const result = spawnSync("herdr", ["api", "snapshot"], { encoding: "utf8", maxBuffer: 32_000_000 });
-	if (result.status !== 0) return null;
-	try {
-		const parsed = JSON.parse(result.stdout);
-		return parsed?.result?.snapshot || parsed?.result || parsed;
-	} catch { return null; }
+	return fetchHerdrSnapshot({ maxBuffer: 32_000_000 });
 }
 
 function paneLabel(pane) {

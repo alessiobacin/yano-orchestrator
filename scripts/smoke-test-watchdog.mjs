@@ -50,6 +50,15 @@ import { projectKey } from "./yano-trace-storage.mjs";
 // (Dependency-free: does not assume node:path/node:os are imported here.)
 if (!process.env.YANO_CONFIG_FILE) process.env.YANO_CONFIG_FILE = `${process.env.TMPDIR || "/tmp"}/yano-test-isolation-no-such-config.env`;
 
+// Use the production routing branch (the same root-derived topic scope as
+// real Yano processes): under PI_ORCH_TEST_NO_EXIT=1 (set by test-all.mjs
+// for every test) the extension short-circuits the MQTT scope to the raw
+// `project` string instead of projectKey(cwd, project). This test's own
+// runEvents subscription below always uses the hashed projectKey scope, so
+// under test-all.mjs publisher and subscriber land on two DIFFERENT topics
+// and the awaited ticket_stalled event never arrives — not a timing flake,
+// a topic mismatch.
+delete process.env.PI_ORCH_TEST_NO_EXIT;
 
 const execFileP = promisify(execFile);
 const PROJECT_ROOT = path.resolve(new URL(".", import.meta.url).pathname, "..");

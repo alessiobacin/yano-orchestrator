@@ -154,11 +154,35 @@ async function makeInstance(label, instance, role, cwd, project) {
 }
 
 async function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+// A fixed sleep after subscribing is a real flake source under load (full
+// suite run, real broker, many prior tests): retained-message delivery can
+// take longer than any single fixed wait once the broker/event loop is busy.
+// Poll instead of sleeping once — same total worst-case wait, but resolves
+// as soon as the condition is met instead of always paying the full delay.
+async function waitUntilTrue(predicate, timeoutMs, intervalMs = 100) {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		if (predicate()) return true;
+		await sleep(intervalMs);
+	}
+	return predicate();
+}
 
 async function main() {
 	console.log("Team-per-instance smoke test — REAL extensions/orchestrator.ts (Ticket 13).\n");
 	const cwd = await bootstrapScratchRepo();
 	console.log(`scratch repo: ${cwd}\n`);
+
+	// Use the production routing branch (the same root-derived topic scope as
+	// real Yano processes): under PI_ORCH_TEST_NO_EXIT=1 the extension
+	// short-circuits the MQTT scope to the raw `project` string instead of
+	// projectKey(cwd, project) — this test's own subscriber always uses the
+	// hashed projectKey scope, so under test-all.mjs (which sets this flag for
+	// every test) publisher and subscriber were on two DIFFERENT topics and no
+	// retained card could ever arrive, no matter how long the wait. This was
+	// the actual root cause of an apparent "flaky under load" failure — not a
+	// timing issue at all, confirmed by instrumented reproduction.
+	delete process.env.PI_ORCH_TEST_NO_EXIT;
 
 	console.log("=== PART 1 — two planners in the SAME project resolve DIFFERENT teams ===");
 	const p1 = await makeInstance("planner-01", "planner-01", "planner", cwd, "team-smoke");
@@ -192,7 +216,7 @@ async function main() {
 	// raw "team-smoke" literal. Subscribing to the raw name silently listens
 	// on the wrong topic forever.
 	await subClient.subscribeAsync(`pi/${projectKey(cwd, "team-smoke")}/agents/+/status`, { qos: 1 });
-	await sleep(800);
+	await waitUntilTrue(() => cardHolder["planner-01"] && cardHolder["planner-02"], 5000);
 	const card1 = cardHolder["planner-01"];
 	const card2 = cardHolder["planner-02"];
 	ok(!!card1 && !!card2, "both planners' retained presence cards were read from the broker");

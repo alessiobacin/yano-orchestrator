@@ -32,6 +32,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { globalDataPath } from "./yano-config.mjs";
+import { dailyLogPath } from "./yano-data.mjs";
 import { ensureComputerLocalService } from "./yano-global-services.mjs";
 import { checkConnectivity } from "./yano-connectivity.mjs";
 import { listYanoProjects } from "./yano-projects.mjs";
@@ -705,7 +706,7 @@ async function superviseSchedulerLocked({ env, now, spawn }) {
 	const connectivity = await checkConnectivity({ env });
 	const connectivity_recovery = await autoPauseOrResume({ store, env, now, connectivity, spawn });
 	try {
-		const logPath = path.join(globalDataPath({ env }), "logs", "scheduler-connectivity.jsonl");
+		const logPath = dailyLogPath(path.join(globalDataPath({ env }), "logs"), "scheduler-connectivity");
 		mkdirSync(path.dirname(logPath), { recursive: true, mode: 0o700 });
 		writeFileSync(logPath, "", { flag: "a", mode: 0o600 });
 		writeFileSync(logPath, `${JSON.stringify({ timestamp: nowIso(now), event: "connectivity_supervision", connectivity, recovery: connectivity_recovery })}\n`, { flag: "a", mode: 0o600 });

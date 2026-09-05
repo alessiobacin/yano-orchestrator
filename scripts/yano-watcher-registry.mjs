@@ -33,12 +33,12 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import { appendRawTraceRecord, canonicalProjectScope, projectKey, readTraceRecords, resolveTraceProject, traceRoot } from "./yano-trace-storage.mjs";
+import { appendRawTraceRecord, canonicalProjectScope, projectKey, readTraceRecords, resolveTraceProject, traceRoot, tracePaths } from "./yano-trace-storage.mjs";
 import { projectDbPath } from "./yano-project.mjs";
 import { ensureGlobalYanoServices } from "./yano-global-services.mjs";
 import { superviseExternalServices, getService } from "./yano-services.mjs";
 import { herdrSnapshot } from "./yano-herdr-client.mjs";
-import { applyRetention } from "./yano-data.mjs";
+import { applyRetention, dailyLogPath, bytesUnder } from "./yano-data.mjs";
 
 // Cron launches with a minimal PATH. Herdr is commonly installed in the
 // user's ~/.local/bin, so make the runtime independent from the interactive
@@ -991,6 +991,42 @@ export function trackHerdrReachability(reachable) {
 	return state;
 }
 
+// Fase 8 — per-project log/trace size alert. Never moves anything
+// automatically (the user was explicit: alert + ask, nothing more). This
+// only detects and persists a debounced "over threshold" flag; the actual
+// question to the user ("vuoi spostare i log più vecchi nell'archivio
+// configurato?") is asked once via the daily digest (Fase 9), which already
+// has the notification channel wiring — this avoids building a second,
+// separate real-time notification path for the same concern Fase 5 already
+// established the pattern for (log now, let the digest surface it).
+const PROJECT_LOG_ALERT_BYTES = Number(process.env.YANO_PROJECT_LOG_ALERT_BYTES) || 2 * 1024 * 1024 * 1024;
+const PROJECT_LOG_ALERT_COOLDOWN_MS = 7 * 86_400_000; // re-arm weekly, not every minute
+function projectLogSizeStatePath() { return path.join(traceRoot(), "watcher", "project-log-sizes.json"); }
+function readProjectLogSizeState() {
+	try { return JSON.parse(fs.readFileSync(projectLogSizeStatePath(), "utf8")); } catch { return {}; }
+}
+function writeProjectLogSizeState(state) {
+	try { fs.mkdirSync(path.dirname(projectLogSizeStatePath()), { recursive: true, mode: 0o700 }); fs.writeFileSync(projectLogSizeStatePath(), JSON.stringify(state), { mode: 0o600 }); } catch { /* best effort */ }
+}
+export function checkProjectLogSizes(rows) {
+	const state = readProjectLogSizeState();
+	const alerts = [];
+	for (const row of rows) {
+		const project = resolveTraceProject(row.root) || row.name;
+		const key = projectKey(row.root, project);
+		const { projectDir } = tracePaths({ cwd: row.root, project });
+		const { bytes } = bytesUnder(projectDir);
+		const previous = state[key] || {};
+		const overThreshold = bytes >= PROJECT_LOG_ALERT_BYTES;
+		const lastAlertAge = previous.last_alerted_at ? Date.now() - Date.parse(previous.last_alerted_at) : Infinity;
+		const shouldAlert = overThreshold && lastAlertAge >= PROJECT_LOG_ALERT_COOLDOWN_MS;
+		state[key] = { project: row.name, root: row.root, bytes, over_threshold: overThreshold, last_checked_at: now(), last_alerted_at: shouldAlert ? now() : (overThreshold ? previous.last_alerted_at : null) };
+		if (shouldAlert) alerts.push({ project: row.name, root: row.root, bytes, threshold_bytes: PROJECT_LOG_ALERT_BYTES });
+	}
+	writeProjectLogSizeState(state);
+	return { checked: rows.length, over_threshold: Object.values(state).filter((item) => item.over_threshold).length, new_alerts: alerts };
+}
+
 function supervise(db) {
 	return withSupervisorLock(async () => {
 		const rows = db.prepare("SELECT * FROM watcher_projects ORDER BY updated_at DESC").all();
@@ -1039,10 +1075,12 @@ function supervise(db) {
 		let maintenance_sessions_closed;
 		try { maintenance_sessions_closed = { architect: closeTerminalArchitectSessions(), auto_improver: closeTerminalAutoImproverSessions() }; }
 		catch (error) { maintenance_sessions_closed = { error: error instanceof Error ? error.message : String(error) }; }
+		let project_log_sizes;
+		try { project_log_sizes = checkProjectLogSizes(rows); } catch (error) { project_log_sizes = { error: error instanceof Error ? error.message : String(error) }; }
 		try {
-			const logPath = path.join(path.dirname(dbPath()), "..", "logs", "watcher-global.jsonl");
+			const logPath = dailyLogPath(path.join(path.dirname(dbPath()), "..", "logs"), "watcher-global");
 			fs.mkdirSync(path.dirname(logPath), { recursive: true, mode: 0o700 });
-			fs.appendFileSync(logPath, `${JSON.stringify({ timestamp: new Date().toISOString(), event: "global_watch_supervision", scheduler, retention, global_services, maintenance_sessions_closed, herdr_reachability, projects: rows.length })}\n`, { mode: 0o600 });
+			fs.appendFileSync(logPath, `${JSON.stringify({ timestamp: new Date().toISOString(), event: "global_watch_supervision", scheduler, retention, global_services, maintenance_sessions_closed, herdr_reachability, project_log_sizes, projects: rows.length })}\n`, { mode: 0o600 });
 		} catch { /* recovery must not be blocked by logging */ }
 		// Refresh the activation state after global-service recovery.
 		const activated = [...rows.map((row) => activateDefaultWorkers(db, row)).filter(Boolean)];

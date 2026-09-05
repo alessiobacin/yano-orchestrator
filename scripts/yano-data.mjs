@@ -9,8 +9,21 @@ import { globalDataPath } from "./yano-config.mjs";
 function has(argv, flag) { return argv.includes(flag); }
 function packageLegacyRoot(packageRoot) { return path.join(packageRoot, "temp"); }
 function filesUnder(root) { try { return fs.readdirSync(root); } catch { return []; } }
-function bytesUnder(root) { let total = 0; const projects = new Map(); const visit = (current, relative = "") => { let entries; try { entries = fs.readdirSync(current, { withFileTypes: true }); } catch { return; } for (const entry of entries) { const file = path.join(current, entry.name); const rel = path.join(relative, entry.name); if (entry.isDirectory()) visit(file, rel); else { let size = 0; try { size = fs.statSync(file).size; } catch {} total += size; const top = rel.split(path.sep)[0] || "_root"; projects.set(top, (projects.get(top) || 0) + size); } } }; if (fs.existsSync(root)) visit(root); return { bytes: total, files_by_top_level: Object.fromEntries([...projects.entries()].sort((a, b) => b[1] - a[1])) }; }
+export function bytesUnder(root) { let total = 0; const projects = new Map(); const visit = (current, relative = "") => { let entries; try { entries = fs.readdirSync(current, { withFileTypes: true }); } catch { return; } for (const entry of entries) { const file = path.join(current, entry.name); const rel = path.join(relative, entry.name); if (entry.isDirectory()) visit(file, rel); else { let size = 0; try { size = fs.statSync(file).size; } catch {} total += size; const top = rel.split(path.sep)[0] || "_root"; projects.set(top, (projects.get(top) || 0) + size); } } }; if (fs.existsSync(root)) visit(root); return { bytes: total, files_by_top_level: Object.fromEntries([...projects.entries()].sort((a, b) => b[1] - a[1])) }; }
 export function dataUsageReport({ root = globalDataPath({ env: process.env }) } = {}) { const traces = bytesUnder(path.join(root, "traces")); const recovery = bytesUnder(path.join(root, "recovery")); const logs = bytesUnder(path.join(root, "logs")); const feedback = bytesUnder(path.join(root, "feedback")); return { data_root: root, generated_at: new Date().toISOString(), totals: { bytes: traces.bytes + recovery.bytes + logs.bytes + feedback.bytes, traces_bytes: traces.bytes, recovery_bytes: recovery.bytes, logs_bytes: logs.bytes, feedback_bytes: feedback.bytes }, by_area: { traces, recovery, logs, feedback }, recommendation: { traces: "conserva 30 giorni per diagnosi ordinaria; archivia o elimina solo dopo export", recovery: "conserva 14 giorni; mantieni snapshot collegati a run non finalizzati", logs: "conserva 30 giorni; i log operativi hanno crescita ridotta", feedback: "conserva finché il bug/suggerimento non è risolto o cancellato dall'utente" } }; }
+
+// Fase 8 — the three global one-minute-cadence logs (watcher-global,
+// global-services, scheduler-connectivity) used to be single ever-growing
+// files. Retention (oldFiles() below) filters by file mtime, but a file
+// appended to every minute always has mtime "now" — retention could
+// structurally never fire on it, which is why these files reached 5-7MB
+// each in real installs. Rotating by calendar day gives yesterday's segment
+// (and every day before it) a real, aging mtime the existing retention scan
+// already knows how to sweep — no change needed there at all.
+export function dailyLogPath(dir, baseName, { now = new Date() } = {}) {
+	const day = now.toISOString().slice(0, 10);
+	return path.join(dir, `${baseName}-${day}.jsonl`);
+}
 
 const retentionDefaults = Object.freeze({ traces: 30, recovery: 14, logs: 30 });
 function retentionConfig() { const cfg = process.env; return { traces: Math.max(0, Number(cfg.YANO_TRACE_RETENTION_DAYS || retentionDefaults.traces)), recovery: Math.max(0, Number(cfg.YANO_RECOVERY_RETENTION_DAYS || retentionDefaults.recovery)), logs: Math.max(0, Number(cfg.YANO_LOG_RETENTION_DAYS || retentionDefaults.logs)), backup: cfg.YANO_DATA_BACKUP_DIR ? path.resolve(cfg.YANO_DATA_BACKUP_DIR) : null }; }

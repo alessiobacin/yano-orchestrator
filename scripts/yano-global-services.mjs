@@ -6,6 +6,7 @@ import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSyn
 import { globalDataPath, resolveYanoConfig } from "./yano-config.mjs";
 import { materializeAgentMcp } from "./yano-agent-mcp.mjs";
 import { herdrSnapshot as snapshot } from "./yano-herdr-client.mjs";
+import { dailyLogPath } from "./yano-data.mjs";
 
 const PACKAGE_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const COMPUTER_INSTANCE = "yano-local-pc";
@@ -23,7 +24,7 @@ const SYSTEM_PROJECT = "yano-local-pc";
 
 function computerRuntimeRoot() { return path.join(globalDataPath(), "yano-local-pc"); }
 function serviceRuntimeRoot(name) { return path.join(globalDataPath(), name); }
-function serviceLogPath() { return path.join(globalDataPath(), "logs", "global-services.jsonl"); }
+function serviceLogPath() { return dailyLogPath(path.join(globalDataPath(), "logs"), "global-services"); }
 function serviceLockPath(service) { return path.join(globalDataPath(), "locks", `global-service-${service.instance}.lock`); }
 function acquireServiceLock(service) {
 	const lock = serviceLockPath(service);

@@ -138,6 +138,29 @@ function openDatabase() {
 	return db;
 }
 
+// Cron-side teardown half of the scheduler-creates/cron-closes lifecycle
+// (matches yano-architect.mjs's closeTerminalArchitectSessions()): the
+// worker's own tab/agent used to linger forever after completeAudit() set
+// worker_status back to 'idle' -- nothing ever closed it. "worker_tab_id IS
+// NOT NULL" excludes a project that was registered but never actually
+// launched yet (idle-and-never-started looks identical to idle-and-just-
+// finished except for that column). Columns are nulled out after closing so
+// a torn-down project is never revisited.
+export function closeTerminalAutoImproverSessions({ spawn = spawnSync } = {}) {
+	const db = openDatabase();
+	const closed = [];
+	try {
+		const rows = db.prepare("SELECT project_key, worker_tab_id FROM auto_projects WHERE worker_status = 'idle' AND worker_tab_id IS NOT NULL").all();
+		for (const row of rows) {
+			const result = spawn("herdr", ["tab", "close", row.worker_tab_id], { encoding: "utf8" });
+			const outcome = result.status === 0 ? { closed: true, tab_id: row.worker_tab_id } : { closed: false, tab_id: row.worker_tab_id, error: (result.stderr || result.stdout || "Herdr non ha chiuso la tab").trim() };
+			db.prepare("UPDATE auto_projects SET workspace_id = NULL, worker_tab_id = NULL, worker_pane_id = NULL, worker_instance = NULL, updated_at = ? WHERE project_key = ?").run(now(), row.project_key);
+			closed.push({ project_key: row.project_key, ...outcome });
+		}
+	} finally { db.close(); }
+	return closed;
+}
+
 function projectInfo(projectRoot, explicitProject = null) {
 	const root = path.resolve(projectRoot || process.cwd());
 	if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) throw new Error(`yano auto-improve: project root non valida: ${root}`);

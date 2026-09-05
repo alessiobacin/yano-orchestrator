@@ -48,6 +48,8 @@ if (!String(process.env.PATH || "").split(path.delimiter).includes(herdrBinDir))
 import { installOneMinuteWindowsJob, removeOneMinuteWindowsJob, statusOneMinuteWindowsJob } from "./yano-os-scheduler.mjs";
 import { agentTabIdentityAudit, findAgentIdentityConflicts, formatAgentIdentityConflicts } from "./yano-agent-identity.mjs";
 import { superviseScheduler } from "./yano-scheduler.mjs";
+import { closeTerminalArchitectSessions } from "./yano-architect.mjs";
+import { closeTerminalAutoImproverSessions } from "./yano-auto-improver.mjs";
 import mqtt from "mqtt";
 import { claimFeedback, listFeedback, openDatabase as openFeedbackDatabase } from "./yano-feedback.mjs";
 
@@ -1001,10 +1003,19 @@ function supervise(db) {
 		catch (error) { scheduler = { checked_at: now(), error: error instanceof Error ? error.message : String(error) }; }
 		let retention;
 		try { retention = superviseRetention(); } catch (error) { retention = { error: error instanceof Error ? error.message : String(error) }; }
+		// Cron-side teardown for on-demand maintenance agents (architect,
+		// auto-improver): the scheduler/CLI side creates their workspace/agent
+		// when work is needed, this global pass is what closes tab/agent once
+		// the work reaches a terminal state — neither role is ever health-
+		// checked as an always-on service, but before this neither was ever
+		// torn down either, so their sessions lingered forever.
+		let maintenance_sessions_closed;
+		try { maintenance_sessions_closed = { architect: closeTerminalArchitectSessions(), auto_improver: closeTerminalAutoImproverSessions() }; }
+		catch (error) { maintenance_sessions_closed = { error: error instanceof Error ? error.message : String(error) }; }
 		try {
 			const logPath = path.join(path.dirname(dbPath()), "..", "logs", "watcher-global.jsonl");
 			fs.mkdirSync(path.dirname(logPath), { recursive: true, mode: 0o700 });
-			fs.appendFileSync(logPath, `${JSON.stringify({ timestamp: new Date().toISOString(), event: "global_watch_supervision", scheduler, retention, global_services, projects: rows.length })}\n`, { mode: 0o600 });
+			fs.appendFileSync(logPath, `${JSON.stringify({ timestamp: new Date().toISOString(), event: "global_watch_supervision", scheduler, retention, global_services, maintenance_sessions_closed, projects: rows.length })}\n`, { mode: 0o600 });
 		} catch { /* recovery must not be blocked by logging */ }
 		// Refresh the activation state after global-service recovery.
 		const activated = [...rows.map((row) => activateDefaultWorkers(db, row)).filter(Boolean)];

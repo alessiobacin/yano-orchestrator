@@ -1,12 +1,12 @@
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import path from "node:path";
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { globalDataPath, resolveYanoConfig } from "./yano-config.mjs";
 import { materializeAgentMcp } from "./yano-agent-mcp.mjs";
 import { herdrSnapshot as snapshot } from "./yano-herdr-client.mjs";
 import { dailyLogPath } from "./yano-data.mjs";
+import { readApplicationHeartbeat } from "./yano-trace-storage.mjs";
 
 const PACKAGE_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const COMPUTER_INSTANCE = "yano-local-pc";
@@ -54,16 +54,6 @@ function logService(event, details = {}) {
 		mkdirSync(path.dirname(serviceLogPath()), { recursive: true, mode: 0o700 });
 		appendFileSync(serviceLogPath(), `${JSON.stringify({ timestamp: new Date().toISOString(), event, ...details })}\n`, { mode: 0o600 });
 	} catch { /* logging must never prevent service recovery */ }
-}
-function applicationHeartbeatPath(agent, root, project) {
-	const key = cryptoProjectKey(root, project);
-	return path.join(globalDataPath(), "heartbeats", key, `${agent}.json`);
-}
-function cryptoProjectKey(root, project) {
-	// Keep this dependency-free and identical to Yano's durable root identity.
-	let canonical = root;
-	try { canonical = realpathSync(root); } catch { /* root may be temporarily unavailable */ }
-	return `workspace-${createHash("sha256").update(canonical).digest("hex").slice(0, 12)}`;
 }
 function ensureComputerRuntime() {
 	const root = computerRuntimeRoot();
@@ -136,15 +126,11 @@ function probeService(paneId, snapshotAgent, { instance = null, root = PACKAGE_R
 	try { explanation = JSON.parse(explained.stdout || ""); } catch { /* older Herdr: fall back to snapshot */ }
 	const state = String(explanation?.state || snapshotAgent?.agent_status || "unknown").toLowerCase();
 	const healthyState = ["idle", "working"].includes(state) && explanation?.warning == null && explanation?.visible_blocker !== true;
-	let applicationHeartbeat = { healthy: false, reason: "missing" };
-	if (instance) {
-		try {
-			const heartbeat = JSON.parse(readFileSync(applicationHeartbeatPath(instance, root, project), "utf8"));
-			const observed = Date.parse(heartbeat.observed_at || heartbeat.last_heartbeat || "");
-			const ageMs = Number.isFinite(observed) ? Math.max(0, Date.now() - observed) : Infinity;
-			applicationHeartbeat = { healthy: ageMs <= 60_000, age_ms: ageMs, observed_at: heartbeat.observed_at || heartbeat.last_heartbeat || null, status: heartbeat.status || null };
-		} catch { /* first boot: process health remains useful during warm-up */ }
-	}
+	// project is retained in this signature for call-site clarity even though
+	// the canonical key (yano-trace-storage.mjs's projectKey) derives purely
+	// from cwd; keeping the parameter avoids a churny signature change here.
+	void project;
+	const applicationHeartbeat = instance ? readApplicationHeartbeat(root, instance, { maxAgeMs: 60_000 }) : { healthy: false, reason: "missing" };
 	// A newly launched process gets one bounded grace probe; an already-live
 	// process without an application heartbeat is unhealthy. This prevents a
 	// decorative/stuck PID from remaining accepted forever, while still letting

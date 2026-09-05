@@ -33,7 +33,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import { appendRawTraceRecord, canonicalProjectScope, projectKey, readTraceRecords, resolveTraceProject, traceRoot, tracePaths } from "./yano-trace-storage.mjs";
+import { appendRawTraceRecord, canonicalProjectScope, projectKey, readApplicationHeartbeat, readTraceRecords, resolveTraceProject, traceRoot, tracePaths } from "./yano-trace-storage.mjs";
 import { projectDbPath } from "./yano-project.mjs";
 import { ensureGlobalYanoServices } from "./yano-global-services.mjs";
 import { superviseExternalServices, getService } from "./yano-services.mjs";
@@ -351,7 +351,24 @@ function plannerLabelForAgent(snapshot, agent) {
 	return Boolean(tab && /^planner(?:-\d+)?$/i.test(tab.label || ""));
 }
 
-function plannerHeartbeatHealthy(planner) {
+// Fase 2 (heartbeat unification): every agent process (this planner included)
+// already writes a bounded application-heartbeat file on each presence
+// publish (see orchestrator.ts's publishPresence()) — the same file
+// yano-global-services.mjs consults for the 3 global services. Neither the
+// MQTT-retained `last_heartbeat` nor Herdr's own process/explain heuristics
+// below can tell "process alive, event loop wedged" apart from healthy; the
+// file can, because it is only ever refreshed by application code actually
+// running. Only enforced when the file exists, so a just-recovered planner
+// mid-warm-up (no heartbeat published yet) is judged on the existing signals
+// exactly as before.
+function plannerFileHeartbeatSaysDead(planner) {
+	if (!planner?.cwd) return false;
+	const instance = String(planner.name || "planner-01");
+	const file = readApplicationHeartbeat(planner.cwd, instance, { maxAgeMs: 120_000 });
+	return file.found && !file.healthy;
+}
+
+export function plannerHeartbeatHealthy(planner) {
 	const status = String(planner?.agent_status || "unknown").toLowerCase();
 	if (!["idle", "working"].includes(status)) return false;
 	const heartbeat = Date.parse(planner?.last_heartbeat || "");
@@ -360,6 +377,7 @@ function plannerHeartbeatHealthy(planner) {
 	// use the authoritative pane process plus Herdr's explanation API rather
 	// than treating an otherwise live planner as dead every minute.
 	if (!planner?.pane_id) return false;
+	if (plannerFileHeartbeatSaysDead(planner)) return false;
 	const processInfo = spawnSync("herdr", ["pane", "process-info", "--pane", planner.pane_id], { encoding: "utf8" });
 	let process;
 	try { process = JSON.parse(processInfo.stdout || "")?.result?.process_info?.foreground_processes?.[0]; } catch { process = null; }

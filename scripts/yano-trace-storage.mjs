@@ -63,6 +63,32 @@ export function projectKey(cwd, project) {
 	return `workspace-${locationHash}`;
 }
 
+// Fase 2 (heartbeat unification) — every Yano agent process (global service or
+// per-project planner/coder/reviewer) already writes this same bounded JSON
+// file on each presence publish (see orchestrator.ts's publishPresence()).
+// Before this, two independent readers existed: yano-global-services.mjs had
+// its own path/key derivation (with a subtly different, buggy fallback when
+// realpath failed) used only for the 3 global services, and per-project
+// planner/agent liveness never consulted the file at all — relying solely on
+// the MQTT-retained presence card or Herdr's own process heuristics, neither
+// of which can distinguish "process alive, event loop wedged" from "healthy".
+// One canonical reader closes both gaps at once.
+export function applicationHeartbeatPath(cwd, instance) {
+	return path.join(traceRoot(), "heartbeats", projectKey(cwd), `${instance}.json`);
+}
+
+export function readApplicationHeartbeat(cwd, instance, { maxAgeMs = 60_000 } = {}) {
+	try {
+		const heartbeat = JSON.parse(fs.readFileSync(applicationHeartbeatPath(cwd, instance), "utf8"));
+		const observedAt = heartbeat.observed_at || heartbeat.last_heartbeat || null;
+		const observed = Date.parse(observedAt || "");
+		const ageMs = Number.isFinite(observed) ? Math.max(0, Date.now() - observed) : Infinity;
+		return { healthy: ageMs <= maxAgeMs, age_ms: ageMs, observed_at: observedAt, status: heartbeat.status || null, found: true };
+	} catch {
+		return { healthy: false, age_ms: Infinity, observed_at: null, status: null, found: false };
+	}
+}
+
 function locationHash(cwd) {
 	return crypto.createHash("sha256").update(canonicalCwd(cwd)).digest("hex").slice(0, 12);
 }

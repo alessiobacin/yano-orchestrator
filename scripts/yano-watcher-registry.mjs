@@ -965,6 +965,32 @@ async function superviseFeedbackQueue(rows, snapshot) {
 	return result;
 }
 
+// Fase 5 — reboot/crash resilience visibility. reconcileProjectRun()/
+// recoverPlanner() already retry Herdr (herdrSnapshot()'s own backoff) and
+// degrade per-project rather than crashing, but before this there was no
+// signal anywhere for "Herdr has been unreachable for a while" — e.g. after
+// a machine restart where Herdr itself never came back up, every one-minute
+// pass would silently do nothing project-by-project, forever, with no
+// operator-visible escalation. This tracks a simple consecutive-failure
+// streak across passes; the daily digest (Fase 9) surfaces it if it grows
+// large instead of requiring a brand-new cross-module notification path.
+export function herdrReachabilityPath() { return path.join(traceRoot(), "watcher", "herdr-reachability.json"); }
+export function trackHerdrReachability(reachable) {
+	const file = herdrReachabilityPath();
+	let state = { unreachable_streak: 0, unreachable_since: null, last_checked_at: null };
+	try { state = { ...state, ...JSON.parse(fs.readFileSync(file, "utf8")) }; } catch { /* first run, or corrupt — start fresh */ }
+	state.last_checked_at = now();
+	if (reachable) {
+		state.unreachable_streak = 0;
+		state.unreachable_since = null;
+	} else {
+		state.unreachable_streak = Number(state.unreachable_streak || 0) + 1;
+		state.unreachable_since ||= now();
+	}
+	try { fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 }); fs.writeFileSync(file, JSON.stringify(state), { mode: 0o600 }); } catch { /* best effort */ }
+	return state;
+}
+
 function supervise(db) {
 	return withSupervisorLock(async () => {
 		const rows = db.prepare("SELECT * FROM watcher_projects ORDER BY updated_at DESC").all();
@@ -984,6 +1010,7 @@ function supervise(db) {
 		// restarted above, or after the machine itself just rebooted — no
 		// longer needs to wait for the next one-minute cron tick to resolve.
 		const snapshot = herdrSnapshot();
+		const herdr_reachability = trackHerdrReachability(Boolean(snapshot));
 		const orphan_tabs_removed = pruneOrphanWatcherTabs(snapshot, rows);
 		const agent_identity_repaired = snapshot ? repairAgentTabIdentities(snapshot) : [];
 		const repairedSnapshot = agent_identity_repaired.length ? herdrSnapshot() : snapshot;
@@ -1015,7 +1042,7 @@ function supervise(db) {
 		try {
 			const logPath = path.join(path.dirname(dbPath()), "..", "logs", "watcher-global.jsonl");
 			fs.mkdirSync(path.dirname(logPath), { recursive: true, mode: 0o700 });
-			fs.appendFileSync(logPath, `${JSON.stringify({ timestamp: new Date().toISOString(), event: "global_watch_supervision", scheduler, retention, global_services, maintenance_sessions_closed, projects: rows.length })}\n`, { mode: 0o600 });
+			fs.appendFileSync(logPath, `${JSON.stringify({ timestamp: new Date().toISOString(), event: "global_watch_supervision", scheduler, retention, global_services, maintenance_sessions_closed, herdr_reachability, projects: rows.length })}\n`, { mode: 0o600 });
 		} catch { /* recovery must not be blocked by logging */ }
 		// Refresh the activation state after global-service recovery.
 		const activated = [...rows.map((row) => activateDefaultWorkers(db, row)).filter(Boolean)];

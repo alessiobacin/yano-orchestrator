@@ -11,6 +11,12 @@ export const DEFAULT_TRACE_MODE = "events";
 const TRACE_SCHEMA_VERSION = 1;
 const require = createRequire(import.meta.url);
 
+// Conservative margin for since-bounded reads: mtime granularity + clock skew.
+// Trace files are append-only, so mtime is the last write time: a file whose
+// mtimeMs + SAFETY_MARGIN_MS < since cannot contain records with ts >= since.
+// 2000ms keeps files within 2s of the window readable (never skipped).
+const SAFETY_MARGIN_MS = 2000;
+
 export function traceRoot() {
 	const global = loadConfigFile(globalConfigPath({ env: process.env }));
 	return path.resolve(globalDataPath({ env: { ...global, ...process.env } }));
@@ -230,6 +236,20 @@ export function readTraceRecords({ cwd, project, allProjects = false, since = nu
 		const fileProjectKey = ["events", "terminal", "snapshots"].includes(parent)
 			? path.basename(path.dirname(path.dirname(file)))
 			: parent;
+		// Since-bounded reads skip files whose mtime proves they cannot hold
+		// in-window records (append-only, mtime = last write). A file with
+		// mtimeMs + SAFETY_MARGIN_MS < since has not been written since before
+		// the window, so it cannot contain any record with ts >= since.
+		// INTENTIONAL behaviour change (documented, not a bug): records WITHOUT
+		// `ts` inside a skipped old file exit a `since` query, whereas before
+		// they were always included (the per-line filter only drops lines that
+		// HAVE a ts). A file untouched since before the window cannot hold a
+		// fresh ts-less record, so excluding it is deliberate.
+		if (since) {
+			try {
+				if (fs.statSync(file).mtimeMs + SAFETY_MARGIN_MS < since.getTime()) continue;
+			} catch { /* stat race (file removed): fall through to the read below, same as before */ }
+		}
 		let lines;
 		try { lines = fs.readFileSync(file, "utf8").split("\n").filter(Boolean); } catch { continue; }
 		for (const line of lines) {

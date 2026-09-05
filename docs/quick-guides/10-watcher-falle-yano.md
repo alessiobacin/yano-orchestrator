@@ -152,7 +152,21 @@ verifica workspace/tab/pane, processo Pi foreground, stato effettivo Herdr con
 non usa token né chiama un modello. Se uno dei segnali non è coerente, il
 supervisore chiude e ricrea il componente interessato, riattiva il planner del
 progetto e registra il recupero; le tab morte/bloccate non vengono lasciate
-come falsi positivi.
+come falsi positivi. La stessa passata pulisce anche le tab degli agenti di
+progetto (coder/reviewer/docs-sync/...) che hanno concluso il lavoro — in due
+fasi: prima le tab con un agente Herdr ancora presente (chiusa se l'ultimo
+ticket assegnato è `done`/`failed`, o se il pane non ha più un processo `pi`
+vivo), poi le tab **senza più alcun agente** — un processo Pi terminato del
+tutto sparisce da Herdr senza lasciare traccia, e prima di questo fix la sua
+tab restava aperta per sempre, invisibile alla prima fase. Una tab senza
+agente viene chiusa solo se la sua label (che per convenzione Yano coincide
+col nome dell'istanza) ha davvero un ticket `done`/`failed` nella storia del
+progetto — un'istanza appena lanciata e non ancora registrata non viene mai
+chiusa sulla sola assenza di prove. **La tab del planner e quella etichettata
+`human` (il terminale manuale dell'utente) non vengono mai chiuse**, in
+nessuna delle due fasi. Questa pulizia gira anche per un progetto il cui
+watcher è esplicitamente in pausa: mettere in pausa il polling non equivale a
+conservare per sempre le tab morte (dettaglio: `docs/diagram/12-pulizia-tab-agenti.mmd`).
 
 La stessa passata riconcilia anche `<YANO_DATA_DIR>/scheduler/jobs.json`:
 un dispatch non è considerato riuscito perché è stato semplicemente accodato.
@@ -420,5 +434,40 @@ yano watcher supervise --json
 La stessa passata supervisiona anche la connettività del laptop: DNS Google,
 MQTT e Herdr. In caso di perdita mette in pausa con checkpoint i progetti
 attivi; al ripristino riattiva soltanto quelli messi in pausa dal supervisore.
-Gli esiti e le azioni sono nel log globale
-`<YANO_DATA_DIR>/logs/scheduler-connectivity.jsonl`.
+Gli esiti e le azioni sono nei log globali `<YANO_DATA_DIR>/logs/scheduler-connectivity-YYYY-MM-DD.jsonl`,
+`watcher-global-YYYY-MM-DD.jsonl` e `global-services-YYYY-MM-DD.jsonl` — ruotati
+per giorno solare invece di crescere all'infinito in un unico file, così la
+retention giornaliera esistente li raggiunge davvero (un file in append
+continuo ha sempre `mtime: ora`, su cui la retention basata su `mtime` non
+può mai scattare). Un secondo controllo, indipendente e con debounce
+settimanale, misura la dimensione della directory trace di ogni progetto
+registrato e segnala (senza mai spostare o cancellare nulla) chi supera
+`YANO_PROJECT_LOG_ALERT_BYTES` (default 2GB) — l'alert viene poi ripreso dal
+digest giornaliero qui sotto.
+
+## Digest giornaliero (06:00 Europe/Rome)
+
+Un job di default, `yano-daily-digest`, viene installato automaticamente e in
+modo idempotente ad ogni passata del supervisore (`ensureDefaultDigestJob()`
+in `yano-scheduler.mjs`) — nessuna azione manuale richiesta per averlo, e
+richiamare di nuovo il bootstrap non lo duplica mai. Ogni giorno alle 06:00,
+ora di Roma (il fuso è esplicito nel job: non dipende dal fuso del server),
+invia sul canale di notifica globale un riepilogo di:
+
+- progetti con run non completati (obiettivo, ticket pending/in corso);
+- `decision_hold` aperti, con il testo reale della domanda (non solo il conteggio);
+- progetti con un recovery recente (ultime 24 ore);
+- lo streak di Herdr non raggiungibile, se presente;
+- i progetti oltre la soglia di log da 2GB descritta sopra.
+
+```bash
+yano schedule list --json                       # verifica che 'yano-daily-digest' sia presente e abilitato
+node scripts/yano-digest.mjs --dry-run --json    # genera il digest senza inviarlo (diagnosi manuale)
+yano schedule disable --id yano-daily-digest     # per disattivarlo — resta disattivato, il bootstrap non lo riaccende mai da solo
+```
+
+Il job stesso è uno script "bridge" minimo scritto nella cartella script
+persistente dello scheduler (`<YANO_DATA_DIR>/scheduler/scripts/`) che
+richiama, per percorso assoluto, il vero motore `scripts/yano-digest.mjs` del
+pacchetto — un `yano update` aggiorna quindi la logica del digest senza dover
+rieseguire alcun bootstrap (dettaglio: `docs/diagram/10-digest-giornaliero.mmd`).

@@ -53,6 +53,19 @@ La sintassi storica in linguaggio naturale resta disponibile per i job legacy:
 `yano cron --add "ogni giorno alle 14 e alle 21 esegui ..." --project-root "$PWD"`
 (dispatch planner col testo, come in passato — non a script).
 
+## Job di default: digest giornaliero
+
+Oltre ai job creati manualmente, Yano installa da sé — idempotentemente, ad
+ogni passata del supervisore — un job di sistema: `yano-daily-digest`,
+`mode: self`, `0 6 * * *` nel fuso `Europe/Rome` esplicito (i job creati con
+`--cron` restano invece nel fuso del server, comportamento invariato). Invia
+sul canale di notifica globale un riepilogo cross-progetto: run non
+completati, `decision_hold` aperti con il testo della domanda, recovery
+recenti, streak di Herdr non raggiungibile e progetti oltre la soglia di log.
+Vedi `docs/quick-guides/10-watcher-falle-yano.md#digest-giornaliero-0600-europerome`
+per il dettaglio; `yano schedule disable --id yano-daily-digest` lo disattiva
+in modo durevole (il bootstrap non lo riabilita mai da solo).
+
 ## Testare e gestire
 
 ```bash
@@ -111,4 +124,6 @@ Il cron globale esegue la supervisione ogni minuto. Controlla DNS Google
 Se la macchina perde la connettività, salva checkpoint e mette in pausa i run
 attivi dei progetti; quando tutti i segnali tornano disponibili riprende solo i
 progetti messi in pausa automaticamente. Il registro dettagliato è
-`<YANO_DATA_DIR>/logs/scheduler-connectivity.jsonl`.
+`<YANO_DATA_DIR>/logs/scheduler-connectivity-YYYY-MM-DD.jsonl` (un file per
+giorno solare, cosicché la retention esistente possa raggiungerlo una volta
+concluso — un file in append continuo ha sempre `mtime: ora`).

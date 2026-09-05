@@ -29,3 +29,9 @@ Il recovery identifica il workspace dal percorso della repository, non dalla
 sola etichetta: `llmproxy` e `llmProxy` sono quindi trattati come lo stesso
 progetto. Un planner già vivo viene riusato e non viene mai lanciato un
 secondo `planner-01`.
+
+Ogni passata chiude anche le tab degli agenti che hanno concluso il lavoro
+(incluse quelle il cui processo è terminato del tutto e non appare più in
+Herdr) — anche per un progetto in pausa. La tab del planner e quella
+`human` non vengono mai toccate. Dettaglio: `docs/quick-guides/10-watcher-falle-yano.md`,
+`docs/diagram/12-pulizia-tab-agenti.mmd`.

@@ -182,3 +182,22 @@ sconosciuto. Quando `price=` è presente, vince sempre quello (anche se
 `best=` indica un prezzo più basso altrove, come nel caso di `qwen`/`kimi`
 sopra): è il prezzo che il provider sta realmente applicando in questo
 momento.
+
+## Escalation: mai ri-suggerire il provider appena fallito
+
+Quando un ticket viene rimesso in coda dopo un errore di inferenza
+(`ticket_requeue`), il planner passa il provider appena fallito come
+`current_provider_id`; questo viene inoltrato a `recommendModel({ roleClass,
+excludeProviderId: current_provider_id })`, cosicché il provider che ha
+appena restituito un errore non possa essere ri-suggerito subito dopo come
+"la scelta migliore" — l'escalation propone sempre un'alternativa reale.
+
+Il fallback automatico (`yano-model-fallback.mjs`) resta il primo livello,
+completamente deterministico: un ruolo configurato con un modello statico
+che fallisce l'inferenza passa a `llmproxy auto` senza intervento umano né
+LLM. Se anche `llmproxy auto` risultasse irraggiungibile perché llmProxy
+stesso non è in esecuzione, è il ciclo cron (`yano watcher supervise`) a
+verificarlo e a riavviarlo — via il container Docker o la sessione pm2
+registrati in `yano services`, si veda
+["External service supervision"](../architecture/architecture.md#failure-and-recovery)
+per il dettaglio del rilevamento pm2 automatico di llmProxy.

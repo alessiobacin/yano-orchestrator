@@ -5044,3 +5044,118 @@ o artefatti, verifiche, rischi e prossimo destinatario; non vale come
 approvazione finale del worktree. Il contratto è iniettato dal loader dei
 prompt in tutti i ruoli configurati con un `brief`, quindi vale anche per ruoli
 con prompt dedicato o introdotti successivamente dall'Architect.
+
+## Revisione 65 — ristrutturazione cron/watcher/scheduler/log/notifiche
+
+Prova concreta raccolta prima di questa revisione: `jobs.json` reale mostrava
+lo stesso job delle 7:00 rilanciato 39 volte in 2 ore (~30 notifiche
+Telegram reali inviate), e un progetto con watcher in pausa aveva accumulato
+19 tab Herdr, 12 delle quali orfane. Entrambi i problemi sono risolti da
+questa revisione, insieme a una serie di gap correlati emersi durante
+l'analisi (separazione cron/watcher, heartbeat duplicato, notifica assente
+senza configurazione locale, sessioni terminali di architect/auto-improver
+mai chiuse).
+
+**Fix P0 — duplicate-fire dello scheduler.** `durableAcceptance()` non
+riconosceva l'esito sincrono reale di uno script `self`-mode con un JSON di
+successo non-standard, trattandolo come "ancora bloccato" e rilanciandolo ogni
+minuto. `isSynchronousSelfJob()` marca ora un job `self` come `completed`
+immediatamente su `exit 0`; `recoverStaleDispatches()` applica un tetto
+(`MAX_STALE_RECOVERIES`, default 3) ai retry di un dispatch asincrono
+genuinamente bloccato, oltre il quale il job è marcato
+`dispatch_failed_permanently` con una notifica singola invece di un rilancio
+infinito. Un lock (`acquireSchedulerSuperviseLock`) rende esclusiva la
+passata di supervisione tra i due crontab indipendenti (`yano-watcher` e
+`yano-scheduler`) che la richiamano entrambi.
+
+**Notifica: fallback al canale globale.** `getEnvVar()` in
+`extensions/orchestrator.ts` ora ricade sulla configurazione globale
+(`yano config`) quando un progetto non ha un `.env` proprio — prima, un
+progetto mai configurato restava semplicemente muto. Un job scheduler
+`self`-mode (nessun agente Pi vivo, non può chiamare `sendNotifications()`)
+ha un proprio sender standalone equivalente, `scripts/yano-notify.mjs`, che
+usa sempre e solo il canale globale.
+
+**Singola notifica "in attesa di risposta".** `decision_hold_create` è
+idempotente per `(run_id, idempotency_key)`; prima di questa revisione ogni
+retry idempotente inviava di nuovo la notifica. Solo il ramo che crea
+davvero un hold nuovo (mai quello che risolve su un hold già esistente) ora
+invia `sendNotifications()`.
+
+**Ciclo di vita architect/auto-improver.** Restano worker on-demand attivati
+dallo scheduler; la chiusura delle sessioni terminali (`persistent`/`blocked`
+per l'architect, `idle` per l'auto-improver) è ora compito del cron ad ogni
+passata (`closeTerminalArchitectSessions()`, `closeTerminalAutoImproverSessions()`).
+
+**Herdr-reachability streak.** Un contatore persistito
+(`trackHerdrReachability()`) evita che un riavvio in cui Herdr non torna mai
+su produca un silenzio totale, senza escalation visibile all'operatore; lo
+streak viene ripreso dal digest giornaliero.
+
+**Discovery pm2 per llmproxy.** `builtinPm2Service()` prova un container
+Docker e poi un processo pm2 per nome (`pm2 jlist`), con un tipo di
+healthcheck nativo `pm2` e un restart via `pm2 restart <nome>`.
+
+**Escalation modello: mai ri-suggerire il provider appena fallito.**
+`ticket_requeue` passa ora `current_provider_id` a `recommendModel({
+excludeProviderId })`.
+
+**Riscrittura del sistema di log.** I tre log globali a cadenza di un minuto
+(`watcher-global`, `global-services`, `scheduler-connectivity`) ruotano per
+giorno solare (`dailyLogPath()`) invece di crescere all'infinito in un unico
+file — la retention esistente, basata su `mtime`, non poteva mai raggiungere
+un file in append continuo (`mtime` sempre "ora"). Un controllo separato,
+`checkProjectLogSizes()`, misura la dimensione della directory trace di ogni
+progetto e segnala (mai sposta o cancella) chi supera 2GB, con debounce
+settimanale.
+
+**Heartbeat unificato.** Ogni agente (servizio globale o planner di
+progetto) scrive lo stesso heartbeat applicativo su file
+(`heartbeats/<projectKey>/<instance>.json`) ad ogni presence publish; prima
+di questa revisione due lettori indipendenti esistevano (uno solo per i 3
+servizi globali, con una propria derivazione di path/chiave leggermente
+diversa e con un bug latente nel fallback), e il planner di progetto non
+consultava mai il file, affidandosi solo al retained MQTT o all'euristica
+Herdr — nessuno dei due distingue "processo vivo, event loop bloccato" da
+sano. Un'unica funzione canonica (`yano-trace-storage.mjs`) serve ora
+entrambi i lettori; il ramo di fallback Herdr del planner richiede ora anche
+un heartbeat file fresco quando ne esiste già uno, senza penalizzare un
+avvio a freddo (nessun file ancora pubblicato).
+
+**Digest giornaliero.** Nuovo job di default (`yano-daily-digest`, `0 6 * *
+*` fuso `Europe/Rome` esplicito, `mode: self`), installato idempotentemente
+dal supervisore. Aggrega solo stato già esistente (run incompleti,
+decision_hold aperti con il testo della domanda, recovery recenti, streak
+Herdr, alert di log) e lo consegna sul canale globale.
+`scripts/yano-scheduler.mjs`'s `cronMatches()` accetta ora un `timezone`
+opzionale per job; ogni job pre-esistente lo omette e mantiene il confronto
+con l'orologio locale del server esattamente come prima.
+
+**Pulizia delle tab agenti.** `cleanupCompletedAgentTabs()` copriva solo gli
+agenti ancora presenti in `snapshot.agents` — un processo Pi terminato del
+tutto sparisce da lì senza lasciare traccia, e la sua tab restava aperta per
+sempre. Una seconda passata sulle tab del workspace del progetto chiude ora
+anche queste, ma solo quando la storia dei ticket conferma che l'istanza
+(identificata dalla label della tab) ha concluso il lavoro — un'istanza
+appena lanciata e non ancora registrata non viene mai chiusa sulla sola
+assenza di prove. La tab del planner e quella etichettata `human` sono
+sempre escluse, in entrambe le passate. La pulizia gira ora anche per un
+progetto il cui watcher è esplicitamente in pausa: la pausa del polling non
+equivaleva più, prima di questa revisione, a "conserva le tab morte per
+sempre" — era semplicemente un effetto collaterale non voluto del ritorno
+anticipato di `doStatusForRow()` per qualunque stato diverso da `running`.
+
+**Verifica dal vivo.** Su questa macchina, dopo il fix: article-writer
+19→3 tab, newbiz-website 9→5, yano-orchestrator 8→5 — restano solo
+planner, `human` e agenti effettivamente vivi.
+
+**Branch `performance-optimization-yano`.** Tre commit (soglia di
+compaction del contesto 0.82→0.50, ottimizzazione hot-path della ricerca
+trace, report di promozione) applicati con cherry-pick puliti invece di un
+merge del branch intero — il branch era diverso da master da prima
+dell'inizio di questa revisione e un merge diretto avrebbe cancellato la
+maggior parte del lavoro descritto sopra.
+
+Riferimenti diagrammi: `docs/diagram/09-heartbeat-liveness.mmd`,
+`10-digest-giornaliero.mmd`, `11-notifica-canale-globale.mmd`,
+`12-pulizia-tab-agenti.mmd`, `13-scheduler-dispatch-dedup.mmd`.

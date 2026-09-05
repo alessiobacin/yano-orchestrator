@@ -1,0 +1,17 @@
+flowchart TD
+    NEED["un codice ha bisogno\ndi notificare l'utente"] --> WHO{"chi sta notificando?"}
+    WHO -- "agente Pi di progetto\n(sendNotifications in orchestrator.ts)" --> GETENV["getEnvVar(cwd, key)"]
+    WHO -- "job scheduler self-mode\n(nessun agente Pi vivo)" --> STANDALONE["sendGlobalNotification()\nyano-notify.mjs"]
+    GETENV --> P1{"process.env[key]?"}
+    P1 -- sì --> USE_ENV["usa questo valore"]
+    P1 -- no --> P2{".env del progetto\n(loadEnvFile(cwd))?"}
+    P2 -- sì --> USE_PROJECT["usa questo valore\n(config di progetto ha priorità)"]
+    P2 -- no --> P3{"config globale\n(yano config / globalYanoConfig())?"}
+    P3 -- sì --> USE_GLOBAL["fallback al canale globale\n— prima di questa fase,\nun progetto senza .env\nnon notificava mai nessuno"]
+    P3 -- no --> SILENT["nessun canale configurato\nda nessuna parte\n— comportamento invariato"]
+    STANDALONE --> RESOLVE["resolveYanoConfig()\n= SOLO config globale + process.env\nmai un .env di progetto\n(un digest è cross-progetto)"]
+    USE_ENV --> CHANNELS
+    USE_PROJECT --> CHANNELS
+    USE_GLOBAL --> CHANNELS
+    RESOLVE --> CHANNELS
+    CHANNELS["prova in parallelo:\nWhatsApp (Evolution API)\nTelegram (Bot API)\nEmail (SendGrid)"] --> RESULT["ok se almeno un canale riesce\ndettaglio per canale sempre loggato\n(mai un errore silenzioso)"]

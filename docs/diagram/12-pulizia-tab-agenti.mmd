@@ -1,0 +1,17 @@
+flowchart TD
+    PASS["cleanupCompletedAgentTabs()\nogni passata di supervise()\n— anche se il progetto è in pausa"] --> LOOPAGENTS["Passata 1: snapshot.agents\nscoped alla root del progetto"]
+    LOOPAGENTS --> LABEL1{"tab planner\noppure label 'human'?"}
+    LABEL1 -- sì --> KEEP1["mai chiusa\n(controllo di superficie persistente\no terminale manuale dell'utente)"]
+    LABEL1 -- no --> STATUS1{"ultimo ticket assegnato\ndone/failed?\noppure pane senza processo pi vivo?"}
+    STATUS1 -- no --> KEEP1B["lasciata aperta\n(lavoro ancora in corso)"]
+    STATUS1 -- sì --> CLOSE1["chiusa\nreason: terminal_ticket | dead_process"]
+    PASS --> LOOPTABS["Passata 2: snapshot.tabs\ndell'intero workspace del progetto"]
+    LOOPTABS --> HASAGENT{"esiste ancora\nun agente vivo\nper questa tab?"}
+    HASAGENT -- sì --> SKIP2["già gestita dalla Passata 1\n(evita doppia chiusura)"]
+    HASAGENT -- no --> LABEL2{"label planner\noppure 'human'?"}
+    LABEL2 -- sì --> KEEP2["mai chiusa"]
+    LABEL2 -- no --> HISTORY{"la label (= nome istanza\nper convenzione Yano) ha\nun ticket done/failed\nnella storia del progetto?"}
+    HISTORY -- no --> KEEP2B["lasciata aperta\n— un'istanza appena lanciata,\nnon ancora registrata,\nnon va chiusa su una semplice assenza di prove"]
+    HISTORY -- sì --> CLOSE2["chiusa\nreason: orphaned_agentless_terminal_ticket\n— il caso reale: un processo Pi\nterminato del tutto sparisce da\nsnapshot.agents, la tab restava\naperta per sempre prima di questo fix"]
+    CLOSE1 --> LOG["watcher_completed_agent_tabs_closed\nnel trace del progetto"]
+    CLOSE2 --> LOG

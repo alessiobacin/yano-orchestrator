@@ -113,6 +113,26 @@ Per rimuovere una variabile:
 yano config unset TELEGRAM_BOT_TOKEN
 ```
 
+## Canale di notifica: priorità progetto > globale
+
+Ogni progetto può avere il proprio canale (WhatsApp/Telegram/SendGrid) nel suo
+`.env` locale. Se non lo configura, un agente di quel progetto ora usa
+automaticamente il canale registrato qui a livello globale invece di non
+notificare nessuno — prima di questo fallback, un progetto senza `.env`
+proprio restava semplicemente muto:
+
+```bash
+yano config set TELEGRAM_BOT_TOKEN ...     # canale globale, di fallback
+yano config set TELEGRAM_DESTINATION_CHAT_ID ...
+```
+
+La priorità è sempre: variabile d'ambiente del processo, poi `.env` del
+progetto, poi questa configurazione globale. Un digest o un job schedulato
+cross-progetto (il digest giornaliero delle 06:00, vedi
+`docs/quick-guides/22-job-ricorrenti.md`) non ha invece un singolo progetto a
+cui appoggiarsi: usa **sempre e solo** il canale globale configurato qui,
+indipendentemente da eventuali `.env` di progetto.
+
 ## Quando una configurazione è obbligatoria
 
 I canali di notifica restano indipendenti: WhatsApp, Telegram e SendGrid

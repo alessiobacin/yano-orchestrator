@@ -41,4 +41,18 @@ Ad ogni passata controlla DNS Google (`8.8.8.8`/`8.8.4.4`), MQTT, Herdr e
 registra l'esecuzione del cron in `checks.cron`.
 Se la connettività passa offline mette in pausa con checkpoint i progetti
 attivi; quando torna online riprende solo quelli messi in pausa
-automaticamente. Dettagli e transizioni: `<YANO_DATA_DIR>/logs/scheduler-connectivity.jsonl`.
+automaticamente. Dettagli e transizioni: log giornaliero
+`<YANO_DATA_DIR>/logs/scheduler-connectivity-YYYY-MM-DD.jsonl`.
+
+Un job `self` che esce con `status 0` è considerato immediatamente
+`completed` — mai "ancora in dispatch": è il fix dell'incidente 2026-09 (39
+rilanci in 2 ore per un JSON di successo non-standard letto come bloccato).
+Un dispatch asincrono davvero bloccato (`planner:`/`yano-local-pc`) viene
+ritentato fino a `MAX_STALE_RECOVERIES` (default 3), poi marcato
+`dispatch_failed_permanently` con una notifica singola — mai un rilancio
+infinito. Dettaglio: `docs/diagram/13-scheduler-dispatch-dedup.mmd`.
+
+Un job di sistema, `yano-daily-digest` (`0 6 * * *`, fuso `Europe/Rome`
+esplicito), viene installato da solo ad ogni passata se manca — riepilogo
+cross-progetto sul canale globale ogni mattina. Vedi
+`docs/quick-guides/22-job-ricorrenti.md#job-di-default-digest-giornaliero`.

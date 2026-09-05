@@ -1,0 +1,25 @@
+flowchart TD
+    subgraph WRITER["ogni agente Pi (globale o di progetto)"]
+        PRESENCE["publishPresence()\nad ogni turno"]
+        PRESENCE --> MQTTPUB["MQTT retained\npi/scope/agents/instance/status"]
+        PRESENCE --> FILEWRITE["file JSON\nheartbeats/projectKey/instance.json\nobserved_at + status"]
+    end
+    subgraph READERS["due lettori, una sola funzione canonica"]
+        CANON["readApplicationHeartbeat()\nyano-trace-storage.mjs"]
+        GLOBAL["probeService()\nyano-global-services.mjs\n3 servizi globali"]
+        PROJECT["plannerHeartbeatHealthy()\nyano-watcher-registry.mjs\nplanner di progetto"]
+        GLOBAL --> CANON
+        PROJECT --> CANON
+    end
+    FILEWRITE --> CANON
+    MQTTPUB --> PROJECT
+    PROJECT --> MQTTOK{"MQTT last_heartbeat\nfresco?"}
+    MQTTOK -- sì --> HEALTHY_MQTT["healthy = true\n(percorso invariato)"]
+    MQTTOK -- no --> HERDR["fallback Herdr\npane process-info + agent explain"]
+    HERDR --> FILECHECK{"file heartbeat\nesiste?"}
+    FILECHECK -- "no (warm-up)" --> HERDR_ONLY["giudicato solo su Herdr\n(nessuna penalizzazione al cold start)"]
+    FILECHECK -- "sì, fresco" --> HEALTHY_FILE["healthy = true"]
+    FILECHECK -- "sì, stantio" --> WEDGE["healthy = false\n— rilevato il caso\n'processo vivo, event loop bloccato'\nche MQTT/Herdr da soli non vedono"]
+    GLOBAL --> GLOBALCHECK{"file heartbeat\n<= 60s?"}
+    GLOBALCHECK -- sì --> GHEALTHY["healthy = true"]
+    GLOBALCHECK -- no --> GUNHEALTHY["healthy = false\n(salvo warmup grace)"]

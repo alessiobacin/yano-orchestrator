@@ -1,9 +1,12 @@
 flowchart TD
     LOOP["watcher supervise\ncron ogni minuto"] --> DB["DB + trace bounded\nticket/stato/heartbeat"]
-    LOOP --> HEARTBEAT["MQTT heartbeat\nagent live"]
+    LOOP --> HEARTBEAT["heartbeat unificato\n(dettaglio: diagram/09)"]
     LOOP --> TRACE["trace bounded\nsegnali Yano"]
     LOOP --> SERVICES["Herdr + servizi + agenti\nworkspace/tab/pane/processo"]
-    LOOP --> SCHEDULES["scheduler jobs.json\nistanze failed/dispatched stale"]
+    LOOP --> TABS["pulizia tab agenti\nanche se in pausa\n(dettaglio: diagram/12)"]
+    LOOP --> SCHEDULES["scheduler jobs.json\nistanze failed/dispatched stale\n(dettaglio: diagram/13)"]
+    LOOP --> DIGEST["default job digest 06:00 Roma\n(dettaglio: diagram/10)"]
+    LOOP --> LOGSIZE["log rotation + alert 2GB\nper progetto"]
     LOOP --> SCAN["yano_watcher_scan\nstarted_at / completed_at\nduration / status"]
     DB --> FINDING["finding"]
     HEARTBEAT --> FINDING
@@ -13,7 +16,7 @@ flowchart TD
     SCHEDULES --> FINDING
     FINDING --> PLANNER{"Planner live?"}
     PLANNER -- sì --> MQTT["comando MQTT\nal Planner"]
-    PLANNER -- no --> TELEGRAM["Telegram\nconfig globale"]
+    PLANNER -- no --> TELEGRAM["canale notifica\nprogetto > globale\n(dettaglio: diagram/11)"]
     SCHEDULES --> REMEDY{"anomalia consegna?"}
     REMEDY -- sì --> LOCALPC["ensure yano-local-pc\nplanner-01 + bridge"]
     LOCALPC --> RETRY["retry idempotente\ncon timeout/esito osservabile"]

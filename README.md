@@ -230,7 +230,7 @@ yano local-pc status                         # servizio globale Local PC
 yano local-pc ask --prompt "Controlla promemoria e calendario di oggi"
 # yano services: registro di servizi esterni (Docker/pm2/comando) che Yano non possiede ma da cui dipende
 # (broker MQTT, llmProxy, ...); `yano watcher supervise` (cron ogni minuto) li ricontrolla e riavvia da solo
-yano services add --name llmproxy --healthcheck-http http://127.0.0.1:7045/api/providers --restart-pm2 llmproxy
+yano services add --name llmproxy --healthcheck-pm2 llmproxy --restart-pm2 llmproxy   # oppure --healthcheck-http http://127.0.0.1:7045/api/providers
 yano services add --name mqtt-broker --healthcheck-command "docker inspect -f {{.State.Running}} yano-mqtt-broker | grep -q true" --restart-docker yano-mqtt-broker
 # nome riservato "herdr": se registrato, il suo comando di restart viene provato prima dello snapshot Herdr di ogni passata
 # --restart-command qui sotto è un ESEMPIO: sostituiscilo con il comando reale che avvia Herdr sulla tua macchina
@@ -241,7 +241,8 @@ yano services list --json                   # stato/health/backoff correnti
 yano services check --json                  # sola lettura, nessun riavvio
 yano services supervise --json              # health-check + riavvio deterministico con backoff (già chiamato da yano watcher supervise)
 # con Docker disponibile il supervisore scopre anche llmproxy-production e pi-orchestrator-mqtt-dev
-# (override: YANO_LLMPROXY_CONTAINER / YANO_MQTT_CONTAINER)
+# (override: YANO_LLMPROXY_CONTAINER / YANO_MQTT_CONTAINER); se llmproxy non è un container Docker,
+# il supervisore lo scopre comunque via pm2 (nome atteso "llmproxy", override: YANO_LLMPROXY_PM2_NAME)
 yano config path                 # percorso della configurazione globale utente
 yano config list --all           # variabili configurabili, segreti oscurati
 yano config set YANO_ORCHESTRATOR_REPO /path/to/yano-orchestrator

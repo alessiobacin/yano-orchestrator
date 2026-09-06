@@ -11,7 +11,9 @@
 // Decision 2 ("il digest usa sempre il canale globale").
 
 import os from "node:os";
+import fs from "node:fs";
 import { resolveYanoConfig } from "./yano-config.mjs";
+import { formatNotification } from "./yano-notification-format.mjs";
 
 async function sendWhatsAppNotification(message, config, fetchImpl) {
 	const apiUrl = config.EVOLUTION_API_URL;
@@ -58,9 +60,9 @@ async function sendEmailNotification(message, config, fetchImpl) {
 	} catch (err) { return { ok: false, detail: err instanceof Error ? err.message : String(err) }; }
 }
 
-export async function sendGlobalNotification(message, { env = process.env, sender = "yano", fetchImpl = globalThis.fetch } = {}) {
+export async function sendGlobalNotification(message, { env = process.env, sender = "yano", role = "system", project = "globale", task = null, status = null, previousVersion = null, currentVersion = null, fetchImpl = globalThis.fetch } = {}) {
 	const config = resolveYanoConfig({ env });
-	const contextual = [`Mittente: ${sender}`, `Server: ${os.hostname()}`, "", message].join("\n");
+	const contextual = formatNotification(message, { sender, role, project, task, status, server: os.hostname(), previousVersion, currentVersion: currentVersion || readCurrentVersion() });
 	const [whatsapp, telegram, email] = await Promise.all([
 		sendWhatsAppNotification(contextual, config, fetchImpl),
 		sendTelegramNotification(contextual, config, fetchImpl),
@@ -70,4 +72,11 @@ export async function sendGlobalNotification(message, { env = process.env, sende
 	const ok = Object.values(channels).some((result) => result.ok);
 	const detail = Object.entries(channels).map(([channel, result]) => `${channel}: ${result.detail}`).join("; ");
 	return { ok, detail, channels };
+}
+
+function readCurrentVersion() {
+	try {
+		const packageJson = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+		return packageJson.version || "n/d";
+	} catch { return process.env.YANO_CURRENT_YANO_VERSION || "n/d"; }
 }

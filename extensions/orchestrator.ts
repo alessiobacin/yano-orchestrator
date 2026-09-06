@@ -61,6 +61,7 @@ import { switchPinnedModelToAuto } from "../scripts/yano-model-fallback.mjs";
 import { recommend as recommendModel } from "../scripts/yano-model-advisor.mjs";
 import { openDatabase as openFeedbackDatabase, createFeedback as createFeedbackRecord, claimFeedback, claimNextQueuedFeedback, listFeedback, terminalStatusForFeedbackId } from "../scripts/yano-feedback.mjs";
 import { globalConfigPath, loadConfigFile } from "../scripts/yano-config.mjs";
+import { formatNotification } from "../scripts/yano-notification-format.mjs";
 
 // ESM-safe lazy require, used only inside SQLiteOrchestratorStorage's
 // constructor to resolve node:sqlite on first actual use (see the
@@ -5357,7 +5358,13 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	function userMessageContext(message: string): string {
-		return [`Mittente: ${identity?.instance || "yano"} (${identity?.role || "system"})`, `Progetto: ${identity?.project || "sconosciuto"}`, `Server: ${os.hostname()}`, "", message].join("\n");
+		return formatNotification(message, {
+			sender: identity?.instance || "yano",
+			role: identity?.role || "system",
+			project: identity?.project || "sconosciuto",
+			server: os.hostname(),
+			currentVersion: YANO_RUNTIME_PACKAGE_VERSION,
+		});
 	}
 
 	async function sendNotifications(message: string): Promise<{ ok: boolean; detail: string; channels: Record<string, { ok: boolean; detail: string }> }> {

@@ -456,6 +456,14 @@ has no local `.env` value for that key, so a project that never configured
 its own channel still pages the user through the one registered globally
 instead of silently going nowhere.
 
+All user-facing notifications share the formatter in
+`scripts/yano-notification-format.mjs`. It adds, in a short deterministic
+header, sender and role, project, host server, task, previous/current Yano
+version and a normalized lifecycle status. This applies equally to agent
+notifications, standalone scheduler notifications and watcher escalation;
+the original event remains below the header for context. Missing historical
+version information is explicitly reported as `n/d`, never invented.
+
 ### Global `yano-watcher` escalation
 
 The watcher has two separate responsibilities: it observes a project without

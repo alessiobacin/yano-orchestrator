@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { appendRawTraceRecord } from "./yano-trace-storage.mjs";
 import { resolveYanoConfig } from "./yano-config.mjs";
 import { createFeedback, openDatabase as openFeedbackDatabase } from "./yano-feedback.mjs";
+import { formatNotification } from "./yano-notification-format.mjs";
 
 const SECRET_KEY = /token|password|secret|authorization|api[-_]?key|private[-_]?key|cookie/i;
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -363,7 +364,7 @@ export async function sendTelegramWatcherNotification({ yanoRepo, message, sende
 	if (String(env.YANO_WATCHER_NOTIFY_DRY_RUN || "") === "1") return { ok: true, detail: "dry-run", chat_id: chatId };
 	const base = (apiBaseUrl || env.YANO_TELEGRAM_API_URL || "https://api.telegram.org").replace(/\/$/, "");
 	try {
-		message = [`Mittente: ${sender}`, `Progetto: ${project}`, `Server: ${os.hostname()}`, "", message].join("\n");
+		message = formatNotification(message, { sender, role: "watcher", project, server: os.hostname(), currentVersion: process.env.YANO_CURRENT_YANO_VERSION || "n/d" });
 		const response = await fetch(`${base}/bot${encodeURIComponent(token)}/sendMessage`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },

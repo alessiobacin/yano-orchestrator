@@ -437,6 +437,13 @@ from the watched project's `.env`.
 
 Without a `.env`, the extension runs normally — notifications are simply skipped. `notify_all` can be used for a manual fan-out; `notify_whatsapp` remains available for a WhatsApp-only message.
 
+Le notifiche WhatsApp, Telegram ed email usano un’intestazione breve e
+uniforme con mittente/ruolo, progetto, server, task, versione software
+precedente→attuale e stato normalizzato. Il task e lo stato vengono ricavati
+dal messaggio quando non sono forniti esplicitamente; la versione storica non
+disponibile viene indicata come `n/d`, mentre quella attualmente in esecuzione
+è letta dal pacchetto Yano caricato.
+
 ### MCP e prerequisiti frontend
 
 `yano init` verifica e installa automaticamente skill, CLI, adapter MCP e broker necessari. I tre server MCP essenziali vengono anche dichiarati nel `.mcp.json` attivo del progetto:

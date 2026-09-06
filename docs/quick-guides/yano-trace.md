@@ -232,6 +232,12 @@ Filtri disponibili: `--project`, `--run`, `--round`, `--task`, `--since` in
 formato ISO-8601 e `--limit`. `--json` produce un bundle strutturato per LLM o
 script.
 
+Nota su `--since`: dopo un restore dei file trace da un backup che ha
+preservato i mtime, i record freschi (ts dentro la finestra since) in file con
+mtime vecchio richiedono un append oppure una lettura senza `--since` per
+essere visibili alle query since — fino ad allora il file viene saltato perché
+il mtime è la prova dell'ultima scrittura (append-only).
+
 Quando viene passato `--run`, Yano ricava anche il progetto dal run persistito
 nello SQLite locale, se disponibile. Questo evita che un vecchio nome progetto
 o uno scope MQTT esplicito faccia risultare vuoto un contesto esistente.

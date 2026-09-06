@@ -277,6 +277,10 @@ export function readTraceRecords({ cwd, project, allProjects = false, since = nu
 		// they were always included (the per-line filter only drops lines that
 		// HAVE a ts). A file untouched since before the window cannot hold a
 		// fresh ts-less record, so excluding it is deliberate.
+		// NOT COVERED: after a restore of trace files from a backup that
+		// preserved mtimes, fresh records (ts inside the `since` window) living
+		// in files with an old mtime are NOT visible to --since queries until
+		// the file is rewritten (append) or the read drops --since.
 		if (since) {
 			try {
 				if (fs.statSync(file).mtimeMs + SAFETY_MARGIN_MS < since.getTime()) continue;

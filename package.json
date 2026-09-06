@@ -1,6 +1,6 @@
 {
   "name": "yano-orchestrator",
-  "version": "1.5.50",
+  "version": "1.5.51",
   "private": true,
   "type": "module",
   "engines": {
@@ -13,14 +13,36 @@
     "url": "https://github.com/alessiobacin/yano-orchestrator.git"
   },
   "license": "MIT",
-  "keywords": ["yano-package", "yano-agent", "multi-agent", "mqtt", "orchestrator"],
+  "keywords": [
+    "yano-package",
+    "yano-agent",
+    "multi-agent",
+    "mqtt",
+    "orchestrator"
+  ],
   "yano": {
-    "extensions": ["./extensions"]
+    "extensions": [
+      "./extensions"
+    ]
   },
   "bin": {
     "yano": "./bin/yano.mjs"
   },
-  "files": [".env.example", "agents", "bin", "docs", "extensions", "mcp.json.example", "mqtt", "playbooks", "prompts", "scripts", "skills-vendor", "README.md", "LICENSE"],
+  "files": [
+    ".env.example",
+    "agents",
+    "bin",
+    "docs",
+    "extensions",
+    "mcp.json.example",
+    "mqtt",
+    "playbooks",
+    "prompts",
+    "scripts",
+    "skills-vendor",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "test": "node scripts/test-all.mjs",
     "check:package-version": "node scripts/check-package-version.mjs",

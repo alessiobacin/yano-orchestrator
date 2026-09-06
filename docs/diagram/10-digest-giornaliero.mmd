@@ -1,0 +1,23 @@
+flowchart TD
+    BOOT["ensureDefaultDigestJob()\nogni passata di supervise()"] --> EXISTS{"job 'yano-daily-digest'\ngià in jobs.json?"}
+    EXISTS -- sì --> NOOP["nessuna azione\n(mai duplicato)"]
+    EXISTS -- no --> CREATE["scrive bridge script\nin schedulerScriptsDir\n+ registra il job"]
+    CREATE --> JOB["job: cron '0 6 * * *'\ntimezone 'Europe/Rome'\nmode 'self'"]
+    JOB --> TICK["tick() ogni minuto\ncronMatches con timezone esplicita\n(mai il fuso del server)"]
+    TICK -- "06:00 Roma" --> RUN["esegue lo script bridge\n(node, non shell)"]
+    RUN --> DIGESTMOD["yano-digest.mjs\n(package, sempre aggiornato da yano update)"]
+    DIGESTMOD --> BUILD["buildDigest()\nsola aggregazione, nessuna nuova\nfonte di verità"]
+    BUILD --> RUNS["watcher_projects\n+ run attivi per progetto"]
+    BUILD --> HOLDS["decision_holds aperti\n(testo della domanda, non solo il conteggio)"]
+    BUILD --> RECOVERY["last_recovery_at\nnelle ultime 24h"]
+    BUILD --> HERDRSTREAK["herdr-reachability.json\nstreak non raggiungibile"]
+    BUILD --> LOGALERTS["project-log-sizes.json\nprogetti oltre soglia 2GB"]
+    RUNS --> TEXT["formatDigestText()\nriepilogo leggibile"]
+    HOLDS --> TEXT
+    RECOVERY --> TEXT
+    HERDRSTREAK --> TEXT
+    LOGALERTS --> TEXT
+    TEXT --> SEND["sendGlobalNotification()\nyano-notify.mjs"]
+    SEND --> CHANNEL["canale globale\n(config di yano config,\nmai un .env di progetto)"]
+    RUN -- "exit 0 = almeno un canale ok" --> SYNC["durableAcceptance:\nself-mode sincrono\n(fix duplicate-fire)"]
+    RUN -- "exit 1 = nessun canale ok" --> RETRYCAP["retry con tetto\nMAX_STALE_RECOVERIES\n(mai infinito)"]

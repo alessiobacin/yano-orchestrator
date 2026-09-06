@@ -23,6 +23,22 @@ cartella contiene viste più piccole, utili durante diagnosi e onboarding:
   tra checkout dev, copia npm permanente, clone Pi e Docker complementare.
 - [`08-auto-improvement-360.mmd`](./08-auto-improvement-360.mmd) — fasi,
   checkpoint, scoring e handoff dell'auto-improver al Planner.
+- [`09-heartbeat-liveness.mmd`](./09-heartbeat-liveness.mmd) — scrittore unico
+  (file + MQTT) e i due lettori canonici (servizi globali, planner di
+  progetto), incluso il rilevamento del caso "processo vivo, event loop
+  bloccato".
+- [`10-digest-giornaliero.mmd`](./10-digest-giornaliero.mmd) — bootstrap del
+  job di default, aggregazione dello stato esistente, invio sul canale
+  globale.
+- [`11-notifica-canale-globale.mmd`](./11-notifica-canale-globale.mmd) —
+  priorità env > `.env` di progetto > config globale per un agente; solo
+  config globale per un job cross-progetto.
+- [`12-pulizia-tab-agenti.mmd`](./12-pulizia-tab-agenti.mmd) — le due passate
+  di chiusura tab (agente vivo, agente sparito del tutto), le eccezioni
+  planner/`human`, e la copertura anche di un progetto in pausa.
+- [`13-scheduler-dispatch-dedup.mmd`](./13-scheduler-dispatch-dedup.mmd) — il
+  fix del duplicate-fire (self-mode sincrono, tetto sui retry asincroni
+  stantii).
 
 I file `.mmd` sono sorgenti Mermaid: possono essere aperti in VS Code con una
 preview Mermaid o renderizzati con uno strumento Mermaid compatibile.

@@ -26,6 +26,14 @@ che la modifica di design richiesta fosse davvero presente.
 
 {{SLUG_REMINDER}}
 
+## Prerequisiti E2E
+
+Prima di consegnare un frontend autenticato verifica che il coder abbia
+predisposto gli account development/test per i ruoli richiesti e, se serve,
+le aziende/tenant associati. Usa le credenziali solo tramite il registro
+sicuro o env temporanee per i test; non inserirle nella dashboard bug,
+nei report o nel codice.
+
 ## Aspetta il tuo turno
 
 Il planner ti lancia insieme al resto del team scelto per un task (fase 6 —

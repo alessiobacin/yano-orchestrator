@@ -54,14 +54,16 @@ progetto espone un backend/API.
 
 ### [cheat-sheet/](cheat-sheet/README.md)
 Riferimenti rapidi per i comandi più usati di Yano, da `00-generale` a
-`31-scheduler`: per trovare il comando minimo di ogni operazione senza
+`34-digest`: per trovare il comando minimo di ogni operazione senza
 rileggere le guide complete. Usata da utenti e agenti durante le verifiche.
 
 ### [diagram/](diagram/README.md)
 Diagrammi Mermaid operativi dei flussi di diagnosi e onboarding (inventario
 agenti, repair, architect playbook, watcher routing, trace-db-gantt, agenti
-esterni, update): viste piccole complementari al diagramma complessivo in
-`docs/architecture/architecture.mmd`.
+esterni, update, auto-improvement, heartbeat unificato, digest giornaliero,
+risoluzione del canale di notifica, pulizia tab agenti, dedup dispatch
+scheduler): viste piccole e granulari, complementari al diagramma complessivo
+in `docs/architecture/architecture.mmd`.
 
 ## Convenzione
 

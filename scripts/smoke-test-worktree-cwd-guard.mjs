@@ -23,6 +23,16 @@ import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import assert from "node:assert/strict";
 
+// Isolate from the REAL machine's global Yano config. Fase 0 made
+// sendNotifications() fall back to the global notification channel when a
+// project has no local .env — on a real developer machine with real
+// Telegram/WhatsApp credentials configured globally, an unisolated test
+// that reaches a notification code path WILL send a real message. Must be
+// set before extensions/orchestrator.ts is imported anywhere below.
+// (Dependency-free: does not assume node:path/node:os are imported here.)
+if (!process.env.YANO_CONFIG_FILE) process.env.YANO_CONFIG_FILE = `${process.env.TMPDIR || "/tmp"}/yano-test-isolation-no-such-config.env`;
+
+
 const PROJECT_ROOT = path.resolve(new URL(".", import.meta.url).pathname, "..");
 
 let PASS = 0;

@@ -41,6 +41,7 @@ vincoli e procedure complete usare la [documentazione](../../README.md), la
 - [32-memory.md](./32-memory.md)
 - [32-yano-local-pc.md](./32-yano-local-pc.md)
 - [33-services.md](./33-services.md)
+- [34-digest.md](./34-digest.md)
 
 Le modifiche al codice devono aggiornare anche le superfici documentali indicate
 in [documentation-sync.md](../guides/documentation-sync.md).

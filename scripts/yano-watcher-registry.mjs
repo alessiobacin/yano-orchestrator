@@ -28,18 +28,30 @@
 
 import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import { appendRawTraceRecord, canonicalProjectScope, projectKey, readTraceRecords, resolveTraceProject, traceRoot } from "./yano-trace-storage.mjs";
+import { appendRawTraceRecord, canonicalProjectScope, projectKey, readApplicationHeartbeat, readTraceRecords, resolveTraceProject, traceRoot, tracePaths } from "./yano-trace-storage.mjs";
 import { projectDbPath } from "./yano-project.mjs";
 import { ensureGlobalYanoServices } from "./yano-global-services.mjs";
 import { superviseExternalServices, getService } from "./yano-services.mjs";
 import { herdrSnapshot } from "./yano-herdr-client.mjs";
+import { applyRetention, dailyLogPath, bytesUnder } from "./yano-data.mjs";
+
+// Cron launches with a minimal PATH. Herdr is commonly installed in the
+// user's ~/.local/bin, so make the runtime independent from the interactive
+// shell profile before any Herdr probe or recovery command is attempted.
+const herdrBinDir = path.join(os.homedir(), ".local", "bin");
+if (!String(process.env.PATH || "").split(path.delimiter).includes(herdrBinDir)) process.env.PATH = [herdrBinDir, process.env.PATH || ""].filter(Boolean).join(path.delimiter);
 import { installOneMinuteWindowsJob, removeOneMinuteWindowsJob, statusOneMinuteWindowsJob } from "./yano-os-scheduler.mjs";
 import { agentTabIdentityAudit, findAgentIdentityConflicts, formatAgentIdentityConflicts } from "./yano-agent-identity.mjs";
 import { superviseScheduler } from "./yano-scheduler.mjs";
+import { closeTerminalArchitectSessions } from "./yano-architect.mjs";
+import { closeTerminalAutoImproverSessions } from "./yano-auto-improver.mjs";
+import mqtt from "mqtt";
+import { claimFeedback, listFeedback, openDatabase as openFeedbackDatabase } from "./yano-feedback.mjs";
 
 const require = createRequire(import.meta.url);
 const WORKSPACE_LABEL = "yano-watcher";
@@ -164,6 +176,19 @@ function closeHerdrTab(tabId) {
 		: { closed: false, tab_id: tabId, error: (result.stderr || result.stdout || "Herdr non ha chiuso la tab").trim() };
 }
 
+function watcherProcessMatches(row, paneId) {
+	if (!paneId) return null;
+	const result = spawnSync("herdr", ["pane", "process-info", "--pane", paneId], { encoding: "utf8", maxBuffer: 2_000_000 });
+	if (result.status !== 0) return null;
+	try {
+		const payload = JSON.parse(result.stdout || "");
+		const processes = payload?.result?.process_info?.foreground_processes || [];
+		if (!processes.length) return null;
+		const command = processes.map((item) => item.cmdline || item.argv?.join(" ") || "").join(" ");
+		return command.includes("yano watch") && command.includes(`--project-root ${row.root}`) && command.includes(`--interval-ms ${Math.max(1000, Number(row.interval_ms))}`) && command.includes(`--lookback-ms ${Math.max(1000, Number(row.lookback_ms))}`);
+	} catch { return null; }
+}
+
 function repairAgentTabIdentities(snapshot) {
 	const repaired = [];
 	for (const conflict of agentTabIdentityAudit(snapshot)) {
@@ -198,7 +223,7 @@ function closeUnusedInitialTab(snapshot, workspaceId, keepTabId) {
 	return closeHerdrTab(initial.tab_id);
 }
 
-function projectRuns(root) {
+export function projectRuns(root) {
 	const db = openProjectDatabase(root);
 	if (!db) return { available: false, runs: [] };
 	try {
@@ -212,7 +237,7 @@ function projectRuns(root) {
 			GROUP BY r.id
 			ORDER BY r.updated_at DESC
 		`).all();
-		const tickets = db.prepare("SELECT id, run_id, title, status, assigned_instance, updated_at FROM tickets ORDER BY updated_at DESC").all();
+		const tickets = db.prepare("SELECT id, run_id, title, status, assigned_instance, required_playbook, updated_at FROM tickets ORDER BY updated_at DESC").all();
 		const dependencies = db.prepare("SELECT d.ticket_id, d.depends_on_id, dependency.status AS dependency_status FROM ticket_dependencies d JOIN tickets dependency ON dependency.id = d.depends_on_id").all();
 		const dependenciesByTicket = new Map();
 		for (const dependency of dependencies) {
@@ -224,11 +249,32 @@ function projectRuns(root) {
 			if (!byRun.has(ticket.run_id)) byRun.set(ticket.run_id, []);
 			byRun.get(ticket.run_id).push(ticket);
 		}
+		const bindings = new Map(db.prepare("SELECT run_id, playbook_id, checksum, snapshot FROM playbook_bindings").all().map((binding) => {
+			let snapshot = null; try { snapshot = JSON.parse(binding.snapshot); } catch {}
+			return [binding.run_id, { ...binding, snapshot }];
+		}));
+		const runtimeStates = new Map(db.prepare("SELECT run_id, state_id, generation, updated_at FROM playbook_runtime_state").all().map((state) => [state.run_id, state]));
 		return { available: true, runs: runs.map((run) => {
 			const runTickets = byRun.get(run.id) || [];
+			const binding = bindings.get(run.id) || null;
+			const flowViolations = [];
+			for (const ticket of runTickets) {
+				const deps = dependenciesByTicket.get(ticket.id) || [];
+				if (["running", "done"].includes(ticket.status)) {
+					const unfinished = deps.filter((dependency) => dependency.dependency_status !== "done");
+					if (unfinished.length) flowViolations.push({ kind: "ticket_out_of_order", ticket_id: ticket.id, status: ticket.status, unfinished_dependencies: unfinished.map((item) => ({ ticket_id: item.depends_on_id, status: item.dependency_status })) });
+				}
+				if (binding?.playbook_id && ticket.required_playbook && ticket.required_playbook !== binding.playbook_id) flowViolations.push({ kind: "ticket_playbook_mismatch", ticket_id: ticket.id, required_playbook: ticket.required_playbook, bound_playbook: binding.playbook_id });
+			}
+			const runtime = runtimeStates.get(run.id) || null;
+			const terminalStates = new Set((binding?.snapshot?.states || []).filter((state) => state.terminal === true).map((state) => state.id));
+			if (run.status === "active" && runtime?.state_id && terminalStates.has(runtime.state_id) && runtime.state_id !== "blocked") flowViolations.push({ kind: "active_run_in_terminal_playbook_state", state_id: runtime.state_id });
 			return {
 				...run,
 				tickets: runTickets,
+				playbook_binding: binding ? { playbook_id: binding.playbook_id, checksum: binding.checksum } : null,
+				playbook_state: runtime,
+				playbook_flow: { status: flowViolations.length ? "violation" : "ordered", violations: flowViolations },
 				active_ticket_count: runTickets.filter((ticket) => ["pending", "running"].includes(ticket.status)).length,
 				running_ticket_count: runTickets.filter((ticket) => ticket.status === "running").length,
 				pending_ticket_count: runTickets.filter((ticket) => ticket.status === "pending").length,
@@ -243,8 +289,38 @@ function projectHasActiveWork(root) {
 	return projectRuns(root).runs.some(runNeedsPlanner);
 }
 
+// Fase 9 (digest giornaliero) — the run-level open_holds COUNT already
+// computed by projectRuns() is enough to decide "does this project need a
+// planner", but the digest needs the actual question text so the user can
+// act without opening the project. A separate, minimal read-only query
+// avoids reshaping projectRuns()'s existing contract for every other caller.
+export function projectOpenHolds(root) {
+	const db = openProjectDatabase(root);
+	if (!db) return [];
+	try {
+		return db.prepare("SELECT id, run_id, question, created_at FROM decision_holds WHERE status = 'open' ORDER BY created_at ASC").all();
+	} catch { return []; }
+	finally { try { db.close(); } catch { /* best effort */ } }
+}
+
+export function listWatcherProjectRows() {
+	const db = openDatabase();
+	try { return db.prepare("SELECT * FROM watcher_projects ORDER BY name, root").all(); }
+	finally { try { db.close(); } catch { /* best effort */ } }
+}
+
 function runNeedsPlanner(run) {
-	return run.status === "active" || (run.status === "completed" && !["finalized", "not_applicable"].includes(run.finalization_status));
+	// A completed run is terminal. `pending_finalize` is an administrative
+	// state, not evidence of live work, so it must never trigger an LLM wake-up.
+	return run.status === "active";
+}
+
+export { runNeedsPlanner, projectNeedsPlanner };
+
+function projectNeedsPlanner(root) {
+	const state = projectRuns(root);
+	if (!state.available) return false;
+	return state.runs.some((run) => runNeedsPlanner(run) || Number(run.open_holds || 0) > 0);
 }
 
 export function findProjectWorkspace(snapshot, root, project) {
@@ -295,7 +371,24 @@ function plannerLabelForAgent(snapshot, agent) {
 	return Boolean(tab && /^planner(?:-\d+)?$/i.test(tab.label || ""));
 }
 
-function plannerHeartbeatHealthy(planner) {
+// Fase 2 (heartbeat unification): every agent process (this planner included)
+// already writes a bounded application-heartbeat file on each presence
+// publish (see orchestrator.ts's publishPresence()) — the same file
+// yano-global-services.mjs consults for the 3 global services. Neither the
+// MQTT-retained `last_heartbeat` nor Herdr's own process/explain heuristics
+// below can tell "process alive, event loop wedged" apart from healthy; the
+// file can, because it is only ever refreshed by application code actually
+// running. Only enforced when the file exists, so a just-recovered planner
+// mid-warm-up (no heartbeat published yet) is judged on the existing signals
+// exactly as before.
+function plannerFileHeartbeatSaysDead(planner) {
+	if (!planner?.cwd) return false;
+	const instance = String(planner.name || "planner-01");
+	const file = readApplicationHeartbeat(planner.cwd, instance, { maxAgeMs: 120_000 });
+	return file.found && !file.healthy;
+}
+
+export function plannerHeartbeatHealthy(planner) {
 	const status = String(planner?.agent_status || "unknown").toLowerCase();
 	if (!["idle", "working"].includes(status)) return false;
 	const heartbeat = Date.parse(planner?.last_heartbeat || "");
@@ -304,6 +397,7 @@ function plannerHeartbeatHealthy(planner) {
 	// use the authoritative pane process plus Herdr's explanation API rather
 	// than treating an otherwise live planner as dead every minute.
 	if (!planner?.pane_id) return false;
+	if (plannerFileHeartbeatSaysDead(planner)) return false;
 	const processInfo = spawnSync("herdr", ["pane", "process-info", "--pane", planner.pane_id], { encoding: "utf8" });
 	let process;
 	try { process = JSON.parse(processInfo.stdout || "")?.result?.process_info?.foreground_processes?.[0]; } catch { process = null; }
@@ -314,12 +408,28 @@ function plannerHeartbeatHealthy(planner) {
 	return ["idle", "working"].includes(String(explanation?.state || status).toLowerCase()) && explanation?.warning == null && explanation?.visible_blocker !== true;
 }
 
-function ensureRegisteredPlanner(row, snapshot) {
+export function ensureRegisteredPlanner(row, snapshot, db = null) {
 	if (!snapshot || !fs.existsSync(row.root)) return { recovery: "project_unavailable" };
+	// A registered project may be idle or contain only terminal runs. Planner
+	// liveness is required for active work or an open user decision hold, not as
+	// a reason to manufacture a fresh planner session for every completed project.
+	if (!projectNeedsPlanner(row.root)) return { recovery: "no_active_run", planner_status: "not_required" };
 	const workspace = findProjectWorkspace(snapshot, row.root, row.name);
 	const planners = workspace ? plannerAgentsInWorkspace(snapshot, workspace.workspace_id, row.root) : [];
 	const healthy = planners.find(plannerHeartbeatHealthy);
 	if (healthy) return { recovery: "planner_healthy", planner_status: healthy.agent_status || "unknown", planner_instance: healthy.name || null };
+	const reason = "planner_missing_or_stale_heartbeat";
+	// Unlike reconcileProjectRun, this check used to run unconditionally on
+	// every one-minute supervisor pass. A momentarily flaky heartbeat read
+	// (snapshot lag right after Mac sleep/Herdr restart, or a just-recovered
+	// planner that has not published its first heartbeat yet) made it close
+	// and relaunch the planner tab again and again — once per minute, forever
+	// — each relaunch paying for a fresh multi-hundred-MB recovery snapshot.
+	// The same cooldown reconcileProjectRun already respects must gate this
+	// path too, or the two recovery entry points race each other.
+	if (recoveryCoolingDown(row, reason)) {
+		return { recovery: "recovery_cooldown", recovery_reason: reason, last_recovery_at: row.last_recovery_at };
+	}
 	// A dead/blocked planner tab must not be reused as if it were live. Close it
 	// first; recoverPlanner will create a clean planner-01 pane in the verified
 	// project workspace and launch the normal guarded Yano command.
@@ -327,8 +437,96 @@ function ensureRegisteredPlanner(row, snapshot) {
 		const tab = snapshot.tabs?.find((item) => item.tab_id === planner.tab_id);
 		if (tab) closeHerdrTab(tab.tab_id);
 	}
-	const recovered = recoverPlanner({ row, snapshot: herdrSnapshot() || snapshot, run: { id: "planner-presence", status: "active", finalization_status: "not_started" }, reason: "planner_missing_or_stale_heartbeat" });
+	const recovered = recoverPlanner({ row, snapshot: herdrSnapshot() || snapshot, run: { id: "planner-presence", status: "active", finalization_status: "not_started" }, reason });
+	if (db) db.prepare("UPDATE watcher_projects SET last_recovery_at = ?, last_recovery_reason = ?, updated_at = ? WHERE project_key = ?").run(now(), reason, now(), row.project_key);
 	return { recovery: "planner_recovered", ...recovered };
+}
+
+function paneHasLivePiProcess(paneId) {
+	if (!paneId) return false;
+	const result = spawnSync("herdr", ["pane", "process-info", "--pane", paneId], { encoding: "utf8" });
+	try {
+		const processes = JSON.parse(result.stdout || "")?.result?.process_info?.foreground_processes || [];
+		return processes.some((item) => item?.argv0 === "pi" || item?.argv?.some((arg) => /(?:^|\/)pi(?:\.m?js)?$/.test(String(arg))));
+	} catch { return false; }
+}
+
+// A tab is never touched — regardless of any other condition below — if it
+// is the planner's own persistent control surface, or the user's own manual
+// terminal pane (conventionally labelled "human" across every project).
+function isProtectedTabLabel(label) {
+	const text = String(label || "").trim().toLowerCase();
+	return text === "human" || /planner/i.test(text);
+}
+
+export function cleanupCompletedAgentTabs(snapshot, row, runs) {
+	if (!snapshot) return [];
+	const terminalAssignments = new Set(runs.flatMap((run) => (run.tickets || [])
+		.filter((ticket) => ["done", "failed"].includes(ticket.status) && ticket.assigned_instance)
+		.map((ticket) => ticket.assigned_instance)));
+	const isTerminalAssignment = (instance) => [...terminalAssignments].some((assigned) =>
+		instance === assigned || instance.startsWith(`${assigned}-`) || assigned.startsWith(`${instance}-`));
+	const removed = [];
+	const closedTabIds = new Set();
+	const agentsInProject = (snapshot.agents || []).filter((agent) => path.resolve(agent.cwd || "") === path.resolve(row.root));
+	for (const agent of agentsInProject) {
+		const tab = snapshot.tabs?.find((item) => item.tab_id === agent.tab_id);
+		// A real Herdr snapshot does not populate agent.name/agent.instance, and
+		// agent.terminal_title_stripped is a generic Pi pane title ("π -
+		// <project>"), not the role identity — none of these ever matched a
+		// ticket's assigned_instance in production. Real evidence (2026-09-05):
+		// this made the ENTIRE live-agent branch below a no-op for every real
+		// project — every closed tab up to this point came from the agent-less
+		// second pass instead, which already (correctly) reads the tab's own
+		// label. Yano's own tab-naming convention names a tab after its exact
+		// instance, so prefer that; only fall back to the agent's own fields
+		// when a tab genuinely cannot be found for this agent.
+		const instance = String(tab?.label || agent.name || agent.instance || agent.terminal_title_stripped || "");
+		const isProtected = /planner/i.test(instance) || isProtectedTabLabel(tab?.label);
+		const terminalTask = isTerminalAssignment(instance);
+		const status = String(agent.agent_status || "unknown").toLowerCase();
+		const dead = !paneHasLivePiProcess(agent.pane_id);
+		// Planner tabs are persistent project control surfaces, and a "human"
+		// tab is the user's own manual terminal — never close either merely
+		// because a run completed or the process is temporarily absent; when an
+		// active run/hold needs recovery, ensureRegisteredPlanner() owns the
+		// explicit blocked-planner close/relaunch decision below.
+		if (isProtected) continue;
+		if (!terminalTask && !dead) continue;
+		if (!dead && !["idle", "offline", "unknown", "stopped", "done"].includes(status)) continue;
+		if (!tab) continue;
+		const closed = closeHerdrTab(tab.tab_id);
+		closedTabIds.add(tab.tab_id);
+		removed.push({ tab_id: tab.tab_id, pane_id: agent.pane_id, instance, reason: dead ? "dead_process" : "terminal_ticket", ...closed });
+	}
+	// A Pi process that has fully exited disappears from snapshot.agents
+	// entirely (Herdr does not keep a "dead agent" placeholder) — its TAB,
+	// however, lingers forever with no owning agent at all, invisible to the
+	// loop above. Real evidence (2026-09-05 audit): article-writer alone had
+	// 12 such agent-less tabs (duplicated coder-02/docs-sync instances whose
+	// process had long since exited). Sweep the project's own workspace
+	// directly for these; a tab is only closed here when ticket history
+	// confirms its assigned instance's work is actually done/failed — a
+	// same-minute freshly-launched instance that has not registered its Pi
+	// agent yet has no terminal-assignment match, so it is never touched.
+	const workspace = findProjectWorkspace(snapshot, row.root, row.name);
+	if (workspace) {
+		const liveTabIds = new Set(agentsInProject.map((agent) => agent.tab_id));
+		for (const tab of snapshot.tabs || []) {
+			if (tab.workspace_id !== workspace.workspace_id) continue;
+			if (liveTabIds.has(tab.tab_id) || closedTabIds.has(tab.tab_id)) continue;
+			if (isProtectedTabLabel(tab.label)) continue;
+			const instance = String(tab.label || "");
+			if (!instance || !isTerminalAssignment(instance)) continue;
+			const closed = closeHerdrTab(tab.tab_id);
+			closedTabIds.add(tab.tab_id);
+			removed.push({ tab_id: tab.tab_id, pane_id: null, instance, reason: "orphaned_agentless_terminal_ticket", ...closed });
+		}
+	}
+	if (removed.length) {
+		try { appendRawTraceRecord({ cwd: row.root, project: row.name, record: { type: "watcher_completed_agent_tabs_closed", record_type: "event", source: "yano-watcher-registry", instance: "yano-watcher", closed: removed } }); } catch { /* best effort */ }
+	}
+	return removed;
 }
 
 function plannerStalled(run) {
@@ -349,12 +547,50 @@ function ticketAgentStatus(snapshot, root, instance) {
 }
 
 function orphanedRunningTickets(run, snapshot, root) {
+	if (!snapshot) return [];
 	return (run.tickets || []).filter((ticket) => {
 		if (ticket.status !== "running" || !ticket.assigned_instance) return false;
 		const updated = Date.parse(ticket.updated_at || "");
 		if (!Number.isFinite(updated) || Date.now() - updated < ORPHANED_TICKET_IDLE_MS) return false;
-		return ticketAgentStatus(snapshot, root, ticket.assigned_instance) === "idle";
+		// A missing agent is also orphaned. Previously only an explicitly idle
+		// Herdr card matched, so a killed lazy worker (notably the performance
+		// benchmarker) could leave the DAG running forever with no recovery signal.
+		return [null, "unknown", "idle", "offline", "dead"].includes(ticketAgentStatus(snapshot, root, ticket.assigned_instance));
 	});
+}
+
+function notifyPlannerOfOrphanedTickets(row, snapshot, run, orphaned) {
+	const workspace = findProjectWorkspace(snapshot, row.root, row.name);
+	const planner = workspace && plannerAgentsInWorkspace(snapshot, workspace.workspace_id, row.root).find(plannerHeartbeatHealthy);
+	if (!planner?.pane_id) return { notified: false, reason: "planner_not_live" };
+	const ticketText = orphaned.map((item) => `${item.ticket.id} (${item.ticket.assigned_instance})`).join(", ");
+	const prompt = `[yano-watcher specialist recovery] Il run ${run.id} ha ticket running senza worker vivo: ${ticketText}. Non creare ticket duplicati. Riprendi dal checkpoint, chiudi/riavvia solo gli agenti specialistici mancanti e continua il flusso fino alla risposta finale. Il planner è già vivo: non riavviare il planner.`;
+	const scope = projectKey(row.root, row.name);
+	const code = `import mqtt from ${JSON.stringify("mqtt")}; const c=await mqtt.connectAsync(process.env.PI_ORCH_BROKER_URL||"mqtt://127.0.0.1:1883",{connectTimeout:3000}); await c.publishAsync(${JSON.stringify(`pi/${scope}/agents/${planner.name || "planner-01"}/commands`)},JSON.stringify(${JSON.stringify({ type: "watcher_specialist_recovery", sender_instance: "yano-watcher", sender_role: "watcher", project: row.name, run_id: run.id, prompt })}),{qos:1}); await c.endAsync();`;
+	const launched = spawnSync(process.execPath, ["--input-type=module", "-e", code], { cwd: row.root, encoding: "utf8", timeout: 5000 });
+	return launched.status === 0 ? { notified: true, planner_pane_id: planner.pane_id, planner_instance: planner.name || "planner-01", ticket_ids: orphaned.map((item) => item.ticket.id) } : { notified: false, reason: "planner_notification_failed", error: (launched.stderr || "").trim() };
+}
+
+async function notifyYanoOrchestratorPlanner(flow, sourceProject) {
+	const root = PACKAGE_ROOT;
+	let snapshot = herdrSnapshot();
+	const row = { name: "yano-orchestrator", root, project_key: projectKey(root, "yano-orchestrator") };
+	let workspace = findProjectWorkspace(snapshot, root, "yano-orchestrator");
+	let planner = workspace && plannerAgentsInWorkspace(snapshot, workspace.workspace_id, root).find(plannerHeartbeatHealthy);
+	if (!planner) {
+		try {
+			recoverPlanner({ row, snapshot, run: { id: "playbook-flow-audit", status: "active", finalization_status: "not_started" }, reason: "playbook_flow_violation" });
+			snapshot = herdrSnapshot() || snapshot;
+			workspace = findProjectWorkspace(snapshot, root, "yano-orchestrator");
+			planner = workspace && plannerAgentsInWorkspace(snapshot, workspace.workspace_id, root).find(plannerHeartbeatHealthy);
+		} catch (error) { return { notified: false, reason: "planner_recovery_failed", error: error instanceof Error ? error.message : String(error) }; }
+	}
+	if (!planner?.name) return { notified: false, reason: "planner_not_live" };
+	const scope = projectKey(root, "yano-orchestrator");
+	const prompt = `[yano-watcher playbook audit] Violazione deterministica del flusso rilevata nel progetto ${sourceProject}. Run ${flow.run_id}. Evidenze: ${JSON.stringify(flow)}. Analizza e correggi il problema nel codice/configurazione di Yano; non modificare il progetto sorgente e non creare ticket duplicati.`;
+	const client = await mqtt.connectAsync(process.env.PI_ORCH_BROKER_URL || "mqtt://127.0.0.1:1883", { connectTimeout: 3000 });
+	try { await client.publishAsync(`pi/${scope}/agents/${planner.name}/commands`, JSON.stringify({ type: "watcher_playbook_flow_violation", sender_instance: "yano-watcher", sender_role: "watcher", source_project: sourceProject, ...flow, prompt }), { qos: 1 }); return { notified: true, planner_instance: planner.name }; }
+	finally { await client.endAsync(); }
 }
 
 function readyPendingTickets(run) {
@@ -463,6 +699,10 @@ function reconcileProjectRun(db, row, snapshot) {
 	if (!available) return { recovery: "waiting_for_initialization", watcher_kept: true };
 	if (!runs.length) return { recovery: "project_idle", watcher_kept: true };
 	const incomplete = runs.filter(runNeedsPlanner);
+	const flowViolations = runs.flatMap((run) => (run.playbook_flow?.violations || []).map((violation) => ({ run_id: run.id, ...violation })));
+	if (flowViolations.length) {
+		try { appendRawTraceRecord({ cwd: row.root, project: row.name, record: { type: "playbook_flow_violation", record_type: "event", source: "yano-watcher-registry", instance: "yano-watcher", project: row.name, violations: flowViolations } }); } catch { /* audit must not stop supervision */ }
+	}
 	if (incomplete.length) {
 		const workspace = findProjectWorkspace(snapshot, row.root, row.name);
 		const planners = workspace ? plannerAgentsInWorkspace(snapshot, workspace.workspace_id, row.root) : [];
@@ -472,7 +712,13 @@ function reconcileProjectRun(db, row, snapshot) {
 		const held = incomplete.filter((run) => Number(run.open_holds || 0) > 0);
 		const stalled = incomplete.filter((run) => Number(run.open_holds || 0) === 0 && (plannerStalled(run) || orphaned.some((item) => item.run.id === run.id) || (plannersIdle && ready.some((item) => item.run.id === run.id))));
 		const reason = orphaned.length ? "planner_handoff_missing" : ready.length && plannersIdle ? "planner_ready_queue_stalled" : stalled.length ? "planner_stalled" : "planner_missing";
-		if (planners.length && !stalled.length) return { recovery: held.length ? "waiting_for_user" : "planner_present", incomplete_runs: incomplete.map((run) => run.id), planner_statuses: planners.map((planner) => planner.agent_status || "unknown") };
+		if (orphaned.length && planners.some(plannerHeartbeatHealthy)) {
+			const targetRun = orphaned[0].run;
+			const notification = notifyPlannerOfOrphanedTickets(row, snapshot, targetRun, orphaned.filter((item) => item.run.id === targetRun.id));
+			try { appendRawTraceRecord({ cwd: row.root, project: row.name, record: { type: "watcher_specialist_recovery_requested", record_type: "event", source: "yano-watcher-registry", instance: "yano-watcher", run_id: targetRun.id, tickets: orphaned.map((item) => item.ticket.id), notification } }); } catch { /* best effort */ }
+			return { recovery: "specialist_recovery_requested", incomplete_runs: incomplete.map((run) => run.id), notification, planner_statuses: planners.map((planner) => planner.agent_status || "unknown") };
+		}
+		if (planners.length && !stalled.length) return { recovery: held.length ? "waiting_for_user" : "planner_present", incomplete_runs: incomplete.map((run) => run.id), planner_statuses: planners.map((planner) => planner.agent_status || "unknown"), playbook_flow: flowViolations.length ? "violation" : "ordered", playbook_flow_violations: flowViolations };
 		if (recoveryCoolingDown(row, reason)) return { recovery: "recovery_cooldown", incomplete_runs: incomplete.map((run) => run.id), recovery_reason: reason, last_recovery_at: row.last_recovery_at };
 		try {
 			const recovered = recoverPlanner({ row, snapshot, run: (stalled[0] || incomplete[0]), reason });
@@ -483,7 +729,7 @@ function reconcileProjectRun(db, row, snapshot) {
 			return { recovery: "planner_recovery_failed", incomplete_runs: incomplete.map((run) => run.id), recovery_error: error instanceof Error ? error.message : String(error) };
 		}
 	}
-	return { recovery: "project_completed", watcher_kept: true };
+	return { recovery: "project_completed", watcher_kept: true, playbook_flow: flowViolations.length ? "violation" : "ordered", playbook_flow_violations: flowViolations };
 }
 
 function findOrCreateWatcherWorkspace(snapshot, root, dryRun = false) {
@@ -640,19 +886,48 @@ function doResume(db, info, existing, opts = {}) {
 // closes the original gap: a stopped watcher used to be invisible until
 // someone happened to check `herdr agent list`; now the routine status call
 // itself notices and repairs it.
-function doStatusForRow(db, row, { heal = true } = {}) {
+export function doStatusForRow(db, row, { heal = true, snapshot: suppliedSnapshot = null } = {}) {
 	const info = infoFromRow(row);
 	const base = { ...row, live: null, drift: false, recovered: false };
-	if (row.worker_status !== "running") return base; // paused/stopped/planned: respect the explicit state, nothing to heal
+	if (row.worker_status !== "running") {
+		// Respect the explicit pause/stop of the WATCHER's own polling loop —
+		// its worker tab and cadence are untouched here. But a paused watcher
+		// says nothing about whether the project's coder/reviewer/docs-sync
+		// agent tabs from past work are still relevant: those accumulate dead
+		// tabs exactly like an actively-watched project (real evidence,
+		// 2026-09-05: a project the user had paused had 12 orphaned tabs never
+		// once swept, since this whole function used to return immediately).
+		if (!heal) return base;
+		const pausedSnapshot = suppliedSnapshot || herdrSnapshot();
+		if (!pausedSnapshot) return base;
+		const agent_tabs_closed = cleanupCompletedAgentTabs(pausedSnapshot, row, projectRuns(row.root).runs);
+		return agent_tabs_closed.length ? { ...base, agent_tabs_closed } : base;
+	}
 	if (!row.worker_pane_id) return { ...base, live: "unknown", drift: false }; // e.g. started with --foreground: not Herdr-managed, nothing this check can observe
-	const snapshot = herdrSnapshot();
+	const snapshot = suppliedSnapshot || herdrSnapshot();
 	if (!snapshot) return { ...base, live: "unknown", note: "Herdr non raggiungibile: impossibile verificare lo stato reale" };
 	const identity_conflicts = findAgentIdentityConflicts(snapshot).filter((conflict) => path.resolve(conflict.root) === path.resolve(row.root));
 	const tab = snapshot.tabs?.find((item) => item.tab_id === row.worker_tab_id);
 	const pane = tab && snapshot.panes?.find((item) => item.pane_id === row.worker_pane_id);
 	if (tab && pane) {
-		const planner = heal ? (() => { try { return ensureRegisteredPlanner(row, snapshot); } catch (error) { return { recovery: "planner_recovery_failed", recovery_error: error instanceof Error ? error.message : String(error) }; } })() : { recovery: "not_checked" };
-		return { ...base, live: "running", identity_conflicts, planner, ...reconcileProjectRun(db, row, herdrSnapshot() || snapshot) };
+		// The registry is authoritative for cadence. Older workers may still be
+		// alive with the former five-minute interval after an upgrade; keeping
+		// them marked healthy silently defeats the one-minute supervisor contract.
+		const watcherMatches = watcherProcessMatches(row, pane.pane_id);
+		if (watcherMatches === false) {
+			const closed = closeHerdrTab(tab.tab_id);
+			try { appendRawTraceRecord({ cwd: row.root, project: row.name, record: { type: "watcher_worker_restarted_for_config_drift", record_type: "event", source: "yano-watcher-registry", expected_interval_ms: row.interval_ms, expected_lookback_ms: row.lookback_ms, previous_tab_id: tab.tab_id, close: closed } }); } catch { /* best effort */ }
+			try {
+				const relaunched = launchHerdrWorker({ project: infoFromRow(row), root: row.root, db, row, intervalMs: row.interval_ms, lookbackMs: row.lookback_ms, dryRun: false });
+				return { ...base, live: "restarted", drift: true, recovered: true, worker_config_repaired: true, ...relaunched, ...reconcileProjectRun(db, row, herdrSnapshot()) };
+			} catch (error) {
+				return { ...base, live: "config_drift", drift: true, recovered: false, worker_config_repaired: false, recover_error: error instanceof Error ? error.message : String(error) };
+			}
+		}
+		const runs = projectRuns(row.root).runs;
+		const agent_tabs_closed = heal ? cleanupCompletedAgentTabs(snapshot, row, runs) : [];
+		const planner = heal ? (() => { try { return ensureRegisteredPlanner(row, snapshot, db); } catch (error) { return { recovery: "planner_recovery_failed", recovery_error: error instanceof Error ? error.message : String(error) }; } })() : { recovery: "not_checked" };
+		return { ...base, live: "running", identity_conflicts, planner, agent_tabs_closed, ...reconcileProjectRun(db, row, snapshot) };
 	}
 	const drifted = { ...base, live: "not_found", drift: true };
 	if (!heal) return drifted;
@@ -667,6 +942,17 @@ function doStatusForRow(db, row, { heal = true } = {}) {
 
 function supervisorLockPath() { return path.join(traceRoot(), "watcher", "supervisor.lock"); }
 function supervisorHeartbeatPath() { return path.join(traceRoot(), "watcher", "supervisor-heartbeat.json"); }
+function retentionMarkerPath() { return path.join(traceRoot(), "retention", "last-run.json"); }
+function superviseRetention() {
+	const marker = retentionMarkerPath();
+	let last = 0;
+	try { last = Date.parse(JSON.parse(fs.readFileSync(marker, "utf8")).completed_at || "") || 0; } catch {}
+	if (Date.now() - last < 86_400_000) return { skipped: true, reason: "daily_cadence", last_run_at: last ? new Date(last).toISOString() : null };
+	const result = applyRetention({ root: traceRoot(), yes: true });
+	fs.mkdirSync(path.dirname(marker), { recursive: true, mode: 0o700 });
+	fs.writeFileSync(marker, JSON.stringify({ completed_at: now(), files: result.files.length, bytes: result.bytes, action: result.action || "none", backup: result.backup }, null, 2), { mode: 0o600 });
+	return { ...result, scheduled: true };
+}
 
 async function withSupervisorLock(callback) {
 	const lock = supervisorLockPath();
@@ -689,7 +975,16 @@ async function withSupervisorLock(callback) {
 			// age fallback remains for old lock files written before PID metadata
 			// existed, but a live long-running supervisor is never overlapped just
 			// because one pass needs more than two minutes.
-			if (!ownerAlive || (age > 120_000 && !Number.isInteger(ownerPid))) {
+			if (!ownerAlive || age > 120_000) {
+				// A live PID is not proof of a healthy supervisor: synchronous Herdr
+				// probes or a deadlocked child can keep it alive indefinitely. The
+				// supervisor is intentionally bounded; terminate only this control
+				// process after two minutes, never a project agent.
+				if (ownerAlive && ownerPid !== process.pid) {
+					try { process.kill(ownerPid, "SIGTERM"); } catch {}
+					for (let attempt = 0; attempt < 5; attempt++) { try { process.kill(ownerPid, 0); } catch { break; } spawnSync("sleep", ["0.1"], { encoding: "utf8" }); }
+					try { process.kill(ownerPid, "SIGKILL"); } catch {}
+				}
 				fs.unlinkSync(lock);
 				fd = fs.openSync(lock, "wx");
 				fs.writeSync(fd, `${process.pid}\n${now()}\n`);
@@ -699,7 +994,9 @@ async function withSupervisorLock(callback) {
 		}
 	}
 	try {
-		return await callback();
+		try { fs.writeFileSync(supervisorHeartbeatPath(), JSON.stringify({ checked_at: now(), pid: process.pid, status: "running" }, null, 2), { mode: 0o600 }); } catch { /* best effort */ }
+		const heartbeatTimer = setInterval(() => { try { fs.writeFileSync(supervisorHeartbeatPath(), JSON.stringify({ checked_at: now(), pid: process.pid, status: "running" }, null, 2), { mode: 0o600 }); } catch {} }, 30_000);
+		try { return await callback(); } finally { clearInterval(heartbeatTimer); }
 	} finally {
 		try { if (fd !== undefined) fs.closeSync(fd); } catch { /* best effort */ }
 		try { fs.unlinkSync(lock); } catch { /* best effort */ }
@@ -711,6 +1008,11 @@ function pruneOrphanWatcherTabs(snapshot, rows) {
 	const knownRoots = new Set(rows.map((row) => path.resolve(row.root)));
 	const removed = [];
 	for (const tab of snapshot.tabs || []) {
+		if (/^(debugger|suggester)(-|$)/i.test(tab.label || "")) {
+			const closed = closeHerdrTab(tab.tab_id);
+			removed.push({ tab_id: tab.tab_id, label: tab.label, root: null, obsolete_agent: true, ...closed });
+			continue;
+		}
 		if (!/^watcher-/i.test(tab.label || "")) continue;
 		const pane = (snapshot.panes || []).find((item) => item.tab_id === tab.tab_id);
 		const root = pane?.cwd ? path.resolve(pane.cwd) : null;
@@ -736,6 +1038,91 @@ function activateDefaultWorkers(db, row) {
 	};
 }
 
+async function superviseFeedbackQueue(rows, snapshot) {
+	const result = { checked: 0, delivered: 0, claimed: [], deferred: [] };
+	let feedbackDb;
+	try { feedbackDb = openFeedbackDatabase(); } catch (error) { return { ...result, error: error instanceof Error ? error.message : String(error) }; }
+	const pending = listFeedback(feedbackDb, { statuses: ["pending_planner", "queued", "retry"] });
+	if (!pending.length) { feedbackDb.close(); return result; }
+	let client;
+	try { client = await mqtt.connectAsync(process.env.PI_ORCH_BROKER_URL || "mqtt://127.0.0.1:1883", { connectTimeout: 3000 }); } catch (error) { feedbackDb.close(); return { ...result, checked: pending.length, error: error instanceof Error ? error.message : String(error) }; }
+	try {
+		for (const item of pending) {
+			result.checked++;
+			const row = rows.find((candidate) => candidate.project_key === item.project_id || candidate.name === item.project_id || slug(candidate.name) === slug(item.project_id));
+			const workspace = row && findProjectWorkspace(snapshot, row.root, row.name);
+			const planner = workspace && plannerAgentsInWorkspace(snapshot, workspace.workspace_id, row.root).find(plannerHeartbeatHealthy);
+			if (!planner) { result.deferred.push({ id: item.id, project_id: item.project_id, reason: "planner_not_live" }); continue; }
+			const scope = row?.project_key || item.project_id;
+			await client.publishAsync(`pi/${scope}/agents/${planner.name || "planner-01"}/commands`, JSON.stringify({ type: "feedback_received", feedback_type: item.type, feedback_id: item.id, project_id: item.project_id, message: item.message, resolution: item.resolution, screenshots: item.screenshots || [], requires_user_confirmation: item.type === "suggestion" || item.resolution === "user_confirmation", sender_instance: "yano-watcher", sender_role: "watcher" }), { qos: 1 });
+			claimFeedback(feedbackDb, item.id); result.delivered++; result.claimed.push(item.id);
+		}
+	} finally { try { await client.endAsync(); } catch {} feedbackDb.close(); }
+	return result;
+}
+
+// Fase 5 — reboot/crash resilience visibility. reconcileProjectRun()/
+// recoverPlanner() already retry Herdr (herdrSnapshot()'s own backoff) and
+// degrade per-project rather than crashing, but before this there was no
+// signal anywhere for "Herdr has been unreachable for a while" — e.g. after
+// a machine restart where Herdr itself never came back up, every one-minute
+// pass would silently do nothing project-by-project, forever, with no
+// operator-visible escalation. This tracks a simple consecutive-failure
+// streak across passes; the daily digest (Fase 9) surfaces it if it grows
+// large instead of requiring a brand-new cross-module notification path.
+export function herdrReachabilityPath() { return path.join(traceRoot(), "watcher", "herdr-reachability.json"); }
+export function trackHerdrReachability(reachable) {
+	const file = herdrReachabilityPath();
+	let state = { unreachable_streak: 0, unreachable_since: null, last_checked_at: null };
+	try { state = { ...state, ...JSON.parse(fs.readFileSync(file, "utf8")) }; } catch { /* first run, or corrupt — start fresh */ }
+	state.last_checked_at = now();
+	if (reachable) {
+		state.unreachable_streak = 0;
+		state.unreachable_since = null;
+	} else {
+		state.unreachable_streak = Number(state.unreachable_streak || 0) + 1;
+		state.unreachable_since ||= now();
+	}
+	try { fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 }); fs.writeFileSync(file, JSON.stringify(state), { mode: 0o600 }); } catch { /* best effort */ }
+	return state;
+}
+
+// Fase 8 — per-project log/trace size alert. Never moves anything
+// automatically (the user was explicit: alert + ask, nothing more). This
+// only detects and persists a debounced "over threshold" flag; the actual
+// question to the user ("vuoi spostare i log più vecchi nell'archivio
+// configurato?") is asked once via the daily digest (Fase 9), which already
+// has the notification channel wiring — this avoids building a second,
+// separate real-time notification path for the same concern Fase 5 already
+// established the pattern for (log now, let the digest surface it).
+const PROJECT_LOG_ALERT_BYTES = Number(process.env.YANO_PROJECT_LOG_ALERT_BYTES) || 2 * 1024 * 1024 * 1024;
+const PROJECT_LOG_ALERT_COOLDOWN_MS = 7 * 86_400_000; // re-arm weekly, not every minute
+function projectLogSizeStatePath() { return path.join(traceRoot(), "watcher", "project-log-sizes.json"); }
+export function readProjectLogSizeState() {
+	try { return JSON.parse(fs.readFileSync(projectLogSizeStatePath(), "utf8")); } catch { return {}; }
+}
+function writeProjectLogSizeState(state) {
+	try { fs.mkdirSync(path.dirname(projectLogSizeStatePath()), { recursive: true, mode: 0o700 }); fs.writeFileSync(projectLogSizeStatePath(), JSON.stringify(state), { mode: 0o600 }); } catch { /* best effort */ }
+}
+export function checkProjectLogSizes(rows) {
+	const state = readProjectLogSizeState();
+	const alerts = [];
+	for (const row of rows) {
+		const project = resolveTraceProject(row.root) || row.name;
+		const key = projectKey(row.root, project);
+		const { projectDir } = tracePaths({ cwd: row.root, project });
+		const { bytes } = bytesUnder(projectDir);
+		const previous = state[key] || {};
+		const overThreshold = bytes >= PROJECT_LOG_ALERT_BYTES;
+		const lastAlertAge = previous.last_alerted_at ? Date.now() - Date.parse(previous.last_alerted_at) : Infinity;
+		const shouldAlert = overThreshold && lastAlertAge >= PROJECT_LOG_ALERT_COOLDOWN_MS;
+		state[key] = { project: row.name, root: row.root, bytes, over_threshold: overThreshold, last_checked_at: now(), last_alerted_at: shouldAlert ? now() : (overThreshold ? previous.last_alerted_at : null) };
+		if (shouldAlert) alerts.push({ project: row.name, root: row.root, bytes, threshold_bytes: PROJECT_LOG_ALERT_BYTES });
+	}
+	writeProjectLogSizeState(state);
+	return { checked: rows.length, over_threshold: Object.values(state).filter((item) => item.over_threshold).length, new_alerts: alerts };
+}
+
 function supervise(db) {
 	return withSupervisorLock(async () => {
 		const rows = db.prepare("SELECT * FROM watcher_projects ORDER BY updated_at DESC").all();
@@ -755,6 +1142,7 @@ function supervise(db) {
 		// restarted above, or after the machine itself just rebooted — no
 		// longer needs to wait for the next one-minute cron tick to resolve.
 		const snapshot = herdrSnapshot();
+		const herdr_reachability = trackHerdrReachability(Boolean(snapshot));
 		const orphan_tabs_removed = pruneOrphanWatcherTabs(snapshot, rows);
 		const agent_identity_repaired = snapshot ? repairAgentTabIdentities(snapshot) : [];
 		const repairedSnapshot = agent_identity_repaired.length ? herdrSnapshot() : snapshot;
@@ -772,21 +1160,47 @@ function supervise(db) {
 		let scheduler;
 		try { scheduler = await superviseScheduler({ now: new Date() }); }
 		catch (error) { scheduler = { checked_at: now(), error: error instanceof Error ? error.message : String(error) }; }
+		let retention;
+		try { retention = superviseRetention(); } catch (error) { retention = { error: error instanceof Error ? error.message : String(error) }; }
+		// Cron-side teardown for on-demand maintenance agents (architect,
+		// auto-improver): the scheduler/CLI side creates their workspace/agent
+		// when work is needed, this global pass is what closes tab/agent once
+		// the work reaches a terminal state — neither role is ever health-
+		// checked as an always-on service, but before this neither was ever
+		// torn down either, so their sessions lingered forever.
+		let maintenance_sessions_closed;
+		try { maintenance_sessions_closed = { architect: closeTerminalArchitectSessions(), auto_improver: closeTerminalAutoImproverSessions() }; }
+		catch (error) { maintenance_sessions_closed = { error: error instanceof Error ? error.message : String(error) }; }
+		let project_log_sizes;
+		try { project_log_sizes = checkProjectLogSizes(rows); } catch (error) { project_log_sizes = { error: error instanceof Error ? error.message : String(error) }; }
 		try {
-			const logPath = path.join(path.dirname(dbPath()), "..", "logs", "watcher-global.jsonl");
+			const logPath = dailyLogPath(path.join(path.dirname(dbPath()), "..", "logs"), "watcher-global");
 			fs.mkdirSync(path.dirname(logPath), { recursive: true, mode: 0o700 });
-			fs.appendFileSync(logPath, `${JSON.stringify({ timestamp: new Date().toISOString(), event: "global_watch_supervision", scheduler, global_services, projects: rows.length })}\n`, { mode: 0o600 });
+			fs.appendFileSync(logPath, `${JSON.stringify({ timestamp: new Date().toISOString(), event: "global_watch_supervision", scheduler, retention, global_services, maintenance_sessions_closed, herdr_reachability, project_log_sizes, projects: rows.length })}\n`, { mode: 0o600 });
 		} catch { /* recovery must not be blocked by logging */ }
 		// Refresh the activation state after global-service recovery.
 		const activated = [...rows.map((row) => activateDefaultWorkers(db, row)).filter(Boolean)];
+		let feedback_queue;
+		try { feedback_queue = await superviseFeedbackQueue(rows, repairedSnapshot); } catch (error) { feedback_queue = { error: error instanceof Error ? error.message : String(error) }; }
+		const projectResults = rows.map((row) => doStatusForRow(db, row, { heal: true, snapshot: repairedSnapshot }));
+		const playbook_flow_alerts = [];
+		for (let index = 0; index < projectResults.length; index++) {
+			const item = projectResults[index];
+			if (!item.playbook_flow_violations?.length) continue;
+			try { playbook_flow_alerts.push({ project: rows[index].name, ...await notifyYanoOrchestratorPlanner(item.playbook_flow_violations[0], rows[index].name) }); }
+			catch (error) { playbook_flow_alerts.push({ project: rows[index].name, notified: false, reason: error instanceof Error ? error.message : String(error) }); }
+		}
 		const result = {
 			checked_at: now(),
 			herdr_reachable: Boolean(snapshot),
 			herdr_service_registered: herdrServiceRegistered,
-			projects: rows.map((row) => doStatusForRow(db, row, { heal: true })),
+			projects: projectResults,
+			playbook_flow_alerts,
 			activated,
+			feedback_queue,
 			global_services,
 			scheduler,
+			retention,
 			external_services,
 			external_workers: [],
 			orphan_tabs_removed,
@@ -794,7 +1208,7 @@ function supervise(db) {
 			identity_conflicts: identityConflicts,
 			errors: formatAgentIdentityConflicts(identityConflicts),
 		};
-		try { fs.writeFileSync(supervisorHeartbeatPath(), JSON.stringify({ checked_at: result.checked_at, pid: process.pid, project_count: rows.length, external_recoveries: result.external_workers }, null, 2), { mode: 0o600 }); } catch { /* best effort */ }
+		try { fs.writeFileSync(supervisorHeartbeatPath(), JSON.stringify({ checked_at: result.checked_at, pid: process.pid, status: "idle", project_count: rows.length, external_recoveries: result.external_workers }, null, 2), { mode: 0o600 }); } catch { /* best effort */ }
 		return result;
 	});
 }
@@ -807,7 +1221,7 @@ function readCrontab() {
 }
 
 function cronCommand() {
-	return `${shellQuote(process.execPath)} ${shellQuote(path.join(PACKAGE_ROOT, "bin", "yano.mjs"))} watcher supervise --json >/dev/null 2>&1 ${CRON_MARKER}`;
+	return `PATH=${shellQuote(herdrBinDir)}:\$PATH ${shellQuote(process.execPath)} ${shellQuote(path.join(PACKAGE_ROOT, "bin", "yano.mjs"))} watcher supervise --json >/dev/null 2>&1 ${CRON_MARKER}`;
 }
 
 function cronInstall() {

@@ -68,4 +68,11 @@ registrato un servizio `docker` con il comando corretto per il sistema operativo
 
 I servizi globali Yano pubblicano anche un heartbeat applicativo su disco,
 oltre al controllo di processo/Herdr: un processo vivo ma senza heartbeat
-aggiornato non è considerato sano dopo la fase iniziale di avvio.
+aggiornato non è considerato sano dopo la fase iniziale di avvio (stesso
+meccanismo file-based ora usato anche per i planner di progetto — vedi
+`docs/diagram/09-heartbeat-liveness.mmd`).
+
+La discovery builtin di `llmproxy` prova prima un container Docker, poi un
+processo pm2 per nome (`pm2 jlist`) — `yano services add --name llmproxy
+--healthcheck-pm2 llmproxy` per registrarlo esplicitamente se lanciato con
+`pm2 start` invece di `docker run`; il restart usa `pm2 restart <nome>`.

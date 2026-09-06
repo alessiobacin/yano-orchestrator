@@ -975,9 +975,11 @@ fatto lui il lavoro di coding** invece di rilanciarne uno:
 
 ### Punto 1 — rilevamento istantaneo + kill/relaunch
 
-I due controlli watchdog esistenti (Revisione 29: ticket `running` senza
-`ticket_complete` da 15+ minuti; Revisione 40: run `completed` senza finalize
-da 10+ minuti) condividono lo stesso limite: sono euristiche sul tempo
+Il controllo watchdog operativo rileva ticket `running` senza
+`ticket_complete` da 15+ minuti. I run `completed` restano terminali anche se
+`finalization_status=pending_finalize`: il finalize è un gate amministrativo e
+non deve riattivare il planner o generare falsi allarmi watchdog. I controlli
+basati sul tempo condividono comunque un limite: sono euristiche sul tempo
 trascorso, perché l'unico segnale che avevano era "nessun evento arriva più".
 Ma per il caso specifico di un'istanza CHE NON C'È PIÙ (pane herdr chiuso,
 processo `pi` morto — non "lento", proprio assente), esiste un segnale
@@ -5042,3 +5044,209 @@ o artefatti, verifiche, rischi e prossimo destinatario; non vale come
 approvazione finale del worktree. Il contratto è iniettato dal loader dei
 prompt in tutti i ruoli configurati con un `brief`, quindi vale anche per ruoli
 con prompt dedicato o introdotti successivamente dall'Architect.
+
+## Revisione 65 — ristrutturazione cron/watcher/scheduler/log/notifiche
+
+Prova concreta raccolta prima di questa revisione: `jobs.json` reale mostrava
+lo stesso job delle 7:00 rilanciato 39 volte in 2 ore (~30 notifiche
+Telegram reali inviate), e un progetto con watcher in pausa aveva accumulato
+19 tab Herdr, 12 delle quali orfane. Entrambi i problemi sono risolti da
+questa revisione, insieme a una serie di gap correlati emersi durante
+l'analisi (separazione cron/watcher, heartbeat duplicato, notifica assente
+senza configurazione locale, sessioni terminali di architect/auto-improver
+mai chiuse).
+
+**Fix P0 — duplicate-fire dello scheduler.** `durableAcceptance()` non
+riconosceva l'esito sincrono reale di uno script `self`-mode con un JSON di
+successo non-standard, trattandolo come "ancora bloccato" e rilanciandolo ogni
+minuto. `isSynchronousSelfJob()` marca ora un job `self` come `completed`
+immediatamente su `exit 0`; `recoverStaleDispatches()` applica un tetto
+(`MAX_STALE_RECOVERIES`, default 3) ai retry di un dispatch asincrono
+genuinamente bloccato, oltre il quale il job è marcato
+`dispatch_failed_permanently` con una notifica singola invece di un rilancio
+infinito. Un lock (`acquireSchedulerSuperviseLock`) rende esclusiva la
+passata di supervisione tra i due crontab indipendenti (`yano-watcher` e
+`yano-scheduler`) che la richiamano entrambi.
+
+**Notifica: fallback al canale globale.** `getEnvVar()` in
+`extensions/orchestrator.ts` ora ricade sulla configurazione globale
+(`yano config`) quando un progetto non ha un `.env` proprio — prima, un
+progetto mai configurato restava semplicemente muto. Un job scheduler
+`self`-mode (nessun agente Pi vivo, non può chiamare `sendNotifications()`)
+ha un proprio sender standalone equivalente, `scripts/yano-notify.mjs`, che
+usa sempre e solo il canale globale.
+
+**Singola notifica "in attesa di risposta".** `decision_hold_create` è
+idempotente per `(run_id, idempotency_key)`; prima di questa revisione ogni
+retry idempotente inviava di nuovo la notifica. Solo il ramo che crea
+davvero un hold nuovo (mai quello che risolve su un hold già esistente) ora
+invia `sendNotifications()`.
+
+**Ciclo di vita architect/auto-improver.** Restano worker on-demand attivati
+dallo scheduler; la chiusura delle sessioni terminali (`persistent`/`blocked`
+per l'architect, `idle` per l'auto-improver) è ora compito del cron ad ogni
+passata (`closeTerminalArchitectSessions()`, `closeTerminalAutoImproverSessions()`).
+
+**Herdr-reachability streak.** Un contatore persistito
+(`trackHerdrReachability()`) evita che un riavvio in cui Herdr non torna mai
+su produca un silenzio totale, senza escalation visibile all'operatore; lo
+streak viene ripreso dal digest giornaliero.
+
+**Discovery pm2 per llmproxy.** `builtinPm2Service()` prova un container
+Docker e poi un processo pm2 per nome (`pm2 jlist`), con un tipo di
+healthcheck nativo `pm2` e un restart via `pm2 restart <nome>`.
+
+**Escalation modello: mai ri-suggerire il provider appena fallito.**
+`ticket_requeue` passa ora `current_provider_id` a `recommendModel({
+excludeProviderId })`.
+
+**Riscrittura del sistema di log.** I tre log globali a cadenza di un minuto
+(`watcher-global`, `global-services`, `scheduler-connectivity`) ruotano per
+giorno solare (`dailyLogPath()`) invece di crescere all'infinito in un unico
+file — la retention esistente, basata su `mtime`, non poteva mai raggiungere
+un file in append continuo (`mtime` sempre "ora"). Un controllo separato,
+`checkProjectLogSizes()`, misura la dimensione della directory trace di ogni
+progetto e segnala (mai sposta o cancella) chi supera 2GB, con debounce
+settimanale.
+
+**Heartbeat unificato.** Ogni agente (servizio globale o planner di
+progetto) scrive lo stesso heartbeat applicativo su file
+(`heartbeats/<projectKey>/<instance>.json`) ad ogni presence publish; prima
+di questa revisione due lettori indipendenti esistevano (uno solo per i 3
+servizi globali, con una propria derivazione di path/chiave leggermente
+diversa e con un bug latente nel fallback), e il planner di progetto non
+consultava mai il file, affidandosi solo al retained MQTT o all'euristica
+Herdr — nessuno dei due distingue "processo vivo, event loop bloccato" da
+sano. Un'unica funzione canonica (`yano-trace-storage.mjs`) serve ora
+entrambi i lettori; il ramo di fallback Herdr del planner richiede ora anche
+un heartbeat file fresco quando ne esiste già uno, senza penalizzare un
+avvio a freddo (nessun file ancora pubblicato).
+
+**Digest giornaliero.** Nuovo job di default (`yano-daily-digest`, `0 6 * *
+*` fuso `Europe/Rome` esplicito, `mode: self`), installato idempotentemente
+dal supervisore. Aggrega solo stato già esistente (run incompleti,
+decision_hold aperti con il testo della domanda, recovery recenti, streak
+Herdr, alert di log) e lo consegna sul canale globale.
+`scripts/yano-scheduler.mjs`'s `cronMatches()` accetta ora un `timezone`
+opzionale per job; ogni job pre-esistente lo omette e mantiene il confronto
+con l'orologio locale del server esattamente come prima.
+
+**Pulizia delle tab agenti.** `cleanupCompletedAgentTabs()` copriva solo gli
+agenti ancora presenti in `snapshot.agents` — un processo Pi terminato del
+tutto sparisce da lì senza lasciare traccia, e la sua tab restava aperta per
+sempre. Una seconda passata sulle tab del workspace del progetto chiude ora
+anche queste, ma solo quando la storia dei ticket conferma che l'istanza
+(identificata dalla label della tab) ha concluso il lavoro — un'istanza
+appena lanciata e non ancora registrata non viene mai chiusa sulla sola
+assenza di prove. La tab del planner e quella etichettata `human` sono
+sempre escluse, in entrambe le passate. La pulizia gira ora anche per un
+progetto il cui watcher è esplicitamente in pausa: la pausa del polling non
+equivaleva più, prima di questa revisione, a "conserva le tab morte per
+sempre" — era semplicemente un effetto collaterale non voluto del ritorno
+anticipato di `doStatusForRow()` per qualunque stato diverso da `running`.
+
+**Verifica dal vivo.** Su questa macchina, dopo il fix: article-writer
+19→3 tab, newbiz-website 9→5, yano-orchestrator 8→5 — restano solo
+planner, `human` e agenti effettivamente vivi.
+
+**Branch `performance-optimization-yano`.** Tre commit (soglia di
+compaction del contesto 0.82→0.50, ottimizzazione hot-path della ricerca
+trace, report di promozione) applicati con cherry-pick puliti invece di un
+merge del branch intero — il branch era diverso da master da prima
+dell'inizio di questa revisione e un merge diretto avrebbe cancellato la
+maggior parte del lavoro descritto sopra.
+
+Riferimenti diagrammi: `docs/diagram/09-heartbeat-liveness.mmd`,
+`10-digest-giornaliero.mmd`, `11-notifica-canale-globale.mmd`,
+`12-pulizia-tab-agenti.mmd`, `13-scheduler-dispatch-dedup.mmd`.
+
+## Revisione 66 — `bug-dash`/`suggest-dash` non avevano mai renderizzato in un browser
+
+Audit richiesto su `bug-dash`/`suggest-dash`. La scoperta più grave è emersa
+solo aprendo davvero la dashboard in un browser (mai fatto dai test
+precedenti, che confrontavano solo sottostringhe dell'HTML servito, mai
+l'eseguibilità del suo JavaScript): lo `<script>` inline aveva **due
+SyntaxError fatali**, presenti da prima di questa revisione, che
+impedivano l'esecuzione di QUALUNQUE riga dello script — la Kanban board
+non ha probabilmente mai renderizzato nulla in nessun browser, per nessun
+progetto. Causa 1: dentro il template literal esterno di `page()`
+(`scripts/yano-feedback-dashboard.mjs`), le regex `\n`, `\s`, `\[`, `\]`,
+`\(`, `\)`, `\/` usate da `titleOf()`/`shot()` avevano un solo backslash —
+la stringa esterna le "consumava" prima di raggiungere il browser (`\n`
+diventava un vero a-capo dentro un letterale regex, `\s`/`\[`/ecc.
+perdevano il backslash), producendo regex non valide lato client. Solo
+`cleanUrl()` era già corretta (doppio backslash). Causa 2: l'handler di
+submit del form costruiva gli screenshot con
+`files.map(file=>({data:await new Promise(...)}))` — una arrow function
+`await`-ante ma non dichiarata `async` — un secondo `SyntaxError`
+indipendente, che avrebbe comunque rotto il salvataggio di ogni bug/
+suggestion con screenshot allegati anche fosse stata l'unica causa. Oltre
+al fix sintattico, la funzione ora usa correttamente
+`await Promise.all(files.map(async file=>(...)))`: prima, anche
+"corretta" solo nella sintassi, avrebbe inserito Promise non risolte
+nell'array `screenshots` invece dei dati letti.
+`scripts/smoke-test-feedback-dashboard.mjs` ora fa parsare lo `<script>`
+servito con `node:vm` per entrambi i tipi — verificato che questo nuovo
+controllo fallisce davvero contro il codice pre-fix e passa contro quello
+corretto, cioè è una guardia di regressione reale, non decorativa.
+
+**Colonna `pending_planner` mancante.** Anche a sintassi corretta, ogni
+bug/suggestion appena creato — lo stato più comune in assoluto, dato che
+`notifyPlanner()` lascia il record in `pending_planner` ogni volta che
+nessun planner risulta sottoscritto nella finestra di ~250ms — non aveva
+nessuna colonna Kanban in cui apparire: la lista stati di `page()` iniziava
+con `received`, saltando `pending_planner` del tutto. Aggiunta a entrambe
+le dashboard.
+
+**Le suggestion REST non venivano mai consegnate al planner.**
+`wakeNextQueuedFeedback()` in `extensions/orchestrator.ts` — la funzione che
+consegna al planner inattivo il record persistito più vecchio, sia su
+`planner_turn_end` sia su notifica MQTT `feedback_received` — interrogava
+sempre e solo `listFeedback(db, { type: "bug", ... })`. Una suggestion
+persistita mentre il planner era occupato restava in `pending_planner`/
+`queued` per sempre: nessun meccanismo la riproponeva mai, a differenza dei
+bug (una coda FIFO reale). La logica di dequeue è stata estratta in
+`claimNextQueuedFeedback()`/`buildQueuedFeedbackWakeMessage()`
+(`scripts/yano-feedback.mjs`), così testabile senza l'harness MQTT/Pi; ora
+controlla entrambe le code (bug con priorità quando nessuna notifica
+specifica è arrivata, il tipo della notifica quando è arrivata), con un
+messaggio di wake distinto per tipo.
+
+**Stato terminale sbagliato per i bug automatici.** `worktree_finalize` con
+`automatic_backend: true` scriveva `status='processed'` per un bug — ma
+`bug-dash` non ha mai avuto una colonna `processed` (solo `resolved`): un bug
+chiuso in automatico spariva silenziosamente dalla propria Kanban invece di
+comparire come risolto. `terminalStatusForFeedbackId()` deriva ora lo stato
+corretto dal prefisso dell'id (`BUG-`→`resolved`, `SUG-`→`processed`), usato
+sia dal ramo automatico sia — estensione nuova — da qualunque
+`worktree_finalize` confermato (`user_confirmed: true`) che passi
+`feedback_id`: prima, il percorso "frontend/misto confermato dall'utente" e
+qualunque suggestion non chiudevano mai il record via codice, lasciando
+l'istruzione del prompt ("aggiornane lo stato con la CLI/API") come unico
+percorso, mai verificato in modo deterministico.
+
+**Dashboard: drag-and-drop reale, non decorativo.** Le card avevano
+`draggable="true"` ma nessuna colonna aveva `ondragover`/`ondrop`: trascinare
+una card non faceva nulla. Aggiunti anche colore/chip per severità (assente
+prima: ogni card aveva lo stesso bordo teal indipendentemente dalla
+severità), contatore per colonna, stato vuoto esplicito, campo di ricerca
+client-side e un indicatore dell'ultimo aggiornamento — stesso stack
+single-file HTML/CSS/JS inline, nessuna nuova dipendenza.
+
+**Verifica end-to-end.** `scripts/smoke-test-feedback-e2e-flow.mjs` avvia
+`bug-dash`/`suggest-dash` come veri processi figli separati (esattamente come
+`yano bug-dash start`), crea un bug e una suggestion via le loro API HTTP
+reali, dimostra che `claimNextQueuedFeedback()` (il meccanismo che userebbe
+davvero un planner) ora consegna entrambi, simula la chiusura via
+`worktree_finalize` e verifica che ciascuno atterri sulla propria colonna
+terminale reale (`resolved` per il bug, `processed` per la suggestion) senza
+mai comparire sull'altra dashboard.
+
+**Verifica manuale in browser.** Nessuno dei test sopra esegue davvero il
+JavaScript servito in un motore browser — è proprio per questo che i due
+`SyntaxError` sono rimasti invisibili. Avviata un'istanza isolata di
+`bug-dash` (dati di test, mai il registro reale) e verificato dal vivo:
+board popolata correttamente per severità/colonna/conteggio, filtro di
+ricerca che aggiorna anche i conteggi, drag-and-drop di una card reale con
+un vero `DragEvent`/`DataTransfer` che sposta davvero lo stato via API, e
+apertura/chiusura della modale "Nuovo".

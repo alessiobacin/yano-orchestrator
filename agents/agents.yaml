@@ -28,6 +28,22 @@ agents:
       - core
       - backend
 
+  fullstack-dev-01:
+    role: full-stack-developer
+    label: "Full-stack Developer 01"
+    teams:
+      - core
+      - frontend
+      - backend
+
+  fullstack-reviewer-01:
+    role: full-stack-reviewer
+    label: "Full-stack Reviewer 01"
+    teams:
+      - core
+      - frontend
+      - backend
+
   reviewer-01:
     role: reviewer
 

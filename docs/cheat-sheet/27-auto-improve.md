@@ -22,3 +22,8 @@ feature/prodotto → micro-test → score/dedup → report → planner.
 
 Regola: nessuna invenzione. Ogni parere ha `score /10`, motivazione,
 `confidence /10`, tipo di evidenza e riferimenti.
+
+Resta un worker on-demand, non un servizio sempre-attivo: la chiusura della
+tab del worker `idle` con sessione ancora registrata è compito del cron
+(`closeTerminalAutoImproverSessions()`), ad ogni passata di
+`yano watcher supervise`.

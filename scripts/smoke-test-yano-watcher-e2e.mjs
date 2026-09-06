@@ -7,6 +7,22 @@ import { pathToFileURL } from "node:url";
 import mqtt from "mqtt";
 import { appendRawTraceRecord, projectKey } from "./yano-trace-storage.mjs";
 
+// Isolate from the REAL machine's global Yano config. Fase 0 made
+// sendNotifications() fall back to the global notification channel when a
+// project has no local .env — on a real developer machine with real
+// Telegram/WhatsApp credentials configured globally, an unisolated test
+// that reaches a notification code path WILL send a real message.
+if (!process.env.YANO_CONFIG_FILE) process.env.YANO_CONFIG_FILE = `${process.env.TMPDIR || "/tmp"}/yano-test-isolation-no-such-config.env`;
+
+// Use the production routing branch (the same root-derived topic scope as
+// real Yano processes): under PI_ORCH_TEST_NO_EXIT=1 (set by test-all.mjs
+// for every test) MQTT scope short-circuits to the raw `project` string
+// instead of projectKey(cwd, project) — this test's own topics always use
+// the hashed projectKey scope, so under test-all.mjs the awaited command
+// never arrives on the topic being listened to — not a timing flake, a
+// topic mismatch.
+delete process.env.PI_ORCH_TEST_NO_EXIT;
+
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "yano-watcher-e2e-"));
 const yanoRepo = path.join(root, "yano-orchestrator");
 const projectRoot = path.join(root, "focusboard-trace-test");

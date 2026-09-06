@@ -21,7 +21,7 @@ const packageRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname)
 
 const first = ensureProjectDatabase({ projectRoot, project: "existing-app", packageRoot });
 assert.equal(first.created, true);
-assert.equal(first.schema_version, 10);
+assert.equal(first.schema_version, 11);
 assert.ok(fs.existsSync(first.path));
 
 const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite");
@@ -29,7 +29,7 @@ const db = new DatabaseSync(first.path, { readOnly: true });
 for (const table of ["schema_meta", "runs", "specs", "tickets", "events", "playbook_bindings"]) {
 	assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table), `tabella ${table} presente`);
 }
-assert.equal(db.prepare("SELECT value FROM schema_meta WHERE key='schema_version'").get().value, "10");
+assert.equal(db.prepare("SELECT value FROM schema_meta WHERE key='schema_version'").get().value, "11");
 db.close();
 
 const second = ensureProjectDatabase({ projectRoot, project: "existing-app", packageRoot });

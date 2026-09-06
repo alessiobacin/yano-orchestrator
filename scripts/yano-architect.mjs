@@ -126,6 +126,41 @@ function openDatabase() {
 	return db;
 }
 
+function closeTabIfPresent(tabId, spawn) {
+	if (!tabId) return null;
+	const result = spawn("herdr", ["tab", "close", tabId], { encoding: "utf8" });
+	return result.status === 0 ? { closed: true, tab_id: tabId } : { closed: false, tab_id: tabId, error: (result.stderr || result.stdout || "Herdr non ha chiuso la tab").trim() };
+}
+
+// Architect/its paired validation-watcher tab are ephemeral, proposal-scoped
+// (see the "ephemeral, proposal-scoped" comment in yano-watcher-registry.mjs)
+// — they were never health-checked as always-on services, but nothing ever
+// closed them either: a proposal reaching a terminal state (persistent =
+// promoted, blocked = rejected) left its tab/agent lingering forever. This
+// is the cron-side teardown half of the scheduler-creates/cron-closes
+// lifecycle: called from the global supervisor pass (yano-watcher-registry's
+// supervise()), it tears down every terminal proposal's still-open tabs
+// exactly once (workspace_id/tab_id/pane_id are nulled out after closing, so
+// a proposal already torn down is never revisited). No explicit
+// "herdr workspace close" is attempted — no such command is used anywhere
+// else in this codebase, so closing every tab the workspace owns is the
+// established equivalent of tearing it down.
+export function closeTerminalArchitectSessions({ spawn = spawnSync } = {}) {
+	const db = openDatabase();
+	const closed = [];
+	try {
+		const rows = db.prepare(
+			"SELECT proposal_id, tab_id, pane_id, watcher_tab_id, watcher_pane_id FROM architect_proposals WHERE status IN ('persistent','blocked') AND (tab_id IS NOT NULL OR watcher_tab_id IS NOT NULL)",
+		).all();
+		for (const row of rows) {
+			const results = [closeTabIfPresent(row.tab_id, spawn), closeTabIfPresent(row.watcher_tab_id, spawn)].filter(Boolean);
+			db.prepare("UPDATE architect_proposals SET tab_id = NULL, pane_id = NULL, watcher_tab_id = NULL, watcher_pane_id = NULL, updated_at = ? WHERE proposal_id = ?").run(new Date().toISOString(), row.proposal_id);
+			closed.push({ proposal_id: row.proposal_id, results });
+		}
+	} finally { db.close(); }
+	return closed;
+}
+
 function createCapabilityArtifact({ type, name, task = "", dryRun = false }) {
 	const allowed = new Set(["playbook", "cli", "skill", "mcp-server", "rest-api"]);
 	if (!allowed.has(type)) throw new Error(`yano architect: --type deve essere uno tra ${[...allowed].join(", ")}`);

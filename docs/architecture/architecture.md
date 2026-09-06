@@ -100,6 +100,7 @@ documentazione.
 7. Ticket/DAG and Playbook state are persisted in SQLite. Generation fencing, idempotency keys and the effect outbox make retries resumable.
 8. The planner advances phases and runs the mandatory closing evidence checklist before `worktree_finalize` merges the reviewed branch.
 9. If the task involved frontend roles, the planner asks whether the user wants a visual development review. On consent, `yano frontend-review start` installs the React dev dependency, infers and starts the frontend URL, and the planner consumes Agentation annotations through MCP; a refusal leaves the normal frontend review flow unchanged.
+10. Bugs and suggestions are persisted in the shared feedback control plane. The bug and suggestions dashboards use project paths, audit every manual mutation, encrypt E2E credentials at rest, and leave classification/resolution to the planner. The deterministic watcher supervises queued feedback and orphaned specialist tickets without waking a planner that is waiting on a user hold.
 
 ### Project repair and reconciliation
 
@@ -342,6 +343,119 @@ terminal adapters when those adapters are active.
 The operational SQLite database remains project-local because it is the
 orchestrator's live state, not forensic trace data.
 
+The three global one-minute-cadence logs (`watcher-global`, `global-services`,
+`scheduler-connectivity`) rotate by calendar day (`dailyLogPath()` in
+`scripts/yano-data.mjs`) instead of growing as a single ever-appended file.
+Retention (`yano data retain`) filters purely by file `mtime`; a file that is
+appended to every minute forever always reports `mtime: now`, so retention
+could structurally never reach it — this is why these files reached several
+megabytes each in real installs before rotation. Yesterday's segment, and
+every day before it, ages normally the moment a new day's file takes over, so
+the existing retention scan (unchanged) sweeps it once it is old enough.
+Per-project trace/log volume gets a separate, alert-only check: on every
+supervisor pass, `checkProjectLogSizes()` measures each registered project's
+own trace directory and, once it crosses `YANO_PROJECT_LOG_ALERT_BYTES`
+(default 2GB), records the project as over threshold with a one-week
+debounce — it never moves or deletes anything automatically. The persisted
+state (`<YANO_DATA_DIR>/watcher/project-log-sizes.json`) is what the daily
+digest below surfaces as "vuoi spostare i log più vecchi nell'archivio
+configurato?"; the actual move only ever happens on explicit user
+confirmation.
+
+### Application heartbeat (unified liveness)
+
+Every Yano agent process — a global service (`watcher-service`,
+`scheduler-service`, `planner-01`/yano-local-pc) or a per-project
+planner/coder/reviewer/specialist — writes the same bounded JSON heartbeat
+file on each presence publish: `<YANO_DATA_DIR>/heartbeats/<projectKey>/<instance>.json`,
+containing `observed_at` and the agent's own status. `yano-trace-storage.mjs`
+exposes the one canonical pair, `applicationHeartbeatPath()`/
+`readApplicationHeartbeat(cwd, instance, { maxAgeMs })`, used by both readers:
+`yano-global-services.mjs`'s `probeService()` (the 3 global services) and
+`yano-watcher-registry.mjs`'s `plannerHeartbeatHealthy()` (per-project
+planners). Before this consolidation the two readers had independently
+duplicated, subtly inconsistent path/key derivation, and the per-project path
+never consulted the file at all — it relied solely on the MQTT-retained
+presence card or Herdr's own process/explain heuristics. Neither of those can
+tell "process alive, event loop wedged" apart from healthy, because a wedged
+event loop can neither refresh Pi's own liveness heuristics nor publish a new
+MQTT retained message, while a raw PID stays alive regardless. The file
+heartbeat can, because it is refreshed only by application code that is
+actually still executing: `plannerHeartbeatHealthy()`'s Herdr-fallback branch
+(reached when no MQTT heartbeat is present) now additionally requires the
+file heartbeat to be fresh whenever one already exists on disk — a
+just-recovered planner mid-warm-up (no heartbeat published yet) is still
+judged on the pre-existing Herdr-only signals, so this never penalizes a
+legitimate cold start.
+
+### Agent tab lifecycle
+
+`cleanupCompletedAgentTabs()` runs on every supervisor pass for every
+registered project — including one whose watcher is explicitly paused or
+stopped, since pausing the polling loop says nothing about whether a
+project's past coder/reviewer/docs-sync tabs are still relevant. It closes a
+tab in two passes. The first walks `snapshot.agents` (live Pi processes still
+known to Herdr) scoped to the project's root, and closes any non-planner,
+non-`human` agent whose last assigned ticket is `done`/`failed`, or whose
+pane no longer has a live `pi` process. The second walks the project's Herdr
+workspace tabs directly: a Pi process that has fully exited disappears from
+`snapshot.agents` entirely (Herdr keeps no "dead agent" placeholder), so its
+tab lingers forever with no owning agent at all, invisible to the first pass.
+This second pass only closes such an agent-less tab when the project's own
+ticket history confirms its label (Yano's own tab-naming convention names a
+tab after its instance) is `done`/`failed` — an agent-less tab with no
+ticket-history match at all is left alone, because a same-minute
+freshly-launched instance that has not yet registered its Pi agent looks
+identical from the outside and must never be closed on absence of evidence
+alone. In both passes, a planner tab and the tab conventionally labelled
+`human` (the user's own manual terminal, present in every project workspace)
+are exempt unconditionally — never touched merely because a run completed,
+the process is temporarily absent, or a ticket happens to reference that
+label. Every closure is appended to the project's trace as
+`watcher_completed_agent_tabs_closed`.
+
+### Daily digest
+
+A default scheduler job (`yano-daily-digest`, `0 6 * * *` in the
+`Europe/Rome` timezone, `mode: self`) is installed idempotently on every
+supervisor pass by `ensureDefaultDigestJob()` — the same "default infra must
+always be there" guarantee already applied to the global services above. Its
+script is a small, fully Yano-generated bridge written into the trusted
+scheduler scripts folder (`validateScriptSecurity()` otherwise reserves that
+folder for user-provided automation) that calls into the real,
+package-shipped `scripts/yano-digest.mjs`, so a `yano update` changes the
+digest's logic without needing to re-run the bootstrap. `buildDigest()`
+aggregates only state that already exists elsewhere — no new source of
+truth: incomplete runs per registered project, open `decision_hold` question
+text (not just a count), projects with a recent recovery (last 24h), the
+Herdr-unreachable streak, and the per-project log-size alert state above —
+and `runDigest()` delivers the formatted summary through the global
+notification channel below, since a cross-project digest has no single
+project configuration to prioritize.
+`scripts/yano-scheduler.mjs`'s cron matcher (`cronMatches()`) accepts an
+optional per-job `timezone`; every pre-existing job omits it and keeps
+matching against the server's own local clock exactly as before, so "06:00 di
+Roma" is not silently reinterpreted as wherever the host machine's system
+timezone happens to be set.
+
+### Notification channel resolution
+
+A "self"-mode scheduler job (a bare Node script, no live Pi agent) cannot
+reach `sendNotifications()` — that function lives inside
+`extensions/orchestrator.ts`'s per-agent closure. `scripts/yano-notify.mjs`
+ports the same WhatsApp/Telegram/SendGrid logic as a standalone
+`sendGlobalNotification(message)`, resolving configuration through
+`resolveYanoConfig()` (global config file merged with `process.env`) —
+deliberately the GLOBAL channel only, never a per-project `.env`, matching
+the rule that a cross-project notification (the daily digest, a scheduler
+job with no natural single project) always uses the channel registered once
+in `yano config`. Per-project agent notifications keep their existing
+priority instead: `extensions/orchestrator.ts`'s `getEnvVar()` now falls back
+to the same global configuration (`globalYanoConfig()`) only when a project
+has no local `.env` value for that key, so a project that never configured
+its own channel still pages the user through the one registered globally
+instead of silently going nowhere.
+
 ### Global `yano-watcher` escalation
 
 The watcher has two separate responsibilities: it observes a project without
@@ -545,6 +659,15 @@ Comandi principali: `init`, `start`, `run`, `status`, `reports`, `pause`,
 composizione del worker senza aprire Herdr. `yano auto-improve run|start
 --once` esegue un solo audit e non avvia lo scheduler detached.
 
+L'auto-improver resta un worker on-demand, non un servizio sempre-attivo: lo
+scheduler è il punto di ingresso (crea workspace/tab se mancanti, avvia il
+worker), ma la **chiusura** della sessione terminale è compito del cron. Ad
+ogni passata di `yano watcher supervise`,
+`closeTerminalAutoImproverSessions()` chiude la tab dei worker `idle` con un
+`worker_tab_id` ancora registrato, azzerando `workspace_id`/`worker_tab_id`/
+`worker_pane_id`/`worker_instance` — evitando che tab e agenti restino aperti
+indefinitamente dopo un audit concluso.
+
 ### Global `yano-feedback`
 
 `yano feedback` è un osservatore globale read-only. Registra i suggerimenti in
@@ -616,6 +739,14 @@ raccomandarne una e attendere la scelta dell'utente. `remove` disattiva in modo
 reversibile un playbook personale; `purge` lo elimina solo dopo la rimozione e
 con conferma esplicita. Le dipendenze tra playbook non fanno parte dello schema
 attuale.
+
+Come per l'auto-improver, la chiusura delle sessioni terminali (proposte in
+stato `persistent`/`blocked` con una tab/workspace ancora registrati) è
+compito del cron: `closeTerminalArchitectSessions()` chiude ogni tab
+registrata (sia quella dell'architect sia il corrispondente watcher effimero)
+e azzera i riferimenti su `architect_proposals` ad ogni passata di
+`yano watcher supervise`, cosicché un round concluso non lasci tab aperte a
+tempo indeterminato.
 
 ### Deployment agent
 
@@ -720,7 +851,19 @@ instead checks whether the operator registered a service literally named
 `herdr` in the external-services registry above, and — because
 `superviseExternalServices()` runs before the pass's own Herdr snapshot —
 that declared restart command gets a chance to bring Herdr back up before the
-snapshot is attempted.
+snapshot is attempted. Every pass also persists a simple consecutive-failure
+streak (`trackHerdrReachability()`, `<YANO_DATA_DIR>/watcher/herdr-reachability.json`):
+without it, a machine restart where Herdr itself never comes back would have
+every project-by-project pass silently do nothing, forever, with no
+operator-visible escalation. The daily digest surfaces this streak instead of
+requiring a brand-new cross-module notification path for the same concern.
+
+`llmproxy`'s builtin auto-discovery is not Docker-only: `builtinPm2Service()`
+tries a Docker container first and falls back to checking a pm2-managed
+process by name (`pm2 jlist`, matched via `pm2ProcessOnline()`) when no
+matching container exists, with a native `--healthcheck-pm2 <name>` type and
+a `pm2 restart <name>` restart branch — a llmProxy launched via `pm2 start`
+rather than `docker run` is supervised exactly the same way.
 
 Docker itself gets the deterministic treatment Herdr deliberately avoids:
 unlike Herdr, Docker Desktop/Engine has one well-known start command per
@@ -754,13 +897,23 @@ for an explicit `yano resume`.
 
 - MQTT presence uses retained status plus LWT; stale peers are removed locally. Each heartbeat reconciles the agent's `busy`/`idle` status and load from SQLite ticket ownership, so a planner completing a worker's ticket cannot leave a stale `busy` card behind. Presence publishes are serialized so an older transition cannot overwrite a newer one.
 - `yano fleet` applies the same live-heartbeat rule to retained cards and does not report offline or stale agents as live; it reports their ignored-card count as a diagnostic.
-- The planner watchdog detects stalled tickets, unfinalized runs and orphaned assignments.
+- The planner watchdog detects stalled tickets and orphaned assignments. A
+  `completed` run is terminal: `pending_finalize` is an administrative/user
+  state and never causes an automatic planner wake-up.
+- Registered projects without an active run are supervised without creating or
+  waking a planner session, unless a durable user decision hold is still open;
+  in that case planner liveness recovery remains enabled until the hold closes.
+- After terminal work, the watcher closes only verified dead or idle specialist
+  tabs assigned to terminal tickets, preserving the persistent planner tab and
+  leaving live user work untouched. Planner closure/relaunch is reserved for
+  an active run or open hold whose planner is actually blocked or absent.
 - The standalone `yano-watcher` can turn high-confidence Yano orchestration
   faults into deduplicated maintenance tickets and Telegram alerts; it never
   changes project ticket state or attempts an automatic fix.
 - A dead worker is surfaced with a durable event/checkpoint and can be replaced without letting the planner silently claim worker work.
 - External Playbook effects are claimed with leases, retried with bounded attempts and moved to a dead-letter outcome when delivery is exhausted.
 - Human approvals are durable decision holds with generation fencing and idempotent answers.
+- A decision hold sends AT MOST ONE "waiting for your reply" notification for its entire lifetime: `decision_hold_create` is deliberately idempotent by `(run_id, idempotency_key)` so a retried tool call is safe, but only the branch that actually creates a new hold (not one that resolves to an already-existing one) triggers `sendNotifications()` — a flaky agent turn retrying the same call can never re-page the user for a question they already saw.
 - Merge conflicts preserve the worktree for manual recovery; the main checkout is not mutated by a failed merge.
 
 ## Security boundaries

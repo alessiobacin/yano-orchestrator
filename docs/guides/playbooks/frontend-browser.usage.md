@@ -22,6 +22,20 @@ Se il frontend non è avviabile o non esiste un harness realistico, il planner
 deve registrare `e2e_tests_skipped_reason` con il comando tentato, l'errore e
 la verifica alternativa. Non è valido dichiarare E2E eseguito senza evidenza.
 
+### Account di test per il login
+
+Quando il progetto ha autenticazione, il coder deve rilevare i ruoli
+applicativi e predisporre nel worktree/sandbox un account development/test per
+ciascun ruolo utente previsto dall'applicazione, non solo per il primo
+percorso E2E. Se il dominio richiede un'azienda,
+deve predisporre anche l'azienda test e il legame utente-azienda. Le credenziali
+sono generate o configurate solo per development/test, registrate cifrate nel
+registro sicuro Yano e passate a Playwright tramite variabili d'ambiente
+temporanee; non vanno scritte nei report, trace, screenshot o codice. Se lo
+schema di autenticazione non consente il provisioning automatico, il coder
+deve documentare il comando/fixture riproducibile e il planner deve bloccare
+l'E2E con una motivazione esplicita, senza inventare credenziali.
+
 ## Gate Agentation
 
 Dopo l'approvazione frontend/E2E e prima della chiusura, il planner chiede:

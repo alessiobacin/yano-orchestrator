@@ -1,0 +1,16 @@
+flowchart TD
+    TICK["tick() — un minuto scaduto\nper un job abilitato"] --> DISPATCH["dispatch(job)"]
+    DISPATCH --> MODE{"job.mode?"}
+    MODE -- "self" --> SELFRUN["esegue lo script\nvia node, mai una shell"]
+    MODE -- "planner:<progetto>\noppure yano-local-pc" --> BRIDGE["dispatchPlanner()\nbridge MQTT verso planner-01"]
+    SELFRUN --> SELFEXIT{"exit 0?"}
+    SELFEXIT -- sì --> SYNCACCEPT["isSynchronousSelfJob = true\nstatus registrato: completed\n— MAI 'dispatched in attesa'\n(la causa reale dell'incidente\ndel 2026-09: 39 rilanci in 2h\nperché un JSON non standard\nera letto come 'ancora bloccato')"]
+    SELFEXIT -- no --> SELFFAIL["status: failed\njob disabilitato se lo script\nnon è eseguibile (spec A)"]
+    BRIDGE --> ASYNCWAIT["durable_pending\nin attesa di ack asincrono"]
+    ASYNCWAIT --> STALE{"recoverStaleDispatches()\nack mai arrivato?"}
+    STALE -- sì --> COUNTER["consecutive_stale_recoveries++"]
+    COUNTER --> CAP{"oltre\nMAX_STALE_RECOVERIES\n(default 3)?"}
+    CAP -- no --> RETRY["ridispatch\n(stesso meccanismo di BRIDGE)"]
+    CAP -- sì --> PERMFAIL["dispatch_failed_permanently\nnotifica singola,\nMAI rilancio infinito"]
+    SYNCACCEPT --> RESET["prossima occorrenza dovuta:\nconsecutive_stale_recoveries\nazzerato — budget pulito ad ogni\ndispatch fresco"]
+    LOCK["acquireSchedulerSuperviseLock()"] -.->|"esclusività tra\nyano-watcher e\nyano-scheduler crontab"| TICK

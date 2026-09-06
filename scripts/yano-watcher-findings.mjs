@@ -131,6 +131,10 @@ export function detectYanoFindings(records, context = {}) {
 	for (const record of records || []) {
 		const type = String(record.type || "");
 		const text = textOf(record);
+		if (type === "playbook_flow_violation") {
+			addFinding(failure({ category: "playbook", signal: "playbook_flow_violation", severity: "high", summary: "Il watcher ha rilevato un ticket o una transizione eseguiti fuori dall’ordine dichiarato dal playbook.", record, evidence: context }));
+			continue;
+		}
 		if (type === "agent_send_no_live_target") {
 			addFinding(failure({ category: "delegation", signal: "no_live_target", severity: "high", summary: "Yano ha tentato di inviare un lavoro ma non ha trovato un destinatario vivo.", record, evidence: context }));
 			continue;
@@ -397,6 +401,7 @@ async function routeYanoWatcherFindingToPlanner(finding, { yanoRepo, sourceProje
 			project_id: finding.project_key || sourceProject.name,
 			message: `${finding.summary}\n\n${description}`,
 			resolution: "user_confirmation",
+			require_credentials: false,
 		});
 		return { routed: true, feedback_id: result.id, duplicate: false };
 	} catch (error) {

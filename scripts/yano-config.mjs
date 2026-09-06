@@ -11,6 +11,10 @@ import path from "node:path";
 export const CONFIG_SPECS = Object.freeze([
 	{ key: "YANO_ORCHESTRATOR_REPO", description: "checkout usato per i ticket di manutenzione Yano" },
 	{ key: "YANO_DATA_DIR", description: "directory globale per trace, snapshot e indice" },
+	{ key: "YANO_DATA_BACKUP_DIR", description: "directory opzionale dove spostare i dati scaduti prima della retention" },
+	{ key: "YANO_TRACE_RETENTION_DAYS", description: "giorni di conservazione dei trace (default 30)" },
+	{ key: "YANO_RECOVERY_RETENTION_DAYS", description: "giorni di conservazione dei recovery (default 14)" },
+	{ key: "YANO_LOG_RETENTION_DAYS", description: "giorni di conservazione dei log operativi (default 30)" },
 	{ key: "YANO_TEMP_DIR", description: "alias legacy della directory globale Yano" },
 	{ key: "YANO_TRACE_MODE", description: "modalità trace predefinita: off|events|standard|full" },
 	{ key: "YANO_FEEDBACK_API_PORT", description: "porta HTTP per l'API REST bug/suggestions (default 20002)" },

@@ -16,7 +16,7 @@
 //
 // Uso:
 //   yano services add --name <nome> \
-//     --healthcheck-http <url> | --healthcheck-command "<comando>" \
+//     --healthcheck-http <url> | --healthcheck-pm2 <nome> | --healthcheck-command "<comando>" \
 //     --restart-docker <container> | --restart-pm2 <app> | --restart-command "<comando>" \
 //     [--timeout-ms 2000] [--backoff-base-ms 5000] [--backoff-max-ms 300000] [--max-attempts 6] [--json]
 //   yano services list [--json]
@@ -31,11 +31,18 @@ import { spawnSync } from "node:child_process";
 import { globalDataPath } from "./yano-config.mjs";
 
 const REGISTRY_VERSION = 1;
-const VALID_HEALTHCHECK_TYPES = new Set(["http", "command"]);
+const VALID_HEALTHCHECK_TYPES = new Set(["http", "command", "pm2"]);
 const VALID_RESTART_TYPES = new Set(["docker", "pm2", "command"]);
 const NAME_PATTERN = /^[a-z0-9][a-z0-9_-]*$/i;
+// llmproxy is commonly launched either way (README documents both a Docker
+// container and `yano services add --restart-pm2 llmproxy`); builtin
+// auto-discovery used to only ever look for a Docker container, so a
+// pm2-launched llmproxy was never health-checked/restarted automatically
+// unless the operator manually registered it. pm2NameEnv/defaultPm2Name are
+// only declared for dependencies that are actually documented as
+// pm2-launchable — mqtt is not, so it stays Docker-only.
 const BUILTIN_DEPENDENCIES = [
-	{ name: "llmproxy", containerEnv: "YANO_LLMPROXY_CONTAINER", defaultContainer: "llmproxy-production" },
+	{ name: "llmproxy", containerEnv: "YANO_LLMPROXY_CONTAINER", defaultContainer: "llmproxy-production", pm2NameEnv: "YANO_LLMPROXY_PM2_NAME", defaultPm2Name: "llmproxy" },
 	{ name: "mqtt", containerEnv: "YANO_MQTT_CONTAINER", defaultContainer: "pi-orchestrator-mqtt-dev" },
 ];
 
@@ -70,22 +77,59 @@ function dockerContainerExists(container) {
 	return result.status === 0;
 }
 
+// `pm2 jlist` — the single JSON snapshot pm2 itself recommends for scripting
+// (vs. parsing `pm2 list`'s table output). Used both for builtin
+// auto-discovery below and for the native "pm2" healthcheck type.
+export function pm2ProcessOnline(name, { run = spawnSync } = {}) {
+	const result = run("pm2", ["jlist"], { encoding: "utf8", timeout: 3000 });
+	if (result.status !== 0) return false;
+	try {
+		const list = JSON.parse(result.stdout || "[]");
+		return Array.isArray(list) && list.some((proc) => proc?.name === name && proc?.pm2_env?.status === "online");
+	} catch { return false; }
+}
+
+function builtinDockerService(definition, registry) {
+	const container = process.env[definition.containerEnv] || definition.defaultContainer;
+	if (!dockerContainerExists(container)) return null;
+	return {
+		name: definition.name,
+		builtin: true,
+		healthcheck: { type: "command", target: `docker inspect --format '{{.State.Running}}' ${JSON.stringify(container)} | grep -q true`, timeout_ms: 3000 },
+		restart: { type: "docker", target: container },
+		enabled: true,
+		backoff: { base_ms: 5000, max_ms: 300000, max_attempts: 6 },
+		created_at: new Date().toISOString(),
+		state: defaultState(),
+	};
+}
+
+function builtinPm2Service(definition) {
+	if (!definition.pm2NameEnv) return null;
+	const pm2Name = process.env[definition.pm2NameEnv] || definition.defaultPm2Name;
+	if (!pm2ProcessOnline(pm2Name)) return null;
+	return {
+		name: definition.name,
+		builtin: true,
+		healthcheck: { type: "pm2", target: pm2Name, timeout_ms: 3000 },
+		restart: { type: "pm2", target: pm2Name },
+		enabled: true,
+		backoff: { base_ms: 5000, max_ms: 300000, max_attempts: 6 },
+		created_at: new Date().toISOString(),
+		state: defaultState(),
+	};
+}
+
 function builtinServices(registry) {
 	if (String(process.env.YANO_DISABLE_BUILTIN_DEPENDENCY_SUPERVISION || "0") === "1") return [];
-	if (spawnSync("docker", ["version", "--format", "{{.Server.Version}}"], { encoding: "utf8", timeout: 3000 }).status !== 0) return [];
-	return BUILTIN_DEPENDENCIES.map((definition) => {
-		const container = process.env[definition.containerEnv] || definition.defaultContainer;
-		return dockerContainerExists(container) ? {
-			name: definition.name,
-			builtin: true,
-			healthcheck: { type: "command", target: `docker inspect --format '{{.State.Running}}' ${JSON.stringify(container)} | grep -q true`, timeout_ms: 3000 },
-			restart: { type: "docker", target: container },
-			enabled: true,
-			backoff: { base_ms: 5000, max_ms: 300000, max_attempts: 6 },
-			created_at: new Date().toISOString(),
-			state: defaultState(),
-		} : null;
-	}).filter(Boolean).filter((service) => !registry.services.some((existing) => existing.name === service.name));
+	const dockerAvailable = spawnSync("docker", ["version", "--format", "{{.Server.Version}}"], { encoding: "utf8", timeout: 3000 }).status === 0;
+	return BUILTIN_DEPENDENCIES
+		// Docker is tried first (the historical default); a dependency not found
+		// as a Docker container (or Docker unavailable at all) falls back to
+		// pm2 auto-discovery instead of being silently unsupervised.
+		.map((definition) => (dockerAvailable && builtinDockerService(definition, registry)) || builtinPm2Service(definition))
+		.filter(Boolean)
+		.filter((service) => !registry.services.some((existing) => existing.name === service.name));
 }
 
 export function listServices({ includeBuiltIns = false } = {}) {
@@ -105,7 +149,7 @@ export function getService(name) {
 // one-minute cadence, so only register services/commands you trust.
 export function addService({ name, healthcheck, restart, enabled = true, backoff = {} }) {
 	if (!name || !NAME_PATTERN.test(name)) throw new Error("yano services: nome non valido (lettere/numeri/-/_ , non può iniziare con - o _)");
-	if (!healthcheck || !VALID_HEALTHCHECK_TYPES.has(healthcheck.type) || !String(healthcheck.target || "").trim()) throw new Error("yano services: serve --healthcheck-http <url> oppure --healthcheck-command \"<comando>\"");
+	if (!healthcheck || !VALID_HEALTHCHECK_TYPES.has(healthcheck.type) || !String(healthcheck.target || "").trim()) throw new Error("yano services: serve --healthcheck-http <url>, --healthcheck-pm2 <nome> oppure --healthcheck-command \"<comando>\"");
 	if (!restart || !VALID_RESTART_TYPES.has(restart.type) || !String(restart.target || "").trim()) throw new Error("yano services: serve --restart-docker <container>, --restart-pm2 <app> oppure --restart-command \"<comando>\"");
 	const registry = readRegistry();
 	if (registry.services.some((service) => service.name === name)) throw new Error(`yano services: "${name}" esiste già — usa "yano services remove --name ${name}" prima di ricrearlo`);
@@ -154,6 +198,10 @@ async function runHealthcheck(service) {
 		} finally {
 			clearTimeout(timer);
 		}
+	}
+	if (service.healthcheck.type === "pm2") {
+		const online = pm2ProcessOnline(service.healthcheck.target);
+		return { ok: online, detail: online ? "pm2_online" : "pm2_offline_or_missing" };
 	}
 	// `command`: exit code 0 is healthy. Runs through the shell so the operator
 	// can declare a pipeline (`docker inspect -f {{.State.Running}} x | grep true`)
@@ -276,7 +324,7 @@ function usage() {
 		"Uso: yano services <add|list|remove|enable|disable|check|supervise> [opzioni]",
 		"",
 		"  yano services add --name <nome> \\",
-		"    --healthcheck-http <url> | --healthcheck-command \"<comando>\" \\",
+		"    --healthcheck-http <url> | --healthcheck-pm2 <nome> | --healthcheck-command \"<comando>\" \\",
 		"    --restart-docker <container> | --restart-pm2 <app> | --restart-command \"<comando>\" \\",
 		"    [--timeout-ms 2000] [--backoff-base-ms 5000] [--backoff-max-ms 300000] [--max-attempts 6] [--disabled] [--json]",
 		"  yano services list [--json]",
@@ -298,9 +346,11 @@ export async function runYanoServices({ argv = [] } = {}) {
 		const name = value(argv, "--name");
 		const healthcheck = value(argv, "--healthcheck-http")
 			? { type: "http", target: value(argv, "--healthcheck-http") }
-			: value(argv, "--healthcheck-command")
-				? { type: "command", target: value(argv, "--healthcheck-command") }
-				: null;
+			: value(argv, "--healthcheck-pm2")
+				? { type: "pm2", target: value(argv, "--healthcheck-pm2") }
+				: value(argv, "--healthcheck-command")
+					? { type: "command", target: value(argv, "--healthcheck-command") }
+					: null;
 		const restart = value(argv, "--restart-docker")
 			? { type: "docker", target: value(argv, "--restart-docker") }
 			: value(argv, "--restart-pm2")

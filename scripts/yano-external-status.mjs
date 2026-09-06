@@ -6,9 +6,9 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { projectKey, resolveTraceProject, traceRoot } from "./yano-trace-storage.mjs";
+import { herdrSnapshot as fetchHerdrSnapshot } from "./yano-herdr-client.mjs";
 
 const require = createRequire(import.meta.url);
 const ROLES = new Set(["architect", "watcher", "auto-improver"]);
@@ -44,14 +44,12 @@ function readRows(file, table) {
 	finally { try { db?.close(); } catch { /* best effort */ } }
 }
 
-function herdrSnapshot() {
-	const result = spawnSync("herdr", ["api", "snapshot"], { encoding: "utf8", maxBuffer: 4_000_000 });
-	if (result.status !== 0) return null;
-	try {
-		const parsed = JSON.parse(result.stdout);
-		return parsed?.result?.snapshot || parsed?.result || parsed;
-	} catch { return null; }
-}
+// Delegates to the shared, retrying client (scripts/yano-herdr-client.mjs) —
+// see .scratch/optimize-orchestrator/issues/118. This used to be an
+// independent, un-retried reimplementation with a smaller maxBuffer than
+// yano-repair.mjs's own copy; two divergent copies of the same logic is
+// exactly the kind of drift risk this consolidation removes.
+function herdrSnapshot() { return fetchHerdrSnapshot({ maxBuffer: 4_000_000 }); }
 
 function roleFromIdentifier(identifier) {
 	const text = String(identifier || "").toLowerCase();

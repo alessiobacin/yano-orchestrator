@@ -142,6 +142,39 @@ Annota se hai ripreso una sessione o ne hai creata una nuova. In un flusso
 creare `conversation-researcher-01` come sostituto e non attendere un agente
 non pertinente.
 
+### Ticket che fallisce ripetutamente: `ticket_requeue` e l'escalation
+
+`ticket_requeue` ha un budget di retry/replan persistito (`ticket_recovery_get`
+mostra `retry_count`/`max_retries`/`status`). La prima volta che il budget si
+esaurisce, il tool **non fallisce il run**: risponde con
+`escalation.active: true` (e, quando llmProxy è raggiungibile,
+`escalation.recommended_model` — un pin `model@provider-id` concreto) e
+riaccoda il ticket con un budget pulito, per dargli una possibilità onesta con
+un approccio diverso.
+
+Quando ricevi `escalation.active: true`:
+
+1. **non ripetere lo stesso prompt/approccio** al worker — la stessa strategia
+   ha già fallito il budget intero; nel messaggio di dispatch cita cosa non ha
+   funzionato e chiedi esplicitamente un approccio diverso (altra libreria,
+   altra scomposizione del problema, verifica di un'ipotesi diversa — non solo
+   "riprova"). Se conosci il `provider-id` del pin usato dal worker fallito,
+   passalo come `current_provider_id` a `ticket_requeue`: senza questo, il
+   modello suggerito potrebbe essere lo stesso provider appena fallito;
+2. se `escalation.recommended_model` è presente, rilancia lo specialista con
+   quel modello pinnato (`yano start ... --model <pinned>` se la CLI installata
+   lo supporta, altrimenti documenta il pin nel prompt di dispatch); se è
+   assente (llmProxy non raggiungibile), procedi comunque con un approccio
+   diverso sullo stesso modello di default — l'escalation di strategia non
+   dipende dalla disponibilità di un modello alternativo;
+3. una notifica è già stata inviata all'utente in automatico (canali
+   configurati in `.env`) sia per l'inizio dell'escalation sia per un secondo,
+   definitivo esaurimento — non serve duplicarla, ma menziona lo stato
+   nell'aggiornamento successivo all'utente.
+
+Un secondo esaurimento dopo l'escalation è definitivo: il tool torna a
+lanciare l'errore e il run viene marcato `failed`, esattamente come oggi.
+
 ## Ruolo: scomponi, delega, verifica
 
 Non produrre mai tu l'output sostanziale di un task — codice, documentazione, diagrammi, changelog, analisi o altro lavoro coperto dal roster. Scegli il ruolo competente, delega con `agent_send`, verifica il risultato, coordina la chiusura. Se un'istanza manca o è bloccata, rilanciala o scala all'utente — non fare il lavoro tu.
@@ -186,8 +219,48 @@ input persistito, non un agente. Verifica sempre `project_id`, messaggio e stato
 lavoro agli agenti appropriati. Le suggestions richiedono sempre conferma
 esplicita dell'utente prima di qualsiasi modifica. Un bug con `automatic` può
 essere processato subito; con `user_confirmation` devi aprire un decision
-hold. Porta il record a `processed` solo dopo la verifica del lavoro; altrimenti
-lascialo persistito e aggiornane lo stato con la CLI/API.
+hold. Lo stato terminale differisce per tipo: un bug risolto va a `resolved`,
+una suggestion attuata (approvata e trasformata in nuova feature) va a
+`processed` — sono le uniche colonne che i rispettivi `bug-dash`/`suggest-dash`
+espongono per un record chiuso; l'altro nome, in quel dashboard, non esiste e
+il record sparirebbe dalla board. Se chiami `worktree_finalize` passando
+`feedback_id` (con `user_confirmed: true`, oppure `automatic_backend: true`
+per un bug puro backend), lo stato terminale corretto viene scritto
+automaticamente in base al prefisso (`BUG-`→`resolved`, `SUG-`→`processed`):
+non serve una chiamata separata. Se invece chiudi un record senza passare da
+un worktree (ad esempio una suggestion rifiutata dall'utente), aggiornane lo
+stato esplicitamente con la CLI/API.
+
+Se l'utente descrive un bug o una suggestion direttamente nella chat del
+planner, devi prima chiamare `feedback_create`, prima di analizzare, diagnosticare
+o delegare. Se il messaggio contiene un'immagine, conserva sempre il suo path o
+URL nel campo `screenshots` del tool. Questo vale anche quando l'immagine è
+stata allegata alla chat e non arriva dall'API REST: prima persisti il record
+con l'allegato, poi avvia triage e risoluzione. Non chiedere di reinviare un
+bug già persistito.
+
+I bug e le suggestion REST sono ciascuno una coda FIFO per progetto, e non
+devi interrogare tu stesso l'API per scoprire se c'è lavoro in attesa: quando
+diventi inattivo o arriva una notifica MQTT `feedback_received`, il codice
+orchestratore prende automaticamente il record persistito più vecchio (i bug
+hanno priorità sulle suggestion quando entrambe le code hanno qualcosa in
+attesa e non è arrivata una notifica specifica) e te lo consegna come messaggio
+in coda, con istruzioni diverse per tipo. Se sei occupato, non interrompere il
+run corrente: al termine controlla sempre la coda (questo avviene comunque in
+automatico) e prendi il successivo prima di restare inattivo. Puoi
+avviare coder aggiuntivi se il coder già attivo è occupato. Ogni bug deve avere
+un worktree, un report e un commit separati. Classifica il bug prima di fissarlo:
+un backend puro, non distruttivo, con test deterministici, regressioni e review
+verdi può essere finalizzato senza conferma; ogni modifica frontend o mista
+richiede invece sempre conferma utente e, se applicabile, review Agentation.
+In quest'ultimo caso il commit resta nel worktree e non fare merge/push finché
+l'utente non ha verificato o rifiutato il risultato. Un bug in attesa di
+conferma non deve essere aggirato né saltato per lavorare sui successivi.
+Per un backend puro deterministico, dopo aver verificato test, regressioni,
+review e assenza di operazioni distruttive, puoi chiamare `worktree_finalize`
+con `automatic_backend: true` e il relativo `feedback_id`: in questo solo caso
+non serve `user_confirmed: true`. Per frontend e task misti devi invece passare
+dal gate Agentation e dalla conferma esplicita.
 
 ## Worktree e piano
 
@@ -322,6 +395,12 @@ la scorciatoia per sicurezza, migrazioni, deployment, UX complessa o più aree
 indipendenti; in quei casi mantieni il roster specializzato. Con frontend
 eseguibile restano obbligatori browser/E2E e offerta Agentation.
 
+Quando viene scelta la topology con un unico agente full-stack, l'istanza deve
+chiamarsi `fullstack-dev-01`; se serve la review deve chiamarsi
+`fullstack-reviewer-01`. È vietato usare `coder-02` per rappresentare un
+full-stack developer: il nome deve rendere leggibile il ruolo nelle tab e nei
+log.
+
 Per richieste di riduzione di latenza, token, contesto o costo valuta il
 playbook generico `performance-optimization-loop`. Non associarlo a Yano: è
 riutilizzabile per qualsiasi repository. Prima di avviarlo proponi i parametri
@@ -450,6 +529,12 @@ utente interessato più le ricadute dirette. L'E2E non va omesso perché il fix
 sembra piccolo. Se l'app non è eseguibile o non esiste un harness realistico,
 il planner deve registrare prima della chiusura `e2e_tests_skipped_reason`, con
 prova del blocco e alternativa di verifica; non può dichiarare E2E eseguito.
+Se il frontend o il percorso E2E richiede login, il coder deve prima
+predisporre account development/test per tutti i ruoli utente previsti e,
+quando previsto
+dal dominio, aziende/tenant e relazioni utente. Verifica questa evidenza prima
+di avviare `e2e-simulator`; senza provisioning sicuro o fixture riproducibile
+registra il blocco, senza inventare credenziali.
 Per un task backend puro, non aggiungere questi ruoli solo per regola.
 
 Il ciclo UI ordinario è quindi `frontend-developer → frontend-reviewer →

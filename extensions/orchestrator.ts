@@ -58,6 +58,9 @@ import { collectCodeMemContext } from "../scripts/yano-code-mem-context.mjs";
 import { getProjectApi, listProjectApis, resolveApiSecret } from "../scripts/yano-api-registry.mjs";
 import { llmProxyAutoModel, switchImageTurnToAuto } from "../scripts/yano-vision-routing.mjs";
 import { switchPinnedModelToAuto } from "../scripts/yano-model-fallback.mjs";
+import { recommend as recommendModel } from "../scripts/yano-model-advisor.mjs";
+import { openDatabase as openFeedbackDatabase, createFeedback as createFeedbackRecord, claimFeedback, claimNextQueuedFeedback, listFeedback, terminalStatusForFeedbackId } from "../scripts/yano-feedback.mjs";
+import { globalConfigPath, loadConfigFile } from "../scripts/yano-config.mjs";
 
 // ESM-safe lazy require, used only inside SQLiteOrchestratorStorage's
 // constructor to resolve node:sqlite on first actual use (see the
@@ -1174,7 +1177,7 @@ async function findExistingWorktree(projectCwd: string, wtPath: string): Promise
 // Herdr elsewhere in this file.
 
 const YANO_SCHEMA_VERSION = 1;
-const YANO_STORAGE_SCHEMA_VERSION = 10;
+const YANO_STORAGE_SCHEMA_VERSION = 11;
 const YANO_EXTENSION_VERSION = "0.1.0-slice1";
 
 function loadRuntimePackageVersion(): string | null {
@@ -1448,7 +1451,7 @@ interface OrchestratorStorage {
 	claimPlaybookEffect(id: number, input: { owner: string; token: string; lease_until: string }): unknown;
 	failPlaybookEffect(id: number, input: { owner: string; token: string; error: string; max_attempts: number; next_attempt_at?: string }): unknown;
 	ackPlaybookEffect(id: number, input: { idempotency_key: string; generation: number; actor_role?: string }): unknown;
-	createDecisionHold(input: { id?: string; idempotency_key: string; run_id: string; ticket_id?: string | null; generation?: number; question: string; context?: unknown; owner: string; expires_at?: string | null }): DecisionHoldRecord;
+	createDecisionHold(input: { id?: string; idempotency_key: string; run_id: string; ticket_id?: string | null; generation?: number; question: string; context?: unknown; owner: string; expires_at?: string | null }): DecisionHoldRecord & { created: boolean };
 	getDecisionHold(id: string): DecisionHoldRecord | null;
 	listDecisionHolds(run_id: string, status?: DecisionHoldStatus): DecisionHoldRecord[];
 	answerDecisionHold(id: string, input: { generation: number; idempotency_key: string; answer: string; resolution_metadata?: unknown; expected_checksum?: string; principal?: string }): DecisionHoldRecord;
@@ -1520,6 +1523,7 @@ CREATE TABLE IF NOT EXISTS ticket_recovery_state (
 	 max_replans INTEGER NOT NULL DEFAULT 3,
 	 recovery_generation INTEGER NOT NULL DEFAULT 0,
 	 status TEXT NOT NULL DEFAULT 'available' CHECK (status IN ('available','exhausted')),
+	 escalation_used INTEGER NOT NULL DEFAULT 0,
 	 last_failure TEXT,
 	 updated_at TEXT NOT NULL
 );
@@ -1790,6 +1794,7 @@ class SQLiteOrchestratorStorage implements OrchestratorStorage {
 			}
 			if (current < 9) this.db.exec("ALTER TABLE tickets ADD COLUMN required_playbook TEXT");
 			if (current < 10) this.db.exec("ALTER TABLE runs ADD COLUMN finalization_status TEXT NOT NULL DEFAULT 'not_started'");
+			if (current < 11) this.db.exec("ALTER TABLE ticket_recovery_state ADD COLUMN escalation_used INTEGER NOT NULL DEFAULT 0");
 			// Advance the marker only after every additive statement succeeds.
 			this.db.prepare("UPDATE schema_meta SET value = ? WHERE key = 'schema_version'").run(String(YANO_STORAGE_SCHEMA_VERSION));
 		}
@@ -1930,16 +1935,35 @@ class SQLiteOrchestratorStorage implements OrchestratorStorage {
 		const now = nowIso();
 		this.db.exec("BEGIN IMMEDIATE");
 		try {
-			const current = this.getTicketRecovery(id) ?? { retry_count: 0, replan_round: 0, recovery_generation: 0, max_replans: input.max_replans ?? 3, status: "available" };
+			const current = this.getTicketRecovery(id) ?? { retry_count: 0, replan_round: 0, recovery_generation: 0, max_replans: input.max_replans ?? 3, status: "available", escalation_used: 0 };
 			const retries = Number(current.retry_count) + 1;
 			const maxReplans = input.max_replans ?? Number(current.max_replans ?? 3);
-			if (retries > input.max_retries || Number(current.replan_round ?? 0) >= maxReplans || current.status === "exhausted") {
+			const budgetExhausted = retries > input.max_retries || Number(current.replan_round ?? 0) >= maxReplans || current.status === "exhausted";
+			const escalationAlreadyUsed = Number(current.escalation_used ?? 0) > 0;
+			if (budgetExhausted && escalationAlreadyUsed) {
 				this.db.prepare("INSERT INTO ticket_recovery_state (ticket_id, run_id, retry_count, replan_round, max_retries, max_replans, recovery_generation, status, last_failure, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'exhausted', ?, ?) ON CONFLICT(ticket_id) DO UPDATE SET retry_count=excluded.retry_count, max_retries=excluded.max_retries, max_replans=excluded.max_replans, status='exhausted', last_failure=excluded.last_failure, updated_at=excluded.updated_at").run(id, ticket.run_id, retries, Number(current.replan_round ?? 0), input.max_retries, maxReplans, Number(current.recovery_generation ?? 0), input.reason, now);
 				this.db.prepare("UPDATE runs SET status = 'failed', finalization_status = 'not_applicable', updated_at = ? WHERE id = ? AND status = 'active'").run(now, ticket.run_id);
-				this.db.prepare("INSERT INTO checkpoints (run_id, label, payload, created_at) VALUES (?, 'recovery_budget_exhausted', ?, ?)").run(ticket.run_id, JSON.stringify({ ticket_id: id, retry_count: retries, max_retries: input.max_retries, reason: input.reason }), now);
-				this.recordEvent(ticket.run_id, "recovery_budget_exhausted", { ticket_id: id, retry_count: retries, max_retries: input.max_retries, reason: input.reason }, id);
+				this.db.prepare("INSERT INTO checkpoints (run_id, label, payload, created_at) VALUES (?, 'recovery_budget_exhausted', ?, ?)").run(ticket.run_id, JSON.stringify({ ticket_id: id, retry_count: retries, max_retries: input.max_retries, reason: input.reason, escalation_used: true }), now);
+				this.recordEvent(ticket.run_id, "recovery_budget_exhausted", { ticket_id: id, retry_count: retries, max_retries: input.max_retries, reason: input.reason, escalation_used: true }, id);
 				this.db.exec("COMMIT");
 				throw new Error(`ticket_requeue: recovery budget exhausted for "${id}".`);
+			}
+			if (budgetExhausted) {
+				// First time this ticket hits its budget: the same strategy
+				// clearly is not working, but failing the whole run outright
+				// here — before ever trying something different — is exactly
+				// the silent dead-end this escalation step exists to avoid.
+				// Give the escalated attempt a CLEAN retry/replan budget (not
+				// a continuation of the exhausted one) so it is judged on its
+				// own merits, and mark escalation_used so a second exhaustion
+				// after this one is final — no infinite escalation loop.
+				const generation = Number(current.recovery_generation ?? 0) + 1;
+				this.db.prepare("INSERT INTO ticket_recovery_state (ticket_id, run_id, retry_count, replan_round, max_retries, max_replans, recovery_generation, status, escalation_used, last_failure, updated_at) VALUES (?, ?, 0, 0, ?, ?, ?, 'available', 1, ?, ?) ON CONFLICT(ticket_id) DO UPDATE SET retry_count=0, replan_round=0, max_retries=excluded.max_retries, max_replans=excluded.max_replans, recovery_generation=excluded.recovery_generation, status='available', escalation_used=1, last_failure=excluded.last_failure, updated_at=excluded.updated_at").run(id, ticket.run_id, input.max_retries, maxReplans, generation, input.reason, now);
+				this.db.prepare("UPDATE tickets SET status = 'pending', assigned_instance = NULL, result_summary = ?, updated_at = ? WHERE id = ? AND status = 'failed'").run(`requeued (escalation): ${input.reason}`, now, id);
+				const updatedTicket = this.getTicket(id);
+				this.recordEvent(ticket.run_id, "recovery_escalation_started", { ticket_id: id, recovery_generation: generation, retry_count: retries, reason: input.reason }, id);
+				this.db.exec("COMMIT");
+				return { ticket: updatedTicket, recovery: this.getTicketRecovery(id), escalation: { active: true, reason: input.reason } };
 			}
 			const generation = Number(current.recovery_generation ?? 0) + 1;
 			this.db.prepare("INSERT INTO ticket_recovery_state (ticket_id, run_id, retry_count, replan_round, max_retries, max_replans, recovery_generation, status, last_failure, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'available', ?, ?) ON CONFLICT(ticket_id) DO UPDATE SET retry_count=excluded.retry_count, max_retries=excluded.max_retries, max_replans=excluded.max_replans, recovery_generation=excluded.recovery_generation, status='available', last_failure=excluded.last_failure, updated_at=excluded.updated_at").run(id, ticket.run_id, retries, Number(current.replan_round ?? 0), input.max_retries, maxReplans, generation, input.reason, now);
@@ -2331,7 +2355,7 @@ class SQLiteOrchestratorStorage implements OrchestratorStorage {
 		};
 	}
 
-	createDecisionHold(input: { id?: string; idempotency_key: string; run_id: string; ticket_id?: string | null; generation?: number; question: string; context?: unknown; owner: string; expires_at?: string | null }): DecisionHoldRecord {
+	createDecisionHold(input: { id?: string; idempotency_key: string; run_id: string; ticket_id?: string | null; generation?: number; question: string; context?: unknown; owner: string; expires_at?: string | null }): DecisionHoldRecord & { created: boolean } {
 		if (!input.idempotency_key.trim()) throw new Error("decision_hold_create: idempotency_key is required.");
 		if (!this.getRun(input.run_id)) throw new Error(`decision_hold_create: no run "${input.run_id}".`);
 		if (input.ticket_id) {
@@ -2340,8 +2364,13 @@ class SQLiteOrchestratorStorage implements OrchestratorStorage {
 			if (ticket.run_id !== input.run_id) throw new Error("decision_hold_create: ticket belongs to another run.");
 		}
 		const id = input.id || `hold-${crypto.createHash("sha256").update(`${input.run_id}:${input.idempotency_key}`).digest("hex").slice(0, 32)}`;
+		// `created` distinguishes a genuinely new hold from an idempotent replay
+		// of the same (run_id, idempotency_key) — the caller (the
+		// decision_hold_create tool) uses it to guarantee the "I'm waiting for
+		// your reply" notification fires exactly once per hold, never once per
+		// call.
 		const existing = this.getDecisionHold(id);
-		if (existing) return existing;
+		if (existing) return { ...existing, created: false };
 		const now = nowIso();
 		const rec: DecisionHoldRecord = {
 			id, run_id: input.run_id, ticket_id: input.ticket_id ?? null, generation: input.generation ?? 0,
@@ -2354,11 +2383,11 @@ class SQLiteOrchestratorStorage implements OrchestratorStorage {
 				.run(rec.id, rec.run_id, rec.ticket_id, rec.generation, rec.question, JSON.stringify(rec.context), rec.owner, rec.status, null, JSON.stringify(rec.resolution_metadata), rec.created_at, rec.expires_at, rec.updated_at);
 			this.db.prepare("INSERT INTO decision_hold_operations (hold_id, operation, idempotency_key, created_at) VALUES (?, 'create', ?, ?)").run(rec.id, input.idempotency_key, now);
 			this.db.exec("COMMIT");
-			return rec;
+			return { ...rec, created: true };
 		} catch (error) {
 			try { this.db.exec("ROLLBACK"); } catch { /* preserve original error */ }
 			const retry = this.getDecisionHold(id);
-			if (retry) return retry;
+			if (retry) return { ...retry, created: false };
 			throw error;
 		}
 	}
@@ -2596,20 +2625,14 @@ interface UnfinalizedRunInfo {
 }
 
 function yanoFindUnfinalizedRuns(storage: OrchestratorStorage, project: string, nowMs: number, graceMs: number): UnfinalizedRunInfo[] {
-	const found: UnfinalizedRunInfo[] = [];
-	for (const run of storage.listRuns(project)) {
-		if (run.status !== "completed") continue;
-		if (run.finalization_status === "finalized" || run.finalization_status === "not_applicable") continue;
-		// An open human hold means the planner is alive and intentionally waiting
-		// for the operator (for example Agentation or finalization approval). Do
-		// not wake it or spend an LLM turn; the hold is durable across restarts.
-		if (storage.listDecisionHolds(run.id, "open").length > 0) continue;
-		const elapsed = nowMs - Date.parse(run.updated_at);
-		if (elapsed >= graceMs) {
-			found.push({ run_id: run.id, objective: run.objective, completed_at: run.updated_at, elapsed_ms: elapsed });
-		}
-	}
-	return found;
+	// Completed is terminal. Finalization is an administrative/user gate, not an
+	// operational liveness signal; returning it here used to wake planners
+	// forever after a manual merge or an answered decision hold.
+	void storage;
+	void project;
+	void nowMs;
+	void graceMs;
+	return [];
 }
 
 // ━━ Watchdog: detect tickets whose assigned instance is confirmably GONE
@@ -2858,6 +2881,17 @@ export default function (pi: ExtensionAPI) {
 		return inboundQueue.size > 0 || activeTicketIds.size > 0 ? "busy" : "idle";
 	}
 	let currentCtx: ExtensionContext | null = null;
+	let currentInputScreenshots: unknown[] = [];
+	function inputScreenshotReferences(event: any): unknown[] {
+		const candidates = Array.isArray(event?.images) ? event.images : (Array.isArray(event?.message?.content) ? event.message.content : []);
+		return candidates.filter((item: any) => item && (item.type === "image" || item.type === "input_image" || item.path || item.url || item.data)).map((item: any) => ({
+			path: item.path,
+			url: item.url,
+			data: item.data,
+			name: item.name || item.filename,
+			mime_type: item.mime_type || item.mimeType,
+		})).slice(0, 8);
+	}
 	let projectBootstrap = "";
 	let projectBootstrapDelivered = false;
 	let currentInbound: InboundContext | null = null;
@@ -3030,6 +3064,33 @@ export default function (pi: ExtensionAPI) {
 			if (oldestKey) seenAssignments.delete(oldestKey);
 		}
 		return true;
+	}
+	// Dequeues the oldest pending bug/suggestion for this project (see
+	// claimNextQueuedFeedback in yano-feedback.mjs — extracted there so the
+	// dequeue-and-classify decision is unit-testable). Before 2026-09-06 this
+	// only ever looked at type="bug", so a suggestion sitting in
+	// "pending_planner"/"queued" was NEVER surfaced to the planner no matter
+	// how long it stayed idle — bugs got a FIFO catch-up, suggestions got
+	// silently stuck forever. preferredType lets a live feedback_received
+	// notification check the queue matching what just arrived first, while
+	// still respecting that queue's own FIFO order (see the smoke test).
+	function wakeNextQueuedFeedback(reason: string, preferredType?: "bug" | "suggestion"): void {
+		if (!identity || identity.role !== "planner" || computeSelfStatus() !== "idle") return;
+		let db: any = null;
+		try {
+			db = openFeedbackDatabase();
+			const result = claimNextQueuedFeedback(db, identity.project, { preferredType });
+			if (!result) return;
+			pi.sendMessage({ customType: "feedback-inbound", content: result.message, display: true, details: { feedback_id: result.claimed.id, reason, feedback_type: result.type } }, { deliverAs: "followUp", triggerTurn: true });
+			logEvent("feedback_queue_wake", { feedback_id: result.claimed.id, reason, status: result.claimed.status, feedback_type: result.type });
+		} catch (error) {
+			logEvent("feedback_queue_wake_failed", { reason, error: error instanceof Error ? error.message : String(error) });
+		} finally { try { db?.close(); } catch { /* best effort */ } }
+	}
+	function handleFeedbackReceived(payload: any): void {
+		if (!identity || identity.role !== "planner" || payload?.project_id !== identity.project) return;
+		logEvent("feedback_received", { feedback_id: payload.feedback_id ?? null, feedback_type: payload.feedback_type ?? null, screenshot_count: Array.isArray(payload.screenshots) ? payload.screenshots.length : 0, planner_status: computeSelfStatus() });
+		wakeNextQueuedFeedback("feedback_received", payload?.feedback_type === "suggestion" ? "suggestion" : "bug");
 	}
 
 	function scheduleEviction(assignment_id: string): void {
@@ -3580,7 +3641,8 @@ export default function (pi: ExtensionAPI) {
 			if (topicStr === T.agentCommands(identity.instance)) {
 				try {
 					const env = JSON.parse(payload.toString("utf-8")) as CommandEnvelope | ContextCompactRequestEnvelope | TerminateEnvelope | ReloadPrepareEnvelope | ReloadCancelEnvelope;
-					if (env.type === "command") handleCommand(env);
+					if (env.type === "feedback_received") handleFeedbackReceived(env);
+					else if (env.type === "command") handleCommand(env);
 					else if (env.type === "context_compact_request") handleContextCompactRequest(env);
 					else if (env.type === "reload_prepare") handleReloadPrepare(env);
 					else if (env.type === "reload_cancel") handleReloadCancel(env);
@@ -3763,6 +3825,7 @@ export default function (pi: ExtensionAPI) {
 	// the attachment with "image omitted" before the model selection changes.
 	pi.on("input", async (event: any) => {
 		if (!identity) return;
+		currentInputScreenshots = inputScreenshotReferences(event);
 		await switchImageTurnToAuto({ event, ctx: currentCtx, setModel: (model) => pi.setModel(model), log: logEvent });
 	});
 
@@ -4271,6 +4334,45 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	// ━━ Tools ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+	// A bug reported in the planner chat must be persisted before diagnosis. This
+	// tool gives the planner the same durable intake used by REST, including the
+	// screenshot references supplied with the user's message.
+	pi.registerTool({
+		name: "feedback_create",
+		label: "Persist Bug or Suggestion",
+		description: "Persist a user-reported bug or suggestion before analysing it. Planner-only. For a bug received with an image, include its local path or HTTPS URL in screenshots; the record is created before any fix is attempted.",
+		parameters: Type.Object({
+			type: Type.Union([Type.Literal("bug"), Type.Literal("suggestion")]),
+			message: Type.String({ description: "Faithful user report, including route and observed behaviour." }),
+			resolution: Type.Optional(Type.Union([Type.Literal("automatic"), Type.Literal("user_confirmation")])),
+			screenshots: Type.Optional(Type.Array(Type.Any({ description: "Screenshot path, HTTPS URL, or attachment descriptor." }))),
+			username: Type.Optional(Type.String({ description: "Credenziale utente per i test E2E; obbligatoria per i bug." })),
+			password: Type.Optional(Type.String({ description: "Password per i test E2E; obbligatoria per i bug e salvata cifrata." })),
+		}),
+		async execute(_callId, params) {
+			if (!identity || identity.role !== "planner") throw new Error("feedback_create: tool riservato al planner.");
+			const db = openFeedbackDatabase();
+			try {
+				const result = await createFeedbackRecord(db, {
+					type: params.type,
+					project_id: identity.project,
+					message: params.message,
+					resolution: params.resolution,
+					screenshots: params.screenshots?.length ? params.screenshots : currentInputScreenshots,
+					test_username: params.username,
+					test_password: params.password,
+					notify: false,
+				});
+				claimFeedback(db, result.id);
+				const claimed = listFeedback(db, { project_id: identity.project, type: params.type, statuses: ["processing"] }).find((item: any) => item.id === result.id) || result;
+				currentInputScreenshots = [];
+				logEvent("feedback_persisted_from_planner_chat", { feedback_id: claimed.id, feedback_type: claimed.type, screenshot_count: claimed.screenshots?.length ?? 0 });
+				return { content: [{ type: "text" as const, text: JSON.stringify({ feedback_id: claimed.id, status: claimed.status, screenshots: claimed.screenshots }, null, 2) }], details: { feedback_id: claimed.id, status: claimed.status, screenshot_count: claimed.screenshots?.length ?? 0 } };
+			} finally { db.close(); }
+		},
+		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("feedback_create ")) + theme.fg("accent", `${(args as any).type ?? "bug"} · ${String((args as any).message ?? "").slice(0, 60)}`), 0, 0); },
+		renderResult(result, _options, theme) { const d = result.details as any; return new Text(theme.fg("success", `→ ${d?.feedback_id ?? "feedback"} persistito (${d?.screenshot_count ?? 0} screenshot)`), 0, 0); },
+	});
 
 	// The auto-improver is an observer. Prompt instructions alone are not a
 	// sufficient safety boundary because a resumed/stale Pi transcript can still
@@ -5119,10 +5221,26 @@ export default function (pi: ExtensionAPI) {
 		return result;
 	}
 
+	// Cached for the lifetime of the process: the global config file is only
+	// ever changed via `yano config set`/`unset`, never by a running agent, so
+	// re-reading it on every notification send would be pure overhead.
+	let cachedGlobalConfig: Record<string, string> | null = null;
+	function globalYanoConfig(): Record<string, string> {
+		if (!cachedGlobalConfig) cachedGlobalConfig = loadConfigFile(globalConfigPath());
+		return cachedGlobalConfig;
+	}
+
 	function getEnvVar(cwd: string, key: string): string | undefined {
-		// process.env takes precedence over .env — the usual dotenv convention,
-		// lets a real shell/CI env override the file without editing it.
-		return process.env[key] || loadEnvFile(cwd)[key] || undefined;
+		// Precedence: process.env (shell/CI override) > this project's own .env
+		// > the global `yano config` default (see yano-config.mjs's CONFIG_SPECS
+		// — EVOLUTION_*/TELEGRAM_*/SENDGRID_* are already valid global keys).
+		// A project that configures its own channel is never overridden by the
+		// global default; a project with none configured falls back to it —
+		// this is what lets the user set ONE default notification channel once
+		// (`yano config set TELEGRAM_BOT_TOKEN ...`) instead of repeating it in
+		// every project's .env, while still letting a specific project opt into
+		// its own separate channel.
+		return process.env[key] || loadEnvFile(cwd)[key] || globalYanoConfig()[key] || undefined;
 	}
 
 	async function sendWhatsAppNotification(message: string): Promise<{ ok: boolean; detail: string }> {
@@ -5345,7 +5463,8 @@ export default function (pi: ExtensionAPI) {
 			"user rather than retrying blindly.\n\n" +
 			"Revisione 42 — mandatory closing procedure, enforced here rather than left to prompt discipline alone: this call is " +
 			"REFUSED unless you explicitly declare (a) user_confirmed:true — you asked the user whether this result is what they " +
-			"actually wanted and they said yes, don't assume it from silence; (b) either e2e_tests_run:true (the project's " +
+				"actually wanted and they said yes, don't assume it from silence — except for a persisted pure-backend bug that " +
+				"the planner explicitly classifies as deterministic and safe for automatic finalization; (b) either e2e_tests_run:true (the project's " +
 			"end-to-end/full test suite was actually run as part of this task, by coder/reviewer/e2e-simulator — not by you) or " +
 			"e2e_tests_skipped_reason explaining why none applies (e.g. a pure-docs task with no e2e suite to run); (c) either " +
 			"version_bumped:true (the project's own version marker was bumped as part of this task) or " +
@@ -5366,6 +5485,8 @@ export default function (pi: ExtensionAPI) {
 			commit_message: Type.Optional(Type.String({ description: "Commit message for any uncommitted changes and for the merge commit. Defaults to a generic message referencing the slug." })),
 			notify_message: Type.Optional(Type.String({ description: "Custom completion message sent to all configured notification channels. Defaults to a generic one naming the task slug." })),
 			user_confirmed: Type.Boolean({ description: "You explicitly asked the user to confirm this result is what they wanted, and they confirmed — required, no exceptions." }),
+			automatic_backend: Type.Optional(Type.Boolean({ description: "Planner-only bug exception: true only for a persisted pure-backend, deterministic, non-destructive bug with all required tests/review green." })),
+			feedback_id: Type.Optional(Type.String({ description: "Persisted BUG-... or SUG-... id when this task closes a bug/suggestion. Required with automatic_backend. When present and user_confirmed is true, the record is moved to its terminal status automatically (resolved for a bug, processed for a suggestion) — no separate CLI/API call needed." })),
 			frontend_scope: Type.Optional(Type.Union([Type.Literal("required"), Type.Literal("not_applicable")])),
 			agentation_review_status: Type.Optional(Type.Union([Type.Literal("verified"), Type.Literal("declined")])),
 			agentation_url: Type.Optional(Type.String({ description: "The development URL shown to the user for the Agentation review." })),
@@ -5383,7 +5504,15 @@ export default function (pi: ExtensionAPI) {
 			if (!identity) throw new Error("orchestrator not initialised");
 			const slug = params.slug;
 			if (!SLUG_RE.test(slug)) throw new Error(`worktree_finalize: "${slug}" is not a valid kebab-case slug.`);
-			if (!params.user_confirmed) {
+			let automaticBackendBug = false;
+			if (params.automatic_backend) {
+				if (!params.feedback_id?.startsWith("BUG-")) throw new Error("worktree_finalize: automatic_backend richiede feedback_id BUG-...");
+				const feedbackDb = openFeedbackDatabase();
+				try { automaticBackendBug = listFeedback(feedbackDb, { type: "bug" }).some((item: any) => item.id === params.feedback_id && item.project_id === identity.project && item.status === "processing"); }
+				finally { feedbackDb.close(); }
+				if (!automaticBackendBug) throw new Error("worktree_finalize: automatic_backend richiede un bug persistito del progetto nello stato processing.");
+			}
+			if (!params.user_confirmed && !automaticBackendBug) {
 				throw new Error(
 					"worktree_finalize: refused — user_confirmed must be true. Ask the user explicitly whether this task's result " +
 						"is what they wanted BEFORE finalizing (Revisione 42) — don't assume completion just because every ticket is " +
@@ -5421,6 +5550,8 @@ export default function (pi: ExtensionAPI) {
 			logEvent("worktree_finalize_checklist", {
 				slug,
 				user_confirmed: params.user_confirmed,
+				automatic_backend: automaticBackendBug,
+				feedback_id: params.feedback_id ?? null,
 				frontend_scope: params.frontend_scope ?? "not_applicable",
 				agentation_review_status: params.agentation_review_status ?? null,
 				agentation_url: params.agentation_url ?? null,
@@ -5546,6 +5677,17 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			logEvent("worktree_finalize", { slug, worktree_path: wtPath, branch, merged: true, conflict: false });
+			// Revisione 66 — before this, only the automatic_backend bug path ever
+			// closed a feedback record (and it wrote 'processed', which bug-dash
+			// doesn't even have a column for — an auto-finalized bug silently
+			// vanished from its own Kanban board instead of showing as resolved).
+			// Any confirmed finalize that names a feedback_id now closes it too,
+			// with the status its own dashboard actually expects.
+			if (params.feedback_id && (automaticBackendBug || params.user_confirmed)) {
+				const feedbackDb = openFeedbackDatabase();
+				try { feedbackDb.prepare("UPDATE feedback SET status=?,updated_at=? WHERE id=?").run(terminalStatusForFeedbackId(params.feedback_id), nowIso(), params.feedback_id); }
+				finally { feedbackDb.close(); }
+			}
 			if (params.run_id && finalizationStorage) {
 				finalizationStorage.updateRunFinalizationStatus(params.run_id, "finalized");
 			}
@@ -6953,11 +7095,44 @@ export default function (pi: ExtensionAPI) {
 		name: "ticket_requeue",
 		label: "Requeue Ticket Recovery",
 		description: "Requeue a failed ticket on the same id with a persisted recovery generation and bounded retry budget.",
-		parameters: Type.Object({ ticket_id: Type.String(), reason: Type.String(), max_retries: Type.Integer({ minimum: 1 }), max_replans: Type.Optional(Type.Integer({ minimum: 1 })) }),
+		parameters: Type.Object({ ticket_id: Type.String(), reason: Type.String(), max_retries: Type.Integer({ minimum: 1 }), max_replans: Type.Optional(Type.Integer({ minimum: 1 })), current_provider_id: Type.Optional(Type.String({ description: "provider-id (from the pinned model@provider-id the failed worker used, if any) to exclude from the escalation suggestion — without this the recommendation can suggest the same provider that just failed" })) }),
 		async execute(_callId, params) {
 			if (!identity || identity.role !== "planner") throw new Error("ticket_requeue: only planner may replace a failed worker.");
-			const result = ensureYanoStorage().requeueTicketForRecovery(params.ticket_id, params) as any;
-			return { content: [{ type: "text" as const, text: `ticket_requeue: ${params.ticket_id} is pending (recovery generation ${result.recovery.recovery_generation}).` }], details: { ...result, recovery: redactRuntimeProjection(result.recovery) } };
+			let result: any;
+			try {
+				result = ensureYanoStorage().requeueTicketForRecovery(params.ticket_id, params);
+			} catch (error) {
+				// Final exhaustion (escalation already used and it also failed).
+				// This used to fail the run silently — nobody heard about it
+				// unless they happened to check run_status. Tell the human.
+				const message = error instanceof Error ? error.message : String(error);
+				if (/recovery budget exhausted/.test(message)) {
+					const notifyText = `⚠️ Ticket "${params.ticket_id}" ha esaurito i tentativi anche dopo aver provato un modello/strategia diversa. Il run è stato marcato failed. Motivo: ${params.reason}`;
+					const notifyResult = await sendNotifications(notifyText);
+					logEvent("notification_dispatch", { ticket_id: params.ticket_id, ok: notifyResult.ok, detail: notifyResult.detail, channels: notifyResult.channels, reason: "recovery_budget_exhausted_final" });
+				}
+				throw error;
+			}
+			if (result.escalation?.active) {
+				// First exhaustion: try a different provider before giving up.
+				// recommend() never throws for a data/network problem — it
+				// degrades to auto_fallback — so this is safe even when
+				// llmProxy is unreachable; the escalation itself still
+				// happens either way, just without a specific pin to suggest.
+				let modelSuggestion: any = null;
+				try { modelSuggestion = await recommendModel({ roleClass: "support", excludeProviderId: (params as any).current_provider_id || null }); } catch { modelSuggestion = null; }
+				const pinned = modelSuggestion?.recommended?.pinned_id || null;
+				const notifyText = pinned
+					? `🔁 Ticket "${params.ticket_id}" ha esaurito i tentativi normali. Provo un modello diverso (${pinned}) e un approccio diverso prima di arrendermi. Motivo: ${params.reason}`
+					: `🔁 Ticket "${params.ticket_id}" ha esaurito i tentativi normali. Provo un approccio diverso prima di arrendermi (nessun modello alternativo disponibile da llmProxy in questo momento). Motivo: ${params.reason}`;
+				const notifyResult = await sendNotifications(notifyText);
+				logEvent("notification_dispatch", { ticket_id: params.ticket_id, ok: notifyResult.ok, detail: notifyResult.detail, channels: notifyResult.channels, reason: "recovery_escalation_started" });
+				result = { ...result, escalation: { ...result.escalation, recommended_model: pinned } };
+			}
+			const statusText = result.escalation?.active
+				? `ticket_requeue: ${params.ticket_id} is pending after ESCALATION — try a different model/approach this time${result.escalation.recommended_model ? ` (suggested: ${result.escalation.recommended_model})` : ""}, not the same strategy that already failed twice (recovery generation ${result.recovery.recovery_generation}).`
+				: `ticket_requeue: ${params.ticket_id} is pending (recovery generation ${result.recovery.recovery_generation}).`;
+			return { content: [{ type: "text" as const, text: statusText }], details: { ...result, recovery: redactRuntimeProjection(result.recovery) } };
 		},
 		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("ticket_requeue ")) + theme.fg("accent", (args as any).ticket_id ?? "?"), 0, 0); },
 		renderResult(result, _options, theme) { return new Text(theme.fg("success", "→ ") + theme.fg("accent", String((result.details as any)?.recovery?.recovery_generation ?? "?")), 0, 0); },
@@ -6991,6 +7166,17 @@ export default function (pi: ExtensionAPI) {
 			const storage = ensureYanoStorage();
 			const hold = storage.createDecisionHold({ ...params, ticket_id: params.ticket_id ?? null, context: params.context ?? {}, idempotency_key: params.idempotency_key });
 			storage.recordEvent(hold.run_id, "decision_hold_created", { hold_id: hold.id, generation: hold.generation, owner: hold.owner, expires_at: hold.expires_at }, hold.ticket_id);
+			// Exactly one "I'm waiting for your reply" notification per hold, ever
+			// — gated on storage-level `created` (true only the one time this
+			// call actually inserted a new row), never on anything the calling
+			// agent could retry into firing twice. Silent (never throws) if no
+			// channel is configured, same contract as every other notification
+			// path in this file.
+			if (hold.created) {
+				const notifyText = `❓ Il progetto "${identity.project}" ha una domanda in attesa di risposta: "${hold.question}" (hold ${hold.id}). Non serve fare nulla finché non rispondi — nessun altro processo interverrà su questo hold.`;
+				const notifyResult = await sendNotifications(notifyText);
+				logEvent("notification_dispatch", { hold_id: hold.id, ok: notifyResult.ok, detail: notifyResult.detail, channels: notifyResult.channels, reason: "decision_hold_waiting_for_user" });
+			}
 			return { content: [{ type: "text" as const, text: `decision hold ${hold.id}: ${hold.status} (generation ${hold.generation})` }], details: { hold: redactRuntimeProjection(hold) } };
 		},
 		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("decision_hold_create ")) + theme.fg("accent", (args as any).run_id ?? "?"), 0, 0); },
@@ -7376,7 +7562,10 @@ export default function (pi: ExtensionAPI) {
 		if (identity.role === "planner") {
 			await yanoPublishAgentEvent("planner_task_completed", { assignment_id: inbound?.assignment_id ?? null });
 		}
-		if (!inbound || !client) return;
+		if (!inbound || !client) {
+			if (identity.role === "planner") wakeNextQueuedFeedback("planner_turn_end");
+			return;
+		}
 
 		let response: any = lastAssistantText;
 		let error: string | null = null;
@@ -7399,6 +7588,7 @@ export default function (pi: ExtensionAPI) {
 			if (currentInbound === inbound) currentInbound = null;
 			pi.appendEntry("orchestrator-log", { event: "response_sent", assignment_id: inbound.assignment_id });
 			void publishPresence(computeSelfStatus());
+			if (identity.role === "planner") wakeNextQueuedFeedback("planner_turn_end");
 		} catch (err) {
 			pi.appendEntry("orchestrator-log", { event: "response_send_failed", assignment_id: inbound.assignment_id, error: err instanceof Error ? err.message : String(err) });
 		}

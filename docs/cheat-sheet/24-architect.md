@@ -17,3 +17,9 @@ yano architect create --type mcp-server --name <id> --task "..."
 
 L’architect è un worker esterno globale: viene attivato per proposta/import e
 controlla requisiti, skill, CLI e MCP prima dell’uso.
+
+Resta on-demand: lo scheduler crea workspace/tab se mancanti quando serve
+avviare un round; la **chiusura** delle sessioni terminali (proposte
+`persistent`/`blocked` con tab ancora registrate) è invece compito del cron,
+ad ogni passata di `yano watcher supervise` — nessuna tab resta aperta a
+tempo indeterminato dopo un round concluso.

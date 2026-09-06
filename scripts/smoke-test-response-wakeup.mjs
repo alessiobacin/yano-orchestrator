@@ -56,6 +56,14 @@ const BROKER_URL = process.env.PI_ORCH_BROKER_URL || "mqtt://127.0.0.1:1883";
 // to actually fire within the test's lifetime.
 process.env.PI_ORCH_TIMEOUT_MS = "500";
 
+// Isolate from the REAL machine's global Yano config. Fase 0 made
+// sendNotifications() fall back to the global notification channel when a
+// project has no local .env — on a real developer machine with real
+// Telegram/WhatsApp credentials configured globally, this test's timeout
+// notification WILL send a real message unless isolated. Must be set
+// before extensions/orchestrator.ts is imported below.
+process.env.YANO_CONFIG_FILE = path.join(os.tmpdir(), "yano-response-wakeup-no-such-config.env");
+
 let PASS = 0;
 function ok(cond, msg) {
 	if (!cond) throw new Error(`ASSERTION FAILED: ${msg}`);

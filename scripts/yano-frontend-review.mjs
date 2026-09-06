@@ -63,7 +63,7 @@ function run(command, args, cwd) {
 	});
 }
 
-async function setup(root) {
+export async function setup(root) {
 	const info = inferFrontendDev(root);
 	if (!info.agentation_supported) throw new Error("Agentation ufficiale richiede React 18+; framework non riconosciuto, nessuna modifica applicata");
 	const alreadyInstalled = Boolean(({ ...(readPackage(root).dependencies || {}), ...(readPackage(root).devDependencies || {}) }).agentation);

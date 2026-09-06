@@ -131,6 +131,16 @@ const YANO_AI_OPTIMIZATION_SKILL_ROLES = ["ai-optimizer"];
 // Skill vendorizzata destinata ai ruoli che devono verificare davvero il
 // browser: reviewer frontend e simulatore E2E.
 const CHROME_DEVTOOLS_SKILL = "chrome-devtools";
+
+// Blocking sleep sul thread principale. Node (a differenza dei browser)
+// permette Atomics.wait sul main thread: qui serve un'attesa sincrona
+// perché tutto il percorso --herdr è costruito su spawnSync (bin/yano.mjs
+// chiama runLaunchPlanner in modo sincrono). Nessuna shell coinvolta,
+// quindi funziona identico su macOS/Linux e Windows.
+function sleepSync(ms) {
+	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 const CHROME_DEVTOOLS_SKILL_ROLES = ["frontend-reviewer", "frontend-developer", "e2e-simulator", "full-stack-developer", "full-stack-reviewer"];
 
 function resolveVendoredSkillPaths(packageRoot, vendorDir, names) {
@@ -694,25 +704,48 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 		// Herdr creates an initial tab (often labelled `1`) with a new
 		// workspace. Reuse and rename that empty tab instead of creating a
 		// useless second tab. A tab containing a live agent is never reused.
+		// If the tab is already labelled with the instance name (e.g. a retry
+		// after a previous failed launch), reuse it directly — renaming a tab
+		// to the label it already has is a no-op that still leaves tabResult
+		// null, which used to crash the error check below (TypeError reading
+		// 'status' of null).
 		const initialTab = snapshot?.tabs?.find((tab) => tab.workspace_id === workspace.workspace_id && /^(1|\d+)$/.test(tab.label || ""));
 		const initialPane = initialTab && snapshot?.panes?.find((pane) => pane.tab_id === initialTab.tab_id);
 		const initialAgent = initialPane && snapshot?.agents?.find((agent) => agent.pane_id === initialPane.pane_id);
 		let tabResult = null;
 		let paneId = null;
 		if (initialTab && initialPane && (!initialAgent || ["done", "offline", "unknown"].includes(String(initialAgent.agent_status || "").toLowerCase()))) {
-			const renamed = spawnSync("herdr", ["tab", "rename", initialTab.tab_id, instance], { encoding: "utf8", maxBuffer: 1_000_000 });
-			if (renamed.status === 0) paneId = initialPane.pane_id;
+			if ((initialTab.label || "") === instance) {
+				// Already labelled for this instance — no rename needed.
+				paneId = initialPane.pane_id;
+			} else {
+				const renamed = spawnSync("herdr", ["tab", "rename", initialTab.tab_id, instance], { encoding: "utf8", maxBuffer: 1_000_000 });
+				if (renamed.status === 0) paneId = initialPane.pane_id;
+			}
 		}
 		if (!paneId) {
 			tabResult = spawnSync("herdr", ["tab", "create", "--workspace", workspace.workspace_id, "--cwd", cwd, "--label", instance, "--no-focus"], { encoding: "utf8", maxBuffer: 1_000_000 });
 			try { paneId = JSON.parse(tabResult.stdout || "")?.result?.root_pane?.pane_id; } catch { /* handled below */ }
 		}
-		if (tabResult.status !== 0 || !paneId) {
-			console.error(`launch-planner: Herdr non ha creato una tab isolata per ${instance}: ${(tabResult.stderr || "risposta senza pane").trim()}`);
+		if ((tabResult && tabResult.status !== 0) || !paneId) {
+			console.error(`launch-planner: Herdr non ha creato una tab isolata per ${instance}: ${((tabResult && tabResult.stderr) || "risposta senza pane").trim()}`);
 			process.exit(1);
 		}
 		const agentName = `${slugify(instance)}-${slugify(traceProject)}`.slice(0, 32);
-		const started = spawnSync("herdr", ["agent", "start", agentName, "--kind", "pi", "--pane", paneId, "--", ...piArgs], { cwd, encoding: "utf8", maxBuffer: 4_000_000 });
+		// `herdr agent start` requires the pane to be at an interactive shell
+		// prompt. A freshly created (or just-renamed) tab's shell may not be
+		// ready yet: Herdr then rejects the start with "agent_pane_busy" even
+		// though the pane exists. Retry with a short backoff instead of failing
+		// the whole launch — the shell normally becomes ready within a second
+		// or two.
+		let started = null;
+		const agentStartArgs = ["agent", "start", agentName, "--kind", "pi", "--pane", paneId, "--", ...piArgs];
+		for (let attempt = 0; attempt < 5; attempt++) {
+			if (attempt > 0) sleepSync(1000);
+			started = spawnSync("herdr", agentStartArgs, { cwd, encoding: "utf8", maxBuffer: 4_000_000 });
+			const stderrText = String(started.stderr || "");
+			if (started.status === 0 || !/agent_pane_busy|not an available shell/i.test(stderrText)) break;
+		}
 		if (started.status !== 0) {
 			console.error(`launch-planner: Herdr non ha avviato ${instance}: ${(started.stderr || "errore sconosciuto").trim()}`);
 			process.exit(1);

@@ -68,6 +68,7 @@ async function main() {
 		.filter((file) => file.startsWith("smoke-test-") && file.endsWith(".mjs"))
 		.sort();
 	const targets = [
+		["package version", npmCommand, ["run", "check:package-version"]],
 		["syntax", "node", ["--experimental-strip-types", "scripts/check-syntax.mjs", "extensions/orchestrator.ts"]],
 		["documentation sync", npmCommand, ["run", "check:docs"]],
 		["capability lint", npmCommand, ["run", "lint:capabilities"]],

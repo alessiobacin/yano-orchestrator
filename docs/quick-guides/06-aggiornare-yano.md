@@ -8,6 +8,10 @@ Controlla prima se è disponibile una versione nuova:
 yano update --check
 ~~~
 
+La versione deve essere identica in `package.json` e nei due campi root di
+`package-lock.json`. La suite esegue automaticamente
+`npm run check:package-version` e blocca il rilascio se i file divergono.
+
 Aggiorna l'installazione globale, la copia Git usata da pi extension install
 e sincronizza le estensioni Pi:
 

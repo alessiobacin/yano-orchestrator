@@ -1106,8 +1106,8 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 	// at a safe session boundary and preserves the normal Yano ticket state.
 	let contextFindings = [];
 	try {
-		const contextRecords = readTraceRecords({ cwd: watchCwd, project, since: new Date(Date.now() - Math.max(0, opts.lookbackMs)), limit: 100000 })
-			.filter((record) => record.type === "context_usage" && record.instance && Number.isFinite(Number(record.effective_context_tokens)));
+		const contextRecords = readTraceRecords({ cwd: watchCwd, project, since: new Date(Date.now() - Math.max(0, opts.lookbackMs)), limit: 100000, type: "context_usage" })
+			.filter((record) => record.instance && Number.isFinite(Number(record.effective_context_tokens)));
 		const latestByInstance = new Map();
 		for (const record of contextRecords) {
 			const previous = latestByInstance.get(record.instance);
@@ -1117,9 +1117,9 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 			? opts.contextCompactRatio
 			: 0.5;
 		const lastCompactionByInstance = new Map();
-		const allTraceRecords = readTraceRecords({ cwd: watchCwd, project, limit: 100000 });
+		const allTraceRecords = readTraceRecords({ cwd: watchCwd, project, limit: 100000, type: "context_compaction_completed" });
 		for (const record of allTraceRecords) {
-			if (record.type !== "context_compaction_completed" || !record.instance) continue;
+			if (!record.instance) continue;
 			const previous = lastCompactionByInstance.get(record.instance);
 			if (!previous || String(record.ts || "") > String(previous.ts || "")) lastCompactionByInstance.set(record.instance, record);
 		}

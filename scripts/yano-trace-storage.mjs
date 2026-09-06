@@ -11,6 +11,12 @@ export const DEFAULT_TRACE_MODE = "events";
 const TRACE_SCHEMA_VERSION = 1;
 const require = createRequire(import.meta.url);
 
+// Conservative margin for since-bounded reads: mtime granularity + clock skew.
+// Trace files are append-only, so mtime is the last write time: a file whose
+// mtimeMs + SAFETY_MARGIN_MS < since cannot contain records with ts >= since.
+// 2000ms keeps files within 2s of the window readable (never skipped).
+const SAFETY_MARGIN_MS = 2000;
+
 export function traceRoot() {
 	const global = loadConfigFile(globalConfigPath({ env: process.env }));
 	return path.resolve(globalDataPath({ env: { ...global, ...process.env } }));
@@ -244,10 +250,42 @@ export function appendRawTraceRecord({ cwd, project, record }) {
 	return entry;
 }
 
-export function readTraceRecords({ cwd, project, allProjects = false, since = null, limit = 10000 } = {}) {
+/**
+ * Normalize the optional type filter for readTraceRecords into a Set of
+ * non-empty string type values. `null` means "no filter", keeping the read
+ * bit-identical to the pre-fast-path behaviour; an absent/empty/null value
+ * for both params matches that same contract.
+ */
+function normalizeTraceTypeFilter(type, types) {
+	const candidates = [];
+	if (type !== null && type !== undefined) candidates.push(...(Array.isArray(type) ? type : [type]));
+	if (types !== null && types !== undefined) candidates.push(...(Array.isArray(types) ? types : [types]));
+	const set = new Set();
+	for (const candidate of candidates) if (typeof candidate === "string" && candidate.length > 0) set.add(candidate);
+	return set.size === 0 ? null : set;
+}
+
+/**
+ * Substring pre-check for the typed fast path. A record whose `type` equals a
+ * filter candidate always serializes that value verbatim into its JSON line
+ * (JSON.stringify never escapes ASCII letters/underscores), so
+ * `line.includes(JSON.stringify(candidate))` cannot miss an exact match. The
+ * pre-check therefore can only produce false positives (the substring showing
+ * up inside a different field), which the exact `typeFilter.has(item.type)`
+ * check below removes — never false negatives, same record set.
+ */
+function traceLinePreMatches(line, typeFilter) {
+	for (const candidate of typeFilter) {
+		if (line.includes(JSON.stringify(candidate))) return true;
+	}
+	return false;
+}
+
+export function readTraceRecords({ cwd, project, allProjects = false, since = null, limit = 10000, type = null, types = null } = {}) {
 	const root = traceRoot();
 	const projectKeyFilter = allProjects ? null : new Set(traceProjectKeys({ cwd: cwd || process.cwd(), project }));
 	const base = path.join(root, "traces");
+	const typeFilter = normalizeTraceTypeFilter(type, types);
 	const records = [];
 	for (const file of walkJsonl(base)) {
 		// Events written by versions before project_key was added are still
@@ -256,13 +294,35 @@ export function readTraceRecords({ cwd, project, allProjects = false, since = nu
 		const fileProjectKey = ["events", "terminal", "snapshots"].includes(parent)
 			? path.basename(path.dirname(path.dirname(file)))
 			: parent;
+		// Since-bounded reads skip files whose mtime proves they cannot hold
+		// in-window records (append-only, mtime = last write). A file with
+		// mtimeMs + SAFETY_MARGIN_MS < since has not been written since before
+		// the window, so it cannot contain any record with ts >= since.
+		// INTENTIONAL behaviour change (documented, not a bug): records WITHOUT
+		// `ts` inside a skipped old file exit a `since` query, whereas before
+		// they were always included (the per-line filter only drops lines that
+		// HAVE a ts). A file untouched since before the window cannot hold a
+		// fresh ts-less record, so excluding it is deliberate.
+		// NOT COVERED: after a restore of trace files from a backup that
+		// preserved mtimes, fresh records (ts inside the `since` window) living
+		// in files with an old mtime are NOT visible to --since queries until
+		// the file is rewritten (append) or the read drops --since.
+		if (since) {
+			try {
+				if (fs.statSync(file).mtimeMs + SAFETY_MARGIN_MS < since.getTime()) continue;
+			} catch { /* stat race (file removed): fall through to the read below, same as before */ }
+		}
 		let lines;
 		try { lines = fs.readFileSync(file, "utf8").split("\n").filter(Boolean); } catch { continue; }
 		for (const line of lines) {
+			// Typed fast path: skip JSON.parse for lines that cannot hold a
+			// requested type (substring pre-check, see traceLinePreMatches).
+			if (typeFilter && !traceLinePreMatches(line, typeFilter)) continue;
 			try {
 				const parsed = JSON.parse(line);
 				const item = parsed.project_key ? parsed : { ...parsed, project_key: fileProjectKey };
 				if (projectKeyFilter && !projectKeyFilter.has(item.project_key)) continue;
+				if (typeFilter && !typeFilter.has(item.type)) continue;
 				if (since && item.ts && new Date(item.ts).getTime() < since.getTime()) continue;
 				records.push(item);
 			} catch { /* malformed trace lines are handled by review-log; skip them here */ }

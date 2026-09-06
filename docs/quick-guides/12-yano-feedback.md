@@ -45,6 +45,19 @@ Una suggestion non viene mai applicata automaticamente: usa sempre la
 risoluzione `user_confirmation` e resta nel database fino a `processed` o alla
 cancellazione.
 
+## Stati e motivazioni
+
+La dashboard visualizza `received`, `pending planner`, `processing`, `awaiting
+user confirmation`, `paused`, `retry` e lo stato terminale (`resolved` per i
+bug, `processed` per le suggestions). `queued` è mantenuto solo come alias
+interno compatibile e viene mostrato come `pending planner`.
+
+Ogni cambio di stato richiede una motivazione obbligatoria, sia via API/CLI
+sia tramite drag-and-drop. Questo vale anche per `paused`: per riprendere si
+sposta la card da `paused` a `processing` e si indica il motivo. Le card hanno
+un'immagine principale in alto; cliccandola si apre il preview con zoom, pan e
+reset. Sono supportati più URL e upload tramite drag-and-drop.
+
 I bug vengono processati dal planner in ordine FIFO per progetto. Un planner
 inattivo viene risvegliato subito; un planner occupato li prende al termine del
 run corrente. Il planner può avviare coder aggiuntivi quando serve. Ogni bug
@@ -65,8 +78,8 @@ yano bug create --project-id workspace-example --message "..." --resolution user
 yano suggestion create --project-id workspace-example --message "..."
 yano bug list --type bug
 yano suggestion list --type suggestion
-yano feedback update --type suggestion --id SUG-... --status processed
-yano feedback delete --type bug --id BUG-...
+yano feedback update --type suggestion --id SUG-... --status processed --reason "implementata dopo conferma utente"
+yano feedback delete --type bug --id BUG-... --reason "duplicato verificato"
 yano bug create --project-id workspace-example --message "Toast rosso" --screenshot /tmp/bug-settings.png
 yano bug create --project-id workspace-example --message "Errore remoto" --screenshot https://example.test/bug.png
 ```

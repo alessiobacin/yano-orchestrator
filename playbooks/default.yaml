@@ -67,6 +67,9 @@ states:
   - id: awaiting_team_confirmation
     owner: human
     terminal: false
+  - id: awaiting_parallel_confirmation
+    owner: human
+    terminal: false
   - id: awaiting_worktree_confirmation
     owner: human
     terminal: false
@@ -136,6 +139,32 @@ transitions:
         payload:
           question: Confermare il team e il piano proposti?
           owner: user
+  - id: request_parallel_confirmation
+    from: awaiting_team_confirmation
+    to: awaiting_parallel_confirmation
+    actor: planner
+    requires:
+      - parallelism_proposed_explicitly
+      - independence_and_collision_check_recorded
+      - separate_parallel_confirmation_question
+    effects:
+      - id: parallel-confirmation-hold
+        kind: human_approval
+        payload:
+          question: Confermare anche l'esecuzione in parallelo dei task/team proposti?
+          owner: user
+  - id: confirm_parallel
+    from: awaiting_parallel_confirmation
+    to: awaiting_worktree_confirmation
+    actor: human
+    requires:
+      - explicit_parallel_execution_confirmation
+  - id: decline_parallel
+    from: awaiting_parallel_confirmation
+    to: awaiting_worktree_confirmation
+    actor: human
+    requires:
+      - explicit_serial_execution_selection
   - id: confirm_team
     from: awaiting_team_confirmation
     to: awaiting_worktree_confirmation

@@ -13,18 +13,21 @@ L'anteprima salva lo snapshot ma non ferma gli agenti.
 ## Pausa effettiva
 
 ~~~
-yano pause --all --yes
+yano pause --all --reason "pausa manuale prima della chiusura del laptop" --yes
 yano recovery status
 ~~~
 
 Per un solo run:
 
 ~~~
-yano pause --run <run-id> --yes
+yano pause --run <run-id> --reason "attendo indicazioni sul requisito" --yes
 ~~~
 
 La pausa conserva stato SQLite, ticket, worktree, branch, trace e presenza
 osservata. Non chiude il run e non cancella file.
+La motivazione è obbligatoria per ogni pausa, inclusa una pausa richiesta dal
+planner o dal cron; le pause automatiche registrano una motivazione
+diagnostica generata dal sistema.
 
 ## Riprendere il lavoro
 

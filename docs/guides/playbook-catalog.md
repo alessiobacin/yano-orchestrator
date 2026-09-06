@@ -46,6 +46,18 @@ the phase; they are never silently substituted. The human-readable companion
 documents live under [`docs/guides/playbooks/`](./playbooks/); they are usage
 guides, not agent skills. Skills remain under `skills-vendor/`.
 
+### Parallel execution gate
+
+Parallel task/team execution is always opt-in. When the Planner detects
+independent work, it must present the candidate tasks, collision check,
+separate instances/worktrees, models and the applicable concurrency limit in
+the same proposal as the team/model confirmation, then ask separately for
+explicit approval to run in parallel. Confirming the team or models alone is
+not approval for parallelism. Without that approval the Planner runs the work
+serially; it must not spawn the additional planner/team or create its
+worktree/tickets. The current operational limit is two parallel tasks per
+hour, unless the user explicitly changes it.
+
 ## User REST APIs
 
 REST API esterne o interne registrate dall’utente sono capability configurabili,

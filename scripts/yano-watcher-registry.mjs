@@ -546,6 +546,36 @@ export function cleanupCompletedAgentTabs(snapshot, row, runs) {
 	return removed;
 }
 
+// Project-workspace hygiene: the planner is the permanent control surface and
+// human* tabs belong to the operator. Every other tab must have a live agent
+// and a non-terminal assignment to remain open; agent-less/dead tabs (including
+// Herdr tabs such as "3") are stale by definition and are closed deterministically.
+export function cleanupStaleProjectTabs(snapshot, row, runs) {
+	if (!snapshot) return [];
+	const workspace = findProjectWorkspace(snapshot, row.root, row.name);
+	if (!workspace) return [];
+	const terminal = new Set(runs.flatMap((run) => (run.tickets || [])
+		.filter((ticket) => ["done", "failed"].includes(ticket.status) && ticket.assigned_instance)
+		.map((ticket) => ticket.assigned_instance)));
+	const closed = [];
+	for (const tab of snapshot.tabs || []) {
+		if (tab.workspace_id !== workspace.workspace_id || isProtectedTabLabel(tab.label)) continue;
+		const pane = (snapshot.panes || []).find((item) => item.tab_id === tab.tab_id);
+		const agent = (snapshot.agents || []).find((item) => item.tab_id === tab.tab_id);
+		const identity = String(tab.label || agent?.name || agent?.instance || "");
+		const terminalTask = [...terminal].some((value) => identity === value || identity.startsWith(`${value}-`) || value.startsWith(`${identity}-`));
+		const live = Boolean(agent?.pane_id && paneHasLivePiProcess(agent.pane_id));
+		if (!identity || terminalTask || !live) {
+			const result = closeHerdrTab(tab.tab_id);
+			closed.push({ tab_id: tab.tab_id, label: tab.label || "(senza nome)", reason: terminalTask ? "terminal_task" : live ? "unnamed_orphan_tab" : "dead_agent", ...result });
+		}
+	}
+	if (closed.length) {
+		try { appendRawTraceRecord({ cwd: row.root, project: row.name, record: { type: "watcher_stale_project_tabs_closed", record_type: "event", source: "yano-watcher", closed } }); } catch { /* cleanup must not stop supervision */ }
+	}
+	return closed;
+}
+
 function plannerStalled(run) {
 	if (Number(run.open_holds || 0) > 0) return false;
 	const activity = Date.parse(run.last_activity_at || run.updated_at || "");
@@ -935,7 +965,8 @@ export function doStatusForRow(db, row, { heal = true, snapshot: suppliedSnapsho
 		if (!heal) return base;
 		const pausedSnapshot = suppliedSnapshot || herdrSnapshot();
 		if (!pausedSnapshot) return base;
-		const agent_tabs_closed = cleanupCompletedAgentTabs(pausedSnapshot, row, projectRuns(row.root).runs);
+		const pausedRuns = projectRuns(row.root).runs;
+		const agent_tabs_closed = [...cleanupCompletedAgentTabs(pausedSnapshot, row, pausedRuns), ...cleanupStaleProjectTabs(pausedSnapshot, row, pausedRuns)];
 		return agent_tabs_closed.length ? { ...base, agent_tabs_closed } : base;
 	}
 	if (!row.worker_pane_id) return { ...base, live: "unknown", drift: false }; // e.g. started with --foreground: not Herdr-managed, nothing this check can observe
@@ -960,7 +991,7 @@ export function doStatusForRow(db, row, { heal = true, snapshot: suppliedSnapsho
 			}
 		}
 		const runs = projectRuns(row.root).runs;
-		const agent_tabs_closed = heal ? cleanupCompletedAgentTabs(snapshot, row, runs) : [];
+		const agent_tabs_closed = heal ? [...cleanupCompletedAgentTabs(snapshot, row, runs), ...cleanupStaleProjectTabs(snapshot, row, runs)] : [];
 		const planner = heal ? (() => { try { return ensureRegisteredPlanner(row, snapshot, db); } catch (error) { return { recovery: "planner_recovery_failed", recovery_error: error instanceof Error ? error.message : String(error) }; } })() : { recovery: "not_checked" };
 		return { ...base, live: "running", identity_conflicts, planner, agent_tabs_closed, ...reconcileProjectRun(db, row, snapshot) };
 	}

@@ -295,6 +295,30 @@ lo stato e i riferimenti essenziali; docs-sync non deve sovrascrivere questa
 memoria. Se l'utente rifiuta, registra la scelta e non inventare documenti.
 - Valuta parallelismo e collisioni sui file prima di proporli; usa `file_claim`/`file_release` per i casi residui.
 
+### Gate obbligatorio per la parallelizzazione
+
+La parallelizzazione non è mai implicita e non è autorizzata dalla sola
+conferma del team o dei modelli. Se ritieni che due o più task possano essere
+eseguiti contemporaneamente, nella stessa proposta in cui presenti ruoli,
+istanze, worktree e modelli LLM devi aggiungere una sezione esplicita
+**Parallelizzazione proposta** con:
+
+- task candidati, motivazione dell'indipendenza e verifica delle collisioni;
+- numero dei team, istanze (`planner-01`, `planner-02`, `coder-01`, ...),
+  worktree separati e criterio di merge;
+- limite operativo applicabile (massimo due task paralleli per ora, salvo
+  una diversa conferma futura dell'utente);
+- la domanda separata e inequivocabile: **"Confermi anche l'esecuzione in
+  parallelo di questi task/team?"**
+
+Apri un `decision_hold_create` per questo gate quando esiste già un `run_id`.
+Non creare il secondo planner, non avviare il secondo team, non creare i suoi
+worktree/ticket e non inviare deleghe finché l'utente non approva
+esplicitamente la parallelizzazione. La conferma di ruoli, fasi o modelli
+vale solo per quelli: non vale come consenso implicito all'esecuzione
+parallela. Se l'utente non conferma, esegui i task in serie con un solo team.
+Una ripresa o un retry che introduca parallelismo richiede un nuovo gate.
+
 Per i task frontend, il sottociclo è separato: `frontend-developer` → `frontend-reviewer` → planner. Non inviare lavoro frontend al reviewer backend e non usare il reviewer backend come sostituto del `frontend-reviewer`; quest'ultimo deve avere la CLI/skill Playwright e chrome-devtools.
 
 Presenta nello stesso messaggio ruoli/istanze con motivo e fasi con ordine/motivo; attendi conferma prima di lanciare istanze o chiamare `plan_set`. Non lanciare un secondo planner. Usa nomi istanza solo `<ruolo>-NN` (es. `coder-01`), mai prefissati da progetto o slug. Ogni istanza extra è una sessione LLM reale: proponila solo se il valore lo giustifica. Quando componi `yano start` per un worker, usa sempre lo scope MQTT canonico slugificato della root corrente, non il nome umano mostrato nel progetto: tutti i pannelli devono pubblicare su `pi/<scope-canonico>/...`.

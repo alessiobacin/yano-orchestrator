@@ -1,5 +1,5 @@
 flowchart TD
-    PASS["cleanupCompletedAgentTabs()\nogni passata di supervise()\n— anche se il progetto è in pausa"] --> LOOPAGENTS["Passata 1: snapshot.agents\nscoped alla root del progetto"]
+    PASS["cleanupCompletedAgentTabs() + cleanupStaleProjectTabs()\nogni passata di supervise()\n— anche se il progetto è in pausa"] --> LOOPAGENTS["Passata 1: snapshot.agents\nscoped alla root del progetto"]
     LOOPAGENTS --> LABEL1{"tab planner\noppure label 'human'?"}
     LABEL1 -- sì --> KEEP1["mai chiusa\n(controllo di superficie persistente\no terminale manuale dell'utente)"]
     LABEL1 -- no --> STATUS1{"ultimo ticket assegnato\ndone/failed?\noppure pane senza processo pi vivo?"}
@@ -15,3 +15,4 @@ flowchart TD
     HISTORY -- sì --> CLOSE2["chiusa\nreason: orphaned_agentless_terminal_ticket\n— il caso reale: un processo Pi\nterminato del tutto sparisce da\nsnapshot.agents, la tab restava\naperta per sempre prima di questo fix"]
     CLOSE1 --> LOG["watcher_completed_agent_tabs_closed\nnel trace del progetto"]
     CLOSE2 --> LOG
+    LOG --> RULE["Planner sempre protetto\nHuman/human-01/human-02 sempre protetti\naltre tab: solo se agent vivo e task non terminale"]

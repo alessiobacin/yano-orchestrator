@@ -46,7 +46,16 @@ export function terminalStatusForFeedbackId(feedbackId) { return String(feedback
 function clean(value) { return String(value ?? "").trim().slice(0, MAX_MESSAGE); }
 function decodeRow(value) {
 	if (!value) return value;
-	try { return { ...value, screenshots: JSON.parse(value.screenshots || "[]"), credentials_present: Boolean(value.credentials_ciphertext), credentials_ciphertext: undefined, credentials_iv: undefined, credentials_tag: undefined }; } catch { return { ...value, screenshots: [], credentials_present: Boolean(value.credentials_ciphertext) }; }
+	try {
+		const screenshots = JSON.parse(value.screenshots || "[]").map((shot) => {
+			if (shot?.kind !== "file" || !shot.path || !fs.existsSync(shot.path)) return shot;
+			try {
+				const mime = shot.mime_type || "image/png";
+				return { ...shot, preview_url: `data:${mime};base64,${fs.readFileSync(shot.path).toString("base64")}` };
+			} catch { return shot; }
+		});
+		return { ...value, screenshots, credentials_present: Boolean(value.credentials_ciphertext), credentials_ciphertext: undefined, credentials_iv: undefined, credentials_tag: undefined };
+	} catch { return { ...value, screenshots: [], credentials_present: Boolean(value.credentials_ciphertext) }; }
 }
 function row(db, feedbackId) { const value = db.prepare("SELECT * FROM feedback WHERE id=?").get(feedbackId); return value ? decodeRow(value) : null; }
 export function getFeedback(db, feedbackId) { return row(db, feedbackId); }
@@ -58,11 +67,13 @@ export function listFeedback(db, { project_id = null, type = null, statuses = nu
 	const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
 	return db.prepare(`SELECT * FROM feedback ${where} ORDER BY created_at ASC`).all(...args).map(decodeRow);
 }
-export function claimFeedback(db, feedbackId) {
+export function claimFeedback(db, feedbackId, { actor = "planner", reason = "presa in carico dal planner secondo ordine FIFO" } = {}) {
 	const current = row(db, feedbackId);
 	if (!current || !["received", "pending_planner", "queued"].includes(current.status)) return current;
 	db.prepare("UPDATE feedback SET status='processing',updated_at=? WHERE id=? AND status IN ('received','pending_planner','queued')").run(now(), feedbackId);
-	return row(db, feedbackId);
+	const next = row(db, feedbackId);
+	if (next?.status === "processing") audit(db, feedbackId, actor, "status_changed", reason, current, next);
+	return next;
 }
 export function buildQueuedFeedbackWakeMessage(claimed, type) {
 	const screenshotNote = claimed.screenshots?.length ? `\nScreenshot allegati: ${JSON.stringify(claimed.screenshots)}` : "";

@@ -33,7 +33,7 @@ db.close();
 const previousDataDir = process.env.YANO_DATA_DIR;
 process.env.YANO_DATA_DIR = path.join(root, "yano-temp");
 try {
-	await runRecovery({ cwd: root, argv: ["pause", "--project", project, "--run", "run-recovery"] });
+	await runRecovery({ cwd: root, argv: ["pause", "--project", project, "--run", "run-recovery", "--reason", "smoke test: sospensione non distruttiva"] });
 	assert.ok(fs.existsSync(path.join(root, ".pi", "extensions", "legacy-extension", "orchestratorStorage", "orchestrator.db")), "legacy DB remains in place");
 	assert.ok(!fs.existsSync(path.join(root, ".pi", "extensions", "yano-orchestrator", "orchestratorStorage", "orchestrator.db")), "no duplicate modern DB is created");
 	const recoveryRoot = path.join(root, "yano-temp", "recovery", project, "run-recovery");

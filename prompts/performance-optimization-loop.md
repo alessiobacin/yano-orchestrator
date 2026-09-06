@@ -73,6 +73,12 @@ Per ogni round:
   promuovi l'ultimo miglioramento misurato come baseline finale, scrivi il
   report e termina il loop.
 
+Se una decisione dell'utente ordina di fermare il loop mentre il checkpoint è
+`bottleneck_selected` (per esempio dopo aver rifiutato l'ipotesi successiva),
+non tentare una transizione `stop` non prevista e non lasciare il run `active`:
+scrivi prima il report finale e usa la transizione `stop_after_decision` verso
+`stopped`. Il run terminale non deve essere risvegliato dal watcher.
+
 Una promozione è valida solo se costo <=2% sopra il riferimento, qualità e
 correttezza non peggiorano e tutti i test applicabili passano. Se il candidate
 fallisce, scartalo e mantieni la baseline. Non tentare una seconda modifica

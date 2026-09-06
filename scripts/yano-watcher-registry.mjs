@@ -237,6 +237,15 @@ export function projectRuns(root) {
 			GROUP BY r.id
 			ORDER BY r.updated_at DESC
 		`).all();
+		// A pause is a durable operator/cron decision. The run intentionally
+		// remains active so its checkpoint and ticket state are preserved, but
+		// supervision must not interpret it as work requiring a planner. Without
+		// this join, a recovery scan could wake the same planner that pause had
+		// just stopped, creating an endless pause/recovery loop.
+		const pausedRunIds = new Set();
+		try {
+			for (const pause of db.prepare("SELECT DISTINCT run_id FROM yano_recovery_pauses WHERE status = 'paused'").all()) pausedRunIds.add(pause.run_id);
+		} catch { /* older databases are simply not pause-aware yet */ }
 		const tickets = db.prepare("SELECT id, run_id, title, status, assigned_instance, required_playbook, updated_at FROM tickets ORDER BY updated_at DESC").all();
 		const dependencies = db.prepare("SELECT d.ticket_id, d.depends_on_id, dependency.status AS dependency_status FROM ticket_dependencies d JOIN tickets dependency ON dependency.id = d.depends_on_id").all();
 		const dependenciesByTicket = new Map();
@@ -255,6 +264,7 @@ export function projectRuns(root) {
 		}));
 		const runtimeStates = new Map(db.prepare("SELECT run_id, state_id, generation, updated_at FROM playbook_runtime_state").all().map((state) => [state.run_id, state]));
 		return { available: true, runs: runs.map((run) => {
+			run = { ...run, paused: pausedRunIds.has(run.id) };
 			const runTickets = byRun.get(run.id) || [];
 			const binding = bindings.get(run.id) || null;
 			const flowViolations = [];
@@ -312,7 +322,7 @@ export function listWatcherProjectRows() {
 function runNeedsPlanner(run) {
 	// A completed run is terminal. `pending_finalize` is an administrative
 	// state, not evidence of live work, so it must never trigger an LLM wake-up.
-	return run.status === "active";
+	return run.status === "active" && run.paused !== true;
 }
 
 export { runNeedsPlanner, projectNeedsPlanner };
@@ -320,7 +330,7 @@ export { runNeedsPlanner, projectNeedsPlanner };
 function projectNeedsPlanner(root) {
 	const state = projectRuns(root);
 	if (!state.available) return false;
-	return state.runs.some((run) => runNeedsPlanner(run) || Number(run.open_holds || 0) > 0);
+	return state.runs.some((run) => !run.paused && (runNeedsPlanner(run) || Number(run.open_holds || 0) > 0));
 }
 
 export function findProjectWorkspace(snapshot, root, project) {
@@ -418,6 +428,12 @@ export function ensureRegisteredPlanner(row, snapshot, db = null) {
 	const planners = workspace ? plannerAgentsInWorkspace(snapshot, workspace.workspace_id, row.root) : [];
 	const healthy = planners.find(plannerHeartbeatHealthy);
 	if (healthy) return { recovery: "planner_healthy", planner_status: healthy.agent_status || "unknown", planner_instance: healthy.name || null };
+	// A stale heartbeat does not prove that the Pi process has exited. Never
+	// inject a second planner-01 command into a pane that still owns a live Pi
+	// process: concurrent watcher/manual recovery used to produce duplicate
+	// identity errors and tabs whose purpose appeared to change between roles.
+	const livePlanner = planners.find((planner) => paneHasLivePiProcess(planner.pane_id));
+	if (livePlanner) return { recovery: "planner_process_present_stale_heartbeat", planner_status: livePlanner.agent_status || "unknown", planner_instance: livePlanner.name || null, planner_pane_id: livePlanner.pane_id };
 	const reason = "planner_missing_or_stale_heartbeat";
 	// Unlike reconcileProjectRun, this check used to run unconditionally on
 	// every one-minute supervisor pass. A momentarily flaky heartbeat read
@@ -439,6 +455,7 @@ export function ensureRegisteredPlanner(row, snapshot, db = null) {
 	}
 	const recovered = recoverPlanner({ row, snapshot: herdrSnapshot() || snapshot, run: { id: "planner-presence", status: "active", finalization_status: "not_started" }, reason });
 	if (db) db.prepare("UPDATE watcher_projects SET last_recovery_at = ?, last_recovery_reason = ?, updated_at = ? WHERE project_key = ?").run(now(), reason, now(), row.project_key);
+	if (recovered.deferred) return { recovery: "planner_recovery_deferred", ...recovered };
 	return { recovery: "planner_recovered", ...recovered };
 }
 
@@ -626,6 +643,23 @@ function recoverPlanner({ row, snapshot, run, reason }) {
 		workspace = findProjectWorkspace(current, row.root, row.name);
 	}
 	if (!workspace) throw new Error(`workspace Herdr non trovato per ${row.name}`);
+	// Identity ownership is stronger than a possibly stale heartbeat. If a
+	// planner process is still present, defer instead of closing its tab or
+	// launching another planner-01. This makes recovery idempotent across cron,
+	// watcher and manual starts.
+	const existingLivePlanner = plannerAgentsInWorkspace(current, workspace.workspace_id, row.root)
+		.find((planner) => paneHasLivePiProcess(planner.pane_id));
+	if (existingLivePlanner) {
+		return {
+			recovered: false,
+			deferred: true,
+			recovery_reason: "planner_process_present_stale_heartbeat",
+			workspace_id: workspace.workspace_id,
+			planner_tab_id: existingLivePlanner.tab_id,
+			planner_pane_id: existingLivePlanner.pane_id,
+			run_id: run.id,
+		};
+	}
 	// A stale planner can still be registered by Herdr as an apparently live
 	// identity. Reusing its pane would make `yano start` reject recovery as a
 	// duplicate instance. Close only planners that fail the heartbeat gate,
@@ -724,6 +758,7 @@ function reconcileProjectRun(db, row, snapshot) {
 			const recovered = recoverPlanner({ row, snapshot, run: (stalled[0] || incomplete[0]), reason });
 			db.prepare("UPDATE watcher_projects SET last_recovery_at = ?, last_recovery_reason = ?, updated_at = ? WHERE project_key = ?").run(now(), reason, now(), row.project_key);
 			try { appendRawTraceRecord({ cwd: row.root, project: row.name, record: { type: "watcher_planner_recovered", record_type: "event", source: "yano-watcher-registry", instance: "yano-watcher", run_ids: incomplete.map((run) => run.id), ...recovered } }); } catch { /* best effort */ }
+			if (recovered.deferred) return { recovery: "planner_recovery_deferred", incomplete_runs: incomplete.map((run) => run.id), ...recovered };
 			return { recovery: "planner_recovered", incomplete_runs: incomplete.map((run) => run.id), ...recovered };
 		} catch (error) {
 			return { recovery: "planner_recovery_failed", incomplete_runs: incomplete.map((run) => run.id), recovery_error: error instanceof Error ? error.message : String(error) };

@@ -12,6 +12,12 @@ ripetizioni, soglia di promozione (default 3%), intervallo plateau (default
 1–3%), 3 round consecutivi di plateau, soglia stagnazione (default <=1%), 5
 round consecutivi di stagnazione e costo massimo +2%.
 
+Se l'utente decide di arrestare il loop mentre il checkpoint è
+`bottleneck_selected`, il planner usa la transizione
+`stop_after_decision` dopo aver scritto il report finale. Il run diventa
+`stopped` e non viene più risvegliato dal watcher; non deve essere lasciato
+`active` con una decisione già acquisita.
+
 Il checkout originale resta immutabile. Il planner crea worktree distinti per
 baseline originale, baseline corrente e candidate. Il candidate è l'unico
 modificabile e nessuna modifica arriva automaticamente nel progetto principale,

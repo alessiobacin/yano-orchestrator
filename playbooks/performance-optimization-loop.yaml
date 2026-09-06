@@ -60,6 +60,7 @@ transitions:
   - {id: verify_quality, from: candidate_measured, to: quality_verified, actor: qa-functional-verifier, requires: [quality_compared, functional_tests_passed, concurrency_tests_passed_or_reason_recorded]}
   - {id: promote, from: quality_verified, to: promoted, actor: planner, requires: [speed_and_token_metrics_compared, cost_within_limit, no_quality_regression, promotion_rule_satisfied, report_written]}
   - {id: next_round, from: promoted, to: bottleneck_selected, actor: planner, requires: [reference_baseline_updated, counters_updated, next_hypothesis_allowed]}
+  - {id: stop_after_decision, from: bottleneck_selected, to: stopped, actor: planner, requires: [stop_condition_satisfied, last_improvement_preserved, final_report_written]}
   - {id: stop, from: quality_verified, to: stopped, actor: planner, requires: [stop_condition_satisfied, last_improvement_preserved, final_report_written]}
   - {id: block, from: [parameter_confirmation, baseline_measured, candidate_measured, quality_verified], to: blocked, actor: planner_and_human, requires: [blocker_recorded, partial_report_persisted]}
 failure_routes:

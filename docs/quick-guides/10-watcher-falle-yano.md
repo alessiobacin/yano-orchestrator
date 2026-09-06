@@ -30,6 +30,15 @@ recovery esegue inoltre una verifica finale anti-race: se nel frattempo il
 planner è tornato vivo, riusa la sessione esistente e non invia un nuovo
 comando `yano start`.
 
+Un run con pausa persistita (`yano_recovery_pauses.status = paused`) conserva
+checkpoint, ticket e trace ma non è lavoro da risvegliare: il watcher lo esclude
+dalla riconciliazione del planner finché l'utente non esegue esplicitamente
+`yano resume`. Un heartbeat vecchio, da solo, non autorizza la chiusura o il
+rilancio: se nella tab esiste ancora un processo Pi vivo, la recovery viene
+rinviata e registrata come `planner_process_present_stale_heartbeat`. Questo
+evita doppie identità `planner-01`, comandi recovery lasciati nella stessa tab
+e cambi di ruolo apparenti.
+
 ```bash
 yano watcher supervise --json
 ```

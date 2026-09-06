@@ -19,6 +19,16 @@ La memoria del ruolo è limitata a 12.000 caratteri, quella delle preferenze a
 superato, Yano conserva la parte più recente. I file sono esclusi da Git e non
 devono contenere segreti, token o credenziali.
 
+Ogni volta che un tool fallisce durante il turno, la memoria di ruolo registra
+`[TENTATIVO FALLITO] <tool>: <errore>`. Se lo stesso tool fallisce di nuovo con
+lo stesso identico errore in un turno successivo, la voce diventa
+`[RIPETUTO — NON RIPROVARE COSÌ]`: è il segnale esplicito che quell'approccio
+è già stato tentato e non ha funzionato, così l'istanza corrente (o quella che
+la sostituisce dopo un kill/restart) non lo ripete alla cieca. L'estrazione è
+puramente deterministica (confronto di stringhe sull'errore già registrato,
+nessuna chiamata a un modello) — costo aggiuntivo nullo rispetto
+all'aggiornamento di memoria già eseguito ad ogni turno.
+
 All’avvio di ogni round Yano carica solo una finestra limitata della memoria
 rilevante, così il contesto non cresce indefinitamente. Prima di una scelta
 tecnica, operativa o non banale, l’agente deve verificare la memoria e chiedere

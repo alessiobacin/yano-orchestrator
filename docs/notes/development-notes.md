@@ -5250,3 +5250,48 @@ board popolata correttamente per severità/colonna/conteggio, filtro di
 ricerca che aggiorna anche i conteggi, drag-and-drop di una card reale con
 un vero `DragEvent`/`DataTransfer` che sposta davvero lo stato via API, e
 apertura/chiusura della modale "Nuovo".
+
+## Revisione 67 — la memoria di ruolo non veniva mai aggiornata dopo il primo turno
+
+Indagine avviata per valutare se la memoria persistente per-agente
+(`scripts/yano-agent-memory.mjs`) supportasse davvero "cosa è stato tentato,
+com'è andata, non ripetere gli stessi errori". L'infrastruttura era corretta
+(4 file bounded per caratteri, iniettati ad ogni turno via
+`before_agent_start`, aggiornati ad ogni `turn_end`), ma è emerso un bug
+molto più grave del previsto durante la scrittura del test per la nuova
+funzionalità: `writeBounded(files.role, previousRole || header + roleBody,
+...)` — in JavaScript `+` lega più stretto di `||`, quindi l'espressione
+equivale a `previousRole || (header + roleBody)`. Una volta che `role.md` (o
+`user-preferences.md`, stesso pattern) aveva un contenuto qualunque, ogni
+chiamata successiva riscriveva il file con il proprio contenuto precedente
+invariato, scartando silenziosamente ogni nuovo turno per sempre. In
+produzione questo significa che la memoria di ruolo si è congelata al primo
+turno della prima istanza di ogni ruolo, per tutta la vita di ogni progetto
+— l'esatto opposto di una memoria che si aggiorna nel tempo. Il test
+esistente (`smoke-test-agent-memory.mjs`) non lo intercettava perché
+verificava solo "Round 1 è ancora presente" dopo una seconda chiamata, vero
+sia che il Round 2 fosse stato scritto sia che non lo fosse mai stato.
+Corretto con parentesi esplicite in entrambi i punti; nuovo
+`scripts/smoke-test-agent-memory-accumulation.mjs` dimostra che 3 turni
+consecutivi (e 2 preferenze successive) si accumulano davvero.
+
+**Lezioni strutturate, deterministiche, a costo zero.** Prima di questa
+revisione l'unico segnale per turno era un frammento grezzo dell'ultimo
+messaggio dell'assistente — nessun record esplicito di cosa fosse fallito, e
+nessun segnale se lo stesso errore si stesse ripetendo. `tool_execution_end`
+in `extensions/orchestrator.ts` raccoglie ora i fallimenti del turno
+corrente (`currentTurnToolFailures`, già disponibile lì per il logging
+esistente — nessuna chiamata aggiuntiva), consumati e azzerati ad ogni
+`turn_end` a prescindere dall'esito della scrittura di memoria, per non
+attribuire i fallimenti di un turno a quello sbagliato. `yano-agent-memory.mjs`
+registra ogni fallimento come `[TENTATIVO FALLITO] <tool>: <errore>`; se lo
+stesso identico `tool: errore` è già presente nella memoria di ruolo
+precedente, la voce diventa `[RIPETUTO — NON RIPROVARE COSÌ]` — un confronto
+di sottostringhe sul testo che questa stessa funzione ha già scritto, quindi
+un vero ripetersi combacia sempre e un errore diverso sullo stesso tool non
+viene mai confuso con una ripetizione. Zero chiamate LLM aggiuntive: stesso
+costo di oggi, contenuto più azionabile.
+`scripts/smoke-test-agent-memory-lessons.mjs` copre il caso base, la
+retrocompatibilità (nessun `toolFailures` passato → formato invariato), la
+scalata a "ripetuto" sullo stesso errore, e la non-confusione tra errori
+diversi sullo stesso tool.

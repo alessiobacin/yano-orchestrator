@@ -45,7 +45,30 @@ function explicitPreferences(userMessages) {
 	return userMessages.filter((message) => /\b(preferisco|preferenza|preferenze|d'ora in poi|da ora in poi|sempre|mai|voglio che|non voglio)\b/i.test(message)).map((message) => `- ${message.slice(0, 900)}`);
 }
 
-export function updateAgentMemory({ root, project, role, instance, turnIndex = null, branch = [] }) {
+// Deterministic, zero-cost "lessons" extraction (2026-09-06): before this,
+// the only per-turn signal was a raw last-assistant-message snippet — no
+// explicit record of WHAT failed or that the SAME failure is recurring. The
+// caller (extensions/orchestrator.ts, via its tool_execution_end hook)
+// collects { tool, error } pairs for the current turn; this stays a pure
+// string-matching layer so it is safe to run on every single turn. The
+// repeat check is a straight substring match against the PREVIOUS role
+// memory using the exact same "tool: error" formatting this function itself
+// writes, so a real repeat always matches and an unrelated error for the
+// same tool never does.
+function formatFailures(toolFailures, previousRoleMemory) {
+	if (!Array.isArray(toolFailures) || !toolFailures.length) return "";
+	const priorLower = previousRoleMemory.toLowerCase();
+	const lines = toolFailures.map((failure) => {
+		const tool = safe(failure?.tool || "tool");
+		const errorText = safe(failure?.error || "errore non specificato").slice(0, 220);
+		const signature = `${tool}: ${errorText}`.toLowerCase();
+		const tag = priorLower.includes(signature) ? "[RIPETUTO — NON RIPROVARE COSÌ]" : "[TENTATIVO FALLITO]";
+		return `${tag} ${tool}: ${errorText}`;
+	});
+	return `\nTentativi falliti in questo turno:\n${lines.join("\n")}`;
+}
+
+export function updateAgentMemory({ root, project, role, instance, turnIndex = null, branch = [], toolFailures = [] }) {
 	const files = memoryPaths({ root, role, instance });
 	const evidence = branchEvidence(branch);
 	const now = new Date().toISOString();
@@ -56,17 +79,24 @@ export function updateAgentMemory({ root, project, role, instance, turnIndex = n
 		const additions = projectFacts.filter((fact) => !projectHeader.toLowerCase().includes(fact.toLowerCase().slice(0, 120)));
 		if (additions.length) writeBounded(files.project, projectHeader + entry("Fatto o contesto di progetto", additions.join("\n")), MEMORY_LIMITS.project);
 	} else if (!previousProject) writeBounded(files.project, projectHeader, MEMORY_LIMITS.project);
+	const previousRole = read(files.role, MEMORY_LIMITS.role);
 	const roleBody = entry(`Round ${turnIndex ?? "?"}`, [
 		`La memoria è condivisa dal ruolo ${safe(role)}; il riepilogo generale è in project.md.`,
 		evidence.tools.length ? `Strumenti recenti: ${evidence.tools.join(", ")}` : "Strumenti recenti: nessuno rilevato",
 		evidence.assistant ? `Ultimo esito osservabile: ${evidence.assistant}` : "Ultimo esito osservabile: non disponibile",
-	].join("\n"));
-	const previousRole = read(files.role, MEMORY_LIMITS.role);
-	writeBounded(files.role, previousRole || `# Memoria condivisa — ruolo ${role}\n\nQuesta memoria sopravvive al kill delle istanze e viene condivisa dai successivi agenti dello stesso ruolo.\n` + roleBody, MEMORY_LIMITS.role);
+	].join("\n") + formatFailures(toolFailures, previousRole));
+	// BUG FIX (2026-09-06): `previousRole || header + roleBody` parsed as
+	// `previousRole || (header + roleBody)` — `+` binds tighter than `||` in
+	// JS — so once previousRole was non-empty, EVERY subsequent call just
+	// rewrote the file with its own unchanged prior content, silently
+	// dropping every new round forever. Explicit parens make the header
+	// apply only on the very first write, with roleBody always appended.
+	writeBounded(files.role, (previousRole || `# Memoria condivisa — ruolo ${role}\n\nQuesta memoria sopravvive al kill delle istanze e viene condivisa dai successivi agenti dello stesso ruolo.\n`) + roleBody, MEMORY_LIMITS.role);
 	const preferenceLines = explicitPreferences(evidence.user);
 	if (preferenceLines.length) {
 		const previous = read(files.preferences, MEMORY_LIMITS.preferences);
-		writeBounded(files.preferences, previous || `# Preferenze utente\n\nNon salvare segreti o credenziali.\n` + entry("Preferenze rilevate", preferenceLines.join("\n")), MEMORY_LIMITS.preferences);
+		// Same operator-precedence bug as role.md above, fixed the same way.
+		writeBounded(files.preferences, (previous || `# Preferenze utente\n\nNon salvare segreti o credenziali.\n`) + entry("Preferenze rilevate", preferenceLines.join("\n")), MEMORY_LIMITS.preferences);
 	}
 	const instancePrevious = read(files.instance, MEMORY_LIMITS.instance);
 	writeBounded(files.instance, (instancePrevious || `# Memoria diagnostica — ${instance}\n\nQuesta memoria identifica l’istanza e resta disponibile dopo un kill o un restart.\n`) + entry(`Round ${turnIndex ?? "?"}`, `Progetto: ${safe(project)}\nRuolo: ${safe(role)}\nUltimo heartbeat osservato: ${now}`), MEMORY_LIMITS.instance);

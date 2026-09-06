@@ -2882,6 +2882,13 @@ export default function (pi: ExtensionAPI) {
 	}
 	let currentCtx: ExtensionContext | null = null;
 	let currentInputScreenshots: unknown[] = [];
+	// Collected by tool_execution_end below and consumed/reset at turn_end by
+	// updateAgentMemory() (Revisione 67) — deterministic, zero-LLM-call input
+	// for the "structured lessons" memory: which tool calls failed THIS turn,
+	// so the next turn (or a resumed/restarted instance) can see it and the
+	// repeat-detection in yano-agent-memory.mjs can flag "you already tried
+	// this and it failed" instead of staying silent.
+	let currentTurnToolFailures: Array<{ tool: string; error: string }> = [];
 	function inputScreenshotReferences(event: any): unknown[] {
 		const candidates = Array.isArray(event?.images) ? event.images : (Array.isArray(event?.message?.content) ? event.message.content : []);
 		return candidates.filter((item: any) => item && (item.type === "image" || item.type === "input_image" || item.path || item.url || item.data)).map((item: any) => ({
@@ -3854,10 +3861,15 @@ export default function (pi: ExtensionAPI) {
 	// usage estimate reflects the latest provider response.
 	pi.on("turn_end", async (_event: any, ctx: any) => {
 		logContextUsage(ctx, "turn_end", { turn_index: _event?.turnIndex ?? null });
+		// Snapshot-then-reset regardless of outcome below: a failure while
+		// writing memory must not leak this turn's failures into the NEXT
+		// turn's update (which would misattribute them to the wrong round).
+		const toolFailures = currentTurnToolFailures;
+		currentTurnToolFailures = [];
 		try {
 			const branch = ctx?.sessionManager?.getBranch?.() ?? [];
-			const memory = updateAgentMemory({ root: identity!.cwd, project: identity!.project, role: identity!.role, instance: identity!.instance, turnIndex: _event?.turnIndex ?? null, branch });
-			logEvent("agent_memory_updated", { turn_index: _event?.turnIndex ?? null, project_memory_chars: memory.project_chars, role_memory_chars: memory.role_chars, preferences_updated: memory.preferences_updated, memory_files: memory.files });
+			const memory = updateAgentMemory({ root: identity!.cwd, project: identity!.project, role: identity!.role, instance: identity!.instance, turnIndex: _event?.turnIndex ?? null, branch, toolFailures });
+			logEvent("agent_memory_updated", { turn_index: _event?.turnIndex ?? null, project_memory_chars: memory.project_chars, role_memory_chars: memory.role_chars, preferences_updated: memory.preferences_updated, memory_files: memory.files, tool_failures: toolFailures.length });
 		} catch (error) {
 			logEvent("agent_memory_update_failed", { turn_index: _event?.turnIndex ?? null, error: error instanceof Error ? error.message : String(error) });
 		}
@@ -3920,12 +3932,19 @@ export default function (pi: ExtensionAPI) {
 	});
 	pi.on("tool_execution_end", async (event: any) => {
 		endOperation(event);
+		const ok = event?.isError === true ? false : event?.error ? false : true;
 		logEvent("tool_execution_end", {
 			tool_call_id: event?.toolCallId ?? event?.tool_call_id ?? null,
 			tool: event?.toolName ?? event?.tool_name ?? event?.name ?? null,
-			ok: event?.isError === true ? false : event?.error ? false : true,
+			ok,
 		});
 		tracePayload("tool_execution_end_payload", { tool_call_id: event?.toolCallId ?? event?.tool_call_id ?? null, error: event?.error ?? null, result: event?.result ?? event?.output ?? null }, "standard");
+		if (!ok) {
+			const tool = String(event?.toolName ?? event?.tool_name ?? event?.name ?? "tool");
+			const errorText = String(event?.error?.message ?? event?.error ?? event?.result ?? event?.output ?? "errore non specificato");
+			currentTurnToolFailures.push({ tool, error: errorText });
+			if (currentTurnToolFailures.length > 20) currentTurnToolFailures.shift();
+		}
 	});
 
 	// ━━ Widget ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

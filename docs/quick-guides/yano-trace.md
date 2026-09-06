@@ -236,7 +236,13 @@ Nota su `--since`: dopo un restore dei file trace da un backup che ha
 preservato i mtime, i record freschi (ts dentro la finestra since) in file con
 mtime vecchio richiedono un append oppure una lettura senza `--since` per
 essere visibili alle query since — fino ad allora il file viene saltato perché
-il mtime è la prova dell'ultima scrittura (append-only).
+il mtime è la prova dell'ultima scrittura (append-only). I record **senza `ts`**
+in file vecchi (non scritti da since−2s) escono dalle query since-bound: è un
+cambio di comportamento intenzionale documentato nel report di promozione del
+Round 3 (`docs/reports/2026-09-06-promotion-round3-a1e5f62.md`) — un record
+scritto prima della finestra (provato dal mtime) non ha titolo a stare in una
+query since; i ts-less in file recenti restano letti e mantenuti. I path senza
+`since` (dedup/fingerprint/recovery) non sono toccati.
 
 Quando viene passato `--run`, Yano ricava anche il progetto dal run persistito
 nello SQLite locale, se disponibile. Questo evita che un vecchio nome progetto

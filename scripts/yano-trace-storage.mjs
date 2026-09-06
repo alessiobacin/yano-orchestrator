@@ -224,10 +224,42 @@ export function appendRawTraceRecord({ cwd, project, record }) {
 	return entry;
 }
 
-export function readTraceRecords({ cwd, project, allProjects = false, since = null, limit = 10000 } = {}) {
+/**
+ * Normalize the optional type filter for readTraceRecords into a Set of
+ * non-empty string type values. `null` means "no filter", keeping the read
+ * bit-identical to the pre-fast-path behaviour; an absent/empty/null value
+ * for both params matches that same contract.
+ */
+function normalizeTraceTypeFilter(type, types) {
+	const candidates = [];
+	if (type !== null && type !== undefined) candidates.push(...(Array.isArray(type) ? type : [type]));
+	if (types !== null && types !== undefined) candidates.push(...(Array.isArray(types) ? types : [types]));
+	const set = new Set();
+	for (const candidate of candidates) if (typeof candidate === "string" && candidate.length > 0) set.add(candidate);
+	return set.size === 0 ? null : set;
+}
+
+/**
+ * Substring pre-check for the typed fast path. A record whose `type` equals a
+ * filter candidate always serializes that value verbatim into its JSON line
+ * (JSON.stringify never escapes ASCII letters/underscores), so
+ * `line.includes(JSON.stringify(candidate))` cannot miss an exact match. The
+ * pre-check therefore can only produce false positives (the substring showing
+ * up inside a different field), which the exact `typeFilter.has(item.type)`
+ * check below removes — never false negatives, same record set.
+ */
+function traceLinePreMatches(line, typeFilter) {
+	for (const candidate of typeFilter) {
+		if (line.includes(JSON.stringify(candidate))) return true;
+	}
+	return false;
+}
+
+export function readTraceRecords({ cwd, project, allProjects = false, since = null, limit = 10000, type = null, types = null } = {}) {
 	const root = traceRoot();
 	const projectKeyFilter = allProjects ? null : new Set(traceProjectKeys({ cwd: cwd || process.cwd(), project }));
 	const base = path.join(root, "traces");
+	const typeFilter = normalizeTraceTypeFilter(type, types);
 	const records = [];
 	for (const file of walkJsonl(base)) {
 		// Events written by versions before project_key was added are still
@@ -253,10 +285,14 @@ export function readTraceRecords({ cwd, project, allProjects = false, since = nu
 		let lines;
 		try { lines = fs.readFileSync(file, "utf8").split("\n").filter(Boolean); } catch { continue; }
 		for (const line of lines) {
+			// Typed fast path: skip JSON.parse for lines that cannot hold a
+			// requested type (substring pre-check, see traceLinePreMatches).
+			if (typeFilter && !traceLinePreMatches(line, typeFilter)) continue;
 			try {
 				const parsed = JSON.parse(line);
 				const item = parsed.project_key ? parsed : { ...parsed, project_key: fileProjectKey };
 				if (projectKeyFilter && !projectKeyFilter.has(item.project_key)) continue;
+				if (typeFilter && !typeFilter.has(item.type)) continue;
 				if (since && item.ts && new Date(item.ts).getTime() < since.getTime()) continue;
 				records.push(item);
 			} catch { /* malformed trace lines are handled by review-log; skip them here */ }

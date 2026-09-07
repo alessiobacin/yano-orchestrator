@@ -226,9 +226,23 @@ export async function runYanoDash({ argv = [], cwd = process.cwd() } = {}) {
 	}
 	if (!argv.includes("--no-open")) openBrowser(url);
 	const shutdown = () => {
+		// An open SSE connection (/api/stream) is a live socket that keeps
+		// Node's event loop alive on its own; server.close() only stops NEW
+		// connections, so without closing these explicitly (and exiting
+		// explicitly) the process would linger forever after SIGTERM whenever
+		// a browser tab is still subscribed — exactly what "yano dash stop"
+		// must not do for an always-on, supervised service.
+		for (const client of clients) {
+			try {
+				client.end();
+			} catch {
+				/* client already gone */
+			}
+		}
 		server.close();
 		db.close();
 		writeDashState({ ...state, pid: null, stopped_at: new Date().toISOString() });
+		process.exit(0);
 	};
 	process.once("SIGTERM", shutdown);
 	process.once("SIGINT", shutdown);

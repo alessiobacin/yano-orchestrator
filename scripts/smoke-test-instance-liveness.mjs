@@ -280,9 +280,9 @@ async function runScenario(cwd, project) {
 	ok(terminateResult.details.target === "coder-03" && terminateResult.details.was_live === true, "agent_terminate reports it found a live target before sending");
 
 	await waitUntil(
-		async () => (await planner.call("agent_list")).details.agents.some((a) => a.instance === "coder-03" && a.status === "offline"),
+		async () => !(await planner.call("agent_list")).details.agents.some((a) => a.instance === "coder-03"),
 		3000,
-		"coder-03's REAL retained MQTT presence flips to offline after receiving the terminate control message — cleanShutdown() actually ran",
+		"coder-03's REAL retained MQTT presence is removed after receiving the terminate control message — cleanShutdown() actually ran",
 	);
 	coder3.shutdownCalled = true; // already went through its own real shutdown via handleTerminate — don't double-shutdown in main()'s cleanup pass
 

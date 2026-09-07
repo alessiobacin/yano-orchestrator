@@ -16,6 +16,11 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
+const repositoryRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+const watcherRegistrySource = fs.readFileSync(path.join(repositoryRoot, "scripts/yano-watcher-registry.mjs"), "utf8");
+assert.match(watcherRegistrySource, /closeTerminalArchitectSessions\(\)/, "global supervision must close terminal Architect sessions");
+assert.match(watcherRegistrySource, /closeTerminalAutoImproverSessions\(\)/, "global supervision must close terminal auto-improver sessions");
+
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "yano-maintenance-teardown-"));
 process.env.YANO_DATA_DIR = root;
 process.env.YANO_CONFIG_FILE = path.join(root, "no-such-config.env");

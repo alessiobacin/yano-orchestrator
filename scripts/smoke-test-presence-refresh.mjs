@@ -118,8 +118,11 @@ async function main() {
 	const cwd = await scratchRepo();
 	const planner = new Instance("planner-01", "planner", cwd);
 	const coder = new Instance("coder-01", "coder", cwd);
+	const staleCoder = new Instance("old-coder", "coder", cwd);
 	let restartedPlanner = null;
 	try {
+		await staleCoder.start();
+		await staleCoder.shutdown();
 		await coder.start();
 		restartedPlanner = new Instance("planner-01", "planner", cwd);
 		await restartedPlanner.start();
@@ -127,6 +130,8 @@ async function main() {
 		ok(true, "agent_list includes the current planner explicitly instead of implying it is offline");
 		await waitUntil(async () => (await restartedPlanner.call("agent_list")).details.agents.some((agent) => agent.instance === "coder-01"), "restarted planner receives coder retained presence");
 		ok(true, "planner restart rebuilds its peer map from retained MQTT presence");
+		const initialRoster = (await restartedPlanner.call("agent_list")).details.agents;
+		ok(!initialRoster.some((agent) => agent.instance === "old-coder"), "offline retained presence is removed before the first agent_list result");
 
 		// A retained card can carry a valid-looking status topic while claiming
 		// another project. The roster must reject it even though the broker
@@ -172,6 +177,7 @@ async function main() {
 		await restartedPlanner?.shutdown();
 		await planner.shutdown();
 		await coder.shutdown();
+		await staleCoder.shutdown();
 		fs.rmSync(cwd, { recursive: true, force: true });
 	}
 }

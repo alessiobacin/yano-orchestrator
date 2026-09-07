@@ -436,6 +436,12 @@ ticket markdown.
 Il watcher non corregge, non chiude ticket e non modifica il codice: segnala e
 prepara il contesto per il futuro `yano-feedback` o per un LLM incaricato.
 
+Un planner di progetto non deve autoriparare questi incidenti né modificare il
+codice di Yano per aggirarli. Deve inviare evidenze a `yano-local-pc`, che
+informa l'utente; il planner continua solo se l'incidente è non bloccante e si
+ferma con checkpoint osservabile quando è bloccante. La manutenzione del
+control-plane passa dal progetto globale Yano e da un incarico esplicito.
+
 In aggiunta, ogni passata verifica deterministicamente l’ordine del playbook:
 un ticket `running` o `done` non può precedere dipendenze incomplete, il
 playbook richiesto deve coincidere con il binding immutabile del run e un run

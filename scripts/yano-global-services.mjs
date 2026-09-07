@@ -185,9 +185,12 @@ function ensureServiceUnlocked(service) {
 		}
 	}
 	const health = pane ? probeService(pane.pane_id, agent, { instance: service.instance, root: serviceCwd, project: service.project || "yano-orchestrator" }) : { healthy: false, reason: "pane_missing" };
-	// A live process in the pane is not enough: Herdr can briefly expose a
-	// stale/foreign agent after tab reuse. Require the owned service identity.
-	if (isLive(agent, service.instance) && health.healthy) {
+	// The pane/process probe plus the application heartbeat are authoritative
+	// for an always-on service. Herdr can briefly omit the agent row (or expose
+	// the generic `pi` name) immediately after a process starts or after a
+	// scheduler refresh. Requiring `isLive(agent, ...)` here turned that normal
+	// indexing gap into a destructive close/recreate loop every minute.
+	if (health.healthy) {
 		closeInitialDuplicates(state, workspaceId, tab.tab_id, service);
 		logService("service_healthy", { service: service.instance, workspace_id: workspaceId, tab_id: tab.tab_id, pane_id: pane.pane_id, health });
 		return { service: service.instance, running: true, recovered: false, health, workspace_id: workspaceId, tab_id: tab.tab_id, pane_id: pane.pane_id };
@@ -232,10 +235,11 @@ function ensureServiceUnlocked(service) {
 		after = snapshot();
 	}
 	closeInitialDuplicates(after, workspaceId, tab.tab_id, service);
-	const live = after?.agents?.find((item) => item.pane_id === pane.pane_id && isLive(item, service.instance));
-	const afterHealth = pane?.pane_id ? probeService(pane.pane_id, live, { instance: service.instance, root: serviceCwd, project: service.project || "yano-orchestrator", warmup: true }) : { healthy: false, reason: "pane_missing_after_start" };
-	logService("service_recovery_attempted", { service: service.instance, recovered: true, running: Boolean(live && afterHealth.healthy), workspace_id: workspaceId, tab_id: tab.tab_id, pane_id: pane.pane_id, health: afterHealth, start_status: started.status });
-	return { service: service.instance, running: Boolean(live && afterHealth.healthy), recovered: true, health: afterHealth, workspace_id: workspaceId, tab_id: tab.tab_id, pane_id: pane.pane_id, error: live && afterHealth.healthy || started.status === 0 ? null : (started.stderr || started.stdout || "Herdr non ha avviato l'agente").trim() };
+	const afterAgent = after?.agents?.find((item) => item.pane_id === pane.pane_id) || null;
+	const afterHealth = pane?.pane_id ? probeService(pane.pane_id, afterAgent, { instance: service.instance, root: serviceCwd, project: service.project || "yano-orchestrator", warmup: true }) : { healthy: false, reason: "pane_missing_after_start" };
+	const live = afterHealth.healthy ? (after?.agents?.find((item) => item.pane_id === pane.pane_id) || { name: service.instance, agent_status: "idle" }) : null;
+	logService("service_recovery_attempted", { service: service.instance, recovered: true, running: afterHealth.healthy, workspace_id: workspaceId, tab_id: tab.tab_id, pane_id: pane.pane_id, health: afterHealth, start_status: started.status });
+	return { service: service.instance, running: afterHealth.healthy, recovered: true, health: afterHealth, workspace_id: workspaceId, tab_id: tab.tab_id, pane_id: pane.pane_id, error: afterHealth.healthy || started.status === 0 ? null : (started.stderr || started.stdout || "Herdr non ha avviato l'agente").trim() };
 }
 
 // The minute watcher and scheduler both supervise the same always-on panes.

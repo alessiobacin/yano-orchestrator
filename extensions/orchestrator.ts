@@ -2830,6 +2830,10 @@ export default function (pi: ExtensionAPI) {
 	let yanoStorage: SQLiteOrchestratorStorage | null = null;
 	let presenceRevision = 0;
 	let presencePublishChain: Promise<void> = Promise.resolve();
+	// Retained MQTT presence arrives asynchronously after subscribe. Keep a
+	// short bounded hydration barrier so the first agent_list cannot expose an
+	// intermediate roster while the broker delivers retained peer states.
+	let presenceHydration: Promise<void> = Promise.resolve();
 	// ticket_id::running_since -> highest "how many WATCHDOG_STALL_MS multiples
 	// have we already alerted for THIS running episode" — keyed on running_since
 	// (not just ticket_id) so a fresh ticket_claim after a reassignment starts a
@@ -3050,7 +3054,7 @@ export default function (pi: ExtensionAPI) {
 			capacity: identity.capacity,
 			self: true,
 		};
-		const others = [...presence.values()].map((c) => ({
+		const others = [...presence.values()].filter((c) => c.status !== "offline").map((c) => ({
 			instance: c.instance,
 			role: c.role,
 			status: c.status,
@@ -3418,7 +3422,10 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 			if (identity && card.instance === identity.instance) return;
-			presence.set(card.instance, card);
+			// Offline is a tombstone, not a peer. Keeping it in the map made the
+			// first agent_list after launch show dead agents until staleSweepTimer.
+			if (card.status === "offline") presence.delete(card.instance);
+			else presence.set(card.instance, card);
 			requestPoolRedraw();
 		} catch {
 			// ignore malformed retained payloads
@@ -3714,6 +3721,10 @@ export default function (pi: ExtensionAPI) {
 					}
 					mqttConnected = true;
 					everConnected = true;
+					presenceHydration = new Promise((resolve) => {
+						const timer = setTimeout(resolve, 200);
+						try { (timer as any).unref?.(); } catch { /* bounded barrier */ }
+					});
 					await publishPresence(computeSelfStatus());
 					pi.appendEntry("orchestrator-log", { event: "connected", instance: identity.instance, role, project, broker: brokerUrl });
 					logEvent("connected", { broker: brokerUrl });
@@ -4005,7 +4016,7 @@ export default function (pi: ExtensionAPI) {
 		const header = truncateToWidth(`${left}${" ".repeat(pad)}${right}`, w);
 
 		const presenceRows = mqttConnected
-			? [...presence.values()].map((c) => {
+			? [...presence.values()].filter((c) => c.status !== "offline").map((c) => {
 				const dotColor = c.status === "idle" ? "success" : c.status === "busy" ? "warning" : "error";
 				const modelPart = c.model ? theme.fg("dim", ` · ${c.model}`) : "";
 				const line = theme.fg(dotColor, "●") + " " + theme.fg("accent", `${c.instance} `) + theme.fg("dim", `(${c.role})`) + modelPart + " " + theme.fg("muted", c.status);
@@ -4554,6 +4565,9 @@ export default function (pi: ExtensionAPI) {
 		description: "List the current agent and known peer instances (role, team, status) discovered via MQTT presence. The current instance is marked self=true and is not a valid delegation target. Presence is retained, so peers appear immediately even if they connected before you.",
 		parameters: Type.Object({}),
 		async execute() {
+			// MQTT retained messages are delivered asynchronously after subscribe;
+			// wait for the bounded initial hydration before exposing the roster.
+			await presenceHydration;
 			// Revisione 41 bug fix: the "offline" presence payload published on
 			// LWT/clean shutdown deliberately carries only instance/role/project/
 			// status/last_heartbeat (see the two `client.publishAsync(...,
@@ -4574,7 +4588,7 @@ export default function (pi: ExtensionAPI) {
 				current_load: currentLoad(),
 				self: true,
 			} : null;
-			const peers = [...presence.values()].map((c) => ({
+			const peers = [...presence.values()].filter((c) => c.status !== "offline").map((c) => ({
 				instance: c.instance, role: c.role, team: c.team ?? [], status: c.status, capacity: c.capacity ?? 0, current_load: c.current_load ?? 0, self: false,
 			}));
 			const agents = selfAgent ? [selfAgent, ...peers] : peers;

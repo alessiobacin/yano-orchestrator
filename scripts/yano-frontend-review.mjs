@@ -22,16 +22,42 @@ function readPackage(root) {
 	catch { throw new Error(`package.json non trovato o non valido in ${root}`); }
 }
 
+function hasDevScript(root) {
+	try {
+		const scripts = readPackage(root).scripts || {};
+		return ["dev", "start", "serve"].some((name) => typeof scripts[name] === "string");
+	} catch { return false; }
+}
+
+export function resolveFrontendRoots(root) {
+	const requestedRoot = path.resolve(root);
+	if (hasDevScript(requestedRoot)) {
+		const parent = path.dirname(requestedRoot);
+		const nestedName = path.basename(requestedRoot).toLowerCase();
+		if (["webapp", "client", "frontend"].includes(nestedName) && fs.existsSync(path.join(parent, "package.json"))) {
+			return { projectRoot: parent, frontendRoot: requestedRoot };
+		}
+		return { projectRoot: requestedRoot, frontendRoot: requestedRoot };
+	}
+	for (const directory of ["webapp", "client", "frontend"]) {
+		const frontendRoot = path.join(requestedRoot, directory);
+		if (hasDevScript(frontendRoot)) return { projectRoot: requestedRoot, frontendRoot };
+	}
+	throw new Error("nessuno script frontend dev trovato (cercati scripts.dev, scripts.start o scripts.serve nella directory corrente e nei sotto-progetti webapp/client/frontend)");
+}
+
 export function inferFrontendDev(root) {
-	const pkg = readPackage(root);
+	const roots = resolveFrontendRoots(root);
+	const frontendRoot = roots.frontendRoot;
+	const pkg = readPackage(frontendRoot);
 	const scripts = pkg.scripts || {};
 	const script = ["dev", "start", "serve"].find((name) => typeof scripts[name] === "string");
 	if (!script) throw new Error("nessuno script frontend dev trovato (attesi scripts.dev, scripts.start o scripts.serve)");
 	const raw = scripts[script];
 	const dependencies = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
-	const isReact = Boolean(dependencies.react) || /react|next/i.test(raw) || fs.existsSync(path.join(root, "src", "App.jsx")) || fs.existsSync(path.join(root, "src", "App.tsx"));
+	const isReact = Boolean(dependencies.react) || /react|next/i.test(raw) || fs.existsSync(path.join(frontendRoot, "src", "App.jsx")) || fs.existsSync(path.join(frontendRoot, "src", "App.tsx"));
 	const portMatch = raw.match(/(?:--|\s)(?:port|p)[=\s]+(\d{2,5})/i);
-	const frameworkPort = /angular/i.test(raw) || fs.existsSync(path.join(root, "angular.json")) ? 4200
+	const frameworkPort = /angular/i.test(raw) || fs.existsSync(path.join(frontendRoot, "angular.json")) ? 4200
 		: /next/i.test(raw) ? 3000
 		: /react-scripts/i.test(raw) ? 3000
 		: 5173;
@@ -39,7 +65,7 @@ export function inferFrontendDev(root) {
 	const manager = fs.existsSync(path.join(root, "pnpm-lock.yaml")) ? "pnpm"
 		: fs.existsSync(path.join(root, "yarn.lock")) ? "yarn"
 		: fs.existsSync(path.join(root, "bun.lockb")) || fs.existsSync(path.join(root, "bun.lock")) ? "bun" : "npm";
-	return { script, raw, manager, port, url: `http://localhost:${port}`, framework: isReact ? "react" : "unknown", agentation_supported: isReact };
+	return { script, raw, manager, port, url: `http://localhost:${port}`, framework: isReact ? "react" : "unknown", agentation_supported: isReact, project_root: roots.projectRoot, frontend_root: frontendRoot };
 }
 
 function hasAgentationImport(root) {
@@ -65,12 +91,13 @@ function run(command, args, cwd) {
 
 export async function setup(root) {
 	const info = inferFrontendDev(root);
+	const frontendRoot = info.frontend_root;
 	if (!info.agentation_supported) throw new Error("Agentation ufficiale richiede React 18+; framework non riconosciuto, nessuna modifica applicata");
-	const alreadyInstalled = Boolean(({ ...(readPackage(root).dependencies || {}), ...(readPackage(root).devDependencies || {}) }).agentation);
+	const alreadyInstalled = Boolean(({ ...(readPackage(frontendRoot).dependencies || {}), ...(readPackage(frontendRoot).devDependencies || {}) }).agentation);
 	const install = info.manager === "npm" ? ["install", "-D", "agentation"]
 		: info.manager === "pnpm" ? ["add", "-D", "agentation"]
 		: info.manager === "yarn" ? ["add", "-D", "agentation"] : ["add", "-d", "agentation"];
-	if (!alreadyInstalled) await run(info.manager, install, root);
+	if (!alreadyInstalled) await run(info.manager, install, frontendRoot);
 	return { ...info, package: "agentation", installed: true, package_changed: !alreadyInstalled, component_imported: hasAgentationImport(root), next: hasAgentationImport(root) ? "planner può avviare la review MCP" : "planner deve delegare al frontend-developer l'import/mount di Agentation nel layout/root con NODE_ENV development e endpoint http://localhost:4747" };
 }
 
@@ -88,7 +115,7 @@ function waitForPort(host, port, timeoutMs = 30_000) {
 
 async function start(root) {
 	const info = await setup(root);
-	const child = spawn(info.manager, ["run", info.script], { cwd: root, detached: true, stdio: "ignore", shell: process.platform === "win32" });
+	const child = spawn(info.manager, ["run", info.script], { cwd: info.frontend_root, detached: true, stdio: "ignore", shell: process.platform === "win32" });
 	child.unref();
 	const reachable = await waitForPort("127.0.0.1", info.port);
 	if (!reachable) throw new Error(`frontend dev non raggiungibile su ${info.url} entro 30 secondi`);

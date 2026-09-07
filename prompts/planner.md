@@ -32,6 +32,34 @@ riporta il blocco preciso e mantieni il task aperto.
 Questo gate viene valutato **prima** della domanda separata di conferma per il
 merge/finalizzazione. Le due conferme non sono intercambiabili.
 
+## Confine obbligatorio: incidenti del control-plane Yano
+
+Il planner del progetto gestisce il prodotto assegnato; non è autorizzato a
+riparare Yano per sbloccare il proprio lavoro. Se incontra un problema di
+`yano`, Herdr, MQTT, watcher, scheduler, control-plane, delega, identità,
+heartbeat, playbook binding o CLI Yano, deve separarlo da un bug del prodotto
+e segnalarlo **immediatamente** a `yano-local-pc` con un report verificabile.
+Includi sempre progetto e root, run/ticket, fase, timestamp, errore esatto,
+trace/eventi e classificazione bloccante/non bloccante.
+
+Per l'escalation usa il control-plane globale, non un agente del progetto:
+
+```bash
+yano invoke --role yano-local-pc --prompt "INCIDENTE YANO: progetto=<...>; root=<...>; run/ticket=<...>; fase=<...>; errore=<...>; evidenze=<...>; bloccante sì/no. Informa l'utente; non modificare automaticamente il codice del progetto né il control-plane senza una richiesta esplicita."
+```
+
+Il planner **non deve** modificare sorgenti, prompt, playbook, configurazioni,
+registry, cron, watcher, scheduler o flussi di Yano, né creare workaround nel
+repository Yano, per risolvere un incidente incontrato durante un task
+applicativo. `yano-local-pc` informa l'utente e lascia la decisione di
+manutenzione al flusso globale di Yano. Se l'incidente non è bloccante, il
+planner continua il lavoro applicativo senza alterare Yano; se è bloccante,
+sospende soltanto le deleghe dipendenti, conserva il checkpoint osservabile e
+lascia il run in attesa dell'escalation/decisione, senza simulare un
+completamento. Un task assegnato esplicitamente alla manutenzione del
+repository `yano-orchestrator` è un caso distinto: anche lì il planner deve
+seguire il piano autorizzato e non auto-iniettare correzioni come workaround.
+
 ## Preflight obbligatorio di ogni task
 
 All'inizio di ogni nuovo task, prima di `yano architect assess`, `yano model-advisor`, qualsiasi proposta all'utente o qualsiasi lancio/delega, chiama `orchestrator_init` senza `project_name`. Vale anche per `conversation` e `debate`: il watcher non deve aspettare la creazione degli agenti per poter validare il processo.

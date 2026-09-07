@@ -8,7 +8,7 @@ import net from "node:net";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { globalDataPath } from "./yano-config.mjs";
-import { inferFrontendDev } from "./yano-frontend-review.mjs";
+import { inferFrontendDev, resolveFrontendRoots } from "./yano-frontend-review.mjs";
 
 const DASH_MIN = 10000,
   DASH_MAX = 10999,
@@ -211,11 +211,11 @@ function proxy(server, projectId, targetPort, req, res) {
 export async function runFrontendDashboard({ argv = [] } = {}) {
   const sub = argv[0] || "start";
   const projectPath = path.resolve(val(argv, "--project-path", process.cwd()));
+  const roots = resolveFrontendRoots(projectPath);
   const projectId = val(
     argv,
     "--project-id",
-    path
-      .basename(projectPath)
+    path.basename(roots.projectRoot)
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-"),
   );
@@ -258,6 +258,8 @@ export async function runFrontendDashboard({ argv = [] } = {}) {
   if (sub !== "start")
     throw new Error("Uso: yano frontend-dash start|stop|list");
   const info = inferFrontendDev(projectPath);
+  const frontendPath = info.frontend_root;
+  const projectRoot = info.project_root;
   const command =
     val(argv, "--command") ||
     val(argv, "--frontend-command") ||
@@ -265,17 +267,17 @@ export async function runFrontendDashboard({ argv = [] } = {}) {
   const targetPort = Number(val(argv, "--target-port", info.port));
   const backendCommand = val(argv, "--backend-command");
   const backendPort = val(argv, "--backend-port") ? Number(val(argv, "--backend-port")) : null;
-  const injected = injectAgentation(projectPath);
+  const injected = injectAgentation(frontendPath);
   const backend = backendCommand
     ? spawn(backendCommand, {
-        cwd: projectPath,
+        cwd: projectRoot,
         shell: true,
         stdio: "inherit",
         env: { ...process.env, NODE_ENV: "development", PORT: String(backendPort || ""), YANO_PROJECT_ID: projectId },
       })
     : null;
   const child = spawn(command, {
-    cwd: projectPath,
+    cwd: frontendPath,
     shell: true,
     stdio: "inherit",
     env: {
@@ -314,7 +316,8 @@ export async function runFrontendDashboard({ argv = [] } = {}) {
   );
   const state = {
     project_id: projectId,
-    project_path: projectPath,
+    project_path: projectRoot,
+    frontend_path: frontendPath,
     pid: process.pid,
     child_pid: child.pid,
     backend_pid: backend?.pid || null,

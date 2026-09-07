@@ -19,6 +19,10 @@ assert.ok(backend.invariants.includes("coder_and_reviewer_use_distinct_pinned_ll
 assert.ok(backend.transitions.find((transition) => transition.id === "start_implementation").requires.includes("coder_and_reviewer_have_distinct_pinned_llm_models"));
 assert.match(read("prompts/planner.md"), /Indipendenza obbligatoria coder ↔ reviewer/);
 assert.match(read("prompts/planner.md"), /due `pinned_id` llmProxy diversi/);
+assert.match(read("prompts/planner.md"), /incidenti del control-plane Yano/i);
+assert.match(read("prompts/planner.md"), /yano invoke --role yano-local-pc/);
+assert.match(read("prompts/planner.md"), /non deve[\s\S]*modificare[\s\S]*Yano/i);
+assert.match(read("prompts/planner.md"), /se è bloccante[\s\S]*sospende/i);
 
 const docsPrompt = read("prompts/docs-sync.md");
 assert.match(docsPrompt, /In \*\*ogni\*\* round, non soltanto nel playbook `clean-repo`/i);

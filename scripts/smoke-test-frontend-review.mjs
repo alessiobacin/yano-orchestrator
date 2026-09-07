@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import YAML from "yaml";
-import { inferFrontendDev } from "./yano-frontend-review.mjs";
+import { inferFrontendDev, resolveFrontendRoots } from "./yano-frontend-review.mjs";
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "yano-agentation-"));
 fs.mkdirSync(path.join(root, "src"));
@@ -19,6 +19,16 @@ assert.equal(inferred.port, 5173);
 assert.equal(inferred.framework, "react");
 assert.equal(inferred.agentation_supported, true);
 assert.equal(inferred.url, "http://localhost:5173");
+
+const monorepo = fs.mkdtempSync(path.join(os.tmpdir(), "yano-frontend-monorepo-"));
+fs.writeFileSync(path.join(monorepo, "package.json"), JSON.stringify({ name: "miodoc", scripts: {} }));
+fs.mkdirSync(path.join(monorepo, "webapp"), { recursive: true });
+fs.writeFileSync(path.join(monorepo, "webapp", "package.json"), JSON.stringify({ name: "webapp", scripts: { start: "ng serve --port 4200" } }));
+const nested = inferFrontendDev(monorepo);
+assert.equal(nested.project_root, monorepo, "la root applicativa resta quella del monorepo");
+assert.equal(nested.frontend_root, path.join(monorepo, "webapp"), "il frontend viene cercato nei sotto-progetti webapp/client/frontend");
+assert.equal(inferFrontendDev(path.join(monorepo, "webapp")).project_root, monorepo, "lanciando dal frontend viene mantenuta la root del progetto");
+assert.deepEqual(resolveFrontendRoots(monorepo), { projectRoot: monorepo, frontendRoot: path.join(monorepo, "webapp") });
 const template = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "mcp.json.example"), "utf8"));
 assert.deepEqual(template.mcpServers.agentation, { command: "npx", args: ["-y", "agentation-mcp", "server"] });
 const roles = YAML.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agents", "roles.yaml"), "utf8")).roles;

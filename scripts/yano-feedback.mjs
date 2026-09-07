@@ -34,14 +34,14 @@ export function openDatabase() {
 }
 function now() { return new Date().toISOString(); }
 function id(type) { return `${type === "bug" ? "BUG" : "SUG"}-${crypto.randomUUID()}`; }
-// The two Kanban dashboards (yano-feedback-dashboard.mjs) use different
-// terminal-status columns by design: a bug is "resolved", a suggestion is
-// "processed" (it was actioned into a new feature, not "fixed"). Any code
-// path that closes a feedback record — currently only
-// worktree_finalize(feedback_id, user_confirmed:true) in
-// extensions/orchestrator.ts — must pick the status matching the record's own
-// prefix, or the record silently disappears from its own dashboard (bug-dash
-// has no "processed" column; suggest-dash has no "resolved" column).
+// The two tabs of yano-dash.mjs use different terminal-status columns by
+// design: a bug is "resolved", a suggestion is "processed" (it was actioned
+// into a new feature, not "fixed"). Any code path that closes a feedback
+// record — currently only worktree_finalize(feedback_id,
+// user_confirmed:true) in extensions/orchestrator.ts — must pick the status
+// matching the record's own prefix, or the record silently disappears from
+// its own dashboard (the Bug tab has no "processed" column; the Suggestion
+// tab has no "resolved" column).
 export function terminalStatusForFeedbackId(feedbackId) { return String(feedbackId || "").startsWith("BUG-") ? "resolved" : "processed"; }
 function clean(value) { return String(value ?? "").trim().slice(0, MAX_MESSAGE); }
 function decodeRow(value) {
@@ -105,7 +105,7 @@ export async function repairFeedbackScreenshots(db, item) {
 	if (!changed) return item;
 	const before = item;
 	db.prepare("UPDATE feedback SET screenshots=?,updated_at=? WHERE id=?").run(JSON.stringify(repaired), now(), item.id);
-	audit(db, item.id, "yano-feedback-dashboard", "screenshots_repaired", "ripristino automatico screenshot: cache locale o rimozione di URL definitivamente non valido", before, { ...item, screenshots: repaired });
+	audit(db, item.id, "yano-dash", "screenshots_repaired", "ripristino automatico screenshot: cache locale o rimozione di URL definitivamente non valido", before, { ...item, screenshots: repaired });
 	return row(db, item.id);
 }
 export function claimFeedback(db, feedbackId, { actor = "planner", reason = "presa in carico dal planner secondo ordine FIFO" } = {}) {

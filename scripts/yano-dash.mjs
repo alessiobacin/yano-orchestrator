@@ -11,7 +11,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { globalDataPath } from "./yano-config.mjs";
-import { openDatabase, handleFeedbackApi, listFeedback, dbPath } from "./yano-feedback.mjs";
+import { openDatabase, handleFeedbackApi, listFeedback, getFeedback, listFeedbackAudit, repairFeedbackScreenshots, dbPath } from "./yano-feedback.mjs";
 import { projectKey, resolveTraceProject } from "./yano-trace-storage.mjs";
 import { DASH_PORT, readDashState, writeDashState, processAlive } from "./yano-dash-state.mjs";
 import { sendGlobalNotification } from "./yano-notify.mjs";
@@ -133,6 +133,24 @@ async function handler(db, clients, req, res) {
 	if (url.pathname === "/api.js") return serveStatic(res, "api.js");
 	if (url.pathname === "/columns.js") return serveStatic(res, "columns.js");
 	if (parts[0] === "components" && parts.length === 2) return serveStatic(res, path.join("components", parts[1]));
+	// GET reads are served here directly (not via handleFeedbackApi) so every
+	// board load also opportunistically repairs remote screenshot URLs — the
+	// interactive dashboard cares about visual quality on every view, unlike
+	// the headless yano-feedback-serve API, which only repairs once at
+	// creation time. repairFeedbackScreenshots() is itself a no-op whenever
+	// there is nothing to repair (see yano-feedback.mjs).
+	if (req.method === "GET" && parts.length >= 2 && ["bugs", "suggestions"].includes(parts[1])) {
+		const project = parts[0];
+		const type = parts[1] === "bugs" ? "bug" : "suggestion";
+		const itemId = parts[2];
+		if (!itemId) {
+			const rows = await Promise.all(listFeedback(db, { type, project_id: project }).reverse().map((item) => repairFeedbackScreenshots(db, item)));
+			return send(res, 200, rows);
+		}
+		const found = await repairFeedbackScreenshots(db, getFeedback(db, itemId));
+		if (!found || found.project_id !== project) return send(res, 404, { error: "not found" });
+		return send(res, 200, { ...found, audit: listFeedbackAudit(db, itemId) });
+	}
 	return handleFeedbackApi(db, req, withChangeBroadcast(res, req, clients), { requireCredentials: false });
 }
 

@@ -51,7 +51,7 @@ import { superviseScheduler } from "./yano-scheduler.mjs";
 import { closeTerminalArchitectSessions } from "./yano-architect.mjs";
 import { closeTerminalAutoImproverSessions } from "./yano-auto-improver.mjs";
 import mqtt from "mqtt";
-import { claimFeedback, listFeedback, openDatabase as openFeedbackDatabase } from "./yano-feedback.mjs";
+import { claimFeedback, listFeedback, openDatabase as openFeedbackDatabase, updateFeedback } from "./yano-feedback.mjs";
 
 const require = createRequire(import.meta.url);
 const WORKSPACE_LABEL = "yano-watcher";
@@ -61,6 +61,10 @@ const DEFAULT_PLANNER_STALL_MS = 15 * 60_000;
 const ORPHANED_TICKET_IDLE_MS = 2 * 60_000;
 const PLANNER_RECOVERY_COOLDOWN_MS = 10 * 60_000;
 const IDLE_WATCHER_GRACE_MS = 60 * 60_000;
+// A processing card without a live planner is an orphaned claim, not active
+// work. Give a planner a generous recovery window before returning it to the
+// operator-controlled Received column.
+const ORPHANED_FEEDBACK_PROCESSING_MS = 15 * 60_000;
 const CRON_MARKER = "# yano-watcher-supervisor";
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -420,10 +424,12 @@ export function plannerHeartbeatHealthy(planner) {
 
 export function ensureRegisteredPlanner(row, snapshot, db = null) {
 	if (!snapshot || !fs.existsSync(row.root)) return { recovery: "project_unavailable" };
-	// A registered project may be idle or contain only terminal runs. Planner
-	// liveness is required for active work or an open user decision hold, not as
-	// a reason to manufacture a fresh planner session for every completed project.
-	if (!projectNeedsPlanner(row.root)) return { recovery: "no_active_run", planner_status: "not_required" };
+	// The planner is the permanent control-plane identity of every initialized
+	// Yano project. It must remain ready even when every run is terminal, the
+	// project is idle, or its watcher polling loop is explicitly paused. The old
+	// projectNeedsPlanner() gate made completed projects look healthy while
+	// silently allowing their planner tab/process to disappear.
+	if (!projectRuns(row.root).available) return { recovery: "project_not_initialized", planner_status: "not_required" };
 	const workspace = findProjectWorkspace(snapshot, row.root, row.name);
 	const planners = workspace ? plannerAgentsInWorkspace(snapshot, workspace.workspace_id, row.root) : [];
 	const healthy = planners.find(plannerHeartbeatHealthy);
@@ -476,13 +482,32 @@ function isProtectedTabLabel(label) {
 	return text === "human" || /planner/i.test(text);
 }
 
-export function cleanupCompletedAgentTabs(snapshot, row, runs) {
-	if (!snapshot) return [];
+function sameAgentIdentity(left, right) {
+	const a = String(left || "");
+	const b = String(right || "");
+	return Boolean(a && b && (a === b || a.startsWith(`${b}-`) || b.startsWith(`${a}-`)));
+}
+
+// Ticket history is append-only: an instance name can legitimately be reused
+// by a later run. Cleanup must therefore never let a terminal ticket from an
+// older run close a worker currently assigned to an active run.
+function cleanupAssignmentSets(runs) {
+	const activeAssignments = new Set(runs
+		.filter((run) => runNeedsPlanner(run))
+		.flatMap((run) => (run.tickets || [])
+			.filter((ticket) => ["pending", "running"].includes(ticket.status) && ticket.assigned_instance)
+			.map((ticket) => ticket.assigned_instance)));
 	const terminalAssignments = new Set(runs.flatMap((run) => (run.tickets || [])
 		.filter((ticket) => ["done", "failed"].includes(ticket.status) && ticket.assigned_instance)
 		.map((ticket) => ticket.assigned_instance)));
+	return { activeAssignments, terminalAssignments };
+}
+
+export function cleanupCompletedAgentTabs(snapshot, row, runs) {
+	if (!snapshot) return [];
+	const { activeAssignments, terminalAssignments } = cleanupAssignmentSets(runs);
 	const isTerminalAssignment = (instance) => [...terminalAssignments].some((assigned) =>
-		instance === assigned || instance.startsWith(`${assigned}-`) || assigned.startsWith(`${instance}-`));
+		sameAgentIdentity(instance, assigned) && ![...activeAssignments].some((active) => sameAgentIdentity(instance, active)));
 	const removed = [];
 	const closedTabIds = new Set();
 	const agentsInProject = (snapshot.agents || []).filter((agent) => path.resolve(agent.cwd || "") === path.resolve(row.root));
@@ -554,17 +579,31 @@ export function cleanupStaleProjectTabs(snapshot, row, runs) {
 	if (!snapshot) return [];
 	const workspace = findProjectWorkspace(snapshot, row.root, row.name);
 	if (!workspace) return [];
-	const terminal = new Set(runs.flatMap((run) => (run.tickets || [])
-		.filter((ticket) => ["done", "failed"].includes(ticket.status) && ticket.assigned_instance)
-		.map((ticket) => ticket.assigned_instance)));
+	const { activeAssignments, terminalAssignments } = cleanupAssignmentSets(runs);
 	const closed = [];
 	for (const tab of snapshot.tabs || []) {
 		if (tab.workspace_id !== workspace.workspace_id || isProtectedTabLabel(tab.label)) continue;
+		// Herdr populates snapshot.panes the instant a pane is created, but only
+		// adds a matching snapshot.agents row once its own polling detects the
+		// `pi` process running inside it — a real, observed, nonzero delay. A
+		// freshly-launched instance (e.g. `yano start --instance
+		// frontend-developer-01 ...`) can therefore have a live pane with no
+		// agent entry yet. Resolving liveness through `pane.pane_id` (always
+		// present immediately) instead of `agent?.pane_id` (present late) is
+		// the same correct pattern already used elsewhere in this file for the
+		// same reason (see the pane→agent lookup near cleanupCompletedAgentTabs
+		// callers). Before this fix, a not-yet-indexed but genuinely alive pane
+		// made `live` short-circuit to false WITHOUT ever calling
+		// paneHasLivePiProcess(), closing a brand-new worker within its first
+		// watcher sweep — sometimes before the planner delegated it any ticket
+		// (2026-09-07 newMioDOC incident: frontend-developer-01/coder-01).
 		const pane = (snapshot.panes || []).find((item) => item.tab_id === tab.tab_id);
 		const agent = (snapshot.agents || []).find((item) => item.tab_id === tab.tab_id);
 		const identity = String(tab.label || agent?.name || agent?.instance || "");
-		const terminalTask = [...terminal].some((value) => identity === value || identity.startsWith(`${value}-`) || value.startsWith(`${identity}-`));
-		const live = Boolean(agent?.pane_id && paneHasLivePiProcess(agent.pane_id));
+		const activeTask = [...activeAssignments].some((value) => sameAgentIdentity(identity, value));
+		const terminalTask = !activeTask && [...terminalAssignments].some((value) => sameAgentIdentity(identity, value));
+		const livePaneId = agent?.pane_id || pane?.pane_id;
+		const live = Boolean(livePaneId && paneHasLivePiProcess(livePaneId));
 		if (!identity || terminalTask || !live) {
 			const result = closeHerdrTab(tab.tab_id);
 			closed.push({ tab_id: tab.tab_id, label: tab.label || "(senza nome)", reason: terminalTask ? "terminal_task" : live ? "unnamed_orphan_tab" : "dead_agent", ...result });
@@ -967,7 +1006,9 @@ export function doStatusForRow(db, row, { heal = true, snapshot: suppliedSnapsho
 		if (!pausedSnapshot) return base;
 		const pausedRuns = projectRuns(row.root).runs;
 		const agent_tabs_closed = [...cleanupCompletedAgentTabs(pausedSnapshot, row, pausedRuns), ...cleanupStaleProjectTabs(pausedSnapshot, row, pausedRuns)];
-		return agent_tabs_closed.length ? { ...base, agent_tabs_closed } : base;
+		let planner;
+		try { planner = ensureRegisteredPlanner(row, pausedSnapshot, db); } catch (error) { planner = { recovery: "planner_recovery_failed", recovery_error: error instanceof Error ? error.message : String(error) }; }
+		return { ...base, planner, ...(agent_tabs_closed.length ? { agent_tabs_closed } : {}) };
 	}
 	if (!row.worker_pane_id) return { ...base, live: "unknown", drift: false }; // e.g. started with --foreground: not Herdr-managed, nothing this check can observe
 	const snapshot = suppliedSnapshot || herdrSnapshot();
@@ -1127,6 +1168,46 @@ async function superviseFeedbackQueue(rows, snapshot) {
 	return result;
 }
 
+/**
+ * Reconcile feedback claims independently from the pending queue.
+ *
+ * A previous implementation only supervised pending_planner/queued/retry.
+ * Consequently a stale planner could claim cards, disappear, and leave them
+ * permanently in processing: the queue looked empty and watcher had nothing
+ * to deliver or recover. Only reset old claims when the project has no
+ * healthy planner in the live Herdr snapshot; a live planner keeps ownership.
+ */
+export async function recoverOrphanedProcessingFeedback(rows, snapshot, {
+	maxAgeMs = ORPHANED_FEEDBACK_PROCESSING_MS,
+	nowMs = Date.now(),
+	actor = "yano-watcher"
+} = {}) {
+	const result = { checked: 0, recovered: [], kept: [] };
+	let feedbackDb;
+	try { feedbackDb = openFeedbackDatabase(); } catch (error) { return { ...result, error: error instanceof Error ? error.message : String(error) }; }
+	try {
+		for (const item of listFeedback(feedbackDb, { statuses: ["processing"] })) {
+			const project = rows.find((candidate) => candidate.project_key === item.project_id || candidate.name === item.project_id || slug(candidate.name) === slug(item.project_id));
+			if (!project) continue;
+			result.checked++;
+			const workspace = snapshot && findProjectWorkspace(snapshot, project.root, project.name);
+			const planner = workspace && plannerAgentsInWorkspace(snapshot, workspace.workspace_id, project.root).find(plannerHeartbeatHealthy);
+			const age = nowMs - Date.parse(item.updated_at || item.created_at || "");
+			if (planner || !Number.isFinite(age) || age < maxAgeMs) {
+				result.kept.push({ id: item.id, reason: planner ? "planner_live" : "claim_not_old_enough" });
+				continue;
+			}
+			await updateFeedback(feedbackDb, item.id, {
+				status: "received",
+				updated_by: actor,
+				audit_reason: "recupero deterministico: claim processing orfano senza planner live; restituito a Received per presa in carico manuale"
+			});
+			result.recovered.push(item.id);
+		}
+	} finally { feedbackDb.close(); }
+	return result;
+}
+
 // Fase 5 — reboot/crash resilience visibility. reconcileProjectRun()/
 // recoverPlanner() already retry Herdr (herdrSnapshot()'s own backoff) and
 // degrade per-project rather than crashing, but before this there was no
@@ -1248,6 +1329,8 @@ function supervise(db) {
 		const activated = [...rows.map((row) => activateDefaultWorkers(db, row)).filter(Boolean)];
 		let feedback_queue;
 		try { feedback_queue = await superviseFeedbackQueue(rows, repairedSnapshot); } catch (error) { feedback_queue = { error: error instanceof Error ? error.message : String(error) }; }
+		let orphaned_feedback;
+		try { orphaned_feedback = await recoverOrphanedProcessingFeedback(rows, repairedSnapshot); } catch (error) { orphaned_feedback = { error: error instanceof Error ? error.message : String(error) }; }
 		const projectResults = rows.map((row) => doStatusForRow(db, row, { heal: true, snapshot: repairedSnapshot }));
 		const playbook_flow_alerts = [];
 		for (let index = 0; index < projectResults.length; index++) {
@@ -1264,6 +1347,7 @@ function supervise(db) {
 			playbook_flow_alerts,
 			activated,
 			feedback_queue,
+			orphaned_feedback,
 			global_services,
 			scheduler,
 			retention,

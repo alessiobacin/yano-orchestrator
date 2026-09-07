@@ -5295,3 +5295,46 @@ costo di oggi, contenuto più azionabile.
 retrocompatibilità (nessun `toolFailures` passato → formato invariato), la
 scalata a "ripetuto" sullo stesso errore, e la non-confusione tra errori
 diversi sullo stesso tool.
+
+## Revisione 68 — `cleanupStaleProjectTabs()` chiudeva agenti appena avviati e ancora vivi
+
+Incidente reale su newMioDOC (2026-09-07): il planner lanciava
+`frontend-developer-01` e `coder-01` con `yano start`, i due si connettevano
+regolarmente via MQTT (`session_start`/`connected` nel trace), ma sparivano
+da `herdr api snapshot` entro pochi minuti, prima ancora di ricevere un
+ticket. Nessun evento `agent_terminate_received`/`agent_terminate_sent` per
+nessuno dei due — quindi non era il protocollo di terminate volontario di
+Yano (`handleTerminate` in `extensions/orchestrator.ts`) a chiuderli.
+
+Causa radice trovata in `cleanupStaleProjectTabs()`
+(`scripts/yano-watcher-registry.mjs`), la sweep periodica (~ogni 60s) del
+watcher che chiude le tab non più valide. Herdr popola `snapshot.panes`
+nell'istante stesso in cui una pane viene creata, ma aggiunge la riga
+corrispondente in `snapshot.agents` solo quando il proprio polling rileva
+davvero il processo `pi` in esecuzione al suo interno — un ritardo reale e
+osservato. La funzione cercava però l'`agent` per `tab_id` diretto invece che
+tramite il `pane_id` della pane già trovata (il pattern corretto, già usato
+altrove nello stesso file), e la liveness (`live`) dipendeva esclusivamente
+da `agent?.pane_id`. Quando lo sweep del watcher capitava nella finestra in
+cui Herdr non aveva ancora indicizzato l'agente, `agent` era `undefined`,
+`live` diventava `false` per corto-circuito **senza mai interpellare
+`paneHasLivePiProcess()`**, e — non avendo ancora nessun ticket assegnato
+(quindi nemmeno `terminalTask`) — la tab veniva chiusa e loggata come
+`"dead_agent"`, pur essendo il processo realmente vivo.
+
+Fix: risolvere il `pane_id` da usare per `paneHasLivePiProcess()` preferendo
+`agent?.pane_id` ma ricadendo su `pane?.pane_id` (sempre presente fin da
+subito) quando l'agente non è ancora indicizzato. `scripts/smoke-test-fresh-agent-not-closed.mjs`
+riproduce esattamente lo scenario (pane vivo, agente non ancora indicizzato,
+nessun ticket) e verifica che la tab sopravviva, oltre al caso di controllo
+(pane realmente morto → chiusura corretta) e al caso già indicizzato
+(comportamento preesistente invariato).
+
+Nota collaterale emersa durante l'indagine, non ancora corretta: i
+`presence_ignored_scope_mismatch` osservati nello stesso run erano rumore
+benigno (card retained di una sessione `planner-vision-e2e-*` precedente,
+correttamente scartate dal guard di `onPresenceMessage`) — non la causa di
+questo incidente. Restano però la prova che il difetto già documentato in
+`.scratch/optimize-orchestrator/issues/134-yano-watcher-workspace-scope-mismatch.md`
+(`readCliFlags()` non legge mai `--project-scope`, quindi un'istanza lanciata
+con quel flag degenera sullo scope del progetto ospitante) è tuttora attivo.

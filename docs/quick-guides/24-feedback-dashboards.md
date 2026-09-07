@@ -1,79 +1,86 @@
 # Dashboard bug e suggestions
 
-Yano non usa più agenti LLM `debugger` o `suggester`: il registro feedback è gestito da endpoint REST e dashboard deterministiche.
+Yano non usa più agenti LLM `debugger` o `suggester`: il registro feedback è
+gestito da endpoint REST e da un'unica dashboard deterministica, sempre
+attiva non appena Yano è installato globalmente.
 
 ```bash
-yano bug-dash start
-yano suggest-dash start
-yano bug-dash stop
-yano suggest-dash stop
+yano dash start   # normalmente non serve: parte da sola
+yano dash stop
 ```
 
-L'avvio è idempotente: se la dashboard dello stesso tipo è già attiva, Yano
-riutilizza l'istanza esistente. Se il comando viene eseguito da una
-sottocartella del progetto (per esempio `newMioDOC/webapp`), Yano risale alla
-root del progetto e stampa il relativo URL, senza creare una seconda dashboard
-su una porta diversa.
+`yano dash` è un servizio builtin supervisionato da `yano watcher supervise`
+(lo stesso cron a un minuto già installato da `npm install -g`, che oggi
+tiene in vita anche llmproxy/mqtt): se il processo muore o il computer si
+riavvia, riparte da solo entro circa un minuto, senza bisogno di eseguire
+alcun comando. `yano dash stop` lo ferma comunque su richiesta, ma stampa un
+avviso sul riavvio automatico imminente. Per disattivare l'avvio automatico
+si può impostare `YANO_DASH_AUTOSTART=0` (solo per la dashboard) oppure
+`YANO_DISABLE_BUILTIN_DEPENDENCY_SUPERVISION=1` (disattiva tutta la
+supervisione builtin, non solo la dashboard).
 
-Eseguiti dalla cartella di un progetto, entrambi i comandi ricavano
-automaticamente il suo `project-id`, stampano l'URL completo e aprono il
-browser. Per non aprire il browser si può usare `--no-open`; per un progetto
-diverso si può usare `--project-id <id>`.
+La dashboard usa la porta preferita 11000, con fallback 11000-11999. Se la
+11000 è occupata, Yano invia un messaggio sul canale di notifica globale
+configurato (`yano config set ...`) indicando la porta effettivamente scelta
+— la stessa infrastruttura già usata dal digest schedulato
+(`scripts/yano-notify.mjs`).
 
-La dashboard bug usa la porta preferita 11000 e fallback 11000-11999; quella
-delle suggestions usa 12000 e fallback 12000-12999. Gli URL sono sempre
-`/<project-id>/`, quindi il progetto non viene identificato dalla porta.
-
-Gli endpoint CRUD principali sono `/<project-id>/bugs` e
+Un'unica board mostra bug e suggestions con tab **Bug 🪲 / Suggestion 💡 /
+Tutti**; in "Tutti" le colonne di stato sono condivise e ogni card mostra
+un'iconcina per il tipo. Gli endpoint CRUD restano `/<project-id>/bugs` e
 `/<project-id>/suggestions`, con `GET`, `POST`, `PUT`, `PATCH` e `DELETE`.
-Retry e cambi stato sono auditati. Ogni modifica manuale richiede una nota.
+Retry e cambi stato sono auditati; ogni modifica manuale richiede una nota,
+visibile poi nella cronologia del pannello di dettaglio della card.
 
 La card mostra titolo, severità (colore del bordo e chip: grigio `low`, teal
-`medium`, arancio `high`, rosso `critical`), utente, data/ora locale italiana
-e route; il messaggio completo resta nella modal. La data usa `Europe/Rome` e
-formato `GG/MM/AAAA HH:MM`. Ogni colonna mostra il numero di elementi e uno
-stato vuoto esplicito quando non ne contiene. Un campo di ricerca filtra le
-card per titolo, messaggio o route senza ricaricare la board; un indicatore
-in header mostra l'orario dell'ultimo aggiornamento (poll ogni 5s). Trascinare
-una card in un'altra colonna cambia lo stato via drag-and-drop (registra in
-automatico una nota d'audit "Spostato in ... via drag & drop"); cliccarla
-apre comunque la modal completa per una modifica più dettagliata. La modal
-consente di creare/modificare card, mantiene sempre visibili i pulsanti
-`Salva` e `Annulla`, evidenzia in rosso i campi obbligatori, mostra
-l'anteprima degli screenshot e accetta file multipli anche con
-drag-and-drop. Gli screenshot remoti si inseriscono come URL separati e non
-come JSON.
+`medium`, arancio `high`, rosso `critical`), utente, data/ora locale
+italiana e route; il messaggio completo, la galleria screenshot e la
+cronologia degli audit restano nel pannello di dettaglio laterale. La data
+usa `Europe/Rome` e formato `GG/MM/AAAA HH:MM`. Ogni colonna mostra il
+numero di elementi e uno stato vuoto esplicito quando non ne contiene. Un
+campo di ricerca filtra le card per titolo, messaggio o route senza
+ricaricare la board; un indicatore in header mostra l'orario dell'ultimo
+aggiornamento. Gli aggiornamenti sono quasi istantanei via Server-Sent
+Events. Trascinare una card in un'altra colonna apre il pannello di
+dettaglio con lo stato di destinazione già selezionato, cosicché la nota
+d'audit obbligatoria resta sempre scritta dall'operatore.
 
-Per un frontend con backend separato:
+Per un frontend con backend separato resta disponibile, invariato,
+`yano frontend-dash` (un concetto distinto: reverse proxy di sviluppo +
+Agentation, non la dashboard bug/suggestions):
 
 ```bash
 yano frontend-dash start --project-path /percorso/app --project-id demo \
   --command "npm run dev" --backend-command "npm run api" --backend-port 3000
 ```
 
-La dashboard non raccoglie password e non rende obbligatorio l'utente. Le API
-REST possono comunque richiedere credenziali E2E quando il bug arriva da un
-client esterno. Per i test del progetto, il coder deve predisporre account
-development/test per ogni ruolo applicativo e registrarne le credenziali nel
-meccanismo sicuro di Yano; mai usare o creare account in production.
+La dashboard non raccoglie password e non rende obbligatorio l'utente
+quando la card viene creata dalla GUI. Le API REST possono comunque
+richiedere credenziali E2E quando il bug arriva da un client esterno via
+`yano feedback serve` (porta 20002, headless) — per i test del progetto, il
+coder deve predisporre account development/test per ogni ruolo applicativo
+e registrarne le credenziali nel meccanismo sicuro di Yano; mai usare o
+creare account in production.
 
 Stati comuni: `received`, `pending_planner`, `queued`, `processing`,
 `awaiting_user_confirmation`, `paused`, `retry`, `cancelled`. Lo stato
-terminale differisce per tipo — non sono intercambiabili, ognuna delle due
-dashboard espone solo la propria colonna:
+terminale differisce per tipo — non sono intercambiabili, ognuno dei due tab
+espone solo la propria colonna:
 
 | Tipo | Stato terminale | Colonna esposta da |
 |------|------------------|---------------------|
-| bug (`BUG-...`) | `resolved` | `bug-dash` (non ha colonna `processed`) |
-| suggestion (`SUG-...`) | `processed` | `suggest-dash` (non ha colonna `resolved`) |
+| bug (`BUG-...`) | `resolved` | tab "Bug" (non ha colonna `processed`) |
+| suggestion (`SUG-...`) | `processed` | tab "Suggestion" (non ha colonna `resolved`) |
 
 `failed` esiste solo per i bug. Il planner non deve mai scegliere lo stato
 sbagliato per il tipo: un record chiuso con lo stato dell'altro tipo sparisce
-dalla propria board (nessuna colonna corrisponde). Se il planner chiama
-`worktree_finalize` passando `feedback_id` (con `user_confirmed: true`,
-oppure `automatic_backend: true` per un bug puro backend), lo stato
-terminale corretto viene scelto e scritto automaticamente in base al
-prefisso dell'id — non serve un aggiornamento manuale separato in quel caso.
+dalla propria board (nessuna colonna corrisponde nei tab "Bug"/"Suggestion";
+nel tab "Tutti" resterebbe comunque visibile ma nella colonna sbagliata). Se
+il planner chiama `worktree_finalize` passando `feedback_id` (con
+`user_confirmed: true`, oppure `automatic_backend: true` per un bug puro
+backend), lo stato terminale corretto viene scelto e scritto automaticamente
+in base al prefisso dell'id — non serve un aggiornamento manuale separato in
+quel caso.
 
 Sia i bug sia le suggestion sono ciascuno una coda FIFO per progetto: quando
 il planner del progetto diventa inattivo, o riceve la notifica MQTT

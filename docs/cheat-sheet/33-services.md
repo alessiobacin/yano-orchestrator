@@ -81,3 +81,12 @@ vede ancora il processo Pi vivo e nello stato `idle` o `working`, un heartbeat
 applicativo vecchio o temporaneamente assente non provoca la chiusura e il
 riavvio della tab. Il cron può ricrearlo solo quando mancano davvero pane o
 processo, oppure Herdr espone uno stato non sano.
+
+`yano-dash` è un secondo builtin sempre attivo, ma di natura diversa da
+`llmproxy`/`mqtt`: non viene scoperto da un container/processo esterno, è
+Yano stesso. Ogni passata ricalcola l'health-check dal contenuto corrente
+dello state file della dashboard, così un cambio di porta di fallback non
+produce mai un falso `unhealthy`. Si disattiva con `YANO_DASH_AUTOSTART=0`
+(solo la dashboard) o con la variabile generale
+`YANO_DISABLE_BUILTIN_DEPENDENCY_SUPERVISION=1` (disattiva tutta la
+supervisione builtin).

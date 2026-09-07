@@ -7,6 +7,8 @@ node_modules/
 # key + phone number were found committed in a sibling deployment's .env; this repo's
 # history starts clean specifically to avoid repeating that mistake)
 .env
+# Local MCP example/config variant; the distributable template is mcp.json.example
+.mcp.json.example
 # SQLite ticket/DAG storage + runtime data dirs, per-project/per-machine, never shared (Revisione 26+)
 *.db
 *.db-journal

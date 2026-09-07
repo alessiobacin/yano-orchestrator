@@ -29,6 +29,18 @@ assert.equal(nested.project_root, monorepo, "la root applicativa resta quella de
 assert.equal(nested.frontend_root, path.join(monorepo, "webapp"), "il frontend viene cercato nei sotto-progetti webapp/client/frontend");
 assert.equal(inferFrontendDev(path.join(monorepo, "webapp")).project_root, monorepo, "lanciando dal frontend viene mantenuta la root del progetto");
 assert.deepEqual(resolveFrontendRoots(monorepo), { projectRoot: monorepo, frontendRoot: path.join(monorepo, "webapp") });
+
+const angular = fs.mkdtempSync(path.join(os.tmpdir(), "yano-frontend-angular-"));
+fs.writeFileSync(path.join(angular, "package.json"), JSON.stringify({
+	name: "angular-ui", dependencies: { "@angular/core": "^21.0.0" },
+	scripts: { start: "ng serve --host 0.0.0.0 --port 4200" },
+}, null, 2));
+fs.writeFileSync(path.join(angular, "angular.json"), "{}\n");
+const angularInferred = inferFrontendDev(angular);
+assert.equal(angularInferred.framework, "angular");
+assert.equal(angularInferred.agentation_supported, false, "Agentation React non deve essere installato in Angular");
+assert.equal(angularInferred.review_mode, "browser-only");
+assert.equal(angularInferred.port, 4200);
 const template = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "mcp.json.example"), "utf8"));
 assert.deepEqual(template.mcpServers.agentation, { command: "npx", args: ["-y", "agentation-mcp", "server"] });
 const roles = YAML.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agents", "roles.yaml"), "utf8")).roles;

@@ -56,16 +56,19 @@ export function inferFrontendDev(root) {
 	const raw = scripts[script];
 	const dependencies = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
 	const isReact = Boolean(dependencies.react) || /react|next/i.test(raw) || fs.existsSync(path.join(frontendRoot, "src", "App.jsx")) || fs.existsSync(path.join(frontendRoot, "src", "App.tsx"));
+	const isAngular = Boolean(dependencies["@angular/core"]) || /(?:^|\s)ng(?:\s|$)|angular/i.test(raw) || fs.existsSync(path.join(frontendRoot, "angular.json"));
+	const framework = isReact ? "react" : isAngular ? "angular" : "unknown";
 	const portMatch = raw.match(/(?:--|\s)(?:port|p)[=\s]+(\d{2,5})/i);
-	const frameworkPort = /angular/i.test(raw) || fs.existsSync(path.join(frontendRoot, "angular.json")) ? 4200
+	const frameworkPort = isAngular ? 4200
 		: /next/i.test(raw) ? 3000
 		: /react-scripts/i.test(raw) ? 3000
 		: 5173;
 	const port = Number(portMatch?.[1] || process.env.YANO_FRONTEND_PORT || frameworkPort);
-	const manager = fs.existsSync(path.join(root, "pnpm-lock.yaml")) ? "pnpm"
-		: fs.existsSync(path.join(root, "yarn.lock")) ? "yarn"
-		: fs.existsSync(path.join(root, "bun.lockb")) || fs.existsSync(path.join(root, "bun.lock")) ? "bun" : "npm";
-	return { script, raw, manager, port, url: `http://localhost:${port}`, framework: isReact ? "react" : "unknown", agentation_supported: isReact, project_root: roots.projectRoot, frontend_root: frontendRoot };
+	const managerRoot = roots.projectRoot === frontendRoot ? frontendRoot : (fs.existsSync(path.join(frontendRoot, "package-lock.json")) ? frontendRoot : roots.projectRoot);
+	const manager = fs.existsSync(path.join(managerRoot, "pnpm-lock.yaml")) ? "pnpm"
+		: fs.existsSync(path.join(managerRoot, "yarn.lock")) ? "yarn"
+		: fs.existsSync(path.join(managerRoot, "bun.lockb")) || fs.existsSync(path.join(managerRoot, "bun.lock")) ? "bun" : "npm";
+	return { script, raw, manager, port, url: `http://localhost:${port}`, framework, agentation_supported: isReact, review_mode: isReact ? "agentation" : isAngular ? "browser-only" : "unsupported", project_root: roots.projectRoot, frontend_root: frontendRoot };
 }
 
 function hasAgentationImport(root) {
@@ -92,13 +95,16 @@ function run(command, args, cwd) {
 export async function setup(root) {
 	const info = inferFrontendDev(root);
 	const frontendRoot = info.frontend_root;
-	if (!info.agentation_supported) throw new Error("Agentation ufficiale richiede React 18+; framework non riconosciuto, nessuna modifica applicata");
+	if (info.framework === "angular") {
+		return { ...info, package: null, installed: false, package_changed: false, component_imported: false, next: "frontend-review può avviare la review browser-only; Agentation ufficiale non viene installato perché richiede React 18+. Usa Chrome DevTools/Playwright per la verifica visuale." };
+	}
+	if (!info.agentation_supported) throw new Error("framework frontend non riconosciuto; nessuna modifica applicata");
 	const alreadyInstalled = Boolean(({ ...(readPackage(frontendRoot).dependencies || {}), ...(readPackage(frontendRoot).devDependencies || {}) }).agentation);
 	const install = info.manager === "npm" ? ["install", "-D", "agentation"]
 		: info.manager === "pnpm" ? ["add", "-D", "agentation"]
 		: info.manager === "yarn" ? ["add", "-D", "agentation"] : ["add", "-d", "agentation"];
 	if (!alreadyInstalled) await run(info.manager, install, frontendRoot);
-	return { ...info, package: "agentation", installed: true, package_changed: !alreadyInstalled, component_imported: hasAgentationImport(root), next: hasAgentationImport(root) ? "planner può avviare la review MCP" : "planner deve delegare al frontend-developer l'import/mount di Agentation nel layout/root con NODE_ENV development e endpoint http://localhost:4747" };
+	return { ...info, package: "agentation", installed: true, package_changed: !alreadyInstalled, component_imported: hasAgentationImport(frontendRoot), next: hasAgentationImport(frontendRoot) ? "planner può avviare la review MCP" : "planner deve delegare al frontend-developer l'import/mount di Agentation nel layout/root con NODE_ENV development e endpoint http://localhost:4747" };
 }
 
 function waitForPort(host, port, timeoutMs = 30_000) {

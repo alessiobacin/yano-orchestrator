@@ -20,3 +20,9 @@ framework sulle porte assegnate e verificare health/URL. Se il progetto non
 supporta variabili d'ambiente, il runner deve passare le porte ai comandi del
 framework. Non terminare processi di altri progetti e non dichiarare superato
 un test rimasto su `about:blank`.
+
+`yano frontend-review setup|start` riconosce anche i frontend Angular. In
+questo caso non installa `agentation` (il pacchetto ufficiale richiede React
+18+), ma avvia normalmente il dev server e restituisce l'URL per la review
+browser-only tramite Chrome DevTools/Playwright. Per React continua invece a
+installare e usare Agentation solo in development.

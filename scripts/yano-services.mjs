@@ -29,6 +29,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { globalDataPath } from "./yano-config.mjs";
+import { DASH_PORT, readDashState, processAlive } from "./yano-dash-state.mjs";
 
 const REGISTRY_VERSION = 1;
 const VALID_HEALTHCHECK_TYPES = new Set(["http", "command", "pm2"]);
@@ -120,15 +121,40 @@ function builtinPm2Service(definition) {
 	};
 }
 
+// yano-dash is not an external dependency the operator opts into like
+// llmproxy/mqtt — it is Yano's own always-on dashboard, so it is discovered
+// unconditionally (aside from its own dedicated opt-out) rather than only
+// when a matching Docker container/pm2 process happens to be found. The
+// healthcheck target is recomputed from the live state file on every call,
+// so a fallback-port restart is never mistaken for "still unhealthy."
+function builtinDashService() {
+	if (String(process.env.YANO_DASH_AUTOSTART || "1") === "0") return null;
+	const state = readDashState();
+	const alive = Boolean(state?.pid && processAlive(state.pid) && state?.port);
+	const target = alive ? `http://127.0.0.1:${state.port}/healthz` : `http://127.0.0.1:${DASH_PORT.default}/__yano_dash_never_bound__`;
+	return {
+		name: "yano-dash",
+		builtin: true,
+		healthcheck: { type: "http", target, timeout_ms: 2000 },
+		restart: { type: "command", target: "yano dash start --no-open" },
+		enabled: true,
+		backoff: { base_ms: 5000, max_ms: 300000, max_attempts: 6 },
+		created_at: new Date().toISOString(),
+		state: defaultState(),
+	};
+}
+
 function builtinServices(registry) {
 	if (String(process.env.YANO_DISABLE_BUILTIN_DEPENDENCY_SUPERVISION || "0") === "1") return [];
+	const dash = builtinDashService();
 	const dockerAvailable = spawnSync("docker", ["version", "--format", "{{.Server.Version}}"], { encoding: "utf8", timeout: 3000 }).status === 0;
-	return BUILTIN_DEPENDENCIES
+	const dependencies = BUILTIN_DEPENDENCIES
 		// Docker is tried first (the historical default); a dependency not found
 		// as a Docker container (or Docker unavailable at all) falls back to
 		// pm2 auto-discovery instead of being silently unsupervised.
 		.map((definition) => (dockerAvailable && builtinDockerService(definition, registry)) || builtinPm2Service(definition))
-		.filter(Boolean)
+		.filter(Boolean);
+	return [...(dash ? [dash] : []), ...dependencies]
 		.filter((service) => !registry.services.some((existing) => existing.name === service.name));
 }
 

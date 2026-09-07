@@ -81,7 +81,7 @@ import { runTrace } from "../scripts/yano-trace.mjs";
 import { runYanoWatcherRegistry } from "../scripts/yano-watcher-registry.mjs";
 import { runYanoAutoImprove } from "../scripts/yano-auto-improver.mjs";
 import { runYanoFeedback } from "../scripts/yano-feedback.mjs";
-import { runFeedbackDashboard } from "../scripts/yano-feedback-dashboard.mjs";
+import { runYanoDash } from "../scripts/yano-dash.mjs";
 import { runFrontendDashboard } from "../scripts/yano-frontend-dashboard.mjs";
 import { runYanoModelAdvisor } from "../scripts/yano-model-advisor.mjs";
 import { runYanoArchitect } from "../scripts/yano-architect.mjs";
@@ -149,8 +149,7 @@ function printTopUsage() {
 			"  trace [opzioni]  Attiva/disattiva, cerca e cancella il tracing globale — `yano trace --help`",
 			"  auto-improve [opzioni] Audit periodici read-only e report al planner — `yano auto-improve --help`",
 			"  feedback serve|create|list|get|update|delete  CRUD bug e suggestions — API su porta 20002",
-			"  bug-dash start|stop       Kanban bug globale (11000, fallback 11000-11999)",
-			"  suggest-dash start|stop   Kanban suggestions globale (12000, fallback 12000-12999)",
+			"  dash start|stop           Kanban bug+suggestions unificato, sempre attivo (11000, fallback 11000-11999)",
 			"  frontend-dash start|stop|list  Reverse proxy development + Agentation (10000-10999)",
 			"  model-advisor [opzioni] Propone un provider:model pinnato da llmProxy per role-class — `yano model-advisor --help`",
 			"  architect [opzioni]  Progetta/provisiona playbook e ruoli globali — `yano architect --help`",
@@ -328,12 +327,12 @@ async function main() {
 		await runYanoFeedback({ argv: sub === "feedback" ? rest : [rest[0] || "list", ...(type ? ["--type", type] : []), ...rest.slice(1)] });
 		return;
 	}
-	if (sub === "bug-dash" || sub === "suggest-dash") {
+	if (sub === "dash") {
 		if (rest.includes("--help") || rest.includes("-h")) {
-			console.log(`Uso: yano ${sub} start|stop`);
+			console.log("Uso: yano dash start|stop [--no-open] [--project-id ID] [--port N]");
 			return;
 		}
-		await runFeedbackDashboard({ type: sub === "bug-dash" ? "bug" : "suggestion", argv: rest, cwd });
+		await runYanoDash({ argv: rest, cwd });
 		return;
 	}
 	if (sub === "frontend-dash") {

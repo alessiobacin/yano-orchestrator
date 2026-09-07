@@ -1,6 +1,6 @@
 import { html } from "htm/preact";
 import { useEffect, useState } from "preact/hooks";
-import { dateIt, screenshotSrc } from "../columns.js";
+import { dateIt, screenshotSrc, canonicalStatus } from "../columns.js";
 
 const SHARED_STATUSES = ["received", "processing", "awaiting_user_confirmation", "paused", "retry", "cancelled"];
 const BUG_ONLY_STATUSES = ["resolved", "failed"];
@@ -14,7 +14,7 @@ function initialForm(item, initialStatus) {
 	return {
 		title: item?.title || "",
 		message: item?.message || "",
-		status: initialStatus || item?.status || "received",
+		status: initialStatus || (item ? canonicalStatus(item.status) : "received"),
 		severity: item?.severity || "medium",
 		route: item?.route || "",
 		environment: item?.environment || "",

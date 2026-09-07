@@ -5388,6 +5388,17 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	async function sendNotifications(message: string): Promise<{ ok: boolean; detail: string; channels: Record<string, { ok: boolean; detail: string }> }> {
+		// Automated scratch/E2E runs must never reach real WhatsApp, Telegram or
+		// email credentials inherited from the developer machine. Keep the event
+		// path observable in traces, but make delivery an explicit opt-in.
+		if (process.env.YANO_TEST_MODE === "1") {
+			const channels = {
+				whatsapp: { ok: false, detail: "soppresso in YANO_TEST_MODE" },
+				telegram: { ok: false, detail: "soppresso in YANO_TEST_MODE" },
+				email: { ok: false, detail: "soppresso in YANO_TEST_MODE" },
+			};
+			return { ok: false, detail: "notifiche esterne soppresse in YANO_TEST_MODE", channels };
+		}
 		const [whatsapp, telegram, email] = await Promise.all([
 			sendWhatsAppNotification(message),
 			sendTelegramNotification(message),
@@ -5724,9 +5735,10 @@ export default function (pi: ExtensionAPI) {
 
 			logEvent("worktree_finalize", { slug, worktree_path: wtPath, branch, merged: true, conflict: false });
 			// Revisione 66 — before this, only the automatic_backend bug path ever
-			// closed a feedback record (and it wrote 'processed', which bug-dash
-			// doesn't even have a column for — an auto-finalized bug silently
-			// vanished from its own Kanban board instead of showing as resolved).
+			// closed a feedback record (and it wrote 'processed', which yano
+			// dash's Bug tab doesn't even have a column for — an auto-finalized
+			// bug silently vanished from its own Kanban board instead of
+			// showing as resolved).
 			// Any confirmed finalize that names a feedback_id now closes it too,
 			// with the status its own dashboard actually expects.
 			if (params.feedback_id && (automaticBackendBug || params.user_confirmed)) {

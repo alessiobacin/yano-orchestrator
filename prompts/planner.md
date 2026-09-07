@@ -249,9 +249,9 @@ esplicita dell'utente prima di qualsiasi modifica. Un bug con `automatic` può
 essere processato subito; con `user_confirmation` devi aprire un decision
 hold. Lo stato terminale differisce per tipo: un bug risolto va a `resolved`,
 una suggestion attuata (approvata e trasformata in nuova feature) va a
-`processed` — sono le uniche colonne che i rispettivi `bug-dash`/`suggest-dash`
-espongono per un record chiuso; l'altro nome, in quel dashboard, non esiste e
-il record sparirebbe dalla board. Se chiami `worktree_finalize` passando
+`processed` — sono le uniche colonne che i rispettivi tab Bug/Suggestion di
+`yano dash` espongono per un record chiuso; l'altro nome, in quel tab, non
+esiste e il record sparirebbe dalla board. Se chiami `worktree_finalize` passando
 `feedback_id` (con `user_confirmed: true`, oppure `automatic_backend: true`
 per un bug puro backend), lo stato terminale corretto viene scritto
 automaticamente in base al prefisso (`BUG-`→`resolved`, `SUG-`→`processed`):

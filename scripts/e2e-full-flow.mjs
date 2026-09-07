@@ -686,7 +686,7 @@ async function main() {
 	console.log(`Stub Evolution API listening on 127.0.0.1:${evo.port}`);
 	const cwd = await makeScratchRepo(evo.port);
 	console.log(`Scratch repo: ${cwd}`);
-	const project = "e2e" + Math.random().toString(36).slice(2, 8);
+	const project = "yano-e2e-full-flow-" + Math.random().toString(36).slice(2, 8);
 
 	try {
 		await test1FullFlow(cwd, project, evo);

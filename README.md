@@ -454,6 +454,11 @@ pi install npm:pi-mcp-adapter   # ripetere solo se yano doctor lo segnala
 
 `.mcp.json` dichiara `chrome-devtools`, Agentation (`npx -y agentation-mcp server`) e il server remoto GitHub OAuth. Il server MCP resta tecnicamente raggiungibile da tutte le istanze del progetto perché Pi non supporta lo scope MCP per ruolo; la capability Agentation è però assegnata solo al planner, che riceve e instrada i problemi frontend.
 
+Le suite automatiche usano `YANO_TEST_MODE=1`: gli eventi di notifica restano
+nei trace per la verifica, ma WhatsApp, Telegram ed email non vengono mai
+contattati. Le sandbox E2E sono identificate internamente come `yano-e2e-*` e
+non sono progetti utente.
+
 Dopo un task che ha coinvolto `frontend-developer` o `frontend-reviewer`, il
 planner chiede se l'utente vuole una review visuale dell'app in sviluppo. Con
 risposta affermativa esegue:
@@ -464,9 +469,12 @@ yano frontend-review start
 
 Il comando installa `agentation` come devDependency, inferisce il comando e
 l'URL del frontend (`dev`, `start` o `serve`) e stampa l'URL raggiungibile.
-Il frontend developer monta poi il componente Agentation nel root React solo
-in development. L'utente può annotare quella pagina; il planner riceve le
-annotazioni via MCP e le instrada nel normale ciclo frontend.
+Per React il componente viene usato nel root dell'app; per Angular Yano crea
+un host adapter che monta Agentation tramite React dopo il bootstrap Angular.
+Entrambi sono caricati solo in development. L'utente può annotare la pagina;
+il planner riceve le annotazioni via MCP e le instrada nel normale ciclo
+frontend. Framework non riconosciuti restano esplicitamente browser-only finché
+non viene aggiunto un adapter dedicato.
 
 ## Project layout
 

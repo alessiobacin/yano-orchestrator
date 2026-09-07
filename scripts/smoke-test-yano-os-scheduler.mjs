@@ -136,6 +136,8 @@ console.log("\n=== yano-watcher-registry.mjs and yano-scheduler.mjs actually cal
 	assert.match(globalServicesSource, /export function ensureComputerLocalService/);
 	assert.match(globalServicesSource, /if \(health\.healthy\)/, "un servizio permanente resta aperto quando pane, processo e heartbeat sono sani anche se Herdr non ha ancora indicizzato la riga agente");
 	assert.match(globalServicesSource, /const afterHealth = pane\?\.pane_id \? probeService/, "il recupero valuta la salute osservabile della pane/processo, non solo la snapshot agente");
+	assert.match(globalServicesSource, /service_kept_alive_during_health_gap/, "un agente permanente non viene chiuso durante un gap di heartbeat o stato");
+	assert.doesNotMatch(globalServicesSource, /service_tab_closed_for_recovery/, "il control-plane non chiude la tab di un servizio permanente per tentare il recovery");
 	assert.match(globalServicesSource, /ensureGlobalYanoServices\(\)/, "il control-plane globale espone la riconciliazione dei servizi");
 }
 console.log("   OK — entrambi i supervisori globali (yano-watcher e yano-scheduler) sono cablati al ramo Windows");

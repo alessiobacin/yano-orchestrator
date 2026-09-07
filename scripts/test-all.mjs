@@ -82,7 +82,7 @@ async function main() {
 	const broker = await ensureBroker();
 	try {
 		for (const [label, command, args] of targets) {
-			const result = await run(label, command, args, { PI_ORCH_TEST_NO_EXIT: "1" });
+			const result = await run(label, command, args, { PI_ORCH_TEST_NO_EXIT: "1", YANO_TEST_MODE: label === "full e2e" ? "0" : "1" });
 			if (result.code !== 0) throw new Error(`${label} fallito (exit ${result.code}${result.signal ? `, signal ${result.signal}` : ""}).`);
 		}
 		console.log(`\nALL TESTS PASSED (${targets.length} checks).`);

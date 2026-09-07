@@ -204,12 +204,18 @@ function ensureServiceUnlocked(service) {
 		logService("service_healthy", { service: service.instance, workspace_id: workspaceId, tab_id: tab.tab_id, pane_id: pane.pane_id, health });
 		return { service: service.instance, running: true, recovered: false, health, workspace_id: workspaceId, tab_id: tab.tab_id, pane_id: pane.pane_id };
 	}
-	if (tab && agent) {
-		logService("service_tab_closed_for_recovery", { service: service.instance, tab_id: tab.tab_id, pane_id: pane?.pane_id, previous_health: health });
-		const closed = run("herdr", ["tab", "close", tab.tab_id]);
-		if (closed.status !== 0) return { service: service.instance, running: false, recovered: false, error: (closed.stderr || "tab di servizio non chiusa").trim() };
-		state = snapshot(); workspace = state?.workspaces?.find((item) => item.label === service.workspace);
-		tab = null; pane = null;
+	// These are permanent control-plane agents. Never close their tab as a
+	// recovery side effect: a missing/stale application heartbeat can happen
+	// while Pi is reasoning, and closing the tab kills an active inference.
+	// Reuse the existing pane below when the process is genuinely absent; if a
+	// process is still present, leave it entirely untouched and let its own
+	// heartbeat recover naturally.
+	if (tab && pane && !health.process_pid) {
+		logService("service_recovery_reused_existing_pane", { service: service.instance, tab_id: tab.tab_id, pane_id: pane.pane_id, previous_health: health });
+	}
+	if (tab && pane && health.process_pid) {
+		logService("service_kept_alive_during_health_gap", { service: service.instance, tab_id: tab.tab_id, pane_id: pane.pane_id, previous_health: health });
+		return { service: service.instance, running: true, recovered: false, deferred: true, reason: "process_present_heartbeat_or_state_gap", health, workspace_id: workspaceId, tab_id: tab.tab_id, pane_id: pane.pane_id };
 	}
 	if (!tab || !pane) {
 		const created = run("herdr", ["tab", "create", "--workspace", workspaceId, "--cwd", serviceCwd, "--label", service.tab, "--no-focus"]);

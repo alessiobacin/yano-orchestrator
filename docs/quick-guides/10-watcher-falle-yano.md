@@ -158,10 +158,11 @@ tutti i servizi persistenti (`watcher-service`, `scheduler-service`, `planner-01
 e `yano-local-pc`) e degli agenti/progetti registrati:
 verifica workspace/tab/pane, processo Pi foreground, stato effettivo Herdr con
 `agent explain`, heartbeat applicativo, trace e ticket SQLite. Questo controllo
-non usa token né chiama un modello. Se uno dei segnali non è coerente, il
-supervisore chiude e ricrea il componente interessato, riattiva il planner del
-progetto e registra il recupero; le tab morte/bloccate non vengono lasciate
-come falsi positivi. La stessa passata pulisce anche le tab degli agenti di
+non usa token né chiama un modello. Per i servizi permanenti una tab/processo
+ancora esistente non viene mai chiusa durante il recovery: un heartbeat tardivo
+durante l'inferenza viene registrato e lasciato proseguire; se il processo è
+davvero assente, il supervisore riusa la stessa pane per riaprirlo. La stessa
+passata pulisce anche le tab degli agenti di
 progetto (coder/reviewer/docs-sync/...) che hanno concluso il lavoro — in due
 fasi: prima le tab con un agente Herdr ancora presente (chiusa se l'ultimo
 ticket assegnato è `done`/`failed`, o se il pane non ha più un processo `pi`

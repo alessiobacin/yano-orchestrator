@@ -115,7 +115,7 @@ vengono ricevute dal planner tramite il server MCP Agentation.
 Con il broker Docker incluso:
 
 ```bash
-docker compose -f mqtt/compose.yaml up -d
+docker compose -f .pi/extensions/yano-orchestrator/mqtt/compose.yaml up -d
 ```
 
 Se il broker è già disponibile su `127.0.0.1:1883`, questo passaggio non è

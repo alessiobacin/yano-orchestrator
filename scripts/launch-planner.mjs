@@ -369,7 +369,11 @@ function generatedSkillPath(packageRoot, name) {
 
 function generatedRoleConfigDir({ cwd, role, roleManifest, sourceDir: preferredSourceDir = null }) {
 	if (!roleManifest) return null;
-	const sourceDirs = [path.join(cwd, "agents"), path.join(cwd, ".pi", "agents")];
+	const sourceDirs = [
+		path.join(cwd, ".pi", "extensions", "yano-orchestrator", "agents"),
+		path.join(cwd, "agents"),
+		path.join(cwd, ".pi", "agents"),
+	];
 	const sourceDir = preferredSourceDir || sourceDirs.find((candidate) => existsSync(path.join(candidate, "roles.yaml"))) || sourceDirs[0];
 	let config = { roles: {} };
 	const sourceFile = path.join(sourceDir, "roles.yaml");
@@ -492,6 +496,7 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 	const hasLocalExtension = existsSync(orchestratorPath);
 	const projectMarkers = [
 		path.join(cwd, ".pi", "extensions", "yano-orchestrator", "config", "project.json"),
+		path.join(cwd, ".pi", "extensions", "yano-orchestrator", "agents", "roles.yaml"),
 		path.join(cwd, "agents", "roles.yaml"),
 		// Projects created by earlier Yano scaffolds kept the roster under
 		// `.pi/agents`. Keep them launchable while deriving the project scope
@@ -661,9 +666,12 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 	if (projectFlagIndex >= 0 && normalizedPassthrough[projectFlagIndex + 1] !== undefined) normalizedPassthrough[projectFlagIndex + 1] = traceProject;
 	const projectScopeFlags = explicitProject ? [] : ["--project", derivedProject];
 	const hasExplicitConfigDir = passthrough.includes("--config-dir");
-	const legacyConfigDirFlags = !hasExplicitConfigDir && !existsSync(path.join(cwd, "agents", "roles.yaml")) && existsSync(path.join(cwd, ".pi", "agents", "roles.yaml"))
-		? ["--config-dir", path.join(".pi", "agents")]
-		: [];
+	const modernConfigDir = path.join(cwd, ".pi", "extensions", "yano-orchestrator", "agents");
+	const legacyConfigDirFlags = !hasExplicitConfigDir && existsSync(path.join(modernConfigDir, "roles.yaml"))
+		? ["--config-dir", path.join(".pi", "extensions", "yano-orchestrator", "agents")]
+		: !hasExplicitConfigDir && !existsSync(path.join(cwd, "agents", "roles.yaml")) && existsSync(path.join(cwd, ".pi", "agents", "roles.yaml"))
+			? ["--config-dir", path.join(".pi", "agents")]
+			: [];
 	const generatedConfigFlags = generatedConfigDir && !hasExplicitConfigDir ? ["--config-dir", generatedConfigDir] : [];
 	// `yano model-advisor` returns an llmProxy catalog pin such as
 	// `z-ai/glm-5.3-flash@openrouter-glm`. Keep the translation to Pi in this

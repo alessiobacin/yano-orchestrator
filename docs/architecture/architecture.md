@@ -18,6 +18,14 @@ CLI e strumenti locali. Su macOS vengono aggiunti gli MCP Apple affidabili;
 negli altri sistemi gli MCP Apple sono esclusi e restano disponibili gli
 strumenti terminali nativi di Pi.
 
+Il runtime `yano-local-pc` non è un progetto applicativo e non viene quindi
+inserito nel registro dei progetti watcher. Resta però sotto il control-plane:
+ogni passata globale di watcher/scheduler invoca `ensureComputerLocalService()`
+e richiede processo, stato Herdr, heartbeat applicativo e identità esatta del
+`planner-01` globale. Una tab chiusa, bloccata, stantia o occupata dall’agente
+sbagliato viene ricreata. Architect e auto-improver restano worker on-demand e
+sono riconciliati dai propri registri quando richiesto.
+
 Architect genera capability globali con `yano architect create --type
 playbook|cli|skill|mcp-server|rest-api`. Il codice viene scritto nel catalogo persistente
 globale e resta ephemeral finché review, test, installazione, prima esecuzione
@@ -79,7 +87,7 @@ aggiorna i documenti esistenti obsoleti e crea quelli mancanti applicabili.
 con i riferimenti finali. Un rifiuto viene registrato senza inventare
 documentazione.
 
-1. `yano init` validates Node, Pi-facing prerequisites, MCP configuration and broker availability before writing a scaffold. In-place initialization of an existing project is non-destructive: it preserves application files and merges only missing Yano infrastructure; if root `agents/` belongs to the application, the Yano roster uses `.pi/agents/`. The active MCP template includes `chrome-devtools`, GitHub and the project-wide Agentation server. With `--herdr`, the CLI first creates or reuses and explicitly focuses a Herdr workspace rooted at the current directory, runs the scaffold command in its root pane, then starts `planner-01` in that same terminal; when invoked outside Herdr it opens/attaches the Herdr client, while an invocation already inside Herdr avoids nesting another client. Older projects whose roster is still under `.pi/agents/` remain launchable; the launcher selects that directory explicitly instead of assuming the modern root `agents/` layout.
+1. `yano init` validates Node, Pi-facing prerequisites, MCP configuration and broker availability before writing a scaffold. In-place initialization of an existing project is non-destructive: it preserves application files and places new Yano roster/broker configuration under `.pi/extensions/yano-orchestrator/agents/` and `.pi/extensions/yano-orchestrator/mqtt/`; old root `agents/` and `.pi/agents/` layouts remain launchable for compatibility. The active MCP template includes `chrome-devtools`, GitHub and the project-wide Agentation server. With `--herdr`, the CLI first creates or reuses and explicitly focuses a Herdr workspace rooted at the current directory, runs the scaffold command in its root pane, then starts `planner-01` in that same terminal; when invoked outside Herdr it opens/attaches the Herdr client, while an invocation already inside Herdr avoids nesting another client.
 2. `yano start` launches any configured role. For a worker tab, `yano start --herdr`
    verifies both the Herdr workspace label and a pane rooted at the current
    project before creating the tab; it refuses to fall back to whichever
@@ -401,13 +409,15 @@ pane no longer has a live `pi` process. The second walks the project's Herdr
 workspace tabs directly: a Pi process that has fully exited disappears from
 `snapshot.agents` entirely (Herdr keeps no "dead agent" placeholder), so its
 tab lingers forever with no owning agent at all, invisible to the first pass.
-This second pass only closes such an agent-less tab when the project's own
-ticket history confirms its label (Yano's own tab-naming convention names a
-tab after its instance) is `done`/`failed` — an agent-less tab with no
-ticket-history match at all is left alone, because a same-minute
-freshly-launched instance that has not yet registered its Pi agent looks
-identical from the outside and must never be closed on absence of evidence
-alone. In both passes, a planner tab and the tab conventionally labelled
+Terminal-ticket history is run-aware: if the same instance is assigned to a
+`pending`/`running` ticket in an active run, that active assignment always
+overrides a `done`/`failed` ticket from an older run. This is required because
+instance names are intentionally reusable across runs. The second pass only
+closes such an agent-less tab when the project's own ticket history confirms
+its label (Yano's own tab-naming convention names a tab after its instance) is
+`done`/`failed` and no active run claims that instance — a same-minute
+freshly-launched instance must never be closed because of stale history from a
+previous task. In both passes, a planner tab and the tab conventionally labelled
 `human` (the user's own manual terminal, present in every project workspace)
 are exempt unconditionally — never touched merely because a run completed,
 the process is temporarily absent, or a ticket happens to reference that
@@ -563,9 +573,10 @@ the same working directory in a shared workspace can never receive another
 project's recovery prompt. A planner that exists but has made no durable run
 progress for 15 minutes (unless it is waiting on a decision hold) is treated as
 stalled and is restarted with a cooldown to prevent loops. Once every run is
-finalized, or a registered project remains uninitialized/without runs beyond
-the grace period, the project's watcher tab and durable registry state are
-closed automatically.
+finalized, only the watcher polling tab may become idle: the permanent
+`planner-01` control-plane tab remains present and ready for future tasks,
+feedback and resume requests. An explicit pause stops polling but does not
+remove the planner; only `yano watcher leave` removes project supervision.
 
 The external Watcher created for a playbook performs one bounded validation pass
 and then keeps a zero-token `yano watch` process alive with a ten-minute
@@ -926,7 +937,7 @@ for an explicit `yano resume`.
 
 ## Security boundaries
 
-The bundled Docker broker is local-development-only and binds its host port to loopback. Native Mosquitto uses [`mqtt/mosquitto.native.conf`](../../mqtt/mosquitto.native.conf), which also binds to loopback. Any shared or remote broker must add TLS, authentication and project-scoped ACLs; anonymous MQTT is not a production configuration. For remote TLS, launch Pi with `--mqtt-tls-ca` (and optionally `--mqtt-tls-cert`/`--mqtt-tls-key` for mutual TLS); `--mqtt-allow-insecure` is intentionally an explicit development escape hatch.
+The bundled Docker broker is local-development-only and binds its host port to loopback. Native Mosquitto uses `.pi/extensions/yano-orchestrator/mqtt/mosquitto.native.conf`, which also binds to loopback. Any shared or remote broker must add TLS, authentication and project-scoped ACLs; anonymous MQTT is not a production configuration. For remote TLS, launch Pi with `--mqtt-tls-ca` (and optionally `--mqtt-tls-cert`/`--mqtt-tls-key` for mutual TLS); `--mqtt-allow-insecure` is intentionally an explicit development escape hatch.
 
 MCP servers are currently project-wide because Pi does not scope MCP servers per role. Role prompts and capability checks limit intended usage, but this is not equivalent to a network security boundary.
 

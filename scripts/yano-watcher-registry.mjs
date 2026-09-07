@@ -39,6 +39,7 @@ import { ensureGlobalYanoServices } from "./yano-global-services.mjs";
 import { superviseExternalServices, getService } from "./yano-services.mjs";
 import { herdrSnapshot } from "./yano-herdr-client.mjs";
 import { applyRetention, dailyLogPath, bytesUnder } from "./yano-data.mjs";
+import { globalDataPath } from "./yano-config.mjs";
 
 // Cron launches with a minimal PATH. Herdr is commonly installed in the
 // user's ~/.local/bin, so make the runtime independent from the interactive
@@ -78,6 +79,17 @@ function slug(valueToSlug) {
 }
 
 function projectTabLabel(projectName) { return `watcher-${slug(projectName)}`.slice(0, 60); }
+
+// yano-local-pc is a control-plane agent owned by the scheduler, not a user
+// project. It must never enter watcher_projects or receive project lifecycle
+// handling, otherwise watcher can create false recovery loops for the default
+// agent itself.
+function isSystemControlPlaneProject(value) {
+	const root = path.resolve(String(value?.root || ""));
+	const name = String(value?.name || value?.project || "").trim().toLowerCase();
+	const localPcRoot = path.resolve(path.join(globalDataPath(), "yano-local-pc"));
+	return name === "yano-local-pc" || root === localPcRoot;
+}
 
 function requireSqlite() {
 	try { return process.getBuiltinModule?.("node:sqlite") || require("node:sqlite"); }
@@ -121,6 +133,18 @@ function openDatabase() {
 	return db;
 }
 
+function purgeSystemControlPlaneRows(db) {
+	const localPcRoot = path.resolve(path.join(globalDataPath(), "yano-local-pc"));
+	const rows = db.prepare("SELECT * FROM watcher_projects").all();
+	for (const row of rows) {
+		if (!isSystemControlPlaneProject(row)) continue;
+		if (row.worker_tab_id) {
+			try { closeHerdrTab(row.worker_tab_id); } catch { /* stale Herdr tab */ }
+		}
+		db.prepare("DELETE FROM watcher_projects WHERE project_key = ? OR root = ?").run(row.project_key, localPcRoot);
+	}
+}
+
 function openProjectDatabase(root) {
 	const file = projectDbPath(root);
 	const legacy = path.join(root, ".yano", "orchestrator.db");
@@ -139,7 +163,9 @@ function projectInfo(projectRoot, explicitProject = null) {
 	if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) throw new Error(`yano watcher: project root non valida: ${root}`);
 	const name = String(explicitProject || resolveTraceProject(root)).trim();
 	if (!name) throw new Error("yano watcher: nome progetto vuoto");
-	return { root, name, key: projectKey(root, name) };
+	const info = { root, name, key: projectKey(root, name) };
+	if (isSystemControlPlaneProject(info)) throw new Error("yano watcher: yano-local-pc è un agente di sistema, non un progetto; non può essere inizializzato o supervisionato come progetto");
+	return info;
 }
 
 function ensureProject(db, info, { intervalMs = DEFAULT_INTERVAL_MS, lookbackMs = DEFAULT_LOOKBACK_MS } = {}) {
@@ -1465,6 +1491,7 @@ export async function runYanoWatcherRegistry({ argv = [] } = {}) {
 	if (!opts.sub || opts.sub === "--help" || opts.sub === "-h" || opts.help) { console.log(usage()); return { help: true }; }
 	const db = openDatabase();
 	try {
+		purgeSystemControlPlaneRows(db);
 		if (opts.sub === "projects") {
 			const rows = db.prepare("SELECT * FROM watcher_projects ORDER BY name, root").all();
 			const result = rows.map((row) => doStatusForRow(db, row, { heal: false }));

@@ -51,14 +51,14 @@ try {
 	assert.equal(fs.readFileSync(path.join(project, "src", "keep-me.ts"), "utf8"), "export const untouched = true;\n", "application source is untouched");
 	assert.equal(fs.readFileSync(path.join(project, ".env.example"), "utf8"), "APP_ENV=test\n", "existing environment template is untouched");
 	assert.equal(fs.readFileSync(path.join(project, "agents", "application-agent.md"), "utf8"), "application-owned file\n", "application agents directory is untouched");
-	assert.ok(fs.existsSync(path.join(project, ".pi", "agents", "roles.yaml")), "Yano roster uses .pi/agents when root agents/ belongs to the application");
+	assert.ok(fs.existsSync(path.join(project, ".pi", "extensions", "yano-orchestrator", "agents", "roles.yaml")), "Yano roster uses the extension workspace when root agents/ belongs to the application");
 	assert.ok(fs.existsSync(path.join(project, ".pi", "extensions", "yano-orchestrator", "config", "project.json")), "Yano project workspace is initialized");
 	assert.ok(fs.existsSync(path.join(project, "memory")), "Code Mem è inizializzato come prerequisito");
 	assert.ok(fs.existsSync(path.join(project, ".pi", "skills", "cm", "SKILL.md")), "la skill locale Code Mem per Pi è installata");
 	const gitignore = fs.readFileSync(path.join(project, ".gitignore"), "utf8");
 	assert.match(gitignore, /dist\//, "existing .gitignore entry is preserved");
 	assert.match(gitignore, /\.pi\//, "Yano runtime is ignored");
-	assert.ok(fs.existsSync(path.join(project, "mqtt", "compose.yaml")), "missing Yano MQTT infrastructure is added");
+	assert.ok(fs.existsSync(path.join(project, ".pi", "extensions", "yano-orchestrator", "mqtt", "compose.yaml")), "missing Yano MQTT infrastructure is added in the extension workspace");
 	assert.doesNotThrow(() => execFileSync("git", ["rev-parse", "--verify", "HEAD"], { cwd: project, stdio: "ignore" }), "a new Git repository gets a baseline commit so worktree-based playbooks have a real HEAD");
 
 	await runCreateProject({ packageRoot: root, cwd: noGitProject, argv: ["--name", "Conversation Test", "--no-git"], preflightTools });

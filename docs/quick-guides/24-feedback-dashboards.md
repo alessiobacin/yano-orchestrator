@@ -9,6 +9,12 @@ yano bug-dash stop
 yano suggest-dash stop
 ```
 
+L'avvio è idempotente: se la dashboard dello stesso tipo è già attiva, Yano
+riutilizza l'istanza esistente. Se il comando viene eseguito da una
+sottocartella del progetto (per esempio `newMioDOC/webapp`), Yano risale alla
+root del progetto e stampa il relativo URL, senza creare una seconda dashboard
+su una porta diversa.
+
 Eseguiti dalla cartella di un progetto, entrambi i comandi ricavano
 automaticamente il suo `project-id`, stampano l'URL completo e aprono il
 browser. Per non aprire il browser si può usare `--no-open`; per un progetto
@@ -75,3 +81,12 @@ il planner del progetto diventa inattivo, o riceve la notifica MQTT
 automaticamente il record persistito più vecchio (i bug hanno priorità sulle
 suggestion quando entrambe le code hanno qualcosa in attesa e non è arrivata
 una notifica specifica per l'altro tipo).
+
+Gli screenshot remoti vengono verificati e scaricati nella cache privata di
+Yano prima della notifica al planner, quando l'URL pubblico restituisce
+un'immagine valida. Il wake-up del planner trasporta quindi anche blocchi
+multimodali `image`, oltre al riepilogo testuale e ai riferimenti dell'allegato;
+il modello vision può analizzare direttamente lo screenshot senza doverlo
+ricostruire dal testo. URL temporaneamente irraggiungibili vengono conservati
+per un nuovo tentativo; risposte definitivamente non valide non vengono
+mostrate come immagini broken nella dashboard.

@@ -93,7 +93,7 @@ cp .env.example .env   # optional: WhatsApp, Telegram, and email notifications
 # yano init --name "Conversation Test" --no-git
 
 # MQTT broker — either works:
-docker compose -f mqtt/compose.yaml up -d   # with Docker Desktop
+docker compose -f .pi/extensions/yano-orchestrator/mqtt/compose.yaml up -d   # with Docker Desktop
 # or, without Docker Desktop, native Mosquitto for Windows:
 #   install from https://mosquitto.org/download/ (or `winget install EclipseFoundation.Mosquitto`)
 #   then, in a separate window: mosquitto -c mqtt\mosquitto.native.conf
@@ -344,7 +344,7 @@ yano init --name "URL Shortener"
 yano trace enable --mode full
 yano trace status
 cp .env.example .env   # optional: notifications; fill in only the channels you use
-docker compose -f mqtt/compose.yaml up -d   # local MQTT broker
+docker compose -f .pi/extensions/yano-orchestrator/mqtt/compose.yaml up -d   # local MQTT broker
 yano start --instance planner-01
 ```
 
@@ -475,8 +475,7 @@ extensions/orchestrator.ts        the Pi extension itself — identity, MQTT, to
 prompts/                          system prompt for each role (planner, coder, reviewer, specialists) —
                                    read live from this installed package by every instance at launch;
                                    never copied into a scaffolded project unless you run `yano copy-prompts`
-agents/roles.yaml                 per-role defaults and the specialist roster
-agents/agents.yaml                 example instance configuration
+.pi/extensions/yano-orchestrator/agents/  per-role defaults and the specialist roster
 bin/yano.mjs                        the `yano` CLI (init/start/doctor/update/uninstall)
 scripts/                          CLI internals, dev tooling, and CI checks
 skills-vendor/mattpocock/         vendored planner-only skills (wayfinder, to-spec, to-tickets, and their own
@@ -486,7 +485,7 @@ skills-vendor/yano/yano-cli/      shared semantic CLI skill and complete command
 skills-vendor/yano/yano-code-mem/ required project-memory protocol injected into every Yano agent
 skills-vendor/awesome-copilot/    vendored chrome-devtools skill, reviewer/frontend-developer only —
                                    see VERSION.md
-mqtt/                             local Mosquitto broker config for development
+.pi/extensions/yano-orchestrator/mqtt/ local Mosquitto broker config for development
 docs/                             architecture (+Mermaid source), trace reference, quick start, quick guides,
                                    development guides (docs/guides/), ADRs (docs/adr/), cheat-sheet,
                                    Mermaid diagrams (docs/diagram/) and development notes

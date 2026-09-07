@@ -59,7 +59,7 @@ import { getProjectApi, listProjectApis, resolveApiSecret } from "../scripts/yan
 import { llmProxyAutoModel, switchImageTurnToAuto } from "../scripts/yano-vision-routing.mjs";
 import { switchPinnedModelToAuto } from "../scripts/yano-model-fallback.mjs";
 import { recommend as recommendModel } from "../scripts/yano-model-advisor.mjs";
-import { openDatabase as openFeedbackDatabase, createFeedback as createFeedbackRecord, claimFeedback, claimNextQueuedFeedback, listFeedback, terminalStatusForFeedbackId } from "../scripts/yano-feedback.mjs";
+import { openDatabase as openFeedbackDatabase, createFeedback as createFeedbackRecord, claimFeedback, claimNextQueuedFeedback, listFeedback, buildQueuedFeedbackWakeMessage, terminalStatusForFeedbackId } from "../scripts/yano-feedback.mjs";
 import { globalConfigPath, loadConfigFile } from "../scripts/yano-config.mjs";
 import { formatNotification } from "../scripts/yano-notification-format.mjs";
 
@@ -3089,7 +3089,13 @@ export default function (pi: ExtensionAPI) {
 			db = openFeedbackDatabase();
 			const result = claimNextQueuedFeedback(db, identity.project, { preferredType });
 			if (!result) return;
-			pi.sendMessage({ customType: "feedback-inbound", content: result.message, display: true, details: { feedback_id: result.claimed.id, reason, feedback_type: result.type } }, { deliverAs: "followUp", triggerTurn: true });
+			const imageBlocks = (result.claimed.screenshots || []).flatMap((shot: any) => {
+				const source = shot?.preview_url || shot?.data || "";
+				const match = String(source).match(/^data:([^;,]+)?;base64,(.+)$/s);
+				return match ? [{ type: "image", data: match[2], mimeType: shot.mime_type || match[1] || "image/png" }] : [];
+			});
+			const content: any = [{ type: "text", text: buildQueuedFeedbackWakeMessage(result.claimed, result.type) }, ...imageBlocks];
+			pi.sendMessage({ customType: "feedback-inbound", content, display: true, details: { feedback_id: result.claimed.id, reason, feedback_type: result.type, screenshot_count: imageBlocks.length } } as any, { deliverAs: "followUp", triggerTurn: true });
 			logEvent("feedback_queue_wake", { feedback_id: result.claimed.id, reason, status: result.claimed.status, feedback_type: result.type });
 		} catch (error) {
 			logEvent("feedback_queue_wake_failed", { reason, error: error instanceof Error ? error.message : String(error) });

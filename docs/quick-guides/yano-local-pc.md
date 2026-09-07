@@ -5,6 +5,13 @@
 `planner-01`: il servizio non avvia un secondo agente Pi usa-e-getta. Watcher,
 feedback e scheduler verificano e ripristinano sempre quel planner.
 
+Non è un progetto e quindi non compare in `yano watcher projects`. La sua
+supervisione però resta attiva: ogni passata globale verifica workspace, tab,
+processo, stato Herdr, heartbeat applicativo e identità `planner-01`; se è
+chiuso, bloccato, stantio o sostituito dall’agente sbagliato, lo ricrea.
+Architect e auto-improver sono invece worker on-demand e vengono riconciliati
+tramite i rispettivi registri quando il loro lavoro lo richiede.
+
 I server Apple sono caricati esclusivamente dalla configurazione runtime del
 servizio, mai dai `.mcp.json` dei progetti. Sono disponibili Notes, Messages,
 Contacts, Reminders, Calendar, Maps, Mail e Voice Memos. Voice Memos richiede

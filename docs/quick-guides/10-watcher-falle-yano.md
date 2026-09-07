@@ -170,8 +170,12 @@ tutto sparisce da Herdr senza lasciare traccia, e prima di questo fix la sua
 tab restava aperta per sempre, invisibile alla prima fase. Una tab senza
 agente viene chiusa solo se la sua label (che per convenzione Yano coincide
 col nome dell'istanza) ha davvero un ticket `done`/`failed` nella storia del
-progetto — un'istanza appena lanciata e non ancora registrata non viene mai
-chiusa sulla sola assenza di prove. **La tab del planner e quella etichettata
+progetto e nessun ticket `pending`/`running` dello stesso agente in un run
+attivo. I nomi delle istanze sono riutilizzabili: un ticket attivo prevale
+sempre sulla storia terminale di un run precedente, così un worker appena
+rilanciato non viene chiuso dal cleanup del watcher. Un'istanza appena lanciata
+e non ancora registrata non viene mai chiusa sulla sola assenza di prove.
+**La tab del planner e quella etichettata
 `human` (il terminale manuale dell'utente) non vengono mai chiuse**, in
 nessuna delle due fasi. Questa pulizia gira anche per un progetto il cui
 watcher è esplicitamente in pausa: mettere in pausa il polling non equivale a
@@ -365,8 +369,9 @@ quel caso registra `model-runtime-fallback`.
 
 Un watcher registrato resta attivo anche se il progetto non ha ancora
 `orchestrator.db`: la scansione segnala `waiting_for_initialization` e non lo
-disattiva per timeout. Resta aperto anche quando non esistono run attivi,
-finché non viene usato `pause` o `leave`.
+disattiva per timeout. Il planner permanente del progetto viene mantenuto
+presente e pronto anche quando non esistono run attivi o il watcher è in pausa;
+solo `yano watcher leave` rimuove definitivamente la supervisione.
 
 Il watcher persistente mantiene anche la sottoscrizione MQTT agli eventi di
 fine turno (`planner_task_completed`) e di fine run (`run_completed`). Ricevuto

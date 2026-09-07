@@ -12,8 +12,9 @@
 // volte, `pi` si rifiuta con "Tool ... conflicts with ...". Scoperto da un
 // test reale dell'operatore su una macchina Windows nuova — vedi Revisione
 // 33 in docs/notes/development-notes.md per il traceback completo e l'analisi. Un
-// progetto scaffoldato contiene solo CONFIGURAZIONE (agents/roles.yaml,
-// mqtt/, .env.example), mai il codice dell'estensione.
+// progetto scaffoldato contiene solo CONFIGURAZIONE sotto
+// .pi/extensions/yano-orchestrator/ (agents/, mqtt/, .env.example), mai il
+// codice dell'estensione.
 //
 // Revisione 47 — NON copia più prompts/ nel progetto: da Revisione 37 a
 // Revisione 46 questo script copiava prompts/ dentro
@@ -184,18 +185,7 @@ function copyFileMissing(source, destination) {
 }
 
 function resolveAgentsDestination(targetDir) {
-	const rootAgents = path.join(targetDir, "agents");
-	const rootRoster = path.join(rootAgents, "roles.yaml");
-	const existingLegacyAgents = path.join(targetDir, ".pi", "agents");
-	const existingLegacyRoster = path.join(existingLegacyAgents, "roles.yaml");
-	if (!fs.existsSync(rootAgents) && fs.existsSync(existingLegacyRoster)) return existingLegacyAgents;
-	if (fs.existsSync(rootAgents) && !fs.existsSync(rootRoster) && fs.readdirSync(rootAgents).length > 0) {
-		// An application may already own a root `agents/` directory. Keep it
-		// untouched and place Yano's roster in the supported project-local
-		// compatibility location instead of polluting the application folder.
-		return existingLegacyAgents;
-	}
-	return rootAgents;
+	return path.join(targetDir, ".pi", "extensions", "yano-orchestrator", "agents");
 }
 
 function ensureGitignore(targetDir) {
@@ -440,7 +430,7 @@ export async function runCreateProject({ packageRoot, cwd, argv, preflightTools 
 	const adoptingExistingProject = inPlace && fs.readdirSync(targetDir).some((entry) => entry !== ".git");
 	console.log(`create-project: ${adoptingExistingProject ? "inizializzo il progetto esistente" : "creo il progetto"} "${name}" in ${targetDir}${inPlace ? " (in place)" : ""}`);
 
-	// 1. Copia SOLO configurazione (agents/mqtt qui, prompts/ poco più sotto
+	// 1. Copia SOLO configurazione (agents/mqtt sotto l'estensione, prompts/ poco più sotto
 	//    con una destinazione diversa — vedi quel commento) dal pacchetto —
 	//    MAI extensions/ (Revisione 33, vedi commento in testa al file: il
 	//    codice dell'estensione vive nel pacchetto installato globalmente,
@@ -450,9 +440,10 @@ export async function runCreateProject({ packageRoot, cwd, argv, preflightTools 
 	//    del proprio, il problema reale osservato in yano-test-project — vedi
 	//    docs/notes/development-notes.md, Revisione 28).
 	const agentsDestination = resolveAgentsDestination(targetDir);
+	const yanoWorkspace = path.join(targetDir, ".pi", "extensions", "yano-orchestrator");
 	for (const dir of ["mqtt"]) {
 		const src = path.join(packageRoot, dir);
-		if (fs.existsSync(src)) copyDirMissing(src, path.join(targetDir, dir));
+		if (fs.existsSync(src)) copyDirMissing(src, path.join(yanoWorkspace, dir));
 	}
 	const packagedAgents = path.join(packageRoot, "agents");
 	if (fs.existsSync(packagedAgents)) copyDirMissing(packagedAgents, agentsDestination);
@@ -632,7 +623,7 @@ export async function runCreateProject({ packageRoot, cwd, argv, preflightTools 
 	console.log(
 		"  .mcp.json è già attivo: chrome-devtools, Agentation e GitHub MCP sono stati dichiarati automaticamente; autentica GitHub alla prima connessione",
 	);
-	console.log("  docker compose -f mqtt/compose.yaml up -d   # broker MQTT locale (Docker Desktop su Windows), oppure punta --broker a uno esistente");
+	console.log("  docker compose -f .pi/extensions/yano-orchestrator/mqtt/compose.yaml up -d   # broker MQTT locale, oppure punta --broker a uno esistente");
 	if (isWindows) {
 		console.log("  # senza Docker Desktop: installa Mosquitto nativo (https://mosquitto.org/download/ o `winget install EclipseFoundation.Mosquitto`)");
 		console.log("  #   poi: mosquitto -c mqtt\\mosquitto.native.conf   (in una finestra PowerShell separata)");

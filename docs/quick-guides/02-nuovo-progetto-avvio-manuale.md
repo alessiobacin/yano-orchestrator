@@ -24,7 +24,7 @@ codice dell'applicazione; `cm` deve essere disponibile prima di iniziare.
 ## 3. Avviare il broker e il trace
 
 ~~~
-docker compose -f mqtt/compose.yaml up -d
+docker compose -f .pi/extensions/yano-orchestrator/mqtt/compose.yaml up -d
 yano trace enable --mode full
 yano trace status
 ~~~

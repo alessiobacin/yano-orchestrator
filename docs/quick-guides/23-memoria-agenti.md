@@ -47,3 +47,10 @@ Memoria e documentazione non sostituiscono la verifica: informazioni critiche
 o potenzialmente obsolete devono essere confrontate con il codice reale, i
 test e il runtime. Nel report l’agente indica documenti, file, approfondimenti,
 lacune e verifiche eseguite.
+
+Per richieste generiche come “continua la risoluzione dell’ultimo bug”, il
+planner usa quindi la memoria solo come contesto. La selezione dell’attività
+legge deterministicamente prima run/checkpoint, poi feedback in `processing`,
+`retry` o `queued`, infine `received`; se il candidato non è univoco chiede un
+chiarimento. Così una nuova istanza può continuare il lavoro senza duplicare
+bug o ticket.

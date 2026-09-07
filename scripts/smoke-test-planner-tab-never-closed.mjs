@@ -23,7 +23,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { cleanupCompletedAgentTabs } from "./yano-watcher-registry.mjs";
+import { cleanupCompletedAgentTabs, cleanupStaleProjectTabs } from "./yano-watcher-registry.mjs";
 
 console.log("Regression: planner tab is never closed by cleanupCompletedAgentTabs()");
 let passed = 0;
@@ -104,6 +104,32 @@ check("a mixed snapshot: planner survives, finished coder is closed, in-progress
 	const runs = [{ tickets: [{ status: "done", assigned_instance: "coder-01" }, { status: "running", assigned_instance: "coder-02" }] }];
 	const removed = cleanupCompletedAgentTabs(snapshotWith(agents), row, runs);
 	assert.deepEqual(removed.map((item) => item.instance), ["coder-01"], "only the finished, non-planner agent is closed — planner and in-progress worker both survive");
+});
+
+check("a worker reused by a NEW active run is never closed because of an OLD terminal ticket", () => {
+	const snapshot = {
+		agents: [
+			{ name: "planner-01", cwd: row.root, tab_id: "t-planner", pane_id: "p-planner", agent_status: "working" },
+			{ name: "coder-01", cwd: row.root, tab_id: "t-coder", pane_id: "p-coder-running", agent_status: "idle" },
+		],
+		tabs: [
+			{ tab_id: "t-planner", workspace_id: "w1", label: "planner-01" },
+			{ tab_id: "t-coder", workspace_id: "w1", label: "coder-01" },
+		],
+		panes: [
+			{ pane_id: "p-planner", tab_id: "t-planner", workspace_id: "w1", cwd: row.root },
+			{ pane_id: "p-coder-running", tab_id: "t-coder", workspace_id: "w1", cwd: row.root },
+		],
+		workspaces: [{ workspace_id: "w1", label: row.name }],
+	};
+	const runs = [
+		{ id: "old-run", status: "done", tickets: [{ status: "done", assigned_instance: "coder-01" }] },
+		{ id: "new-run", status: "active", paused: false, tickets: [{ status: "running", assigned_instance: "coder-01" }] },
+	];
+	const completedSweep = cleanupCompletedAgentTabs(snapshot, row, runs);
+	const staleSweep = cleanupStaleProjectTabs(snapshot, row, runs);
+	assert.deepEqual(completedSweep, [], "the live worker is protected from the completed-agent sweep");
+	assert.deepEqual(staleSweep, [], "the live worker is protected from the stale-tab sweep");
 });
 
 check("an agent instance from a DIFFERENT project's cwd is never touched", () => {

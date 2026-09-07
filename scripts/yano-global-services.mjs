@@ -185,7 +185,9 @@ function ensureServiceUnlocked(service) {
 		}
 	}
 	const health = pane ? probeService(pane.pane_id, agent, { instance: service.instance, root: serviceCwd, project: service.project || "yano-orchestrator" }) : { healthy: false, reason: "pane_missing" };
-	if (isLive(agent) && health.healthy) {
+	// A live process in the pane is not enough: Herdr can briefly expose a
+	// stale/foreign agent after tab reuse. Require the owned service identity.
+	if (isLive(agent, service.instance) && health.healthy) {
 		closeInitialDuplicates(state, workspaceId, tab.tab_id, service);
 		logService("service_healthy", { service: service.instance, workspace_id: workspaceId, tab_id: tab.tab_id, pane_id: pane.pane_id, health });
 		return { service: service.instance, running: true, recovered: false, health, workspace_id: workspaceId, tab_id: tab.tab_id, pane_id: pane.pane_id };
@@ -225,12 +227,12 @@ function ensureServiceUnlocked(service) {
 	// bounded startup window before declaring an always-on service dead. Without
 	// this grace period the next one-minute tick could close a healthy process
 	// that had not published its first presence card yet.
-	if (!after?.agents?.some((item) => item.pane_id === pane.pane_id && isLive(item))) {
+	if (!after?.agents?.some((item) => item.pane_id === pane.pane_id && isLive(item, service.instance))) {
 		run("sleep", ["1"]);
 		after = snapshot();
 	}
 	closeInitialDuplicates(after, workspaceId, tab.tab_id, service);
-	const live = after?.agents?.find((item) => item.pane_id === pane.pane_id && isLive(item));
+	const live = after?.agents?.find((item) => item.pane_id === pane.pane_id && isLive(item, service.instance));
 	const afterHealth = pane?.pane_id ? probeService(pane.pane_id, live, { instance: service.instance, root: serviceCwd, project: service.project || "yano-orchestrator", warmup: true }) : { healthy: false, reason: "pane_missing_after_start" };
 	logService("service_recovery_attempted", { service: service.instance, recovered: true, running: Boolean(live && afterHealth.healthy), workspace_id: workspaceId, tab_id: tab.tab_id, pane_id: pane.pane_id, health: afterHealth, start_status: started.status });
 	return { service: service.instance, running: Boolean(live && afterHealth.healthy), recovered: true, health: afterHealth, workspace_id: workspaceId, tab_id: tab.tab_id, pane_id: pane.pane_id, error: live && afterHealth.healthy || started.status === 0 ? null : (started.stderr || started.stdout || "Herdr non ha avviato l'agente").trim() };

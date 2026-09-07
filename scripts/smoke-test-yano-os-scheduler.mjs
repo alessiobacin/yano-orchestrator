@@ -128,6 +128,10 @@ console.log("\n=== yano-watcher-registry.mjs and yano-scheduler.mjs actually cal
 	assert.match(schedulerSource, /installOneMinuteWindowsJob/);
 	assert.match(schedulerSource, /removeOneMinuteWindowsJob/);
 	assert.match(schedulerSource, /statusOneMinuteWindowsJob/);
+	const globalServicesSource = fs.readFileSync(new URL("./yano-global-services.mjs", import.meta.url), "utf8");
+	assert.match(globalServicesSource, /export function ensureComputerLocalService/);
+	assert.match(globalServicesSource, /isLive\(agent, service\.instance\)/, "la salute richiede l'identità del servizio atteso");
+	assert.match(globalServicesSource, /ensureGlobalYanoServices\(\)/, "il control-plane globale espone la riconciliazione dei servizi");
 }
 console.log("   OK — entrambi i supervisori globali (yano-watcher e yano-scheduler) sono cablati al ramo Windows");
 

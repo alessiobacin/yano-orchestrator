@@ -67,6 +67,47 @@ export function listFeedback(db, { project_id = null, type = null, statuses = nu
 	const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
 	return db.prepare(`SELECT * FROM feedback ${where} ORDER BY created_at ASC`).all(...args).map(decodeRow);
 }
+
+// Dashboard repair is deliberately conservative: a reachable remote image is
+// cached as a local attachment, a definitive 404/410 or non-image response is
+// removed, while timeouts/network errors leave the original URL untouched.
+export async function repairFeedbackScreenshots(db, item) {
+	if (!item?.screenshots?.some((shot) => shot?.kind === "url" || shot?.url)) return item;
+	const repaired = [];
+	let changed = false;
+	for (const shot of item.screenshots || []) {
+		const rawUrl = String(shot?.url || "").trim();
+		const url = rawUrl.match(/^!?\[[^]]*\]\(([^)]+)\)$/)?.[1] || rawUrl;
+		if (!url || !/^https:\/\//i.test(url)) { repaired.push(shot); continue; }
+		try {
+			const controller = new AbortController();
+			const timer = setTimeout(() => controller.abort(), 4_000);
+			const response = await fetch(url, { signal: controller.signal, redirect: "follow" });
+			clearTimeout(timer);
+			const contentType = response.headers.get("content-type") || "";
+			if (response.status === 404 || response.status === 410 || !response.ok || !/^image\//i.test(contentType)) {
+				if (response.status === 404 || response.status === 410 || response.ok) {
+					changed = true;
+					repaired.push({ ...shot, unavailable: true, checked_at: now() });
+				} else repaired.push(shot);
+				continue;
+			}
+			const buffer = Buffer.from(await response.arrayBuffer());
+			if (!buffer.length || buffer.length > MAX_ATTACHMENT_BYTES) { repaired.push(shot); continue; }
+			const local = materializeScreenshots(item.id, [{ data: `data:${contentType.split(";")[0]};base64,${buffer.toString("base64")}`, name: shot.name || "remote-screenshot", mime_type: contentType }])[0];
+			if (local) { repaired.push(local); changed = true; } else repaired.push(shot);
+		} catch {
+			// A transient network failure must never destroy a still potentially
+			// valid user-provided URL.
+			repaired.push(shot);
+		}
+	}
+	if (!changed) return item;
+	const before = item;
+	db.prepare("UPDATE feedback SET screenshots=?,updated_at=? WHERE id=?").run(JSON.stringify(repaired), now(), item.id);
+	audit(db, item.id, "yano-feedback-dashboard", "screenshots_repaired", "ripristino automatico screenshot: cache locale o rimozione di URL definitivamente non valido", before, { ...item, screenshots: repaired });
+	return row(db, item.id);
+}
 export function claimFeedback(db, feedbackId, { actor = "planner", reason = "presa in carico dal planner secondo ordine FIFO" } = {}) {
 	const current = row(db, feedbackId);
 	if (!current || !["received", "pending_planner", "queued"].includes(current.status)) return current;
@@ -76,7 +117,7 @@ export function claimFeedback(db, feedbackId, { actor = "planner", reason = "pre
 	return next;
 }
 export function buildQueuedFeedbackWakeMessage(claimed, type) {
-	const screenshotNote = claimed.screenshots?.length ? `\nScreenshot allegati: ${JSON.stringify(claimed.screenshots)}` : "";
+	const screenshotNote = claimed.screenshots?.length ? `\nScreenshot allegati: ${JSON.stringify(claimed.screenshots.map((shot) => ({ kind: shot.kind, url: shot.url, path: shot.path, name: shot.name, mime_type: shot.mime_type, attached_image: Boolean(shot.preview_url || shot.data) })))}` : "";
 	if (type === "bug") return `[bug ${claimed.id}] Bug persistito in coda FIFO. Risolvilo ora prima di restare inattivo.\n\n${claimed.message}${screenshotNote}\n\nClassifica prima l'impatto: backend puro oppure frontend/misto.`;
 	return `[suggestion ${claimed.id}] Suggestion persistita in coda. Valutala ora prima di restare inattivo: richiede sempre conferma esplicita dell'utente prima di qualsiasi modifica.\n\n${claimed.message}${screenshotNote}\n\nSe l'utente conferma, pianifica l'implementazione come nuova feature; se rifiuta, chiudi il record con una nota (yano feedback update --status cancelled).`;
 }
@@ -201,7 +242,7 @@ async function notifyPlanner(item) {
 		client.on("message", onMessage);
 		await client.subscribeAsync(`pi/${scope}/agents/+/status`, { qos: 1 });
 		await new Promise((resolve) => setTimeout(resolve, 250));
-	for (const planner of statuses) await client.publishAsync(`pi/${scope}/agents/${planner.instance}/commands`, JSON.stringify({ type: "feedback_received", feedback_type: item.type, feedback_id: item.id, project_id: item.project_id, message: item.message, resolution: item.resolution, screenshots: item.screenshots || [], requires_user_confirmation: item.type === "suggestion" || item.resolution === "user_confirmation" }));
+	for (const planner of statuses) await client.publishAsync(`pi/${scope}/agents/${planner.instance}/commands`, JSON.stringify({ type: "feedback_received", feedback_type: item.type, feedback_id: item.id, project_id: item.project_id, message: buildQueuedFeedbackWakeMessage(item, item.type), resolution: item.resolution, screenshots: item.screenshots || [], requires_user_confirmation: item.type === "suggestion" || item.resolution === "user_confirmation" }));
 		return { delivered: statuses.length, planners: statuses.map((p) => p.instance) };
 	} finally { await client.endAsync(); }
 }
@@ -218,11 +259,11 @@ export async function createFeedback(db, input) {
 	const timestamp = now(); const feedbackId = id(type); const item = { id: feedbackId, type, project_id: projectId, message, resolution, status: "received", screenshots: materializeScreenshots(feedbackId, input.screenshots), title: clean(input.title || "").slice(0, 300) || null, severity: clean(input.severity || "medium").slice(0, 30), route: clean(input.route || "").slice(0, 500) || null, environment: clean(input.environment || "").slice(0, 100) || null, browser_context: input.browser_context ? JSON.stringify(input.browser_context).slice(0, 10000) : null, notes: clean(input.notes || "").slice(0, 5000) || null, created_by: actor, updated_by: actor, created_at: timestamp, updated_at: timestamp };
 	db.prepare("INSERT INTO feedback(id,type,project_id,message,resolution,status,screenshots,title,severity,route,environment,browser_context,notes,created_by,updated_by,credentials_ciphertext,credentials_iv,credentials_tag,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(item.id,type,projectId,message,resolution,item.status,JSON.stringify(item.screenshots),item.title,item.severity,item.route,item.environment,item.browser_context,item.notes,item.created_by,item.updated_by,encrypted?.ciphertext || null,encrypted?.iv || null,encrypted?.tag || null,timestamp,timestamp);
 	audit(db, item.id, actor, "created", clean(input.audit_reason || "bug/suggestion created"), null, item);
-	const delivery = input.notify === false ? { delivered: 0, skipped: "planner_tool" } : await notifyPlanner(item).catch((error) => ({ delivered: 0, error: error.message }));
+	const hydrated = await repairFeedbackScreenshots(db, row(db, feedbackId)); const delivery = input.notify === false ? { delivered: 0, skipped: "planner_tool" } : await notifyPlanner(hydrated).catch((error) => ({ delivered: 0, error: error.message }));
 	db.prepare("UPDATE feedback SET status=?,updated_at=? WHERE id=?").run(delivery.delivered ? "queued" : "pending_planner", now(), item.id);
 	return { ...row(db, item.id), delivery };
 }
-export async function updateFeedback(db, itemId, input) { const current = row(db,itemId); if (!current) return null; if (!clean(input.audit_reason || input.reason)) throw new Error("ogni modifica richiede una nota motivazionale"); const message = input.message === undefined ? current.message : clean(input.message); const resolution = current.type === "suggestion" ? "user_confirmation" : clean(input.resolution || current.resolution); const requestedStatus = input.status === undefined ? current.status : clean(input.status); const status = ["message","screenshots","title","severity","route","environment","browser_context","notes"].some((key) => input[key] !== undefined) ? "queued" : requestedStatus; if (!message || !RESOLUTIONS.has(resolution) || !STATUSES.has(status)) throw new Error("message, resolution e status devono essere validi"); const screenshots = input.screenshots === undefined ? current.screenshots : materializeScreenshots(itemId, input.screenshots); const actor = clean(input.updated_by || input.username || "local-user"); const next = { ...current, message, resolution, status, screenshots, title: input.title === undefined ? current.title : clean(input.title), severity: input.severity === undefined ? current.severity : clean(input.severity), route: input.route === undefined ? current.route : clean(input.route), environment: input.environment === undefined ? current.environment : clean(input.environment), browser_context: input.browser_context === undefined ? current.browser_context : JSON.stringify(input.browser_context), notes: input.notes === undefined ? current.notes : clean(input.notes), updated_by: actor }; db.prepare("UPDATE feedback SET message=?,resolution=?,status=?,screenshots=?,title=?,severity=?,route=?,environment=?,browser_context=?,notes=?,updated_by=?,updated_at=? WHERE id=?").run(next.message,next.resolution,next.status,JSON.stringify(next.screenshots),next.title,next.severity,next.route,next.environment,next.browser_context,next.notes,next.updated_by,now(),itemId); audit(db, itemId, actor, "updated", input.audit_reason || input.reason, current, next); return row(db,itemId); }
+export async function updateFeedback(db, itemId, input) { const current = row(db,itemId); if (!current) return null; if (!clean(input.audit_reason || input.reason)) throw new Error("ogni modifica richiede una nota motivazionale"); const optional = (value) => { const cleaned = clean(value); return cleaned || null; }; const message = input.message === undefined ? current.message : clean(input.message); const resolution = current.type === "suggestion" ? "user_confirmation" : clean(input.resolution || current.resolution); const requestedStatus = input.status === undefined ? current.status : clean(input.status); const screenshots = input.screenshots === undefined ? current.screenshots : materializeScreenshots(itemId, input.screenshots); const title = input.title === undefined ? current.title : optional(input.title); const severity = input.severity === undefined ? current.severity : optional(input.severity); const route = input.route === undefined ? current.route : optional(input.route); const environment = input.environment === undefined ? current.environment : optional(input.environment); const browser_context = input.browser_context === undefined ? current.browser_context : (input.browser_context ? JSON.stringify(input.browser_context) : null); const notes = input.notes === undefined ? current.notes : optional(input.notes); const contentChanged = message !== current.message || JSON.stringify(screenshots) !== JSON.stringify(current.screenshots) || title !== current.title || severity !== current.severity || route !== current.route || environment !== current.environment || browser_context !== current.browser_context || notes !== current.notes; const status = contentChanged ? "queued" : requestedStatus; if (!message || !RESOLUTIONS.has(resolution) || !STATUSES.has(status)) throw new Error("message, resolution e status devono essere validi"); const actor = clean(input.updated_by || input.username || "local-user"); const next = { ...current, message, resolution, status, screenshots, title, severity, route, environment, browser_context, notes, updated_by: actor }; db.prepare("UPDATE feedback SET message=?,resolution=?,status=?,screenshots=?,title=?,severity=?,route=?,environment=?,browser_context=?,notes=?,updated_by=?,updated_at=? WHERE id=?").run(next.message,next.resolution,next.status,JSON.stringify(next.screenshots),next.title,next.severity,next.route,next.environment,next.browser_context,next.notes,next.updated_by,now(),itemId); audit(db, itemId, actor, "updated", input.audit_reason || input.reason, current, next); return row(db,itemId); }
 export function deleteFeedback(db, itemId, { actor = "local-user", reason = "deleted" } = {}) { const current = row(db, itemId); if (!current) return null; if (!clean(reason)) throw new Error("la cancellazione richiede una nota motivazionale"); audit(db, itemId, actor, "deleted", reason, current, null); db.prepare("DELETE FROM feedback WHERE id=?").run(itemId); return { deleted: true, id: itemId }; }
 export function listFeedbackAudit(db, itemId) { return db.prepare("SELECT id,feedback_id,actor,action,reason,before_json,after_json,created_at FROM feedback_audit WHERE feedback_id=? ORDER BY created_at ASC").all(itemId); }
 

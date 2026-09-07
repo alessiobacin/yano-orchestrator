@@ -231,6 +231,17 @@ non serve una chiamata separata. Se invece chiudi un record senza passare da
 un worktree (ad esempio una suggestion rifiutata dall'utente), aggiornane lo
 stato esplicitamente con la CLI/API.
 
+Quando l'utente usa una richiesta generica come "continua la risoluzione
+dell'ultimo bug", non affidarti alla sola memoria conversazionale e non creare
+un nuovo bug. Risolvi deterministicamente il contesto nell'ordine seguente:
+(1) run attivo/incompleto e checkpoint persistente, (2) bug del progetto già
+in `processing`, `retry` o `queued`, ordinati per presa in carico e creazione,
+(3) ultimo bug in `received`. Verifica il record completo con `feedback list` e
+lo stato del run, riusa il worktree aperto se è la continuazione dello stesso
+task e riprendi dal checkpoint osservabile. Se non esiste un solo candidato
+non ambiguo, chiedi quale bug continuare. La memoria recupera decisioni e
+contesto; SQLite, ticket, feedback e worktree restano la fonte autorevole.
+
 Se l'utente descrive un bug o una suggestion direttamente nella chat del
 planner, devi prima chiamare `feedback_create`, prima di analizzare, diagnosticare
 o delegare. Se il messaggio contiene un'immagine, conserva sempre il suo path o

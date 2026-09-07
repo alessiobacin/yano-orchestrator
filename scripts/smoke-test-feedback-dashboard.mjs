@@ -72,7 +72,16 @@ assert.doesNotMatch(suggestionHtml, /<option value="resolved">/, "suggest-dash i
 // notifyPlanner in yano-feedback.mjs) — a column list missing this status
 // made every such record invisible on its own board until something else
 // moved it forward.
-assert.match(html, /<option value="pending_planner">/, "bug-dash must show 'pending_planner' — the most common resting status right after filing a bug, or fresh bugs are invisible");
-assert.match(suggestionHtml, /<option value="pending_planner">/, "suggest-dash must show 'pending_planner' for the same reason");
+assert.doesNotMatch(html, /<option value="pending_planner">/, "bug-dash must not expose the obsolete pending_planner column");
+assert.doesNotMatch(suggestionHtml, /<option value="pending_planner">/, "suggest-dash must not expose the obsolete pending_planner column");
+assert.match(html, /onerror="this\.remove\(\)"/, "broken screenshot images must disappear instead of rendering a broken-image card");
+assert.match(html, /attachments/, "local screenshot attachments must be served by the dashboard");
+assert.match(html, /form\.reportValidity\(\)/, "validation must run on the HTML form, not on FormData");
+assert.match(html, /new FormData\(form\)/, "the validated form must then be serialized for the request");
+assert.doesNotMatch(html, /f\.reportValidity\(\)/, "FormData has no reportValidity method");
+assert.match(html, /function renderExistingShots\(\)/, "editing a record must render already stored screenshots");
+assert.match(html, /Rimuovi screenshot/, "stored screenshots must be removable from the edit dialog");
+assert.match(html, /existingShots\.splice\(index,1\)/, "removing an existing screenshot must update the submitted collection");
+assert.match(html, /!candidate\.unavailable/, "cards must not render screenshots marked unavailable");
 
 console.log("FEEDBACK DASHBOARD SMOKE TEST PASSED");

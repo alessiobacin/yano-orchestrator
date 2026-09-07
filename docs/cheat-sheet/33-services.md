@@ -76,3 +76,8 @@ La discovery builtin di `llmproxy` prova prima un container Docker, poi un
 processo pm2 per nome (`pm2 jlist`) — `yano services add --name llmproxy
 --healthcheck-pm2 llmproxy` per registrarlo esplicitamente se lanciato con
 `pm2 start` invece di `docker run`; il restart usa `pm2 restart <nome>`.
+Eccezione importante: `yano-local-pc` è il control-plane permanente. Se Herdr
+vede ancora il processo Pi vivo e nello stato `idle` o `working`, un heartbeat
+applicativo vecchio o temporaneamente assente non provoca la chiusura e il
+riavvio della tab. Il cron può ricrearlo solo quando mancano davvero pane o
+processo, oppure Herdr espone uno stato non sano.

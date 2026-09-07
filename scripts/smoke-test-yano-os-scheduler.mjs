@@ -16,6 +16,7 @@ import {
 	isWindows, schtasksTaskName,
 	installOneMinuteWindowsJob, removeOneMinuteWindowsJob, statusOneMinuteWindowsJob,
 } from "./yano-os-scheduler.mjs";
+import { serviceHealthAcceptable } from "./yano-global-services.mjs";
 
 console.log("=== isWindows / schtasksTaskName ===");
 assert.equal(isWindows("win32"), true);
@@ -113,6 +114,9 @@ console.log("   OK — install/status/remove compongono i comandi schtasks corre
 
 console.log("\n=== yano-watcher-registry.mjs and yano-scheduler.mjs actually call into this module ===");
 {
+	assert.equal(serviceHealthAcceptable({ processHealthy: true, healthyState: true, applicationHeartbeatHealthy: false, heartbeatRequired: false }), true, "yano-local-pc resta sano se Pi è vivo e idle anche con heartbeat applicativo in ritardo");
+	assert.equal(serviceHealthAcceptable({ processHealthy: true, healthyState: true, applicationHeartbeatHealthy: false, heartbeatRequired: true }), false, "gli altri servizi continuano a richiedere un heartbeat recente");
+	assert.equal(serviceHealthAcceptable({ processHealthy: false, healthyState: true, applicationHeartbeatHealthy: true, heartbeatRequired: false }), false, "un processo assente non viene mai considerato sano");
 	// Both files import installOneMinuteWindowsJob/removeOneMinuteWindowsJob/
 	// statusOneMinuteWindowsJob from yano-os-scheduler.mjs and branch on
 	// platform before falling through to their existing, already-tested

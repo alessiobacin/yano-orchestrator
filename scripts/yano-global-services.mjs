@@ -114,7 +114,11 @@ function isLive(agent, expectedName = null) {
 // stale after a Pi turn ends. Herdr's lifecycle explanation plus the
 // foreground process are the authoritative local signals; no model/MQTT
 // request is made here.
-function probeService(paneId, snapshotAgent, { instance = null, root = PACKAGE_ROOT, project = "yano-orchestrator", warmup = false } = {}) {
+export function serviceHealthAcceptable({ processHealthy, healthyState, applicationHeartbeatHealthy, heartbeatRequired = true, warmup = false } = {}) {
+	return Boolean(processHealthy && healthyState && (warmup || !heartbeatRequired || applicationHeartbeatHealthy));
+}
+
+function probeService(paneId, snapshotAgent, { instance = null, root = PACKAGE_ROOT, project = "yano-orchestrator", warmup = false, heartbeatRequired = true } = {}) {
 	if (!paneId) return { healthy: false, reason: "pane_missing" };
 	const info = run("herdr", ["pane", "process-info", "--pane", paneId]);
 	let processInfo = null;
@@ -136,7 +140,7 @@ function probeService(paneId, snapshotAgent, { instance = null, root = PACKAGE_R
 	// decorative/stuck PID from remaining accepted forever, while still letting
 	// a fresh Pi session publish its first heartbeat during startup.
 	return {
-		healthy: processHealthy && healthyState && (warmup ? true : applicationHeartbeat.healthy),
+		healthy: serviceHealthAcceptable({ processHealthy, healthyState, applicationHeartbeatHealthy: applicationHeartbeat.healthy, heartbeatRequired, warmup }),
 		state,
 		process_pid: Number(foreground?.pid) || null,
 		process: foreground?.argv0 || foreground?.name || null,
@@ -184,7 +188,12 @@ function ensureServiceUnlocked(service) {
 			if (renamed.status === 0) { tab = { ...initial, label: service.tab }; pane = initialPane; agent = initialAgent; }
 		}
 	}
-	const health = pane ? probeService(pane.pane_id, agent, { instance: service.instance, root: serviceCwd, project: service.project || "yano-orchestrator" }) : { healthy: false, reason: "pane_missing" };
+	// yano-local-pc is a permanent control-plane process. Its Herdr process and
+	// lifecycle state are authoritative; a stale/missing application heartbeat
+	// must never close its tab while Pi is visibly alive and idle. The heartbeat
+	// remains required for the other always-on services.
+	const heartbeatRequired = !(service.workspace === COMPUTER_WORKSPACE && service.project === SYSTEM_PROJECT);
+	const health = pane ? probeService(pane.pane_id, agent, { instance: service.instance, root: serviceCwd, project: service.project || "yano-orchestrator", heartbeatRequired }) : { healthy: false, reason: "pane_missing" };
 	// The pane/process probe plus the application heartbeat are authoritative
 	// for an always-on service. Herdr can briefly omit the agent row (or expose
 	// the generic `pi` name) immediately after a process starts or after a
@@ -236,7 +245,7 @@ function ensureServiceUnlocked(service) {
 	}
 	closeInitialDuplicates(after, workspaceId, tab.tab_id, service);
 	const afterAgent = after?.agents?.find((item) => item.pane_id === pane.pane_id) || null;
-	const afterHealth = pane?.pane_id ? probeService(pane.pane_id, afterAgent, { instance: service.instance, root: serviceCwd, project: service.project || "yano-orchestrator", warmup: true }) : { healthy: false, reason: "pane_missing_after_start" };
+	const afterHealth = pane?.pane_id ? probeService(pane.pane_id, afterAgent, { instance: service.instance, root: serviceCwd, project: service.project || "yano-orchestrator", warmup: true, heartbeatRequired }) : { healthy: false, reason: "pane_missing_after_start" };
 	const live = afterHealth.healthy ? (after?.agents?.find((item) => item.pane_id === pane.pane_id) || { name: service.instance, agent_status: "idle" }) : null;
 	logService("service_recovery_attempted", { service: service.instance, recovered: true, running: afterHealth.healthy, workspace_id: workspaceId, tab_id: tab.tab_id, pane_id: pane.pane_id, health: afterHealth, start_status: started.status });
 	return { service: service.instance, running: afterHealth.healthy, recovered: true, health: afterHealth, workspace_id: workspaceId, tab_id: tab.tab_id, pane_id: pane.pane_id, error: afterHealth.healthy || started.status === 0 ? null : (started.stderr || started.stdout || "Herdr non ha avviato l'agente").trim() };

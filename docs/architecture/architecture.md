@@ -381,7 +381,10 @@ exposes the one canonical pair, `applicationHeartbeatPath()`/
 `readApplicationHeartbeat(cwd, instance, { maxAgeMs })`, used by both readers:
 `yano-global-services.mjs`'s `probeService()` (the 3 global services) and
 `yano-watcher-registry.mjs`'s `plannerHeartbeatHealthy()` (per-project
-planners). Before this consolidation the two readers had independently
+planners). Per il control-plane permanente `yano-local-pc`, invece, il
+controllo non richiede un heartbeat recente quando processo Pi e stato Herdr
+sono sani: così un ritardo del file non può causare un ciclo distruttivo di
+chiusura/riapertura. Before this consolidation the two readers had independently
 duplicated, subtly inconsistent path/key derivation, and the per-project path
 never consulted the file at all — it relied solely on the MQTT-retained
 presence card or Herdr's own process/explain heuristics. Neither of those can

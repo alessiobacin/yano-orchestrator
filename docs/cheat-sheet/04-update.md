@@ -6,6 +6,8 @@ tramite snapshot e riavvio controllato.
 ~~~bash
 yano update --check
 yano update
+npm run bcpu
+npm run bcpu -- --include-untracked
 yano update --reload --dry-run --timeout 180
 yano update --reload --yes --timeout 180
 ~~~

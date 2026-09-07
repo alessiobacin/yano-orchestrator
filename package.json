@@ -45,6 +45,7 @@
   ],
   "scripts": {
     "test": "node scripts/test-all.mjs",
+    "bcpu": "node scripts/bcpu.mjs",
     "check:package-version": "node scripts/check-package-version.mjs",
     "check:docs": "node scripts/check-documentation-sync.mjs",
     "check-syntax": "node --experimental-strip-types scripts/check-syntax.mjs extensions/orchestrator.ts",

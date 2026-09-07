@@ -19,6 +19,19 @@ e sincronizza le estensioni Pi:
 yano update
 ~~~
 
+## Bump, commit, push e update in un comando
+
+Dopo aver verificato le modifiche locali, puoi eseguire l'intero ciclo con:
+
+~~~bash
+npm run bcpu
+~~~
+
+Il comando esegue `check:docs`, `check-syntax`, `npm test`, incrementa la
+versione patch, crea il commit, fa push su `origin` e invoca `yano update`.
+Per sicurezza rifiuta file non tracciati; includili solo dopo averli verificati
+con `npm run bcpu -- --include-untracked`.
+
 Questo comando non riavvia le istanze Pi già aperte. I processi attivi
 continuano a usare il codice caricato in memoria; applica il nuovo codice al
 prossimo avvio.

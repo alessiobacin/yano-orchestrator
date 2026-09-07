@@ -55,8 +55,8 @@ export function inferFrontendDev(root) {
 	if (!script) throw new Error("nessuno script frontend dev trovato (attesi scripts.dev, scripts.start o scripts.serve)");
 	const raw = scripts[script];
 	const dependencies = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
-	const isReact = Boolean(dependencies.react) || /react|next/i.test(raw) || fs.existsSync(path.join(frontendRoot, "src", "App.jsx")) || fs.existsSync(path.join(frontendRoot, "src", "App.tsx"));
 	const isAngular = Boolean(dependencies["@angular/core"]) || /(?:^|\s)ng(?:\s|$)|angular/i.test(raw) || fs.existsSync(path.join(frontendRoot, "angular.json"));
+	const isReact = !isAngular && (Boolean(dependencies.react) || /react|next/i.test(raw) || fs.existsSync(path.join(frontendRoot, "src", "App.jsx")) || fs.existsSync(path.join(frontendRoot, "src", "App.tsx")));
 	const framework = isReact ? "react" : isAngular ? "angular" : "unknown";
 	const portMatch = raw.match(/(?:--|\s)(?:port|p)[=\s]+(\d{2,5})/i);
 	const frameworkPort = isAngular ? 4200
@@ -92,11 +92,59 @@ function run(command, args, cwd) {
 	});
 }
 
+const ANGULAR_AGENTATION_MARKER = "/* yano-agentation:angular-dev-only */";
+
+export function ensureAngularAgentationIntegration(frontendRoot) {
+	const mainFile = ["src/main.ts", "src/main.tsx"].map((file) => path.join(frontendRoot, file)).find((file) => fs.existsSync(file));
+	if (!mainFile) throw new Error(`entry Angular non trovato in ${frontendRoot} (atteso src/main.ts)`);
+	const hostFile = path.join(path.dirname(mainFile), "yano-agentation-host.ts");
+	if (!fs.existsSync(hostFile)) fs.writeFileSync(hostFile, `${ANGULAR_AGENTATION_MARKER}
+import { createRoot } from "react-dom/client";
+import { Agentation } from "agentation";
+
+const HOST_ID = "yano-agentation-dev";
+
+export function mountAgentation() {
+	if (document.getElementById(HOST_ID)) return;
+	const host = document.createElement("div");
+	host.id = HOST_ID;
+	document.body.appendChild(host);
+	createRoot(host).render(Agentation({ endpoint: "http://localhost:4747" }));
+}
+`);
+	let main = fs.readFileSync(mainFile, "utf8");
+	if (!main.includes(ANGULAR_AGENTATION_MARKER)) {
+		const importLine = "import { isDevMode } from '@angular/core';\n";
+		if (!main.includes("import { isDevMode }") && !main.includes("import * as AngularCore")) main = `${importLine}${main}`;
+		const bootstrap = /platformBrowserDynamic\(\)\.bootstrapModule\(AppModule\)\s*\.catch\(err => console\.error\(err\)\);/;
+		if (!bootstrap.test(main)) throw new Error(`bootstrap Angular non riconosciuto in ${mainFile}`);
+		main = main.replace(bootstrap, `platformBrowserDynamic().bootstrapModule(AppModule)\n  .then(() => {\n    if (isDevMode()) return import('./yano-agentation-host').then(({ mountAgentation }) => mountAgentation());\n    return undefined;\n  })\n  .catch(err => console.error(err));\n\n${ANGULAR_AGENTATION_MARKER}`);
+		fs.writeFileSync(mainFile, main);
+	}
+	return { main_file: mainFile, host_file: hostFile, injected: true, dev_only: true };
+}
+
+async function setupAngularAgentation(info) {
+	const dependencies = ["agentation", "react", "react-dom", "@types/react", "@types/react-dom"];
+	const pkg = readPackage(info.frontend_root);
+	const declared = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+	const missing = dependencies.filter((dependency) => !declared[dependency]);
+	if (missing.length) {
+		const install = info.manager === "npm" ? ["install", "-D", ...missing]
+			: info.manager === "pnpm" ? ["add", "-D", ...missing]
+			: info.manager === "yarn" ? ["add", "-D", ...missing]
+			: ["add", "-d", ...missing];
+		await run(info.manager, install, info.frontend_root);
+	}
+	const integration = ensureAngularAgentationIntegration(info.frontend_root);
+	return { ...info, agentation_supported: true, review_mode: "agentation", package: "agentation + React adapter", installed: true, package_changed: missing.length > 0, component_imported: true, integration, next: "Agentation è attiva solo in development; apri l'URL restituito e verifica il toolbar in basso a destra" };
+}
+
 export async function setup(root) {
 	const info = inferFrontendDev(root);
 	const frontendRoot = info.frontend_root;
 	if (info.framework === "angular") {
-		return { ...info, package: null, installed: false, package_changed: false, component_imported: false, next: "frontend-review può avviare la review browser-only; Agentation ufficiale non viene installato perché richiede React 18+. Usa Chrome DevTools/Playwright per la verifica visuale." };
+		return setupAngularAgentation(info);
 	}
 	if (!info.agentation_supported) throw new Error("framework frontend non riconosciuto; nessuna modifica applicata");
 	const alreadyInstalled = Boolean(({ ...(readPackage(frontendRoot).dependencies || {}), ...(readPackage(frontendRoot).devDependencies || {}) }).agentation);

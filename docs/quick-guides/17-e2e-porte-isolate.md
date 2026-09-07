@@ -21,8 +21,9 @@ supporta variabili d'ambiente, il runner deve passare le porte ai comandi del
 framework. Non terminare processi di altri progetti e non dichiarare superato
 un test rimasto su `about:blank`.
 
-`yano frontend-review setup|start` riconosce anche i frontend Angular. In
-questo caso non installa `agentation` (il pacchetto ufficiale richiede React
-18+), ma avvia normalmente il dev server e restituisce l'URL per la review
-browser-only tramite Chrome DevTools/Playwright. Per React continua invece a
-installare e usare Agentation solo in development.
+`yano frontend-review setup|start` riconosce anche i frontend Angular. Poiché
+il pacchetto ufficiale richiede React 18+, il setup installa le dipendenze React
+solo come devDependency e crea un piccolo wrapper React montato da Angular.
+L'import viene caricato esclusivamente dentro `isDevMode()`: il toolbar compare
+nel dev server ma non viene montato in produzione. Per React continua invece a
+installare e usare Agentation direttamente.

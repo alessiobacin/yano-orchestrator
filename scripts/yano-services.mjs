@@ -136,7 +136,15 @@ function builtinDashService() {
 		name: "yano-dash",
 		builtin: true,
 		healthcheck: { type: "http", target, timeout_ms: 2000 },
-		restart: { type: "command", target: "yano dash start --no-open" },
+		// runRestart() below runs this through spawnSync with a 30s timeout —
+		// fine for a short-lived command like "docker restart" or "pm2
+		// restart" that exits on its own, but "yano dash start" is a
+		// foreground server that never exits. Without backgrounding it here,
+		// spawnSync would block for the full 30s and then kill the very
+		// process it just started when the timeout fires. nohup lets it
+		// survive the death of this transient `sh -c` parent once the shell
+		// itself exits right after backgrounding it.
+		restart: { type: "command", target: "nohup yano dash start --no-open >/dev/null 2>&1 &" },
 		enabled: true,
 		backoff: { base_ms: 5000, max_ms: 300000, max_attempts: 6 },
 		created_at: new Date().toISOString(),

@@ -54,7 +54,23 @@ export function servicesRegistryPath() {
 function readRegistry() {
 	try {
 		const value = JSON.parse(fs.readFileSync(servicesRegistryPath(), "utf8"));
-		return { version: REGISTRY_VERSION, services: Array.isArray(value.services) ? value.services : [] };
+		const services = Array.isArray(value.services) ? value.services : [];
+		// Builtins are code-owned, but their previous configuration is persisted
+		// in the registry after the first supervise pass. Refresh that config on
+		// every read so a fixed builtin cannot remain stuck in giving_up because
+		// it still carries an obsolete healthcheck (notably the old intentional
+		// 404 used by yano-dash before its first bind).
+		const dash = services.find((service) => service.name === "yano-dash");
+		if (dash) {
+			const freshDash = builtinDashService();
+			if (freshDash && (dash.healthcheck?.target !== freshDash.healthcheck.target || dash.restart?.target !== freshDash.restart.target)) {
+				dash.healthcheck = freshDash.healthcheck;
+				dash.restart = freshDash.restart;
+				dash.backoff = freshDash.backoff;
+				dash.state = defaultState();
+			}
+		}
+		return { version: REGISTRY_VERSION, services };
 	} catch {
 		return { version: REGISTRY_VERSION, services: [] };
 	}
@@ -131,7 +147,11 @@ function builtinDashService() {
 	if (String(process.env.YANO_DASH_AUTOSTART || "1") === "0") return null;
 	const state = readDashState();
 	const alive = Boolean(state?.pid && processAlive(state.pid) && state?.port);
-	const target = alive ? `http://127.0.0.1:${state.port}/healthz` : `http://127.0.0.1:${DASH_PORT.default}/__yano_dash_never_bound__`;
+	// Use the real health endpoint even before the first dashboard process is
+	// bound. The old intentional 404 made the builtin enter `giving_up`; after
+	// a manual stop the global supervisor then refused to restart it, leaving
+	// an old dashboard process/UI in place and hiding fresh API fixes.
+	const target = `http://127.0.0.1:${alive ? state.port : DASH_PORT.default}/healthz`;
 	return {
 		name: "yano-dash",
 		builtin: true,

@@ -18,8 +18,24 @@ console.log("=== yano-dash appears as a builtin when no state file exists ===");
 	const services = listServices({ includeBuiltIns: true });
 	const dash = services.find((service) => service.name === "yano-dash");
 	assert.ok(dash, "yano-dash deve comparire come builtin");
+	assert.match(dash.healthcheck.target, /:11000\/healthz$/, "anche da fermo il builtin deve usare il vero endpoint healthz, non un 404 permanente che lo manda in giving_up");
 	assert.equal(dash.restart.type, "command");
 	assert.match(dash.restart.target, /^nohup .*yano dash start --no-open.*&$/, "the restart command must background+detach itself: yano dash start never exits on its own, and runRestart() uses a 30s-timeout spawnSync that would kill it otherwise");
+}
+console.log("   OK");
+
+console.log("=== an old persisted yano-dash healthcheck is migrated and can recover from giving_up ===");
+{
+	const { addService, listServices, removeService } = await import("./yano-services.mjs");
+	addService({
+		name: "yano-dash",
+		healthcheck: { type: "http", target: "http://127.0.0.1:11000/__yano_dash_never_bound__" },
+		restart: { type: "command", target: "nohup yano dash start --no-open >/dev/null 2>&1 &" },
+	});
+	const dash = listServices({ includeBuiltIns: true }).find((service) => service.name === "yano-dash");
+	assert.match(dash.healthcheck.target, /:11000\/healthz$/);
+	assert.equal(dash.state.status, "unknown");
+	removeService("yano-dash");
 }
 console.log("   OK");
 

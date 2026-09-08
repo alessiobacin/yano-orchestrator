@@ -37,8 +37,18 @@ export function screenshotSrc(item) {
 	const markdown = String(src).match(/^!?\[[^\]]*\]\(([^)]+)\)$/);
 	if (markdown) src = markdown[1];
 	if (!src && shot.kind === "file" && shot.name) src = `/attachments/${encodeURIComponent(item.id)}/${encodeURIComponent(shot.name)}`;
-	const visible = /^https?:/i.test(src) || src.startsWith("data:image/") || src.startsWith("/attachments/");
+	const visible = /^https?:/i.test(src) || src.startsWith("data:image/") || src.startsWith("/attachments/") || src.startsWith("/");
 	return visible ? src : null;
+}
+
+export function screenshotSources(item) {
+	return (item?.screenshots || []).map((shot, index) => {
+		let src = shot?.preview_url || shot?.data || shot?.url || "";
+		const markdown = String(src).match(/^!?\[[^\]]*\]\(([^)]+)\)$/);
+		if (markdown) src = markdown[1];
+		if (!src && shot?.kind === "file" && shot?.name) src = `/attachments/${encodeURIComponent(item.id)}/${encodeURIComponent(shot.name)}`;
+		return { ...shot, src, _index: index };
+	}).filter((shot) => shot.src && !shot.unavailable);
 }
 
 export function typeIcon(type) {

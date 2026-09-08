@@ -349,6 +349,19 @@ export function listWatcherProjectRows() {
 	finally { try { db.close(); } catch { /* best effort */ } }
 }
 
+// Registry cleanup is intentionally limited to rows whose project root no
+// longer exists. Trace files and feedback records remain untouched for
+// forensics; only impossible watcher registrations are removed.
+export function pruneMissingWatcherProjects() {
+	const db = openDatabase();
+	try {
+		const rows = db.prepare("SELECT project_key, root FROM watcher_projects").all();
+		const stale = rows.filter((row) => !row.root || !fs.existsSync(row.root));
+		for (const row of stale) db.prepare("DELETE FROM watcher_projects WHERE project_key = ?").run(row.project_key);
+		return { removed: stale.length, project_keys: stale.map((row) => row.project_key) };
+	} finally { try { db.close(); } catch { /* best effort */ } }
+}
+
 function runNeedsPlanner(run) {
 	// A completed run is terminal. `pending_finalize` is an administrative
 	// state, not evidence of live work, so it must never trigger an LLM wake-up.
@@ -466,6 +479,10 @@ export function ensureRegisteredPlanner(row, snapshot, db = null) {
 	// identity errors and tabs whose purpose appeared to change between roles.
 	const livePlanner = planners.find((planner) => paneHasLivePiProcess(planner.pane_id));
 	if (livePlanner) return { recovery: "planner_process_present_stale_heartbeat", planner_status: livePlanner.agent_status || "unknown", planner_instance: livePlanner.name || null, planner_pane_id: livePlanner.pane_id };
+	// During Herdr startup the pane can be live before the `agents` projection
+	// contains it. Treat a planner-labelled live pane as owned immediately.
+	const livePlannerPane = livePlannerPanesInWorkspace(snapshot, workspace?.workspace_id, row.root)[0];
+	if (livePlannerPane) return { recovery: "planner_process_present_startup_race", planner_status: "working", planner_instance: "planner-01", planner_pane_id: livePlannerPane.pane_id };
 	const reason = "planner_missing_or_stale_heartbeat";
 	// Unlike reconcileProjectRun, this check used to run unconditionally on
 	// every one-minute supervisor pass. A momentarily flaky heartbeat read
@@ -498,6 +515,15 @@ function paneHasLivePiProcess(paneId) {
 		const processes = JSON.parse(result.stdout || "")?.result?.process_info?.foreground_processes || [];
 		return processes.some((item) => item?.argv0 === "pi" || item?.argv?.some((arg) => /(?:^|\/)pi(?:\.m?js)?$/.test(String(arg))));
 	} catch { return false; }
+}
+
+function livePlannerPanesInWorkspace(snapshot, workspaceId, root) {
+	const expectedRoot = path.resolve(root || "");
+	return (snapshot?.panes || []).filter((pane) => {
+		if (pane.workspace_id !== workspaceId || path.resolve(pane.cwd || "") !== expectedRoot) return false;
+		const tab = (snapshot.tabs || []).find((item) => item.tab_id === pane.tab_id);
+		return /^planner(?:-\d+)?$/i.test(tab?.label || "") && paneHasLivePiProcess(pane.pane_id);
+	});
 }
 
 // A tab is never touched — regardless of any other condition below — if it
@@ -752,6 +778,18 @@ function recoverPlanner({ row, snapshot, run, reason }) {
 			workspace_id: workspace.workspace_id,
 			planner_tab_id: existingLivePlanner.tab_id,
 			planner_pane_id: existingLivePlanner.pane_id,
+			run_id: run.id,
+		};
+	}
+	const existingLivePlannerPane = livePlannerPanesInWorkspace(current, workspace.workspace_id, row.root)[0];
+	if (existingLivePlannerPane) {
+		return {
+			recovered: false,
+			deferred: true,
+			recovery_reason: "planner_process_present_startup_race",
+			workspace_id: workspace.workspace_id,
+			planner_tab_id: existingLivePlannerPane.tab_id,
+			planner_pane_id: existingLivePlannerPane.pane_id,
 			run_id: run.id,
 		};
 	}

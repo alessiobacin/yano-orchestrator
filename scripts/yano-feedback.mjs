@@ -130,13 +130,47 @@ export function buildQueuedFeedbackWakeMessage(claimed, type) {
 export function claimNextQueuedFeedback(db, projectId, { preferredType = null } = {}) {
 	const order = preferredType === "bug" || preferredType === "suggestion" ? [preferredType, preferredType === "bug" ? "suggestion" : "bug"] : ["bug", "suggestion"];
 	for (const type of order) {
-		const next = listFeedback(db, { project_id: projectId, type, statuses: ["pending_planner", "queued"] })[0];
+		const pending = listFeedback(db, { project_id: projectId, type, statuses: ["received", "pending_planner", "queued"] });
+		const next = pending.sort((a, b) => priorityRank(a) - priorityRank(b) || Date.parse(a.created_at) - Date.parse(b.created_at))[0];
 		if (!next) continue;
 		const claimed = claimFeedback(db, next.id);
 		if (!claimed || claimed.status !== "processing") continue;
 		return { type, claimed, message: buildQueuedFeedbackWakeMessage(claimed, type) };
 	}
 	return null;
+}
+const PRIORITY_RANK = Object.freeze({ critical: 0, high: 1, medium: 2, low: 3 });
+export function priorityRank(item) {
+	const priority = String(item?.priority || item?.severity || "medium").toLowerCase();
+	return PRIORITY_RANK[priority] ?? 2;
+}
+
+// Agentation emits structured annotations directly from the development UI.
+// This adapter deliberately remains deterministic: one annotation becomes one
+// received bug, never an automatic planner wake or code change.
+export async function createAgentationFeedback(db, projectId, payload) {
+	const annotation = payload?.annotation || payload || {};
+	const annotationId = clean(annotation.id || payload?.id || "").slice(0, 200);
+	const pageUrl = clean(payload?.page_url || annotation.url || "").slice(0, 1000);
+	const route = (() => { try { return new URL(pageUrl).pathname; } catch { return clean(annotation.route || "").slice(0, 500) || null; } })();
+	const duplicate = listFeedback(db, { project_id: projectId, type: "bug" }).find((item) => annotationId && String(item.notes || "").includes(`agentation:${annotationId}`));
+	if (duplicate) return { item: duplicate, duplicate: true };
+	const comment = clean(annotation.comment || annotation.message || "Annotazione grafica senza descrizione");
+	const details = [
+		`Elemento: ${clean(annotation.element || "non specificato")}`,
+		`Percorso elemento: ${clean(annotation.elementPath || "non specificato")}`,
+		annotation.selectedText ? `Testo selezionato: ${clean(annotation.selectedText)}` : "",
+		annotation.cssClasses ? `Classi CSS: ${clean(annotation.cssClasses)}` : "",
+		pageUrl ? `Pagina: ${pageUrl}` : "",
+	].filter(Boolean).join("\n");
+	const item = await createFeedback(db, {
+		type: "bug", project_id: projectId, message: `${comment}\n\n${details}`,
+		title: comment.slice(0, 300), severity: "medium", route, environment: "development",
+		created_by: clean(payload?.created_by || "agentation"), notes: annotationId ? `agentation:${annotationId}` : "agentation",
+		require_credentials: false, notify: false, audit_reason: "annotation Agentation ricevuta automaticamente",
+	});
+	db.prepare("UPDATE feedback SET status='received',updated_at=? WHERE id=?").run(now(), item.id);
+	return { item: row(db, item.id), duplicate: false };
 }
 function attachmentRoot(feedbackId) { return path.join(path.dirname(dbPath()), "attachments", feedbackId); }
 function safeName(name) { return path.basename(String(name || "screenshot" )).replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 120) || "screenshot"; }

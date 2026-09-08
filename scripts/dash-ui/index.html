@@ -15,7 +15,9 @@
 }
 </script>
 <style>
-  body { background:#101820; color:#edf3f7; }
+  body { background:#101820; color:#edf3f7; overflow:hidden; }
+  #root, #root > div { min-width:0; min-height:0; }
+  article, article * { min-width:0; max-width:100%; overflow-wrap:anywhere; word-break:break-word; }
   ::-webkit-scrollbar { height:8px; width:8px; }
   ::-webkit-scrollbar-thumb { background:#334554; border-radius:4px; }
 </style>

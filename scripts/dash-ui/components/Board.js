@@ -2,7 +2,7 @@ import { html } from "htm/preact";
 import { Card } from "./Card.js";
 import { canonicalStatus } from "../columns.js";
 
-export function Board({ columns, items, showType, onOpen, onDragStart, onDrop }) {
+export function Board({ columns, items, showType, onOpen, onDragStart, onDrop, onFileDrop }) {
 	return html`
 		<main class="flex flex-1 gap-3 overflow-x-auto p-5">
 			${columns.map((status) => {
@@ -10,7 +10,7 @@ export function Board({ columns, items, showType, onOpen, onDragStart, onDrop })
 				return html`
 					<section
 						key=${status}
-						class="flex min-h-[120px] w-80 flex-none flex-col rounded-lg border border-slate-700 bg-slate-900 p-2"
+						class="flex min-h-[120px] w-[min(90vw,320px)] min-w-[300px] flex-none flex-col rounded-lg border border-slate-700 bg-slate-900 p-2"
 						onDragOver=${(event) => event.preventDefault()}
 						onDrop=${(event) => { event.preventDefault(); onDrop(status); }}
 					>
@@ -27,6 +27,7 @@ export function Board({ columns, items, showType, onOpen, onDragStart, onDrop })
 										showType=${showType}
 										onOpen=${onOpen}
 										onDragStart=${() => onDragStart(item)}
+										onFileDrop=${(files) => onFileDrop?.(item, files)}
 									/>
 								`)
 								: html`<p class="p-4 text-center text-xs text-slate-500">Nessun elemento</p>`}

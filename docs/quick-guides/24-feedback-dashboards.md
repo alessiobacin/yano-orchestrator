@@ -32,10 +32,18 @@ un'iconcina per il tipo. Gli endpoint CRUD restano `/<project-id>/bugs` e
 Retry e cambi stato sono auditati; ogni modifica manuale richiede una nota,
 visibile poi nella cronologia del pannello di dettaglio della card.
 
-La card mostra titolo, severità (colore del bordo e chip: grigio `low`, teal
-`medium`, arancio `high`, rosso `critical`), utente, data/ora locale
-italiana e route; il messaggio completo, la galleria screenshot e la
-cronologia degli audit restano nel pannello di dettaglio laterale. La data
+La dashboard costruisce l'elenco progetti dal catalogo globale Yano e dal
+registro watcher, deduplicando per root reale e scartando root temporanee di
+test o non più esistenti. Durante la lettura elimina anche dal registro watcher
+le registrazioni con root scomparse; trace e feedback storici restano intatti.
+Perciò il selettore non usa i soli `project_id`
+presenti nei bug e non mostra progetti storici orfani.
+
+La card mostra, quando presente, il primo screenshot in alto, poi titolo,
+severità (colore del bordo e chip: grigio `low`, teal `medium`, arancio
+`high`, rosso `critical`), utente, data/ora locale italiana e route; il
+messaggio completo, la galleria screenshot e la cronologia degli audit restano
+nel pannello di dettaglio laterale. La data
 usa `Europe/Rome` e formato `GG/MM/AAAA HH:MM`. Ogni colonna mostra il
 numero di elementi e uno stato vuoto esplicito quando non ne contiene. Un
 campo di ricerca filtra le card per titolo, messaggio o route senza
@@ -63,7 +71,9 @@ e registrarne le credenziali nel meccanismo sicuro di Yano; mai usare o
 creare account in production.
 
 Stati comuni: `received`, `pending_planner`, `queued`, `processing`,
-`awaiting_user_confirmation`, `paused`, `retry`, `cancelled`. Lo stato
+`awaiting_user_confirmation`, `paused`, `retry`, `cancelled`. `queued` e
+`pending_planner` sono stati legacy e vengono visualizzati nella colonna
+`received`, quindi non sono colonne operative della dashboard. Lo stato
 terminale differisce per tipo — non sono intercambiabili, ognuno dei due tab
 espone solo la propria colonna:
 
@@ -82,18 +92,26 @@ backend), lo stato terminale corretto viene scelto e scritto automaticamente
 in base al prefisso dell'id — non serve un aggiornamento manuale separato in
 quel caso.
 
-Sia i bug sia le suggestion sono ciascuno una coda FIFO per progetto: quando
-il planner del progetto diventa inattivo, o riceve la notifica MQTT
-`feedback_received`, il codice orchestratore preleva e assegna
-automaticamente il record persistito più vecchio (i bug hanno priorità sulle
-suggestion quando entrambe le code hanno qualcosa in attesa e non è arrivata
-una notifica specifica per l'altro tipo).
+Sia i bug sia le suggestion sono una coda per progetto: quando il planner del
+progetto diventa inattivo, o riceve la notifica MQTT `feedback_received`, il
+codice orchestratore preleva e assegna il record persistito più prioritario:
+`critical`, `high`, `medium`, `low`, poi data di creazione. I bug hanno
+priorità sulle suggestion a parità di livello quando non è arrivata una
+notifica specifica per l'altro tipo.
+
+Il mount dev di Agentation usa l'endpoint deterministico
+`POST /api/agentation/<project-id>` della dashboard. Ogni nuova annotation
+grafica viene registrata come bug separato in `received`, con commento, pagina,
+elemento e selettore; l'ID Agentation impedisce duplicati. La ricezione non
+avvia direttamente il planner: resta soggetta al normale ordine di priorità e
+alla supervisione del progetto.
 
 Gli screenshot remoti vengono verificati e scaricati nella cache privata di
 Yano prima della notifica al planner, quando l'URL pubblico restituisce
 un'immagine valida. Il wake-up del planner trasporta quindi anche blocchi
-multimodali `image`, oltre al riepilogo testuale e ai riferimenti dell'allegato;
-il modello vision può analizzare direttamente lo screenshot senza doverlo
-ricostruire dal testo. URL temporaneamente irraggiungibili vengono conservati
-per un nuovo tentativo; risposte definitivamente non valide non vengono
-mostrate come immagini broken nella dashboard.
+multimodali `image`, oltre al riepilogo testuale e ai riferimenti dell'allegato.
+Nel dettaglio si possono aggiungere immagini con selezione o drag-and-drop,
+aprire ogni anteprima e rimuoverla singolarmente con `×`; gli stessi file si
+possono trascinare direttamente su una card. URL temporaneamente
+irraggiungibili vengono conservati per un nuovo tentativo; risposte
+definitivamente non valide non vengono mostrate come immagini broken.

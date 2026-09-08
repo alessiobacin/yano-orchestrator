@@ -39,6 +39,7 @@ try {
 		ensureCore: () => ({ ok: true, skills: [], mcp: {} }),
 		ensureEmbeddings: async () => ({ ok: true }),
 		doctor: async () => ({ ok: true }),
+		registerWatcher: (targetDir) => ({ project: { root: targetDir } }),
 	};
 	await runCreateProject({
 		packageRoot: root,

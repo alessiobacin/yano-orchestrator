@@ -492,3 +492,16 @@ persistente dello scheduler (`<YANO_DATA_DIR>/scheduler/scripts/`) che
 richiama, per percorso assoluto, il vero motore `scripts/yano-digest.mjs` del
 pacchetto — un `yano update` aggiorna quindi la logica del digest senza dover
 rieseguire alcun bootstrap (dettaglio: `docs/diagram/10-digest-giornaliero.mmd`).
+### Identità del planner durante avvio e ripristino
+
+Il planner permanente viene identificato con la root canonica del progetto,
+la tab Herdr `planner-01` e il processo Pi vivo nel pane. Durante l'avvio di
+Herdr l'elenco `agents` può arrivare alcuni istanti dopo tab e processi; il
+watcher considera quindi già occupato anche un pane live non ancora indicizzato.
+Questo evita che cron o un comando manuale lancino un secondo `planner-01`.
+
+Se `yano start --instance planner-01 --role planner` risponde “identità già in
+uso”, il planner è già attivo nel progetto. Usare `yano fleet
+--project-root <root> --json` e `yano watcher status --project-root <root>
+--json`. Il cron globale ripristina il planner solo quando non trova né un
+planner sano né un processo Pi vivo associato alla tab planner.

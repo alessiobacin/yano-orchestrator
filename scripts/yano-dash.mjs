@@ -10,9 +10,9 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { globalDataPath } from "./yano-config.mjs";
-import { openDatabase, handleFeedbackApi, listFeedback, getFeedback, listFeedbackAudit, repairFeedbackScreenshots, dbPath } from "./yano-feedback.mjs";
+import { openDatabase, handleFeedbackApi, listFeedback, getFeedback, listFeedbackAudit, repairFeedbackScreenshots, createAgentationFeedback, dbPath } from "./yano-feedback.mjs";
 import { projectKey, resolveTraceProject } from "./yano-trace-storage.mjs";
+import { listWatcherProjectRows, pruneMissingWatcherProjects } from "./yano-watcher-registry.mjs";
 import { DASH_PORT, readDashState, writeDashState, processAlive } from "./yano-dash-state.mjs";
 import { sendGlobalNotification } from "./yano-notify.mjs";
 
@@ -34,18 +34,41 @@ function projectRootFrom(cwd) {
 	}
 }
 
-function projectLabels() {
+export function watcherProjectCatalog(rows, { exists = fs.existsSync } = {}) {
+	const projects = new Map();
+	const temporaryRoot = (root) => {
+		const value = path.resolve(root);
+		return value.startsWith(`${path.sep}private${path.sep}tmp${path.sep}`)
+			|| value.startsWith(`${path.sep}private${path.sep}var${path.sep}folders${path.sep}`)
+			|| value.startsWith(`${path.sep}var${path.sep}folders${path.sep}`)
+			|| value.includes(`${path.sep}yano-orchestrator${path.sep}temp${path.sep}`)
+			|| value.includes(`${path.sep}.worktreesXYZ`);
+	};
+	const add = (root, name = null) => {
+		if (!root || !exists(root)) return;
+		const resolvedRoot = path.resolve(root);
+		if (temporaryRoot(resolvedRoot)) return;
+		const id = projectKey(resolvedRoot, name || resolveTraceProject(resolvedRoot));
+		const label = name || resolveTraceProject(resolvedRoot);
+		if (!projects.has(id)) projects.set(id, { id, name: label, root: resolvedRoot });
+	};
 	try {
-		const file = path.join(globalDataPath({ env: process.env }), "tracing.json");
-		const data = JSON.parse(fs.readFileSync(file, "utf8"));
-		return new Map(Object.entries(data.projects || {}).map(([id, item]) => [id, item.project || item.name || id]));
-	} catch {
-		return new Map();
-	}
+		for (const item of rows) {
+			// The dashboard project switcher represents the projects currently
+			// followed by a live watcher, not historical trace/memory projects.
+			if (item.worker_status === "running" && item.root) add(item.root, item.name);
+		}
+	} catch { /* dashboard remains usable if watcher registry is unavailable */ }
+	return [...projects.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function projectCatalog() {
+	pruneMissingWatcherProjects();
+	return watcherProjectCatalog(listWatcherProjectRows());
 }
 
 function send(res, status, data, type = "application/json; charset=utf-8") {
-	res.writeHead(status, { "content-type": type, "cache-control": "no-store" });
+	res.writeHead(status, { "content-type": type, "cache-control": "no-store", ...(type.startsWith("application/json") ? { "access-control-allow-origin": "*", "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS", "access-control-allow-headers": "content-type,x-yano-user" } : {}) });
 	res.end(type.startsWith("application/json") ? JSON.stringify(data) : data);
 }
 
@@ -111,6 +134,7 @@ async function handler(db, clients, req, res) {
 	const url = new URL(req.url, "http://localhost");
 	const parts = url.pathname.split("/").filter(Boolean);
 	if (url.pathname === "/healthz") return send(res, 200, { ok: true, service: "yano-dash" });
+	if (req.method === "OPTIONS") return send(res, 204, null);
 	if (url.pathname === "/api/stream") {
 		res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache", connection: "keep-alive" });
 		res.write(":ok\n\n");
@@ -119,9 +143,12 @@ async function handler(db, clients, req, res) {
 		return;
 	}
 	if (url.pathname === "/api/projects") {
-		const labels = projectLabels();
-		const ids = [...new Set(listFeedback(db, {}).map((item) => item.project_id))].filter(Boolean);
-		return send(res, 200, ids.map((id) => ({ id, name: labels.get(id) || id })).sort((a, b) => a.name.localeCompare(b.name)));
+		return send(res, 200, projectCatalog());
+	}
+	if (req.method === "POST" && parts[0] === "api" && parts[1] === "agentation" && parts[2]) {
+		const body = await new Promise((resolve, reject) => { let raw = ""; req.on("data", (chunk) => { raw += chunk; }); req.on("end", () => { try { resolve(raw ? JSON.parse(raw) : {}); } catch (error) { reject(error); } }); req.on("error", reject); });
+		const result = await createAgentationFeedback(db, decodeURIComponent(parts[2]), body);
+		return send(withChangeBroadcast(res, req, clients), result.duplicate ? 200 : 201, { ...result.item, duplicate: result.duplicate });
 	}
 	if (req.method === "GET" && parts[0] === "attachments" && parts.length === 3) {
 		const file = attachmentFile(parts[1], decodeURIComponent(parts[2]));

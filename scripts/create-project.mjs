@@ -82,6 +82,24 @@ import { runHerdrInit } from "./init-herdr.mjs";
 import { installYanoCliSkill } from "./install-yano-cli.mjs";
 import { runYanoWatcherRegistry } from "./yano-watcher-registry.mjs";
 
+async function registerWatcherForInitializedProject(targetDir) {
+	const attempts = 3;
+	let lastError;
+	for (let attempt = 1; attempt <= attempts; attempt++) {
+		try {
+			const result = await runYanoWatcherRegistry({ argv: ["init", "--project-root", targetDir, "--json"] });
+			if (!result?.project?.root || path.resolve(result.project.root) !== path.resolve(targetDir)) {
+				throw new Error("il registro non ha restituito il progetto inizializzato");
+			}
+			return result;
+		} catch (error) {
+			lastError = error;
+			if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
+		}
+	}
+	throw new Error(`registrazione watcher obbligatoria fallita dopo ${attempts} tentativi: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
+}
+
 function parseArgs(argv) {
 	let name;
 	let target;
@@ -600,10 +618,11 @@ export async function runCreateProject({ packageRoot, cwd, argv, preflightTools 
 	// starting a Herdr tab: the global supervisor starts them when a run becomes
 	// active, while an idle project remains visible and resumable explicitly.
 	try {
-		await runYanoWatcherRegistry({ argv: ["init", "--project-root", targetDir, "--json"] });
+		const registerWatcher = preflightTools.registerWatcher || registerWatcherForInitializedProject;
+		await registerWatcher(targetDir);
 		console.log("create-project: watcher registrato; il supervisore lo avvierà automaticamente con task attivi.");
 	} catch (error) {
-		console.warn(`create-project: registrazione watcher non riuscita (${error instanceof Error ? error.message : String(error)}) — riprova con yano watcher init.`);
+		throw new Error(`yano init: progetto non completato perché il watcher non è stato registrato: ${error instanceof Error ? error.message : String(error)}`);
 	}
 
 	// Auto-discovery del sistema operativo (Revisione 32, richiesto

@@ -14,3 +14,8 @@ per singolo progetto. --herdr apre il workspace e il planner; --force serve solo
 contiene già l’infrastruttura da aggiornare. `cm` (Code Mem) è obbligatorio:
 prima dello scaffold `yano init` esegue `cm init pi`, creando `memory/`, la
 skill Pi locale e il relativo hook non bloccante.
+
+Il progetto viene anche registrato obbligatoriamente nel watcher globale.
+`yano init` ritenta i lock temporanei e fallisce esplicitamente se non riesce a
+registrarlo; solo `yano watcher leave --project-root <dir> --yes` rimuove la
+supervisione.

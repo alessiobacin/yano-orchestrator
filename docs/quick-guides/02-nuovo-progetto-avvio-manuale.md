@@ -21,6 +21,13 @@ yano init --name "Mio Progetto"
 Mem con `cm init pi` (`memory/`, skill e hook Pi locale). Non sovrascrive il
 codice dell'applicazione; `cm` deve essere disponibile prima di iniziare.
 
+Ogni `yano init` registra obbligatoriamente il progetto nel watcher globale e
+avvia o riusa il relativo controllo continuo. Se il registro è temporaneamente
+bloccato, l'inizializzazione ritenta automaticamente; se la registrazione non
+riesce, `yano init` termina con errore invece di lasciare un progetto
+inizializzato ma non supervisionato. L'unica rimozione permanente è esplicita:
+`yano watcher leave --project-root <dir> --yes`.
+
 ## 3. Avviare il broker e il trace
 
 ~~~

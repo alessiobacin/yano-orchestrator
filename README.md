@@ -210,6 +210,7 @@ yano watch --once --context-compact-ratio 0.50
 yano watcher start --project-root "$PWD"   # persistent registry: Herdr-supervised yano watch --away
 yano watcher cron install                  # installa manualmente il self-heal ogni minuto
 yano watcher status --json                 # self-heal watcher + planner dei run incompleti
+# Se segnala "identità già in uso", planner-01 è già attivo: non avviare un duplicato.
 yano watcher supervise --json              # verifica anche collisioni di identità live
 yano leave --yes                            # dalla root: rimuove definitivamente solo il watcher del progetto
 yano watcher projects --all --json          # tutti i progetti registrati, anche senza task attivi
@@ -294,11 +295,14 @@ yano auto-improve stop --project-root /path/progetto
 yano auto-improve serve --port 4178 # API REST (un'unica istanza, molti progetti)
 ```
 
-Watcher e feedback sono registrati automaticamente da `yano init`. Il
-supervisore globale li avvia quando rileva run/task attivi, ma rispetta una
-pausa o un `leave` esplicito. I progetti senza task restano visibili in
-`yano watcher projects --all --json` e possono essere riattivati con
-`yano watcher resume --project-root ...`. Architect, feedback e auto-improver
+Watcher e feedback sono registrati automaticamente da `yano init`. La
+registrazione watcher è obbligatoria: `yano init` ritenta i lock temporanei e
+fallisce esplicitamente se non riesce a registrare il progetto, invece di
+lasciarlo inizializzato ma non supervisionato. Il supervisore globale li avvia
+quando rileva run/task attivi, ma rispetta una pausa o un `leave` esplicito. I
+progetti senza task restano visibili in `yano watcher projects --all --json` e
+possono essere riattivati con `yano watcher resume --project-root ...`.
+Architect, feedback e auto-improver
 restano invece servizi on-demand; scheduler è globale e viene ricreato dal
 cron ogni minuto.
 

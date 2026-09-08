@@ -1,6 +1,6 @@
 import { html } from "htm/preact";
 import { useEffect, useState } from "preact/hooks";
-import { dateIt, screenshotSrc, canonicalStatus } from "../columns.js";
+import { dateIt, screenshotSources, canonicalStatus } from "../columns.js";
 
 const SHARED_STATUSES = ["received", "processing", "awaiting_user_confirmation", "paused", "retry", "cancelled"];
 const BUG_ONLY_STATUSES = ["resolved", "failed"];
@@ -28,8 +28,10 @@ export function Drawer({ item, defaultType, initialStatus, onClose, onSave }) {
 	const [form, setForm] = useState(initialForm(item, initialStatus));
 	const [error, setError] = useState(null);
 	const [preview, setPreview] = useState(null);
+	const [previewScale, setPreviewScale] = useState(1);
+	const [screenshots, setScreenshots] = useState(item?.screenshots || []);
 
-	useEffect(() => { setForm(initialForm(item, initialStatus)); }, [item, initialStatus]);
+	useEffect(() => { setForm(initialForm(item, initialStatus)); setScreenshots(item?.screenshots || []); setPreview(null); setPreviewScale(1); }, [item, initialStatus]);
 
 	function field(name) {
 		return { value: form[name], onInput: (event) => setForm({ ...form, [name]: event.target.value }) };
@@ -40,7 +42,7 @@ export function Drawer({ item, defaultType, initialStatus, onClose, onSave }) {
 		if (!form.message.trim()) return setError("Il messaggio è obbligatorio.");
 		if (!form.audit_reason.trim()) return setError("La nota è obbligatoria per ogni modifica.");
 		setError(null);
-		const payload = { ...form };
+		const payload = { ...form, screenshots };
 		if (isNew) delete payload.status;
 		try {
 			await onSave(payload);
@@ -49,22 +51,24 @@ export function Drawer({ item, defaultType, initialStatus, onClose, onSave }) {
 		}
 	}
 
-	const shot = item ? screenshotSrc(item) : null;
+	const shots = screenshotSources({ ...(item || {}), screenshots });
+	const removeScreenshot = (index) => setScreenshots((current) => current.filter((_, position) => position !== index));
+	const addFiles = (files) => Promise.all([...files].filter((file) => file.type.startsWith("image/")).slice(0, 8).map((file) => new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve({ kind: "file", data: reader.result, name: file.name, mime_type: file.type }); reader.onerror = reject; reader.readAsDataURL(file); }))).then((added) => setScreenshots((current) => [...current, ...added]));
 
 	return html`
 		<div class="fixed inset-0 z-40 flex justify-end bg-black/60" onClick=${onClose}>
-			<form class="flex h-full w-full max-w-md flex-col gap-3 overflow-y-auto bg-slate-900 p-5" onClick=${(event) => event.stopPropagation()} onSubmit=${submit}>
+			<form class="flex h-full min-w-0 w-full max-w-md flex-col gap-3 overflow-y-auto bg-slate-900 p-5" onClick=${(event) => event.stopPropagation()} onSubmit=${submit} onDragOver=${(event) => { if ([...(event.dataTransfer?.items || [])].some((entry) => entry.kind === "file")) event.preventDefault(); }} onDrop=${(event) => { event.preventDefault(); addFiles(event.dataTransfer.files); }}>
 				<div class="flex items-center justify-between">
 					<h2 class="text-base font-semibold text-slate-100">${isNew ? "Nuovo" : `Modifica ${item.id}`}</h2>
 					<button type="button" class="text-slate-400 hover:text-slate-100" onClick=${onClose}>✕</button>
 				</div>
 
 				<label class="text-slate-300">Titolo
-					<input class="mt-1 w-full rounded-md border border-slate-600 bg-slate-950 px-2 py-1 text-slate-100" ...${field("title")} />
+					<input placeholder="Esempio: Il campo mostra risultati è tagliato" class="mt-1 w-full min-w-0 rounded-md border border-slate-600 bg-slate-950 px-2 py-1 text-slate-100" ...${field("title")} />
 				</label>
 
 				<label class="text-slate-300">Messaggio *
-					<textarea class="mt-1 min-h-[90px] w-full rounded-md border border-slate-600 bg-slate-950 px-2 py-1 text-slate-100" ...${field("message")}></textarea>
+					<textarea placeholder="Descrivi cosa succede, dove e come riprodurlo..." class="mt-1 min-h-[90px] w-full min-w-0 rounded-md border border-slate-600 bg-slate-950 px-2 py-1 text-slate-100" ...${field("message")}></textarea>
 				</label>
 
 				<label class="text-slate-300">Stato *
@@ -80,17 +84,23 @@ export function Drawer({ item, defaultType, initialStatus, onClose, onSave }) {
 				</label>
 
 				<label class="text-slate-300">Route
-					<input class="mt-1 w-full rounded-md border border-slate-600 bg-slate-950 px-2 py-1 text-slate-100" ...${field("route")} />
+					<input placeholder="Esempio: /settings/suppliers" class="mt-1 w-full min-w-0 rounded-md border border-slate-600 bg-slate-950 px-2 py-1 text-slate-100" ...${field("route")} />
 				</label>
 
 				<label class="text-slate-300">Ambiente
-					<input class="mt-1 w-full rounded-md border border-slate-600 bg-slate-950 px-2 py-1 text-slate-100" ...${field("environment")} />
+					<input placeholder="Esempio: development, staging o production" class="mt-1 w-full min-w-0 rounded-md border border-slate-600 bg-slate-950 px-2 py-1 text-slate-100" ...${field("environment")} />
 				</label>
 
-				${shot ? html`<img class="max-h-52 w-full cursor-zoom-in rounded-md object-contain" src=${shot} alt="Screenshot" onClick=${() => setPreview(shot)} />` : null}
+				<section class="rounded-md border border-dashed border-slate-600 p-2" onDragOver=${(event) => event.preventDefault()} onDrop=${(event) => { event.preventDefault(); addFiles(event.dataTransfer.files); }}>
+					<div class="mb-2 text-xs text-slate-400">Screenshot allegati — trascina qui un’immagine o selezionala</div>
+					<input type="file" accept="image/*" multiple onChange=${(event) => addFiles(event.target.files)} />
+					<div class="mt-2 grid grid-cols-3 gap-2">
+						${shots.map((shot) => html`<div key=${`${shot.src}-${shot._index}`} class="relative"><img class="h-20 w-full cursor-zoom-in rounded object-cover" src=${shot.src} alt=${shot.name || "Screenshot"} onClick=${() => setPreview({ src: shot.src, index: shot._index })} onError=${(event) => { event.currentTarget.style.opacity = "0.25"; }} /><button type="button" class="absolute right-1 top-1 rounded-full bg-red-600 px-1.5 text-white" aria-label="Rimuovi screenshot" onClick=${() => removeScreenshot(shot._index)}>×</button></div>`)}
+					</div>
+				</section>
 
 				<label class="text-slate-300">Nota *
-					<textarea class="mt-1 min-h-[60px] w-full rounded-md border border-slate-600 bg-slate-950 px-2 py-1 text-slate-100" placeholder="Motivo della modifica" ...${field("audit_reason")}></textarea>
+					<textarea class="mt-1 min-h-[60px] w-full min-w-0 rounded-md border border-slate-600 bg-slate-950 px-2 py-1 text-slate-100" placeholder="Esempio: correggo lo stato dopo aver verificato il bug" ...${field("audit_reason")}></textarea>
 				</label>
 
 				${error ? html`<p class="rounded-md border border-red-500 bg-red-950 p-2 text-red-200">${error}</p>` : null}
@@ -115,8 +125,9 @@ export function Drawer({ item, defaultType, initialStatus, onClose, onSave }) {
 				` : null}
 			</form>
 			${preview ? html`
-				<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/80" onClick=${() => setPreview(null)}>
-					<img class="max-h-[85vh] max-w-[90vw] object-contain" src=${preview} alt="Anteprima" />
+				<div class="fixed inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-black/80 p-5" onClick=${() => setPreview(null)}>
+					<div class="flex gap-2"><button type="button" class="rounded bg-slate-700 px-3 py-1 text-white" onClick=${(event) => { event.stopPropagation(); setPreviewScale((value) => Math.max(0.5, value - 0.25)); }}>−</button><button type="button" class="rounded bg-slate-700 px-3 py-1 text-white" onClick=${(event) => { event.stopPropagation(); setPreviewScale(1); }}>Reset</button><button type="button" class="rounded bg-slate-700 px-3 py-1 text-white" onClick=${(event) => { event.stopPropagation(); setPreviewScale((value) => Math.min(4, value + 0.25)); }}>+</button></div>
+					<div class="max-h-full max-w-full overflow-auto" onClick=${(event) => event.stopPropagation()}><img class="max-h-[78vh] max-w-[90vw] origin-center object-contain" style=${{ transform: `scale(${previewScale})` }} src=${preview.src} alt="Anteprima" /></div>
 				</div>
 			` : null}
 		</div>

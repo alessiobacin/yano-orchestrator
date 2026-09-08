@@ -91,7 +91,12 @@ export function findAgentIdentityConflicts(snapshot) {
 export function assertAgentIdentityAvailable({ snapshot, root, instance, role }) {
 	const canonicalRoot = canonicalAgentRoot(root);
 	const duplicate = liveAgentIdentities(snapshot).find((agent) => agent.root === canonicalRoot && agent.name === instance);
-	if (duplicate) throw new Error(`identità già in uso nel progetto: ${instance} (${canonicalRoot}); avvio rifiutato per evitare due agenti con lo stesso nome`);
+	if (duplicate) {
+		const tab = (snapshot?.tabs || []).find((item) => item.tab_id === duplicate.tab_id);
+		const pane = (snapshot?.panes || []).find((item) => item.pane_id === duplicate.pane_id);
+		const location = [tab?.tab_id && `tab ${tab.tab_id}`, pane?.pane_id && `pane ${pane.pane_id}`, duplicate.agent_status && `stato ${duplicate.agent_status}`].filter(Boolean).join(", ");
+		throw new Error(`identità già in uso nel progetto: ${instance} (${canonicalRoot}); agente già attivo${location ? ` (${location})` : ""}. Usa la tab esistente o attendi il watcher; non avviare un secondo planner`);
+	}
 	if (role === "planner" && !/^planner-\d{2}$/.test(instance)) throw new Error(`planner con nome non valido "${instance}"; usa planner-01, planner-02, ...`);
 	const conflict = findAgentIdentityConflicts(snapshot).find((item) => item.root === canonicalRoot && item.type === "planner_naming");
 	if (conflict) throw new Error(`planner duplicati o non numerati nel progetto ${canonicalRoot}: ${conflict.names.join(", ")}; risolvi prima l’incongruenza`);

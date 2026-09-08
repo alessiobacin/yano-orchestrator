@@ -21,6 +21,12 @@ function App() {
 	const [toasts, setToasts] = useState([]);
 	const draggedRef = useRef(null);
 
+	async function filesAsScreenshots(files) {
+		return Promise.all(files.filter((file) => file.type.startsWith("image/")).slice(0, 8).map((file) => new Promise((resolve, reject) => {
+			const reader = new FileReader(); reader.onload = () => resolve({ data: reader.result, name: file.name, mime_type: file.type }); reader.onerror = reject; reader.readAsDataURL(file);
+		})));
+	}
+
 	function pushToast(message, kind = "info") {
 		const id = crypto.randomUUID();
 		setToasts((current) => [...current, { id, message, kind }]);
@@ -78,6 +84,15 @@ function App() {
 		setDrawerStatus(status);
 	}
 
+	async function handleFileDrop(item, files) {
+		const screenshots = await filesAsScreenshots(files);
+		if (!screenshots.length) return;
+		const full = await getItem(project, item.type, item.id);
+		setDrawer({ ...full, screenshots: [...(full.screenshots || []), ...screenshots] });
+		setDrawerStatus(null);
+		pushToast("Screenshot aggiunto al contesto: premi Salva per confermare");
+	}
+
 	async function saveDrawer(payload) {
 		if (drawer) {
 			await updateItem(project, drawer.type, drawer.id, payload);
@@ -110,6 +125,7 @@ function App() {
 				onOpen=${openDrawer}
 				onDragStart=${(item) => { draggedRef.current = item; }}
 				onDrop=${handleDrop}
+				onFileDrop=${handleFileDrop}
 			/>
 			${drawer !== undefined ? html`
 				<${Drawer}

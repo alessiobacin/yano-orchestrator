@@ -15,11 +15,47 @@ import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "yano-dash-"));
 const env = { ...process.env, YANO_DATA_DIR: dataDir, YANO_FEEDBACK_SKIP_NOTIFY: "1" };
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const require = createRequire(import.meta.url);
+
+function seedWatcherRegistry() {
+	const { DatabaseSync } = process.getBuiltinModule?.("node:sqlite") || require("node:sqlite");
+	const watcherDir = path.join(dataDir, "watcher");
+	fs.mkdirSync(watcherDir, { recursive: true });
+	const db = new DatabaseSync(path.join(watcherDir, "watcher-registry.sqlite"));
+	db.exec(`
+		CREATE TABLE watcher_projects (
+			project_key TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			root TEXT NOT NULL UNIQUE,
+			workspace_id TEXT,
+			worker_tab_id TEXT,
+			worker_pane_id TEXT,
+			worker_instance TEXT,
+			worker_status TEXT NOT NULL DEFAULT 'stopped',
+			interval_ms INTEGER NOT NULL DEFAULT 60000,
+			lookback_ms INTEGER NOT NULL DEFAULT 3600000,
+			last_recovery_at TEXT,
+			last_recovery_reason TEXT,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);
+	`);
+	const watchedAt = new Date().toISOString();
+	const insert = db.prepare("INSERT INTO watcher_projects(project_key,name,root,worker_status,interval_ms,lookback_ms,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)");
+	const watched = [
+		["watcher-yano", "yano-orchestrator", root, "running"],
+		["watcher-miodoc", "newMioDOC", path.resolve(root, "../..", "Code", "newMioDOC"), "running"],
+		["watcher-stopped", "historical-project", path.resolve(root, "../sales-companion"), "stopped"],
+	];
+	for (const [key, name, projectRoot, status] of watched) insert.run(key, name, projectRoot, status, 60000, 3600000, watchedAt, watchedAt);
+	db.close();
+}
 
 function dashStatePath() {
 	return path.join(dataDir, "dashboards", "dash.json");
@@ -56,6 +92,7 @@ async function startDash() {
 let dash = null;
 
 try {
+	seedWatcherRegistry();
 	console.log("=== yano dash start binds a port and writes state ===");
 	dash = await startDash();
 	assert.ok(dash.port > 0, "yano dash must report the port it actually bound");
@@ -83,7 +120,13 @@ try {
 		for (const file of ["app.js", "api.js", "columns.js", "components/Header.js", "components/Board.js", "components/Card.js", "components/Drawer.js", "components/Toasts.js"]) {
 			const response = await fetch(`http://127.0.0.1:${dash.port}/${file}`);
 			assert.equal(response.status, 200, `${file} deve essere servito`);
-			assertValidModule(await response.text(), file);
+			const source = await response.text();
+			assertValidModule(source, file);
+			if (file === "components/Card.js") {
+				assert.match(source, /class="w-full min-w-0 max-w-full/);
+				assert.match(source, /shrink-0 whitespace-nowrap/);
+				assert.doesNotMatch(source, /w-\[70%\]/);
+			}
 		}
 	}
 	console.log("   OK");
@@ -109,11 +152,12 @@ try {
 	}
 	console.log("   OK");
 
-	console.log("=== /api/projects lists the demo project ===");
+	console.log("=== /api/projects lists only live watcher projects ===");
 	{
 		const { status, body } = await fetchJson(`http://127.0.0.1:${dash.port}/api/projects`);
 		assert.equal(status, 200);
-		assert.ok(body.some((project) => project.id === "demo"));
+		assert.deepEqual(body.map((project) => project.name), ["newMioDOC", "yano-orchestrator"]);
+		assert.ok(body.every((project) => project.name !== "historical-project" && project.name !== "demo"));
 	}
 	console.log("   OK");
 

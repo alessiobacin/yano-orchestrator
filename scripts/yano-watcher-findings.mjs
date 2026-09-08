@@ -10,7 +10,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { appendRawTraceRecord } from "./yano-trace-storage.mjs";
+import { appendRawTraceRecord, projectKey, resolveTraceProject } from "./yano-trace-storage.mjs";
 import { resolveYanoConfig } from "./yano-config.mjs";
 import { createFeedback, openDatabase as openFeedbackDatabase } from "./yano-feedback.mjs";
 import { formatNotification } from "./yano-notification-format.mjs";
@@ -399,7 +399,11 @@ async function routeYanoWatcherFindingToPlanner(finding, { yanoRepo, sourceProje
 		].join("\n");
 		const result = await createFeedback(db, {
 			type: "bug",
-			project_id: finding.project_key || sourceProject.name,
+			// This is a Yano defect, not an application defect: keep it in the
+			// Yano repository's dashboard even when the signal was observed while
+			// supervising another project. Otherwise watcher diagnostics pollute
+			// the application's bug board and are later mistaken for user bugs.
+			project_id: projectKey(yanoRepo, resolveTraceProject(yanoRepo)),
 			message: `${finding.summary}\n\n${description}`,
 			resolution: "user_confirmation",
 			require_credentials: false,

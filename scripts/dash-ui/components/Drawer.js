@@ -1,6 +1,7 @@
 import { html } from "htm/preact";
 import { useEffect, useState } from "preact/hooks";
 import { dateIt, screenshotSources, canonicalStatus } from "../columns.js";
+import { ActivityIndicator } from "./ActivityIndicator.js";
 
 const SHARED_STATUSES = ["received", "processing", "awaiting_user_confirmation", "paused", "retry", "cancelled"];
 const BUG_ONLY_STATUSES = ["resolved", "failed"];
@@ -102,6 +103,7 @@ export function Drawer({ item, defaultType, initialStatus, onClose, onSave }) {
 				<label class="text-slate-300">Nota *
 					<textarea class="mt-1 min-h-[60px] w-full min-w-0 rounded-md border border-slate-600 bg-slate-950 px-2 py-1 text-slate-100" placeholder="Esempio: correggo lo stato dopo aver verificato il bug" ...${field("audit_reason")}></textarea>
 				</label>
+				${item?.execution ? html`<${ActivityIndicator} execution=${item.execution} />` : null}
 
 				${error ? html`<p class="rounded-md border border-red-500 bg-red-950 p-2 text-red-200">${error}</p>` : null}
 

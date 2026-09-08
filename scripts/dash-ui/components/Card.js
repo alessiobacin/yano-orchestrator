@@ -1,5 +1,6 @@
 import { html } from "htm/preact";
 import { titleOf, dateIt, screenshotSrc, typeIcon } from "../columns.js";
+import { ActivityIndicator } from "./ActivityIndicator.js";
 
 const SEVERITY_COLOR = { low: "#5b7a8c", medium: "#70d6c2", high: "#ff9f43", critical: "#e5484d" };
 
@@ -22,6 +23,7 @@ export function Card({ item, showType, onOpen, onDragStart, onFileDrop }) {
 			</div>
 			<small class="mt-2 block text-slate-400">${item.created_by || "unknown"} · ${dateIt(item.created_at)}</small>
 			${item.route ? html`<span class="mt-1 block break-words font-mono text-xs text-slate-400">${item.route}</span>` : null}
+			${item.execution ? html`<${ActivityIndicator} execution=${item.execution} />` : null}
 		</article>
 	`;
 }

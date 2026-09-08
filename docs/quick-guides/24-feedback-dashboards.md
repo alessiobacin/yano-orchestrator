@@ -53,6 +53,16 @@ Events. Trascinare una card in un'altra colonna apre il pannello di
 dettaglio con lo stato di destinazione già selezionato, cosicché la nota
 d'audit obbligatoria resta sempre scritta dall'operatore.
 
+Quando una card è in `processing`, il pannello attività mostra anche la prova
+operativa del coder: ticket Yano collegato (quando il relativo `feedback_id`
+è presente nel ticket), istanza assegnata, stato del heartbeat, ultimo evento e
+ultimo tool osservato. `CODER ATTIVO` richiede un heartbeat recente e uno stato
+busy oppure un tool recente; `CODER IDLE`, `CODER OFFLINE` e `ATTIVITÀ INCERTA`
+rendono visibile la situazione reale. `NESSUN TICKET CODER` significa che il
+planner ha preso in carico la card ma non esiste ancora un collegamento
+dimostrabile a un ticket: non viene quindi mostrata come lavoro effettivamente
+in esecuzione. La stessa evidenza è disponibile nel pannello di dettaglio.
+
 Per un frontend con backend separato resta disponibile, invariato,
 `yano frontend-dash` (un concetto distinto: reverse proxy di sviluppo +
 Agentation, non la dashboard bug/suggestions):

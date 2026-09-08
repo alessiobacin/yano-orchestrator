@@ -276,7 +276,17 @@ export function projectRuns(root) {
 		try {
 			for (const pause of db.prepare("SELECT DISTINCT run_id FROM yano_recovery_pauses WHERE status = 'paused'").all()) pausedRunIds.add(pause.run_id);
 		} catch { /* older databases are simply not pause-aware yet */ }
-		const tickets = db.prepare("SELECT id, run_id, title, status, assigned_instance, required_playbook, updated_at FROM tickets ORDER BY updated_at DESC").all();
+		// description/result_summary are also consumed by the dashboard's
+		// evidence view to link a feedback card to the exact ticket.  This is a
+		// read-only addition; older project DBs are covered by the outer fallback.
+		let tickets;
+		try {
+			tickets = db.prepare("SELECT id, run_id, title, description, status, assigned_instance, required_playbook, result_summary, updated_at FROM tickets ORDER BY updated_at DESC").all();
+		} catch {
+			// Minimal/legacy fixture databases may not contain optional ticket
+			// context columns; activity must remain available from their core fields.
+			tickets = db.prepare("SELECT id, run_id, title, status, assigned_instance, required_playbook, updated_at FROM tickets ORDER BY updated_at DESC").all();
+		}
 		const dependencies = db.prepare("SELECT d.ticket_id, d.depends_on_id, dependency.status AS dependency_status FROM ticket_dependencies d JOIN tickets dependency ON dependency.id = d.depends_on_id").all();
 		const dependenciesByTicket = new Map();
 		for (const dependency of dependencies) {

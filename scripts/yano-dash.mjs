@@ -11,8 +11,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { openDatabase, handleFeedbackApi, listFeedback, getFeedback, listFeedbackAudit, repairFeedbackScreenshots, createAgentationFeedback, dbPath } from "./yano-feedback.mjs";
-import { projectKey, resolveTraceProject } from "./yano-trace-storage.mjs";
-import { listWatcherProjectRows, pruneMissingWatcherProjects } from "./yano-watcher-registry.mjs";
+import { projectKey, resolveTraceProject, readTraceRecords, traceRoot } from "./yano-trace-storage.mjs";
+import { listWatcherProjectRows, pruneMissingWatcherProjects, projectRuns } from "./yano-watcher-registry.mjs";
+import { deriveCoderActivity, executionForFeedback } from "./yano-feedback-activity.mjs";
 import { DASH_PORT, readDashState, writeDashState, processAlive } from "./yano-dash-state.mjs";
 import { sendGlobalNotification } from "./yano-notify.mjs";
 
@@ -65,6 +66,30 @@ export function watcherProjectCatalog(rows, { exists = fs.existsSync } = {}) {
 function projectCatalog() {
 	pruneMissingWatcherProjects();
 	return watcherProjectCatalog(listWatcherProjectRows());
+}
+
+function projectActivity(root) {
+	const key = projectKey(root, resolveTraceProject(root));
+	const heartbeats = [];
+	try {
+		const directory = path.join(traceRoot(), "heartbeats", key);
+		for (const name of fs.readdirSync(directory)) {
+			if (!name.endsWith(".json")) continue;
+			try { heartbeats.push(JSON.parse(fs.readFileSync(path.join(directory, name), "utf8"))); } catch { /* raced/invalid heartbeat */ }
+		}
+	} catch { /* no heartbeat directory: activity will be explicit about that */ }
+	let events = [];
+	try { events = readTraceRecords({ cwd: root, limit: 5000 }); } catch { /* trace is diagnostic, never blocks the board */ }
+	const runs = projectRuns(root);
+	return deriveCoderActivity({ runs: runs.runs, heartbeats, events });
+}
+
+function decorateFeedback(item, project, { catalog = projectCatalog(), activities = new Map() } = {}) {
+	if (!item) return item;
+	const root = catalog.find((candidate) => candidate.id === project)?.root;
+	if (!root) return { ...item, execution: { state: "unknown", evidence: "project_root_unavailable" } };
+	if (!activities.has(root)) activities.set(root, projectActivity(root));
+	return { ...item, execution: executionForFeedback(item, activities.get(root)) };
 }
 
 function send(res, status, data, type = "application/json; charset=utf-8") {
@@ -170,13 +195,15 @@ async function handler(db, clients, req, res) {
 		const project = parts[0];
 		const type = parts[1] === "bugs" ? "bug" : "suggestion";
 		const itemId = parts[2];
+		const catalog = projectCatalog();
+		const activities = new Map();
 		if (!itemId) {
-			const rows = await Promise.all(listFeedback(db, { type, project_id: project }).reverse().map((item) => repairFeedbackScreenshots(db, item)));
+			const rows = await Promise.all(listFeedback(db, { type, project_id: project }).reverse().map(async (item) => decorateFeedback(await repairFeedbackScreenshots(db, item), project, { catalog, activities })));
 			return send(res, 200, rows);
 		}
 		const found = await repairFeedbackScreenshots(db, getFeedback(db, itemId));
 		if (!found || found.project_id !== project) return send(res, 404, { error: "not found" });
-		return send(res, 200, { ...found, audit: listFeedbackAudit(db, itemId) });
+		return send(res, 200, { ...decorateFeedback(found, project, { catalog, activities }), audit: listFeedbackAudit(db, itemId) });
 	}
 	return handleFeedbackApi(db, req, withChangeBroadcast(res, req, clients), { requireCredentials: false });
 }

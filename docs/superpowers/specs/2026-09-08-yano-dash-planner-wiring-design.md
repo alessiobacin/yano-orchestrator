@@ -222,6 +222,26 @@ duplicazione della logica delicata.
 domanda, chi aspetta risposta, campo di testo + pulsante "Rispondi" che chiama il
 nuovo endpoint.
 
+**Rilevamento della risposta data altrove (es. direttamente in Herdr, non dalla
+dashboard):** rispondere a un hold da Herdr tocca **solo** il database
+dell'orchestratore — non passa mai dal percorso di scrittura di
+`yano-feedback.mjs`, quindi non fa scattare l'evento SSE esistente (`/api/stream`
+si attiva solo sui cambi della tabella `feedback`). Senza un meccanismo dedicato,
+la dashboard resterebbe bloccata a mostrare l'avviso "domanda in sospeso" anche
+dopo che la domanda è stata risposta altrove.
+
+Scartata l'idea di sottoscrivere MQTT per-hold (`T.runEvents(runId)`,
+riga 4090): richiederebbe gestire una sottoscrizione dinamica per ogni hold
+aperto, con relativo lifecycle di subscribe/unsubscribe — troppa complessità per
+il beneficio. Si usa invece un **poll leggero lato browser**: mentre la board è
+montata, `app.js` richiama `loadItems()` (già esistente, nessun endpoint nuovo)
+ogni 8 secondi — puramente un refresh di sicurezza indipendente dal canale SSE,
+che nel giro di un intervallo rileva qualunque hold risposto altrove (da Herdr,
+da CLI, o dalla dashboard stessa) perché ogni GET ricalcola `open_question` da
+zero leggendo lo stato reale del database dell'orchestratore. Quando l'hold non
+risulta più aperto, la card torna al colore normale automaticamente, senza
+nessuna azione esplicita lato client per "cancellare" l'avviso.
+
 ## Rischi e compromessi accettati (documentati, non nascosti)
 
 - **Nessun ack di consegna MQTT**: sia l'assegnazione mirata sia la risposta a
@@ -259,7 +279,14 @@ nuovo endpoint.
    di test) con `context.feedback_id`; si verifica che compaia su
    `GET /<project>/bugs/<id>`; si risponde via il nuovo endpoint; si verifica che
    il fittizio riceva `decision_hold_answer_requested` con i campi giusti.
-4. Nessuna regressione: la suite completa (`node scripts/test-all.mjs`,
+4. Rilevamento risposta data altrove: si crea un hold aperto collegato a un
+   feedback_id (inserimento diretto nel DB di test dell'orchestratore, come nel
+   punto 3), si verifica che `GET` lo esponga come `open_question`; poi si marca
+   l'hold come risposto direttamente nel DB (simulando una risposta data da
+   Herdr, senza passare da nessun endpoint della dashboard) e si verifica che il
+   `GET` successivo non lo esponga più — a riprova che la lettura è sempre dal
+   vivo e non da uno stato lato dashboard che andrebbe invalidato esplicitamente.
+5. Nessuna regressione: la suite completa (`node scripts/test-all.mjs`,
    attualmente 131 controlli) deve continuare a passare, incluso il test di
    regressione screenshot/status già presente.
 
@@ -274,6 +301,8 @@ nuovo endpoint.
   `answer-question`.
 - `scripts/dash-ui/components/Card.js`, `Drawer.js` — evidenza visiva domanda +
   form di risposta.
+- `scripts/dash-ui/app.js` — poll leggero (8s) di sicurezza per rilevare una
+  risposta data altrove (es. Herdr) che non passa dall'evento SSE.
 - Nuovi smoke test per ciascun pezzo sopra elencato.
 - `docs/quick-guides/24-feedback-dashboards.md` — aggiornamento della sezione
   esistente sui cambi di stato per riflettere l'assegnazione reale e le domande

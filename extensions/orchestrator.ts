@@ -83,6 +83,7 @@ import {
 	paseoDetectAndLog,
 } from "../scripts/yano-terminal-integration.ts";
 import * as notifications from "../scripts/yano-notifications.ts";
+import { createWatchdogSweep } from "../scripts/watcher/watchdog-sweep.ts";
 
 // ━━ Constants ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -1513,24 +1514,11 @@ export default function (pi: ExtensionAPI) {
 	// short bounded hydration barrier so the first agent_list cannot expose an
 	// intermediate roster while the broker delivers retained peer states.
 	let presenceHydration: Promise<void> = Promise.resolve();
-	// ticket_id::running_since -> highest "how many WATCHDOG_STALL_MS multiples
-	// have we already alerted for THIS running episode" — keyed on running_since
-	// (not just ticket_id) so a fresh ticket_claim after a reassignment starts a
-	// new episode and re-arms alerting instead of staying silently suppressed.
-	const watchdogAlertLevel = new Map<string, number>();
-	// run_id set already alerted for "completed but never finalized" (Revisione
-	// 40) — fired at most once per run, same discipline as watchdogAlertLevel
-	// above (an operator reading a heuristic "verifica manualmente" WhatsApp
-	// every sweep for the same already-known situation is noise, not signal).
-	const watchdogRunAlerted = new Set<string>();
-	// Revisione 42 — same "alert once per running episode" discipline as
-	// watchdogAlertLevel above, for the two new checks: orphaned tickets
-	// (instance confirmably gone — yanoFindOrphanedTickets) and, opt-in,
-	// hard-stuck-but-still-connected tickets (WATCHDOG_AUTO_TERMINATE_*).
-	// Keyed the same way (ticket_id::running_since) so a fresh ticket_claim
-	// after reassignment starts a new episode and re-arms both.
-	const watchdogOrphanAlerted = new Set<string>();
-	const watchdogAutoTerminated = new Set<string>();
+	// The watchdogAlertLevel/watchdogRunAlerted/watchdogOrphanAlerted/
+	// watchdogAutoTerminated alert-dedup caches moved to scripts/watcher/
+	// watchdog-sweep.ts (Fase 2 / M3) — createWatchdogSweep() now owns them as
+	// factory-closure state, created once per call, same lifetime as before
+	// (this file only ever calls it once, below).
 	// Tickets this instance currently holds "running" (ticket_claim..ticket_complete),
 	// tracked here because agent_send's own inboundQueue (below) is a DIFFERENT
 	// completion signal — an instance can be deep into real ticket work with a
@@ -2779,282 +2767,13 @@ export default function (pi: ExtensionAPI) {
 		}
 	}
 
-	// Planner-only (a coder/specialist instance can't act on a stalled ticket
-	// anyway — reassignment/escalation is a planning decision). No-op for every
-	// other role and a no-op until the workspace/DB actually exists (yanoStorage
-	// null before the first orchestrator_init/run_create) — the timer below
-	// runs unconditionally from session_start, this function is what makes it
-	// harmless before there's anything to watch. Never throws: every side
-	// effect here (SQLite event, MQTT publish, WhatsApp, waking the planner's
-	// own turn) is independently best-effort, same discipline as the rest of
-	// this file — a watchdog that can itself crash the planner defeats its
-	// purpose.
-	async function watchdogSweep(nowMs: number): Promise<StalledTicketInfo[]> {
-		if (!identity || identity.role !== "planner" || !yanoStorage) return [];
-		// Fase 1 / M5: mark that the in-process watchdog is alive and just ran a
-		// pass for this project — regardless of whether anything is stalled.
-		// scripts/watch-stalls.mjs checks this heartbeat before publishing
-		// `ticket_stalled` to MQTT, so the two watchers stop double-publishing
-		// the same event when both are covering the same project at once. See
-		// scripts/watcher/heartbeat.mjs for the fail-open contract.
-		try { writeWatchdogHeartbeat(projectKey(identity.cwd, identity.project), nowMs); } catch { /* best effort, never block the real sweep */ }
-		try {
-			const expired = yanoStorage.expireDecisionHolds(new Date(nowMs).toISOString());
-			for (const hold of expired) {
-				yanoStorage.recordEvent(hold.run_id, "decision_hold_expired", { hold_id: hold.id, generation: hold.generation, expires_at: hold.expires_at }, hold.ticket_id);
-				void yanoPublishEvent(hold.run_id, "decision_hold_expired", { hold_id: hold.id, generation: hold.generation });
-				logEvent("decision_hold_expired", { run_id: hold.run_id, hold_id: hold.id, ticket_id: hold.ticket_id });
-			}
-		} catch {
-			// Hold expiry is best-effort within the watchdog; a storage failure must
-			// not suppress the independent stalled-ticket sweep below.
-		}
-		try {
-			for (const item of yanoStorage.drainDecisionHoldOutbox()) {
-				const payload = item.payload as { hold_id?: string; generation?: number; needs_replan?: boolean };
-				const message = `[decision-hold-resume] hold ${payload.hold_id ?? item.hold_id} answered (generation ${payload.generation ?? "?"}). ` +
-					(payload.needs_replan ? "Replan is required before dispatch." : "Resume the current plan from persisted state.");
-				void yanoPublishEvent(item.run_id, "decision_hold_resume_requested", { ...payload, outbox_id: item.id });
-				try {
-					pi.sendMessage({ customType: "decision-hold-resume", content: message, display: true, details: { run_id: item.run_id, ...payload, outbox_id: item.id } }, { deliverAs: "followUp", triggerTurn: true });
-				} catch {
-					logEvent("decision_hold_resume_delivery_failed", { run_id: item.run_id, hold_id: item.hold_id, outbox_id: item.id });
-				}
-			}
-		} catch {
-			// Keep the ticket watchdog alive if outbox delivery encounters a DB or
-			// transport failure; the durable answer/audit state remains intact.
-		}
-		let stalled: StalledTicketInfo[];
-		try {
-			stalled = yanoFindStalledTickets(yanoStorage, identity.project, nowMs, WATCHDOG_STALL_MS);
-		} catch {
-			return [];
-		}
-		for (const s of stalled) {
-			const episodeKey = `${s.ticket_id}::${s.running_since}`;
-			const thresholdLevel = Math.floor(s.elapsed_ms / WATCHDOG_STALL_MS); // 1 at first stall, 2 after another full stall period unresolved, ...
-			const lastLevel = watchdogAlertLevel.get(episodeKey) ?? 0;
-			if (thresholdLevel <= lastLevel) continue; // already alerted at this severity for this running episode
-			watchdogAlertLevel.set(episodeKey, thresholdLevel);
-
-			const minutes = Math.round(s.elapsed_ms / 60_000);
-			try {
-				yanoStorage.recordEvent(s.run_id, "ticket_stalled", { ticket_id: s.ticket_id, assigned_instance: s.assigned_instance, elapsed_ms: s.elapsed_ms }, s.ticket_id);
-			} catch {
-				// best-effort — never let a logging failure hide a real stall from the other channels below
-			}
-			// Await the publish (with a bound) before completing this sweep. A
-			// fire-and-forget publish could be overtaken by the next turn or by
-			// shutdown, leaving the planner notified locally while peers never
-			// receive the durable `ticket_stalled` signal.
-			await withTimeout(
-				yanoPublishEvent(s.run_id, "ticket_stalled", { ticket_id: s.ticket_id, title: s.title, assigned_instance: s.assigned_instance, elapsed_ms: s.elapsed_ms }),
-				2000,
-			);
-			logEvent("watchdog_stall_detected", { run_id: s.run_id, ticket_id: s.ticket_id, assigned_instance: s.assigned_instance, elapsed_ms: s.elapsed_ms, threshold_level: thresholdLevel });
-
-			const waMessage =
-				`⚠️ watchdog: il ticket "${s.title}" (${s.ticket_id}), assegnato a ${s.assigned_instance ?? "?"}, è RUNNING da ${minutes} min ` +
-				`senza un ticket_complete — probabile blocco dell'istanza (turno bloccato o troncato). Il planner è stato informato, nessuna azione automatica presa.`;
-			void sendNotifications(waMessage).then((r) => logEvent("notification_dispatch", { ok: r.ok, detail: r.detail, channels: r.channels, reason: "watchdog_stall", ticket_id: s.ticket_id }));
-
-			try {
-				pi.sendMessage(
-					{
-						customType: "orchestrator-watchdog",
-						content:
-							`[watchdog] Il ticket "${s.title}" (${s.ticket_id}), assegnato a ${s.assigned_instance ?? "istanza sconosciuta"}, risulta RUNNING da ${minutes} minuti ` +
-							`senza alcun evento di completamento — probabile blocco dell'istanza (turno bloccato o con risposta troncata dal provider). ` +
-							`Decidi tu come procedere: un ping via agent_send verso quell'istanza per capire se è ancora viva, marcare il ticket come fallito con ` +
-							`ticket_complete (status: "failed") e ripianificarlo su una nuova istanza dello stesso ruolo, oppure escalare all'utente se non riesci a ` +
-							`sbloccarlo. L'utente è già stato avvisato tramite i canali configurati (se presenti). Annota cosa decidi nel report, così resta nell'audit trail.`,
-						display: true,
-						details: { run_id: s.run_id, ticket_id: s.ticket_id, assigned_instance: s.assigned_instance, elapsed_ms: s.elapsed_ms, threshold_level: thresholdLevel },
-					},
-					{ deliverAs: "followUp", triggerTurn: true },
-				);
-			} catch {
-				// best-effort — the SQLite event + MQTT publish + notifications above already happened regardless
-			}
-		}
-
-		// Revisione 42 — orphaned tickets: assigned instance confirmably not
-		// connected (see yanoFindOrphanedTickets() above). Fires independently of
-		// the elapsed-time stall check above — no waiting needed, the presence
-		// snapshot already tells us the instance is gone. Deterministic,
-		// code-only action: mark the ticket "failed" itself (freeing the slot)
-		// and force a mandatory relaunch instruction into the planner's own
-		// turn — not a suggestion, since the real incident this closes was
-		// exactly the planner treating "the coder never showed up" as license
-		// to do the work itself instead of relaunching one.
-		try {
-			const orphaned = yanoFindOrphanedTickets(yanoStorage, identity.project, presence, { ignoreOpenDecisionHolds: true });
-			for (const o of orphaned) {
-				const episodeKey = `${o.ticket_id}::${o.running_since}`;
-				if (watchdogOrphanAlerted.has(episodeKey)) continue;
-				watchdogOrphanAlerted.add(episodeKey);
-
-				const summary = `istanza "${o.assigned_instance}" risultata offline/disconnessa (nessuna presence viva) — rilevato dal watchdog, ticket riportato a failed automaticamente.`;
-				try {
-					yanoStorage.updateTicketStatus(o.ticket_id, "failed", { result_summary: summary });
-					yanoStorage.recordEvent(o.run_id, "ticket_failed", { ticket_id: o.ticket_id, result_summary: summary, auto: true, reason: "orphaned_instance" }, o.ticket_id);
-				} catch {
-					// best-effort — the notification below still fires even if the DB write fails
-				}
-				void yanoPublishEvent(o.run_id, "ticket_failed", { ticket_id: o.ticket_id, auto: true, reason: "orphaned_instance" });
-				logEvent("watchdog_orphaned_ticket_auto_failed", { run_id: o.run_id, ticket_id: o.ticket_id, assigned_instance: o.assigned_instance });
-
-				const waMessage =
-					`🔴 watchdog: l'istanza "${o.assigned_instance}", assegnataria del ticket "${o.title}" (${o.ticket_id}), risulta OFFLINE — ` +
-					`il ticket è stato automaticamente riportato a "failed". Il planner è stato svegliato con l'istruzione di rilanciare l'istanza.`;
-				void sendNotifications(waMessage).then((r) => logEvent("notification_dispatch", { ok: r.ok, detail: r.detail, channels: r.channels, reason: "watchdog_orphaned_instance", ticket_id: o.ticket_id }));
-
-				try {
-					pi.sendMessage(
-						{
-							customType: "orchestrator-watchdog",
-							content:
-								`[watchdog] L'istanza "${o.assigned_instance}", a cui era assegnato il ticket "${o.title}" (${o.ticket_id}), risulta OFFLINE (nessuna ` +
-								`presence MQTT viva) — il ticket è già stato riportato automaticamente a "failed" per liberare lo slot. AZIONE OBBLIGATORIA: rilancia ` +
-								`ora "${o.assigned_instance}" (stesso nome o uno nuovo dello stesso ruolo) con Herdr, usando la selezione ` +
-								`iniziale del team, poi ripianifica questo lavoro (ticket_create/ticket_claim) su quell'istanza una volta che agent_list la mostra ` +
-								`viva. NON eseguire tu il lavoro di questo ticket: sei il planner, il tuo compito è pianificare e delegare, mai scrivere codice al ` +
-								`posto di un coder assente. L'utente è già stato avvisato tramite i canali configurati (se presenti).`,
-							display: true,
-							details: { run_id: o.run_id, ticket_id: o.ticket_id, assigned_instance: o.assigned_instance },
-						},
-						{ deliverAs: "followUp", triggerTurn: true },
-					);
-				} catch {
-					// best-effort
-				}
-			}
-		} catch {
-			// best-effort — never let this new check take down the rest of the sweep
-		}
-
-		// Revisione 42 — opt-in hard-stuck auto-terminate
-		// (PI_ORCH_WATCHDOG_AUTO_TERMINATE=true — see WATCHDOG_AUTO_TERMINATE_*
-		// above for the trade-off this is deliberately NOT on by default for).
-		// Only ever considers tickets that are BOTH past the harder threshold
-		// AND still presence-live (not offline) — an already-gone instance is
-		// handled by the orphan block above instead, nothing left to terminate.
-		if (WATCHDOG_AUTO_TERMINATE_ENABLED && client && T) {
-			try {
-				const hardStuck = yanoFindStalledTickets(yanoStorage, identity.project, nowMs, WATCHDOG_AUTO_TERMINATE_MS);
-				for (const s of hardStuck) {
-					if (!s.assigned_instance) continue;
-					const episodeKey = `${s.ticket_id}::${s.running_since}`;
-					if (watchdogAutoTerminated.has(episodeKey)) continue;
-					const card = presence.get(s.assigned_instance);
-					if (!card || card.status === "offline") continue; // already-gone — the orphan block above already handled it
-					watchdogAutoTerminated.add(episodeKey);
-
-					const minutes = Math.round(s.elapsed_ms / 60_000);
-					const env: TerminateEnvelope = {
-						type: "terminate",
-						requested_by_instance: identity.instance,
-						requested_by_role: identity.role,
-						reason: `watchdog: ticket "${s.ticket_id}" running da ${minutes} min senza ticket_complete (soglia auto-terminate superata)`,
-						timestamp: nowIso(),
-					};
-					try {
-						await client.publishAsync(T.agentCommands(s.assigned_instance), JSON.stringify(env), { qos: 1 });
-					} catch {
-						// best-effort — the notification/log below still happen regardless
-					}
-					try {
-						yanoStorage.recordEvent(s.run_id, "ticket_auto_terminated", { ticket_id: s.ticket_id, assigned_instance: s.assigned_instance, elapsed_ms: s.elapsed_ms });
-					} catch {
-						// best-effort
-					}
-					logEvent("watchdog_auto_terminate", { run_id: s.run_id, ticket_id: s.ticket_id, assigned_instance: s.assigned_instance, elapsed_ms: s.elapsed_ms });
-
-					const waMessage =
-						`🔴 watchdog: istanza "${s.assigned_instance}" bloccata da ${minutes} min sul ticket "${s.title}" (${s.ticket_id}) — terminazione ` +
-						`automatica inviata (PI_ORCH_WATCHDOG_AUTO_TERMINATE=true). Il planner deve rilanciarla.`;
-					void sendNotifications(waMessage).then((r) => logEvent("notification_dispatch", { ok: r.ok, detail: r.detail, channels: r.channels, reason: "watchdog_auto_terminate", ticket_id: s.ticket_id }));
-
-					try {
-						pi.sendMessage(
-							{
-								customType: "orchestrator-watchdog",
-								content:
-									`[watchdog] Ho appena inviato una terminazione automatica a "${s.assigned_instance}" (bloccata da ${minutes} minuti sul ticket ` +
-									`"${s.title}", ${s.ticket_id}, senza ticket_complete — soglia PI_ORCH_WATCHDOG_AUTO_TERMINATE_MS superata). AZIONE OBBLIGATORIA: ` +
-									`verifica con agent_list che sia sparita, poi rilanciala con Herdr e marca ` +
-									`questo ticket come failed con ticket_complete prima di ripianificarlo — NON eseguire tu il lavoro del ticket.`,
-								display: true,
-								details: { run_id: s.run_id, ticket_id: s.ticket_id, assigned_instance: s.assigned_instance, elapsed_ms: s.elapsed_ms },
-							},
-							{ deliverAs: "followUp", triggerTurn: true },
-						);
-					} catch {
-						// best-effort
-					}
-				}
-			} catch {
-				// best-effort — never let this take down the rest of the sweep
-			}
-		}
-
-		// Revisione 40 — see yanoFindUnfinalizedRuns() above. Independent of the
-		// ticket-stall loop above: a run can be fully "completed" at the DAG
-		// layer (nothing running, nothing to flag there) while still missing its
-		// operator-facing follow-up. `pi.sendMessage(..., {triggerTurn: true})`
-		// below is the actual "awake" half of this fix — if the planner's own
-		// turn-loop merely went idle (rather than the process having genuinely
-		// exited), this forces a fresh turn instead of waiting for one that may
-		// never come on its own. The WhatsApp send is a plain fetch, independent
-		// of this planner's own LLM turn entirely, so it still reaches the
-		// operator even if that revival attempt does nothing (process actually
-		// dead, or wedged deeper than a turn boundary).
-		try {
-			const unfinalized = yanoFindUnfinalizedRuns(yanoStorage, identity.project, nowMs, WATCHDOG_FINALIZE_GRACE_MS);
-			for (const r of unfinalized) {
-				if (watchdogRunAlerted.has(r.run_id)) continue;
-				watchdogRunAlerted.add(r.run_id);
-
-				const minutes = Math.round(r.elapsed_ms / 60_000);
-				try {
-					yanoStorage.recordEvent(r.run_id, "run_unfinalized_stall", { elapsed_ms: r.elapsed_ms });
-				} catch {
-					// best-effort — never let a logging failure hide this from the other channels below
-				}
-				logEvent("watchdog_unfinalized_run_detected", { run_id: r.run_id, objective: r.objective, elapsed_ms: r.elapsed_ms });
-
-				const waMessage =
-					`⚠️ watchdog: il run "${r.objective}" (${r.run_id}) risulta con TUTTI i ticket completati da ${minutes} min, ma nessun ` +
-					`worktree_finalize/notifica di chiusura risulta ancora arrivato — possibile blocco del planner (es. turno interrotto dal ` +
-					`provider LLM) subito dopo l'ultimo ticket_complete. Se il merge/la notifica finale sono già stati fatti manualmente, ignora ` +
-					`questo avviso — è un'euristica sul tempo trascorso, non una certezza.`;
-				void sendNotifications(waMessage).then((r2) => logEvent("notification_dispatch", { ok: r2.ok, detail: r2.detail, channels: r2.channels, reason: "watchdog_unfinalized_run", run_id: r.run_id }));
-
-				try {
-					pi.sendMessage(
-						{
-							customType: "orchestrator-watchdog",
-							content:
-								`[watchdog] Il run "${r.objective}" (${r.run_id}) ha tutti i ticket completati da ${minutes} minuti, ma non risulta ancora ` +
-								`nessun worktree_finalize né notifica di chiusura per questo lavoro. Se il task ha un worktree associato ancora aperto, ` +
-								`chiama worktree_finalize ora; se è già stato finalizzato per un'altra via, non serve fare nulla — annota nel report cosa ` +
-								`hai verificato. L'utente è già stato avvisato tramite i canali configurati (se presenti).`,
-							display: true,
-							details: { run_id: r.run_id, objective: r.objective, elapsed_ms: r.elapsed_ms },
-						},
-						{ deliverAs: "followUp", triggerTurn: true },
-					);
-				} catch {
-					// best-effort — the SQLite event + notifications above already happened regardless
-				}
-			}
-		} catch {
-			// best-effort — never let this second check take down the ticket-stall loop above
-		}
-
-		return stalled;
-	}
+	// ━━ Watchdog sweep (Fase 2 / M3) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+	//
+	// watchdogSweep() itself now lives in scripts/watcher/watchdog-sweep.ts —
+	// see createWatchdogSweep(...) below (placed after sendNotifications is
+	// defined, since it's one of the injected dependencies and — unlike the
+	// hoisted `function` declarations also injected here — a `const`, so it
+	// must already be initialised at this point in the file).
 
 	// ━━ Tools ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 	// A bug reported in the planner chat must be persisted before diagnosis. This
@@ -3914,6 +3633,39 @@ export default function (pi: ExtensionAPI) {
 	const sendTelegramNotification = (message: string) => notifications.sendTelegramNotification(message, identity);
 	const sendEmailNotification = (message: string) => notifications.sendEmailNotification(message, identity);
 	const sendNotifications = (message: string) => notifications.sendNotifications(message, identity);
+
+	// createWatchdogSweep()'s dependency object closes over the live
+	// identity/yanoStorage/client/T `let` bindings via getters (each can be
+	// reassigned later — see scripts/watcher/watchdog-sweep.ts's header for
+	// why a plain value snapshot here would go stale), and over
+	// sendNotifications directly: unlike the hoisted `function` declarations
+	// also passed below, sendNotifications is a `const` (Fase 2 / M2), so this
+	// call must be positioned after its declaration above, not up where
+	// watchdogSweep used to live — the setInterval that actually invokes
+	// watchdogSweep (session_start, further below) only fires long after this
+	// synchronous setup finishes, so where the setInterval registration
+	// itself sits textually doesn't matter.
+	const watchdogSweep = createWatchdogSweep({
+		getIdentity: () => identity,
+		getYanoStorage: () => yanoStorage,
+		getClient: () => client,
+		getTopics: () => T,
+		presence,
+		pi,
+		logEvent,
+		yanoPublishEvent,
+		sendNotifications,
+		withTimeout,
+		projectKey,
+		writeWatchdogHeartbeat,
+		yanoFindStalledTickets,
+		yanoFindUnfinalizedRuns,
+		yanoFindOrphanedTickets,
+		WATCHDOG_STALL_MS,
+		WATCHDOG_AUTO_TERMINATE_ENABLED,
+		WATCHDOG_AUTO_TERMINATE_MS,
+		WATCHDOG_FINALIZE_GRACE_MS,
+	});
 
 	pi.registerTool({
 		name: "notify_whatsapp",

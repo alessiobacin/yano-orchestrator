@@ -52,6 +52,7 @@ import { processYanoWatcherFindings, resolveYanoRepository, sendTelegramWatcherN
 import { missingConfigError, resolveYanoConfig } from "./yano-config.mjs";
 import { projectDbPath } from "./yano-project.mjs";
 import { herdrSnapshot } from "./yano-herdr-client.mjs";
+import { detectStalledTickets } from "./watcher/detect-stalled-tickets.mjs";
 
 const yanoRequire = createRequire(import.meta.url);
 let missingYanoRepoWarned = false;
@@ -771,24 +772,27 @@ function resolveProject(cwd) {
 	return path.basename(cwd);
 }
 
-// Fase 1 / M3 — mechanical extraction (zero behavior change) of the inline
-// stall-ticket query below, so it is unit-testable directly instead of only
-// reachable through the full runWatch() e2e path. Deliberately still queries
-// ALL `running` tickets globally (no active-run scoping) and uses a strict
-// `>` comparison — this is the documented divergence from orchestrator.ts's
-// yanoFindStalledTickets() (which scopes to active runs only and uses `>=`),
-// preserved here on purpose until Fase 1/M4 unifies the two behind one
-// shared detector module. See scripts/watcher/detect-stalled-tickets.test.mjs
-// for the Vitest cases that pin this exact difference.
+// Fase 1 / M4 — delegates the actual "is this ticket stalled" decision to
+// the shared, canonical detector (scripts/watcher/detect-stalled-tickets.mjs)
+// instead of the ad hoc query this used to run. This is a real behavior
+// change, not just a mechanical extraction (see Fase 1/M3 for the previous,
+// zero-behavior-change extraction step and the two divergences it
+// documented): this now also scopes to runs with status === 'active' and
+// uses an INCLUSIVE `>=` comparison, matching extensions/orchestrator.ts's
+// in-process watchdog exactly. The public shape of this function is kept
+// unchanged on purpose (raw ticket rows, same fields, same
+// `ORDER BY updated_at ASC` order) — every existing caller in this file
+// reads `.id`/`.updated_at`/etc. off the result, and this Fase 1 milestone
+// is about unifying the DECISION, not about changing this function's
+// contract with its own callers.
 export function findStalledTicketsFromDb(db, nowMs, stallMs) {
 	const rows = db.prepare("SELECT * FROM tickets WHERE status = 'running' ORDER BY updated_at ASC").all();
-	let stalled = rows.filter((t) => nowMs - new Date(t.updated_at).getTime() > stallMs);
-	if (stalled.length) {
-		const holdRows = db.prepare("SELECT DISTINCT run_id FROM decision_holds WHERE status = 'open'").all();
-		const pausedRuns = new Set(holdRows.map((row) => row.run_id));
-		stalled = stalled.filter((t) => !pausedRuns.has(t.run_id));
-	}
-	return stalled;
+	if (!rows.length) return rows;
+	const runs = db.prepare("SELECT id, status FROM runs").all();
+	const holdRows = db.prepare("SELECT DISTINCT run_id FROM decision_holds WHERE status = 'open'").all();
+	const openHoldRunIds = new Set(holdRows.map((row) => row.run_id));
+	const qualifyingTicketIds = new Set(detectStalledTickets({ tickets: rows, runs, openHoldRunIds }, nowMs, stallMs).map((item) => item.ticket_id));
+	return rows.filter((row) => qualifyingTicketIds.has(row.id));
 }
 
 export async function runWatch({ cwd, argv, packageRoot = null }) {

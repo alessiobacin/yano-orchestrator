@@ -62,6 +62,7 @@ import { recommend as recommendModel } from "../scripts/yano-model-advisor.mjs";
 import { openDatabase as openFeedbackDatabase, createFeedback as createFeedbackRecord, claimFeedback, claimNextQueuedFeedback, listFeedback, buildQueuedFeedbackWakeMessage, terminalStatusForFeedbackId } from "../scripts/yano-feedback.mjs";
 import { globalConfigPath, loadConfigFile } from "../scripts/yano-config.mjs";
 import { formatNotification } from "../scripts/yano-notification-format.mjs";
+import { detectStalledTickets } from "../scripts/watcher/detect-stalled-tickets.mjs";
 
 // ESM-safe lazy require, used only inside SQLiteOrchestratorStorage's
 // constructor to resolve node:sqlite on first actual use (see the
@@ -2587,25 +2588,21 @@ interface StalledTicketInfo {
 	elapsed_ms: number;
 }
 
+// Fase 1 / M4: thin adapter over the shared, canonical detector
+// (scripts/watcher/detect-stalled-tickets.mjs) — this file's own semantics
+// (active-run scoping + inclusive `>=`) were chosen as the one source of
+// truth both this watchdog and the standalone scripts/watch-stalls.mjs now
+// delegate to. Behavior here is unchanged from before this refactor: this
+// function still only considers runs with status === "active" and still
+// excludes any run with an open decision hold (that remains an intentional
+// pause, not a stall — a worker may have completed its preflight turn and
+// exited while the planner waits for the user's answer).
 export function yanoFindStalledTickets(storage: OrchestratorStorage, project: string, nowMs: number, stallMs: number): StalledTicketInfo[] {
-	const stalled: StalledTicketInfo[] = [];
-	const runs = storage.listRuns(project).filter((r) => r.status === "active");
-	// An open human decision hold is an intentional pause.  A worker may have
-	// completed its preflight turn and exited while the planner waits for the
-	// user's answer; treating that normal state as a stalled ticket creates a
-	// false watchdog escalation every interval.
-	const pausedRuns = new Set(runs.filter((run) => storage.listDecisionHolds(run.id, "open").length > 0).map((run) => run.id));
-	for (const run of runs) {
-		if (pausedRuns.has(run.id)) continue;
-		for (const t of storage.listTickets(run.id)) {
-			if (t.status !== "running") continue;
-			const elapsed = nowMs - Date.parse(t.updated_at);
-			if (elapsed >= stallMs) {
-				stalled.push({ run_id: run.id, ticket_id: t.id, title: t.title, assigned_instance: t.assigned_instance, running_since: t.updated_at, elapsed_ms: elapsed });
-			}
-		}
-	}
-	return stalled;
+	const runs = storage.listRuns(project);
+	const activeRuns = runs.filter((r) => r.status === "active");
+	const openHoldRunIds = new Set(activeRuns.filter((run) => storage.listDecisionHolds(run.id, "open").length > 0).map((run) => run.id));
+	const tickets = activeRuns.flatMap((run) => storage.listTickets(run.id));
+	return detectStalledTickets({ tickets, runs: activeRuns, openHoldRunIds }, nowMs, stallMs) as StalledTicketInfo[];
 }
 
 // ━━ Watchdog: detect runs stuck "completed" with no finalize/notify follow-up

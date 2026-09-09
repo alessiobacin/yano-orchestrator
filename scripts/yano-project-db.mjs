@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 
 // Inizializzazione esplicita e non distruttiva del DB del layer orchestrator.
-// La definizione dello schema resta nell'estensione TypeScript, così la CLI
-// non può divergere accidentalmente dallo storage usato da Pi.
+// La definizione dello schema resta in scripts/yano-orchestrator-storage.ts
+// (Fase 2/M0: estratta da extensions/orchestrator.ts, che prima ospitava
+// SQLiteOrchestratorStorage), così la CLI non può divergere accidentalmente
+// dallo storage usato da Pi.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -17,23 +19,23 @@ function sqliteClass() {
 }
 
 function readExtensionSource(packageRoot) {
-	const file = path.join(packageRoot, "extensions", "orchestrator.ts");
-	try { return fs.readFileSync(file, "utf8"); } catch (error) { throw new Error(`estensione orchestrator non leggibile: ${file} (${error.message})`); }
+	const file = path.join(packageRoot, "scripts", "yano-orchestrator-storage.ts");
+	try { return fs.readFileSync(file, "utf8"); } catch (error) { throw new Error(`storage orchestrator non leggibile: ${file} (${error.message})`); }
 }
 
 function schemaFromExtension(source) {
 	const match = source.match(/const YANO_SCHEMA_SQL = `([\s\S]*?)`;\s*\n/);
-	if (!match) throw new Error("schema Yano non trovato nell'estensione.");
+	if (!match) throw new Error("schema Yano non trovato nel modulo storage.");
 	return match[1];
 }
 
-// The version number must come from the SAME extension source as the SQL
-// above — a second hardcoded literal here already drifted out of sync once
-// (this file still seeded '10' after YANO_STORAGE_SCHEMA_VERSION became 11),
-// silently understating the schema_version of every DB this creates.
+// The version number must come from the SAME source as the SQL above — a
+// second hardcoded literal here already drifted out of sync once (this file
+// still seeded '10' after YANO_STORAGE_SCHEMA_VERSION became 11), silently
+// understating the schema_version of every DB this creates.
 function schemaVersionFromExtension(source) {
 	const match = source.match(/const YANO_STORAGE_SCHEMA_VERSION = (\d+);/);
-	if (!match) throw new Error("YANO_STORAGE_SCHEMA_VERSION non trovata nell'estensione.");
+	if (!match) throw new Error("YANO_STORAGE_SCHEMA_VERSION non trovata nel modulo storage.");
 	return Number(match[1]);
 }
 

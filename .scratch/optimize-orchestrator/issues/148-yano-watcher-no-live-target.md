@@ -4,13 +4,14 @@ kind: task
 created_by: yano-watcher
 status: archived-bulk-cleanup
 severity: high
-category: internal_tool
-signal: tool_failure
-fingerprint: 49cf7e2e9a2c9c6daea5f125dee1d041ee603b34dfe49d1556710ec66bc4eba3
-detected_at: 2026-09-02T17:07:26.789Z
-source_project: llmproxy
-source_project_root: /Users/alessiobacin/Development/Modules-platform-implementation/llmProxy
-source_project_key: workspace-b83c072cbe03
+category: delegation
+signal: no_live_target
+fingerprint: c799aac86af8f4a9653fcbb1c3a9fdcc7109dae9c4f4ac59c262f9cfbb46224f
+detected_at: 2026-09-08T12:29:53.491Z
+last_seen_at: 2026-09-08T14:13:06.145Z
+source_project: newbiz-website
+source_project_root: /Users/alessiobacin/Development/Code/newbiz-vendite/newbiz-website
+source_project_key: workspace-701fce3575c4
 run_id: unknown
 round: unknown
 task: unknown
@@ -18,39 +19,44 @@ instance: planner-01
 evidence_record_id: unknown
 ---
 
-# Un tool interno di Yano è terminato con errore.
+# Yano ha tentato di inviare un lavoro ma non ha trovato un destinatario vivo.
 
 Type: human
 Kind: task
 Created-by: yano-watcher
 Status: archived-bulk-cleanup
-Fingerprint: 49cf7e2e9a2c9c6daea5f125dee1d041ee603b34dfe49d1556710ec66bc4eba3
+Fingerprint: c799aac86af8f4a9653fcbb1c3a9fdcc7109dae9c4f4ac59c262f9cfbb46224f
 
 ## Sintesi
 
-Il watcher ha rilevato un comportamento attribuibile al flusso interno di Yano, non un semplice errore del codice del progetto osservato. Questo ticket è destinato a una successiva analisi di **yano-debugger** o di un LLM incaricato della manutenzione di Yano.
+Il watcher ha rilevato un comportamento attribuibile al flusso interno di Yano, non un semplice errore del codice del progetto osservato. Il finding viene inoltrato al planner di Yano per la manutenzione.
 
 ## Evidenza osservabile
 
-- Segnale: `tool_failure`
-- Categoria: `internal_tool`
-- Progetto osservato: `llmproxy` (/Users/alessiobacin/Development/Modules-platform-implementation/llmProxy)
-- Timestamp del record: `2026-09-02T17:07:02.215Z`
+- Segnale: `no_live_target`
+- Categoria: `delegation`
+- Progetto osservato: `newbiz-website` (/Users/alessiobacin/Development/Code/newbiz-vendite/newbiz-website)
+- Timestamp del record: `2026-09-08T12:28:39.446Z`
 - Record di trace: `unknown`
 
 ```json
 {
-  "ts": "2026-09-02T17:07:02.215Z",
-  "seq": 604,
+  "ts": "2026-09-08T12:28:39.446Z",
+  "seq": 593,
   "instance": "planner-01",
   "role": "planner",
-  "project": "llmproxy",
-  "project_key": "workspace-b83c072cbe03",
+  "project": "newbiz-website",
+  "project_key": "workspace-701fce3575c4",
   "trace_mode": "full",
-  "type": "tool_execution_end",
-  "tool_call_id": "call_c590b644da474180b918ac31",
-  "tool": "ticket_complete",
-  "ok": false
+  "type": "agent_send_no_live_target",
+  "target": "coder-01",
+  "route": "watcher",
+  "fallback_target": null,
+  "watcher_bootstrap": {
+    "attempted": true,
+    "ok": true,
+    "detail": "{\n  \"project\": \"newbiz-website\",\n  \"worker_status\": \"running\",\n  \"already_running\": true,\n  \"workspace_id\": \"w1X\",\n  \"tab_id\": \"w1X:tFR\",\n  \"instance\": \"watcher-newbiz-website\"\n}"
+  }
 }
 ```
 

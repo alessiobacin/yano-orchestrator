@@ -172,10 +172,23 @@ function slug(value) {
 	return String(value || "yano-fault").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "yano-fault";
 }
 
-function parseFrontmatter(content) {
+export function parseFrontmatter(content) {
 	const match = content.match(/^---\n([\s\S]*?)\n---/);
 	if (!match) return {};
 	return Object.fromEntries(match[1].split("\n").map((line) => line.match(/^([^:]+):\s*(.*)$/)).filter(Boolean).map(([, key, value]) => [key.trim(), value.trim()]));
+}
+
+// A ticket a human has written into its `## Comments` section is considered
+// human-touched and must never be silently auto-closed (sweep) or archived
+// (bulk cleanup) — only content presence is checked, deliberately not a
+// separate frontmatter flag: the section is always read anyway, so tracking
+// a second, independently-mutable "did someone comment" bit would only add
+// a way for the two to drift out of sync for no benefit. Works for tickets
+// created before this section existed too (no heading → no comments).
+export function hasHumanComments(content) {
+	const idx = String(content || "").indexOf("## Comments");
+	if (idx === -1) return false;
+	return content.slice(idx + "## Comments".length).trim().length > 0;
 }
 
 function ticketBody(finding, sourceProject, now) {
@@ -241,6 +254,8 @@ Verificare se il problema ha lasciato il planner senza destinatario, ha perso l�
 - Esiste un test di regressione.
 - Il caso non produce più il segnale errato in un nuovo round.
 - La notifica e la deduplicazione del watcher restano funzionanti.
+
+## Comments
 `;
 }
 
@@ -286,6 +301,7 @@ export function sweepStaleYanoWatcherTickets({ ticketsDir, now = new Date(), sta
 		try { content = fs.readFileSync(full, "utf8"); } catch { continue; }
 		const meta = parseFrontmatter(content);
 		if (meta.created_by !== "yano-watcher" || meta.status !== "open") continue;
+		if (hasHumanComments(content)) continue;
 		const lastSeen = Date.parse(meta.last_seen_at || meta.detected_at || "");
 		if (!Number.isFinite(lastSeen) || now.getTime() - lastSeen < thresholdMs) continue;
 		const updated = `${content

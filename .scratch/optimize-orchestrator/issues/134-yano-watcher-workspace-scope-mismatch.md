@@ -2,7 +2,7 @@
 type: human
 kind: task
 created_by: yano-watcher
-status: open
+status: archived-bulk-cleanup
 severity: critical
 category: isolation
 signal: workspace_scope_mismatch
@@ -24,7 +24,7 @@ evidence_record_id: unknown
 Type: human
 Kind: task
 Created-by: yano-watcher
-Status: open
+Status: archived-bulk-cleanup
 Fingerprint: ef1cadbe5809dc6c641186be7a4e2e30e14d4b878e2752ba2f7a7768a2cd581a
 
 ## Sintesi
@@ -155,3 +155,7 @@ exit 0; nessun messaggio MQTT reale inviato):
 - [ ] Regressione presente (scope isolato verificato)
 - [ ] Nuovo round senza `presence_ignored_scope_mismatch` tra scheduler e progetto
 - [ ] Notifica/deduplicazione watcher intatte
+
+## Archiviato (pulizia manuale)
+
+Ticket archiviato in blocco il 2026-09-09T14:48:06.399Z durante la pulizia una tantum del backlog watcher (Fase 1, milestone M0): nessuna recidiva mancata come nello sweep automatico, ma una decisione dell'operatore. Il ticket resta nel repository (git-tracked) e recuperabile.

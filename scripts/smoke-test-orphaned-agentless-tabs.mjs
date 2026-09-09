@@ -20,7 +20,7 @@ import { projectDbPath } from "./yano-project.mjs";
 
 console.log("Regression: orphaned agent-less tabs are swept; human/planner tabs never are");
 let passed = 0;
-function check(name, fn) { fn(); passed += 1; console.log(`  ok — ${name}`); }
+async function check(name, fn) { await fn(); passed += 1; console.log(`  ok — ${name}`); }
 
 // The agent-less sweep path never calls paneHasLivePiProcess() (there is no
 // pane to probe), but the pre-existing live-agent loop still does — a fake
@@ -50,7 +50,7 @@ function snapshotWith({ agents = [], tabs = [] }) {
 	return { agents, tabs };
 }
 
-check("an agent-less tab whose instance has a done ticket is closed as 'orphaned_agentless_terminal_ticket'", () => {
+await check("an agent-less tab whose instance has a done ticket is closed as 'orphaned_agentless_terminal_ticket'", () => {
 	const tabs = [{ tab_id: "t-docs-sync", workspace_id: "w1", label: "docs-sync-01-fixture" }];
 	const workspaceAgent = { name: "planner-01", cwd: row.root, tab_id: "t-planner", pane_id: "p-planner", agent_status: "idle" };
 	const snapshot = snapshotWith({
@@ -67,7 +67,7 @@ check("an agent-less tab whose instance has a done ticket is closed as 'orphaned
 	assert.equal(orphan.instance, "docs-sync-01-fixture");
 });
 
-check("a HUMAN tab is never closed, even with no agent and even if its label happened to match a terminal assignment", () => {
+await check("a HUMAN tab is never closed, even with no agent and even if its label happened to match a terminal assignment", () => {
 	const snapshot = snapshotWith({
 		agents: [{ name: "planner-01", cwd: row.root, tab_id: "t-planner", pane_id: "p-planner", agent_status: "idle" }],
 		tabs: [
@@ -85,7 +85,7 @@ check("a HUMAN tab is never closed, even with no agent and even if its label hap
 	assert.ok(!removed.some((item) => item.tab_id === "t-human"), "the human tab is never in the closed list");
 });
 
-check("a HUMAN tab label is matched case-insensitively and trims whitespace", () => {
+await check("a HUMAN tab label is matched case-insensitively and trims whitespace", () => {
 	const snapshot = snapshotWith({
 		agents: [{ name: "planner-01", cwd: row.root, tab_id: "t-planner", pane_id: "p-planner", agent_status: "idle" }],
 		tabs: [
@@ -100,7 +100,7 @@ check("a HUMAN tab label is matched case-insensitively and trims whitespace", ()
 	assert.ok(!removed.some((item) => item.tab_id === "t-human"), "human protection is case/whitespace insensitive");
 });
 
-check("an agent-less tab with NO terminal-assignment match is left alone — a freshly-launched instance is not yet in ticket history", () => {
+await check("an agent-less tab with NO terminal-assignment match is left alone — a freshly-launched instance is not yet in ticket history", () => {
 	const snapshot = snapshotWith({
 		agents: [{ name: "planner-01", cwd: row.root, tab_id: "t-planner", pane_id: "p-planner", agent_status: "idle" }],
 		tabs: [
@@ -114,7 +114,7 @@ check("an agent-less tab with NO terminal-assignment match is left alone — a f
 	assert.ok(!removed.some((item) => item.tab_id === "t-fresh"), "an unmatched agent-less tab is never closed on absence-of-evidence alone");
 });
 
-check("a LIVE agent's tab is never double-closed by the agent-less sweep path", () => {
+await check("a LIVE agent's tab is never double-closed by the agent-less sweep path", () => {
 	const snapshot = snapshotWith({
 		agents: [
 			{ name: "planner-01", cwd: row.root, tab_id: "t-planner", pane_id: "p-planner", agent_status: "idle" },
@@ -134,7 +134,7 @@ check("a LIVE agent's tab is never double-closed by the agent-less sweep path", 
 	assert.deepEqual(removed, [], "a live, working agent survives even with a stale terminal ticket on record");
 });
 
-check("an agent-less tab in a DIFFERENT project's workspace is never touched", () => {
+await check("an agent-less tab in a DIFFERENT project's workspace is never touched", () => {
 	const snapshot = snapshotWith({
 		agents: [{ name: "planner-01", cwd: row.root, tab_id: "t-planner", pane_id: "p-planner", agent_status: "idle" }],
 		tabs: [
@@ -182,13 +182,13 @@ check("an agent-less tab in a DIFFERENT project's workspace is never touched", (
 		panes: [],
 	};
 
-	check("a PAUSED project's dead agent-less tabs are still swept — pausing the watcher's polling loop must not preserve dead terminal clutter", () => {
-		const result = doStatusForRow(null, pausedRow, { heal: true, snapshot });
+	await check("a PAUSED project's dead agent-less tabs are still swept — pausing the watcher's polling loop must not preserve dead terminal clutter", async () => {
+		const result = await doStatusForRow(null, pausedRow, { heal: true, snapshot });
 		assert.ok(result.agent_tabs_closed?.some((item) => item.tab_id === "t-dead-in-paused"), "the dead tab in the paused project is closed");
 	});
 
-	check("a PAUSED project's worker/cadence fields are untouched by this cleanup (only agent tabs are swept, never the watcher's own state)", () => {
-		const result = doStatusForRow(null, pausedRow, { heal: true, snapshot });
+	await check("a PAUSED project's worker/cadence fields are untouched by this cleanup (only agent tabs are swept, never the watcher's own state)", async () => {
+		const result = await doStatusForRow(null, pausedRow, { heal: true, snapshot });
 		assert.equal(result.worker_status, "paused", "the explicit pause is never overridden by this cleanup");
 	});
 

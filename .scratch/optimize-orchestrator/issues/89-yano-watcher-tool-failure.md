@@ -2,7 +2,7 @@
 type: human
 kind: task
 created_by: yano-watcher
-status: open
+status: archived-bulk-cleanup
 severity: high
 category: internal_tool
 signal: tool_failure
@@ -23,7 +23,7 @@ evidence_record_id: unknown
 Type: human
 Kind: task
 Created-by: yano-watcher
-Status: open
+Status: archived-bulk-cleanup
 Fingerprint: 7daad13c9e65ae132a8e3f8142c9ce463910c4de49a305a073ca030eed679466
 
 ## Sintesi
@@ -77,3 +77,7 @@ Verificare se il problema ha lasciato il planner senza destinatario, ha perso l�
 L'`agent_send` fallito (seq 528, tool_call call_1594b20caa9746a687b68dc0, `ok:false`) è il **rifiuto atteso dell'enforcement dei percorsi di handoff**: planner → reviewer non è permesso ("The enforced paths are planner → coder → reviewer → planner"). Nessun bug, nessun round perso: il planner ha re-instradato la review via coder-01 (assignment 01M180T5KQR19NXWEQ6SSR0P8J, accettato; la review interna procede dentro il ciclo coder→reviewer→planner). Il progetto llmproxy (workspace-b83c072cbe03) è sano: T3.1–T3.4 committati (368885c), suite 769/767/0/2, T4 deferred come da gate.
 
 Il tool potrebbe offrire un payload più esplicito per i refusal di routing (es. ok:false + reason già presenti) per evitare falsi positivi del watcher; suggerimento non bloccante.
+
+## Archiviato (pulizia manuale)
+
+Ticket archiviato in blocco il 2026-09-09T14:48:06.399Z durante la pulizia una tantum del backlog watcher (Fase 1, milestone M0): nessuna recidiva mancata come nello sweep automatico, ma una decisione dell'operatore. Il ticket resta nel repository (git-tracked) e recuperabile.

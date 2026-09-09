@@ -2,7 +2,7 @@
 type: human
 kind: task
 created_by: yano-watcher
-status: open
+status: archived-bulk-cleanup
 severity: high
 category: internal_tool
 signal: tool_failure
@@ -23,7 +23,7 @@ evidence_record_id: unknown
 Type: human
 Kind: task
 Created-by: yano-watcher
-Status: open
+Status: archived-bulk-cleanup
 Fingerprint: bc965914595dd5a229540f84b90acaa70618f4910f48a7e0a311a154333c1021
 
 ## Sintesi
@@ -71,3 +71,7 @@ Verificare se il problema ha lasciato il planner senza destinatario, ha perso l‚
 - Esiste un test di regressione.
 - Il caso non produce pi√π il segnale errato in un nuovo round.
 - La notifica e la deduplicazione del watcher restano funzionanti.
+
+## Archiviato (pulizia manuale)
+
+Ticket archiviato in blocco il 2026-09-09T14:48:06.399Z durante la pulizia una tantum del backlog watcher (Fase 1, milestone M0): nessuna recidiva mancata come nello sweep automatico, ma una decisione dell'operatore. Il ticket resta nel repository (git-tracked) e recuperabile.

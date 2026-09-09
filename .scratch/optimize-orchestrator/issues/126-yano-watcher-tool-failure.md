@@ -2,7 +2,7 @@
 type: human
 kind: task
 created_by: yano-watcher
-status: open
+status: archived-bulk-cleanup
 severity: high
 category: internal_tool
 signal: tool_failure
@@ -23,7 +23,7 @@ evidence_record_id: unknown
 Type: human
 Kind: task
 Created-by: yano-watcher
-Status: open
+Status: archived-bulk-cleanup
 Fingerprint: b65063522db620e9207e179e0803209e31032175a4548b7be33af85f820dc172
 
 ## Sintesi
@@ -157,3 +157,7 @@ filtro rifiuti attesi qui richiesto.
 - `scripts/watch-stalls.mjs` (righe 1320-1340)
 - Trace: `~/Library/Application Support/yano/data/traces/workspace-b83c072cbe03/events/planner-01.jsonl` (seq 566-583)
 - `prompts/debugger.md`
+
+## Archiviato (pulizia manuale)
+
+Ticket archiviato in blocco il 2026-09-09T14:48:06.399Z durante la pulizia una tantum del backlog watcher (Fase 1, milestone M0): nessuna recidiva mancata come nello sweep automatico, ma una decisione dell'operatore. Il ticket resta nel repository (git-tracked) e recuperabile.

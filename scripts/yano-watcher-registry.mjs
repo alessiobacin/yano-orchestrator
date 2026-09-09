@@ -707,19 +707,64 @@ function orphanedRunningTickets(run, snapshot, root) {
 	});
 }
 
-function notifyPlannerOfOrphanedTickets(row, snapshot, run, orphaned) {
+// A lazily-connected MQTT client shared by every publisher within a single
+// `supervise()` pass — recovery notifications, playbook-flow alerts and the
+// feedback queue used to each open (and immediately tear down) their own
+// broker connection, up to 3 fresh TCP+MQTT handshakes per one-minute pass
+// even when publishing to the same broker. `.get()` connects on first use
+// and is cached for the rest of the pass; the caller (supervise()) closes it
+// once via `.closeIfOpen()` after everything that might publish has run. A
+// function that doesn't receive a provider (a standalone/interactive call,
+// or a test) falls back to opening and closing its own connection exactly as
+// before — the provider is purely an optimization, never a requirement.
+function createLazyMqttClient() {
+	let connecting = null;
+	return {
+		get() {
+			if (!connecting) connecting = mqtt.connectAsync(process.env.PI_ORCH_BROKER_URL || "mqtt://127.0.0.1:1883", { connectTimeout: 3000 });
+			return connecting;
+		},
+		async closeIfOpen() {
+			if (!connecting) return;
+			try { const client = await connecting; await client.endAsync(); } catch { /* best effort */ }
+		},
+	};
+}
+
+// Real incident: this used to shell out to a whole second Node process
+// (`spawnSync(process.execPath, ["--input-type=module", "-e", code], { cwd:
+// row.root, ... })`) just to open one MQTT connection, publish one message
+// and disconnect — paying a full interpreter fork+exec on every orphaned-
+// ticket recovery, on the one-minute hot path. Worse than slow: Node
+// resolves a spawned subprocess's bare `import mqtt` against `cwd`'s own
+// `node_modules` — `row.root` is the WATCHED project's root, not this
+// package's, so on any real project that doesn't itself depend on `mqtt`
+// this failed outright with `ERR_MODULE_NOT_FOUND` (`planner_notification_
+// failed`), silently. `notifyYanoOrchestratorPlanner` right below already
+// did this correctly, in-process, with the `mqtt` module imported once at
+// file scope — this now does the same, optionally reusing the pass-scoped
+// client from `createLazyMqttClient()` above instead of opening its own.
+export async function notifyPlannerOfOrphanedTickets(row, snapshot, run, orphaned, mqttClientProvider = null) {
 	const workspace = findProjectWorkspace(snapshot, row.root, row.name);
 	const planner = workspace && plannerAgentsInWorkspace(snapshot, workspace.workspace_id, row.root).find(plannerHeartbeatHealthy);
 	if (!planner?.pane_id) return { notified: false, reason: "planner_not_live" };
 	const ticketText = orphaned.map((item) => `${item.ticket.id} (${item.ticket.assigned_instance})`).join(", ");
 	const prompt = `[yano-watcher specialist recovery] Il run ${run.id} ha ticket running senza worker vivo: ${ticketText}. Non creare ticket duplicati. Riprendi dal checkpoint, chiudi/riavvia solo gli agenti specialistici mancanti e continua il flusso fino alla risposta finale. Il planner è già vivo: non riavviare il planner.`;
 	const scope = projectKey(row.root, row.name);
-	const code = `import mqtt from ${JSON.stringify("mqtt")}; const c=await mqtt.connectAsync(process.env.PI_ORCH_BROKER_URL||"mqtt://127.0.0.1:1883",{connectTimeout:3000}); await c.publishAsync(${JSON.stringify(`pi/${scope}/agents/${planner.name || "planner-01"}/commands`)},JSON.stringify(${JSON.stringify({ type: "watcher_specialist_recovery", sender_instance: "yano-watcher", sender_role: "watcher", project: row.name, run_id: run.id, prompt })}),{qos:1}); await c.endAsync();`;
-	const launched = spawnSync(process.execPath, ["--input-type=module", "-e", code], { cwd: row.root, encoding: "utf8", timeout: 5000 });
-	return launched.status === 0 ? { notified: true, planner_pane_id: planner.pane_id, planner_instance: planner.name || "planner-01", ticket_ids: orphaned.map((item) => item.ticket.id) } : { notified: false, reason: "planner_notification_failed", error: (launched.stderr || "").trim() };
+	let client;
+	try { client = await (mqttClientProvider ? mqttClientProvider.get() : mqtt.connectAsync(process.env.PI_ORCH_BROKER_URL || "mqtt://127.0.0.1:1883", { connectTimeout: 3000 })); }
+	catch (error) { return { notified: false, reason: "planner_notification_failed", error: error instanceof Error ? error.message : String(error) }; }
+	try {
+		await client.publishAsync(`pi/${scope}/agents/${planner.name || "planner-01"}/commands`, JSON.stringify({ type: "watcher_specialist_recovery", sender_instance: "yano-watcher", sender_role: "watcher", project: row.name, run_id: run.id, prompt }), { qos: 1 });
+		return { notified: true, planner_pane_id: planner.pane_id, planner_instance: planner.name || "planner-01", ticket_ids: orphaned.map((item) => item.ticket.id) };
+	} catch (error) {
+		return { notified: false, reason: "planner_notification_failed", error: error instanceof Error ? error.message : String(error) };
+	} finally {
+		if (!mqttClientProvider) { try { await client.endAsync(); } catch { /* best effort */ } }
+	}
 }
 
-async function notifyYanoOrchestratorPlanner(flow, sourceProject) {
+async function notifyYanoOrchestratorPlanner(flow, sourceProject, mqttClientProvider = null) {
 	const root = PACKAGE_ROOT;
 	let snapshot = herdrSnapshot();
 	const row = { name: "yano-orchestrator", root, project_key: projectKey(root, "yano-orchestrator") };
@@ -736,9 +781,9 @@ async function notifyYanoOrchestratorPlanner(flow, sourceProject) {
 	if (!planner?.name) return { notified: false, reason: "planner_not_live" };
 	const scope = projectKey(root, "yano-orchestrator");
 	const prompt = `[yano-watcher playbook audit] Violazione deterministica del flusso rilevata nel progetto ${sourceProject}. Run ${flow.run_id}. Evidenze: ${JSON.stringify(flow)}. Analizza e correggi il problema nel codice/configurazione di Yano; non modificare il progetto sorgente e non creare ticket duplicati.`;
-	const client = await mqtt.connectAsync(process.env.PI_ORCH_BROKER_URL || "mqtt://127.0.0.1:1883", { connectTimeout: 3000 });
+	const client = await (mqttClientProvider ? mqttClientProvider.get() : mqtt.connectAsync(process.env.PI_ORCH_BROKER_URL || "mqtt://127.0.0.1:1883", { connectTimeout: 3000 }));
 	try { await client.publishAsync(`pi/${scope}/agents/${planner.name}/commands`, JSON.stringify({ type: "watcher_playbook_flow_violation", sender_instance: "yano-watcher", sender_role: "watcher", source_project: sourceProject, ...flow, prompt }), { qos: 1 }); return { notified: true, planner_instance: planner.name }; }
-	finally { await client.endAsync(); }
+	finally { if (!mqttClientProvider) await client.endAsync(); }
 }
 
 function readyPendingTickets(run) {
@@ -862,7 +907,7 @@ function recoverPlanner({ row, snapshot, run, reason }) {
 	return { recovered: true, workspace_id: workspace.workspace_id, planner_tab_id: tab.tab_id, planner_pane_id: pane.pane_id, run_id: run.id, recovery_reason: reason };
 }
 
-function reconcileProjectRun(db, row, snapshot) {
+async function reconcileProjectRun(db, row, snapshot, mqttClientProvider = null) {
 	const identityConflicts = snapshot ? findAgentIdentityConflicts(snapshot).filter((conflict) => path.resolve(conflict.root) === path.resolve(row.root)) : [];
 	if (identityConflicts.length) {
 		return { recovery: "identity_conflict", watcher_kept: true, identity_conflicts: identityConflicts, recovery_error: formatAgentIdentityConflicts(identityConflicts).join("; ") };
@@ -891,7 +936,7 @@ function reconcileProjectRun(db, row, snapshot) {
 		const reason = orphaned.length ? "planner_handoff_missing" : ready.length && plannersIdle ? "planner_ready_queue_stalled" : stalled.length ? "planner_stalled" : "planner_missing";
 		if (orphaned.length && planners.some(plannerHeartbeatHealthy)) {
 			const targetRun = orphaned[0].run;
-			const notification = notifyPlannerOfOrphanedTickets(row, snapshot, targetRun, orphaned.filter((item) => item.run.id === targetRun.id));
+			const notification = await notifyPlannerOfOrphanedTickets(row, snapshot, targetRun, orphaned.filter((item) => item.run.id === targetRun.id), mqttClientProvider);
 			try { appendRawTraceRecord({ cwd: row.root, project: row.name, record: { type: "watcher_specialist_recovery_requested", record_type: "event", source: "yano-watcher-registry", instance: "yano-watcher", run_id: targetRun.id, tickets: orphaned.map((item) => item.ticket.id), notification } }); } catch { /* best effort */ }
 			return { recovery: "specialist_recovery_requested", incomplete_runs: incomplete.map((run) => run.id), notification, planner_statuses: planners.map((planner) => planner.agent_status || "unknown") };
 		}
@@ -1064,7 +1109,7 @@ function doResume(db, info, existing, opts = {}) {
 // closes the original gap: a stopped watcher used to be invisible until
 // someone happened to check `herdr agent list`; now the routine status call
 // itself notices and repairs it.
-export function doStatusForRow(db, row, { heal = true, snapshot: suppliedSnapshot = null } = {}) {
+export async function doStatusForRow(db, row, { heal = true, snapshot: suppliedSnapshot = null, mqttClientProvider = null } = {}) {
 	const info = infoFromRow(row);
 	const base = { ...row, live: null, drift: false, recovered: false };
 	if (row.worker_status !== "running") {
@@ -1100,7 +1145,7 @@ export function doStatusForRow(db, row, { heal = true, snapshot: suppliedSnapsho
 			try { appendRawTraceRecord({ cwd: row.root, project: row.name, record: { type: "watcher_worker_restarted_for_config_drift", record_type: "event", source: "yano-watcher-registry", expected_interval_ms: row.interval_ms, expected_lookback_ms: row.lookback_ms, previous_tab_id: tab.tab_id, close: closed } }); } catch { /* best effort */ }
 			try {
 				const relaunched = launchHerdrWorker({ project: infoFromRow(row), root: row.root, db, row, intervalMs: row.interval_ms, lookbackMs: row.lookback_ms, dryRun: false });
-				return { ...base, live: "restarted", drift: true, recovered: true, worker_config_repaired: true, ...relaunched, ...reconcileProjectRun(db, row, herdrSnapshot()) };
+				return { ...base, live: "restarted", drift: true, recovered: true, worker_config_repaired: true, ...relaunched, ...await reconcileProjectRun(db, row, herdrSnapshot(), mqttClientProvider) };
 			} catch (error) {
 				return { ...base, live: "config_drift", drift: true, recovered: false, worker_config_repaired: false, recover_error: error instanceof Error ? error.message : String(error) };
 			}
@@ -1108,14 +1153,14 @@ export function doStatusForRow(db, row, { heal = true, snapshot: suppliedSnapsho
 		const runs = projectRuns(row.root).runs;
 		const agent_tabs_closed = heal ? [...cleanupCompletedAgentTabs(snapshot, row, runs), ...cleanupStaleProjectTabs(snapshot, row, runs)] : [];
 		const planner = heal ? (() => { try { return ensureRegisteredPlanner(row, snapshot, db); } catch (error) { return { recovery: "planner_recovery_failed", recovery_error: error instanceof Error ? error.message : String(error) }; } })() : { recovery: "not_checked" };
-		return { ...base, live: "running", identity_conflicts, planner, agent_tabs_closed, ...reconcileProjectRun(db, row, snapshot) };
+		return { ...base, live: "running", identity_conflicts, planner, agent_tabs_closed, ...await reconcileProjectRun(db, row, snapshot, mqttClientProvider) };
 	}
 	const drifted = { ...base, live: "not_found", drift: true };
 	if (!heal) return drifted;
 	try {
 		const relaunched = launchHerdrWorker({ project: info, root: row.root, db, row, intervalMs: row.interval_ms, lookbackMs: row.lookback_ms, dryRun: false });
 		try { appendRawTraceRecord({ cwd: row.root, project: row.name, record: { type: "watcher_worker_recovered", record_type: "event", source: "yano-watcher-registry", instance: "yano-watcher", previous_tab_id: row.worker_tab_id, previous_pane_id: row.worker_pane_id } }); } catch { /* best effort */ }
-		return { ...drifted, recovered: true, ...relaunched, worker_status: "running", ...reconcileProjectRun(db, row, herdrSnapshot()) };
+		return { ...drifted, recovered: true, ...relaunched, worker_status: "running", ...await reconcileProjectRun(db, row, herdrSnapshot(), mqttClientProvider) };
 	} catch (error) {
 		return { ...drifted, recovered: false, recover_error: error instanceof Error ? error.message : String(error) };
 	}
@@ -1219,14 +1264,14 @@ function activateDefaultWorkers(db, row) {
 	};
 }
 
-async function superviseFeedbackQueue(rows, snapshot) {
+async function superviseFeedbackQueue(rows, snapshot, mqttClientProvider = null) {
 	const result = { checked: 0, delivered: 0, claimed: [], deferred: [] };
 	let feedbackDb;
 	try { feedbackDb = openFeedbackDatabase(); } catch (error) { return { ...result, error: error instanceof Error ? error.message : String(error) }; }
 	const pending = listFeedback(feedbackDb, { statuses: ["pending_planner", "queued", "retry"] });
 	if (!pending.length) { feedbackDb.close(); return result; }
 	let client;
-	try { client = await mqtt.connectAsync(process.env.PI_ORCH_BROKER_URL || "mqtt://127.0.0.1:1883", { connectTimeout: 3000 }); } catch (error) { feedbackDb.close(); return { ...result, checked: pending.length, error: error instanceof Error ? error.message : String(error) }; }
+	try { client = await (mqttClientProvider ? mqttClientProvider.get() : mqtt.connectAsync(process.env.PI_ORCH_BROKER_URL || "mqtt://127.0.0.1:1883", { connectTimeout: 3000 })); } catch (error) { feedbackDb.close(); return { ...result, checked: pending.length, error: error instanceof Error ? error.message : String(error) }; }
 	try {
 		for (const item of pending) {
 			result.checked++;
@@ -1238,7 +1283,7 @@ async function superviseFeedbackQueue(rows, snapshot) {
 			await client.publishAsync(`pi/${scope}/agents/${planner.name || "planner-01"}/commands`, JSON.stringify({ type: "feedback_received", feedback_type: item.type, feedback_id: item.id, project_id: item.project_id, message: item.message, resolution: item.resolution, screenshots: item.screenshots || [], requires_user_confirmation: item.type === "suggestion" || item.resolution === "user_confirmation", sender_instance: "yano-watcher", sender_role: "watcher" }), { qos: 1 });
 			claimFeedback(feedbackDb, item.id); result.delivered++; result.claimed.push(item.id);
 		}
-	} finally { try { await client.endAsync(); } catch {} feedbackDb.close(); }
+	} finally { if (!mqttClientProvider) { try { await client.endAsync(); } catch {} } feedbackDb.close(); }
 	return result;
 }
 
@@ -1347,6 +1392,22 @@ export function checkProjectLogSizes(rows) {
 function supervise(db) {
 	return withSupervisorLock(async () => {
 		const rows = db.prepare("SELECT * FROM watcher_projects ORDER BY updated_at DESC").all();
+		// One MQTT connection, reused by every publisher below (recovery
+		// notifications, playbook-flow alerts, the feedback queue) that actually
+		// needs to publish this pass — instead of each one opening and tearing
+		// down its own broker connection. Connects lazily on first use, closed
+		// once at the end of the pass (see the `finally` at the bottom of this
+		// callback) regardless of how the pass exits.
+		const mqttClientProvider = createLazyMqttClient();
+		try {
+			return await runSupervisePass(db, rows, mqttClientProvider);
+		} finally {
+			await mqttClientProvider.closeIfOpen();
+		}
+	});
+}
+
+async function runSupervisePass(db, rows, mqttClientProvider) {
 		// User-declared external dependencies (Docker/pm2/llmProxy/...) run
 		// FIRST, before this pass's own Herdr snapshot: if the operator has
 		// registered a service literally named "herdr" (`yano services add
@@ -1402,15 +1463,15 @@ function supervise(db) {
 		// Refresh the activation state after global-service recovery.
 		const activated = [...rows.map((row) => activateDefaultWorkers(db, row)).filter(Boolean)];
 		let feedback_queue;
-		try { feedback_queue = await superviseFeedbackQueue(rows, repairedSnapshot); } catch (error) { feedback_queue = { error: error instanceof Error ? error.message : String(error) }; }
+		try { feedback_queue = await superviseFeedbackQueue(rows, repairedSnapshot, mqttClientProvider); } catch (error) { feedback_queue = { error: error instanceof Error ? error.message : String(error) }; }
 		let orphaned_feedback;
 		try { orphaned_feedback = await recoverOrphanedProcessingFeedback(rows, repairedSnapshot); } catch (error) { orphaned_feedback = { error: error instanceof Error ? error.message : String(error) }; }
-		const projectResults = rows.map((row) => doStatusForRow(db, row, { heal: true, snapshot: repairedSnapshot }));
+		const projectResults = await Promise.all(rows.map((row) => doStatusForRow(db, row, { heal: true, snapshot: repairedSnapshot, mqttClientProvider })));
 		const playbook_flow_alerts = [];
 		for (let index = 0; index < projectResults.length; index++) {
 			const item = projectResults[index];
 			if (!item.playbook_flow_violations?.length) continue;
-			try { playbook_flow_alerts.push({ project: rows[index].name, ...await notifyYanoOrchestratorPlanner(item.playbook_flow_violations[0], rows[index].name) }); }
+			try { playbook_flow_alerts.push({ project: rows[index].name, ...await notifyYanoOrchestratorPlanner(item.playbook_flow_violations[0], rows[index].name, mqttClientProvider) }); }
 			catch (error) { playbook_flow_alerts.push({ project: rows[index].name, notified: false, reason: error instanceof Error ? error.message : String(error) }); }
 		}
 		const result = {
@@ -1434,7 +1495,6 @@ function supervise(db) {
 		};
 		try { fs.writeFileSync(supervisorHeartbeatPath(), JSON.stringify({ checked_at: result.checked_at, pid: process.pid, status: "idle", project_count: rows.length, external_recoveries: result.external_workers }, null, 2), { mode: 0o600 }); } catch { /* best effort */ }
 		return result;
-	});
 }
 
 function readCrontab() {
@@ -1542,7 +1602,7 @@ export async function runYanoWatcherRegistry({ argv = [] } = {}) {
 		purgeSystemControlPlaneRows(db);
 		if (opts.sub === "projects") {
 			const rows = db.prepare("SELECT * FROM watcher_projects ORDER BY name, root").all();
-			const result = rows.map((row) => doStatusForRow(db, row, { heal: false }));
+			const result = await Promise.all(rows.map((row) => doStatusForRow(db, row, { heal: false })));
 			print(result, opts.json);
 			return result;
 		}
@@ -1586,12 +1646,12 @@ export async function runYanoWatcherRegistry({ argv = [] } = {}) {
 				const info = projectInfo(opts.projectRoot, opts.project);
 				const row = getProject(db, info);
 				if (!row) { print({ registered: false, project: info.name, root: info.root }, opts.json); return { registered: false }; }
-				const result = doStatusForRow(db, row, { heal });
+				const result = await doStatusForRow(db, row, { heal });
 				print(result, opts.json);
 				return result;
 			}
 			const rows = db.prepare("SELECT * FROM watcher_projects ORDER BY updated_at DESC").all();
-			const results = rows.map((row) => doStatusForRow(db, row, { heal }));
+			const results = await Promise.all(rows.map((row) => doStatusForRow(db, row, { heal })));
 			print(results, opts.json);
 			return results;
 		}

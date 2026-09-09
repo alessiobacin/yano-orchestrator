@@ -110,6 +110,16 @@ function failure({ category, signal, severity, summary, record, evidence }) {
 	// policy refusal) from reusing a ticket created for a different project.
 	const fingerprintInput = [detail.project_key || detail.project, category, signal, detail.type, detail.tool, detail.expected, detail.actual, summary].map((item) => String(item || "")).join("|");
 	detail.fingerprint = crypto.createHash("sha256").update(fingerprintInput).digest("hex");
+	// Fase 1 / M7 — a coarser second fingerprint groups findings that are
+	// correlated but not identical (same project/category/signal, different
+	// tool/expected/actual — e.g. 33-39 distinct tool_failure findings
+	// observed during the Fase 1 audit, each opening its own ticket). The
+	// exact `fingerprint` above still dedupes true repeats unchanged;
+	// `family_fingerprint` is only consulted when that exact match misses,
+	// to decide whether a new finding should append an occurrence to an
+	// existing open ticket instead of opening a new one.
+	const familyFingerprintInput = [detail.project_key || detail.project, category, signal].map((item) => String(item || "")).join("|");
+	detail.family_fingerprint = crypto.createHash("sha256").update(familyFingerprintInput).digest("hex");
 	return detail;
 }
 
@@ -202,6 +212,7 @@ severity: ${finding.severity}
 category: ${finding.category}
 signal: ${finding.signal}
 fingerprint: ${finding.fingerprint}
+family_fingerprint: ${finding.family_fingerprint || "unknown"}
 detected_at: ${now}
 source_project: ${sourceProject.name}
 source_project_root: ${sourceProject.root}
@@ -344,6 +355,51 @@ export function findExistingTicket(ticketsDir, fingerprint) {
 	return null;
 }
 
+// Fase 1 / M7 — only an OPEN ticket absorbs a new occurrence. A ticket the
+// stale-sweep already closed, or a human resolved, must not silently regain
+// activity just because a correlated-but-distinct finding recurred; that
+// case opens a fresh ticket instead (see createYanoWatcherTicket), same as
+// if no family match existed at all.
+export function findExistingTicketByFamily(ticketsDir, familyFingerprint) {
+	if (!familyFingerprint || !fs.existsSync(ticketsDir)) return null;
+	for (const file of fs.readdirSync(ticketsDir)) {
+		if (!file.endsWith(".md")) continue;
+		try {
+			const full = path.join(ticketsDir, file);
+			const metadata = parseFrontmatter(fs.readFileSync(full, "utf8"));
+			if (metadata.family_fingerprint === familyFingerprint && metadata.status === "open") return full;
+		} catch { /* best effort; malformed tickets do not block new evidence */ }
+	}
+	return null;
+}
+
+// Records a correlated-but-distinct finding (same family, different exact
+// fingerprint) on the existing ticket instead of opening a new one. Bumps
+// last_seen_at like touchExistingTicketRecurrence (this IS recurrence of the
+// family, just not of the exact fault) but never writes into `## Comments`:
+// the insertion point is computed BEFORE that heading on purpose, otherwise
+// an appended occurrence would look like a human comment to
+// hasHumanComments() and permanently exempt the ticket from auto-close.
+export function appendFamilyOccurrence(ticketPath, finding, now = new Date()) {
+	let content;
+	try { content = fs.readFileSync(ticketPath, "utf8"); } catch { return { appended: false }; }
+	const iso = now.toISOString();
+	let updated = /^last_seen_at: /m.test(content)
+		? content.replace(/^last_seen_at: .*$/m, `last_seen_at: ${iso}`)
+		: content.replace(/^(detected_at: .*)$/m, `$1\nlast_seen_at: ${iso}`);
+	const entry = `- ${iso} — fingerprint \`${finding.fingerprint}\` — cosa è cambiato: tool=${finding.tool || "unknown"}, expected=${finding.expected || "unknown"}, actual=${finding.actual || "unknown"}\n`;
+	const heading = "## Occorrenze\n";
+	if (updated.includes(heading)) {
+		updated = updated.replace(heading, `${heading}${entry}`);
+	} else {
+		const section = `${heading}\nAltri finding correlati (stessa famiglia — stesso project/categoria/segnale, fingerprint esatto diverso) osservati su questo ticket invece di aprirne uno nuovo:\n\n${entry}\n`;
+		const commentsIdx = updated.indexOf("## Comments");
+		updated = commentsIdx === -1 ? `${updated}\n${section}` : `${updated.slice(0, commentsIdx)}${section}\n${updated.slice(commentsIdx)}`;
+	}
+	try { fs.writeFileSync(ticketPath, updated); } catch { return { appended: false }; }
+	return { appended: true };
+}
+
 export function createYanoWatcherTicket({ finding, yanoRepo, projectRoot, project, ticketsDir = null, now = new Date() }) {
 	if (!yanoRepo) return { created: false, skipped: true, reason: "yano_repo_not_configured" };
 	const sourceProject = { name: project || finding.project || path.basename(projectRoot || "project"), root: path.resolve(projectRoot || process.cwd()) };
@@ -353,6 +409,14 @@ export function createYanoWatcherTicket({ finding, yanoRepo, projectRoot, projec
 	if (existing) {
 		touchExistingTicketRecurrence(existing, now);
 		return { created: false, path: existing, finding };
+	}
+	// Fase 1 / M7 — no exact repeat, but a correlated finding (same family)
+	// may already have an open ticket: append to it instead of opening a new
+	// one. See findExistingTicketByFamily for why only OPEN tickets qualify.
+	const familyMatch = findExistingTicketByFamily(targetDir, finding.family_fingerprint);
+	if (familyMatch) {
+		appendFamilyOccurrence(familyMatch, finding, now);
+		return { created: false, appended: true, path: familyMatch, finding };
 	}
 	const iso = now.toISOString();
 	const numbers = fs.readdirSync(targetDir)

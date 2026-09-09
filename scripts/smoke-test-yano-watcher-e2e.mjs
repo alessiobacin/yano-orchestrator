@@ -40,6 +40,13 @@ function seedDatabase(cwd) {
 	const db = new DatabaseSync(path.join(dbDir, "orchestrator.db"));
 	db.exec("CREATE TABLE tickets (id TEXT PRIMARY KEY, status TEXT, updated_at TEXT, assigned_instance TEXT, run_id TEXT, title TEXT)");
 	db.exec("CREATE TABLE decision_holds (id TEXT PRIMARY KEY, run_id TEXT, status TEXT)");
+	// Fase 1 / M4: findStalledTicketsFromDb now scopes to runs with
+	// status === 'active' (the canonical in-process semantics), matching the
+	// real schema (extensions/orchestrator.ts) where `runs` always exists
+	// alongside `tickets`. Empty here is fine for the scenarios that never
+	// insert a running ticket (findStalledTicketsFromDb short-circuits before
+	// ever querying `runs`); pausedProjectRoot below inserts its own row.
+	db.exec("CREATE TABLE runs (id TEXT PRIMARY KEY, project TEXT, objective TEXT, status TEXT, finalization_status TEXT, updated_at TEXT)");
 	db.close();
 }
 
@@ -51,6 +58,7 @@ seedDatabase(pausedProjectRoot);
 	const dbPath = path.join(pausedProjectRoot, ".pi", "extensions", "yano-orchestrator", "orchestratorStorage", "orchestrator.db");
 	const db = new DatabaseSync(dbPath);
 	const old = new Date(Date.now() - 3_600_000).toISOString();
+	db.prepare("INSERT INTO runs (id, project, objective, status, finalization_status, updated_at) VALUES (?, ?, ?, 'active', 'not_started', ?)").run("paused-run", "paused-project", "paused run under an open decision hold", old);
 	db.prepare("INSERT INTO tickets VALUES (?, 'running', ?, ?, ?, ?)").run("paused-ticket", old, "worker-01", "paused-run", "ticket intentionally paused");
 	db.prepare("INSERT INTO decision_holds VALUES (?, ?, 'open')").run("paused-hold", "paused-run");
 	db.close();

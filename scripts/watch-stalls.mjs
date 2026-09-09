@@ -53,6 +53,7 @@ import { missingConfigError, resolveYanoConfig } from "./yano-config.mjs";
 import { projectDbPath } from "./yano-project.mjs";
 import { herdrSnapshot } from "./yano-herdr-client.mjs";
 import { detectStalledTickets } from "./watcher/detect-stalled-tickets.mjs";
+import { readWatchdogHeartbeatAgeMs, shouldPublishStallEvent } from "./watcher/heartbeat.mjs";
 
 const yanoRequire = createRequire(import.meta.url);
 let missingYanoRepoWarned = false;
@@ -1041,12 +1042,20 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 			}
 		}
 	} catch { /* best-effort */ }
+	// Fase 1 / M5: skip the MQTT publish below when the in-process watchdog
+	// (extensions/orchestrator.ts's watchdogSweep()) has a fresh heartbeat for
+	// this project — it is presumed to have already published `ticket_stalled`
+	// for the same condition. Fail-open: an unknown/missing heartbeat always
+	// publishes (see scripts/watcher/heartbeat.mjs). The finding is still
+	// logged locally either way — only the MQTT publish is gated.
+	const stallEventProjectKey = tracePaths({ cwd: watchCwd, project }).projectKey;
+	const publishStallEvents = shouldPublishStallEvent({ heartbeatAgeMs: readWatchdogHeartbeatAgeMs(stallEventProjectKey, now) });
 	const marker = [];
 	for (const t of stalled) {
 		const elapsedMs = now - new Date(t.updated_at).getTime();
 		const active = t.assigned_instance ? semanticActive.has(t.assigned_instance) : false;
-		const event = { ts: new Date().toISOString(), type: "stall_watch", project, project_key: tracePaths({ cwd: watchCwd, project }).projectKey, ticket_id: t.id, run_id: t.run_id, assigned_instance: t.assigned_instance, elapsed_ms: elapsedMs, semantic_active: active };
-		if (client) {
+		const event = { ts: new Date().toISOString(), type: "stall_watch", project, project_key: stallEventProjectKey, ticket_id: t.id, run_id: t.run_id, assigned_instance: t.assigned_instance, elapsed_ms: elapsedMs, semantic_active: active, mqtt_published: Boolean(client && publishStallEvents) };
+		if (client && publishStallEvents) {
 			const topic = `pi/${topicScope}/runs/${t.run_id}/events`;
 			try {
 				await client.publishAsync(topic, JSON.stringify({ type: "ticket_stalled", run_id: t.run_id, payload: { ticket_id: t.id, assigned_instance: t.assigned_instance, elapsed_ms: elapsedMs }, timestamp: new Date().toISOString() }), { qos: 0 });

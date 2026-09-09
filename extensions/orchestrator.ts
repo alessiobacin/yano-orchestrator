@@ -63,6 +63,7 @@ import { openDatabase as openFeedbackDatabase, createFeedback as createFeedbackR
 import { globalConfigPath, loadConfigFile } from "../scripts/yano-config.mjs";
 import { formatNotification } from "../scripts/yano-notification-format.mjs";
 import { detectStalledTickets } from "../scripts/watcher/detect-stalled-tickets.mjs";
+import { writeWatchdogHeartbeat } from "../scripts/watcher/heartbeat.mjs";
 
 // ESM-safe lazy require, used only inside SQLiteOrchestratorStorage's
 // constructor to resolve node:sqlite on first actual use (see the
@@ -4109,6 +4110,13 @@ export default function (pi: ExtensionAPI) {
 	// purpose.
 	async function watchdogSweep(nowMs: number): Promise<StalledTicketInfo[]> {
 		if (!identity || identity.role !== "planner" || !yanoStorage) return [];
+		// Fase 1 / M5: mark that the in-process watchdog is alive and just ran a
+		// pass for this project — regardless of whether anything is stalled.
+		// scripts/watch-stalls.mjs checks this heartbeat before publishing
+		// `ticket_stalled` to MQTT, so the two watchers stop double-publishing
+		// the same event when both are covering the same project at once. See
+		// scripts/watcher/heartbeat.mjs for the fail-open contract.
+		try { writeWatchdogHeartbeat(projectKey(identity.cwd, identity.project), nowMs); } catch { /* best effort, never block the real sweep */ }
 		try {
 			const expired = yanoStorage.expireDecisionHolds(new Date(nowMs).toISOString());
 			for (const hold of expired) {

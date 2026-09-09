@@ -31,6 +31,19 @@ import { projectKey, readTraceRecords, tracePaths } from "../scripts/yano-trace-
 // (Dependency-free: does not assume node:path/node:os are imported here.)
 if (!process.env.YANO_CONFIG_FILE) process.env.YANO_CONFIG_FILE = `${process.env.TMPDIR || "/tmp"}/yano-test-isolation-no-such-config.env`;
 
+// Isolate from the in-process watchdog's own automatic sweep interval
+// (WATCHDOG_INTERVAL_MS, default 120s). PART 4/4b of this test manually
+// controls the watchdog heartbeat file to exercise Fase 1/M5's anti-double-
+// publish gate; a slow full run of this suite (real MQTT round-trips, several
+// FakeInstance startups each waiting up to 8s) can cross the real 2-minute
+// mark, letting the automatic setInterval() sweep fire mid-test and silently
+// overwrite the test's deliberately-stale heartbeat with a fresh one — a
+// nondeterministic race, not a production bug. Push it far outside this
+// test's runtime so only the test's own explicit writeWatchdogHeartbeat()
+// calls control the file. Must be set before extensions/orchestrator.ts is
+// imported (this constant is read once at module load).
+if (!process.env.PI_ORCH_WATCHDOG_INTERVAL_MS) process.env.PI_ORCH_WATCHDOG_INTERVAL_MS = String(60 * 60_000);
+
 
 const execFileP = promisify(execFile);
 const PROJECT_ROOT = path.resolve(new URL(".", import.meta.url).pathname, "..");
@@ -236,6 +249,28 @@ console.log("\n=== PART 3b — idempotency: a second pass surfaces the same find
 	const row = db.prepare("SELECT status FROM tickets WHERE id = ?").get(stalled.id);
 	db.close();
 	ok(row.status === "running", "the watcher never mutates ticket state (surfacing only — resumability contract)");
+
+	console.log("\n=== PART 4 — Fase 1/M5: a fresh in-process-watchdog heartbeat suppresses this watcher's own MQTT publish (no double-publish) ===");
+	const { writeWatchdogHeartbeat, watchdogHeartbeatPath } = await import(pathToFileURL(path.join(PROJECT_ROOT, "scripts", "watcher", "heartbeat.mjs")).href);
+	try { fs.rmSync(markerPath, { force: true }); } catch { /* ignore */ }
+	const stalledEventsBeforeFreshHeartbeat = stalledEvents.length;
+	writeWatchdogHeartbeat(projectKey(cwd, "watch-smoke"), Date.now());
+	await runWatch({ cwd, argv: ["--once", "--project", "watch-smoke"] });
+	await sleep(300);
+	ok(stalledEvents.length === stalledEventsBeforeFreshHeartbeat, "with a fresh in-process-watchdog heartbeat present, no new ticket_stalled MQTT publish happens");
+	const markersAfterFreshHeartbeat = fs.readFileSync(markerPath, "utf-8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+	const localAfterFreshHeartbeat = markersAfterFreshHeartbeat.find((m) => m.ticket_id === stalled.id);
+	ok(Boolean(localAfterFreshHeartbeat), "the finding is still recorded locally even though the MQTT publish was skipped");
+	ok(localAfterFreshHeartbeat.mqtt_published === false, "the local record correctly reflects that the MQTT publish was skipped this time");
+
+	console.log("\n=== PART 4b — a STALE heartbeat does not suppress publishing (fail-open) ===");
+	try { fs.rmSync(markerPath, { force: true }); } catch { /* ignore */ }
+	fs.writeFileSync(watchdogHeartbeatPath(projectKey(cwd, "watch-smoke")), JSON.stringify({ checked_at: new Date(Date.now() - 3_600_000).toISOString() }));
+	const stalledEventsBeforeStaleHeartbeat = stalledEvents.length;
+	await runWatch({ cwd, argv: ["--once", "--project", "watch-smoke"] });
+	await sleep(300);
+	ok(stalledEvents.length === stalledEventsBeforeStaleHeartbeat + 1, "a stale (1h old) in-process-watchdog heartbeat does not suppress publishing — fail-open preserved");
+
 	await sub.endAsync();
 
 	console.log(`\n${PASS} assertions passed.`);

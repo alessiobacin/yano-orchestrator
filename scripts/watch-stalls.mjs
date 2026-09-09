@@ -771,6 +771,26 @@ function resolveProject(cwd) {
 	return path.basename(cwd);
 }
 
+// Fase 1 / M3 — mechanical extraction (zero behavior change) of the inline
+// stall-ticket query below, so it is unit-testable directly instead of only
+// reachable through the full runWatch() e2e path. Deliberately still queries
+// ALL `running` tickets globally (no active-run scoping) and uses a strict
+// `>` comparison — this is the documented divergence from orchestrator.ts's
+// yanoFindStalledTickets() (which scopes to active runs only and uses `>=`),
+// preserved here on purpose until Fase 1/M4 unifies the two behind one
+// shared detector module. See scripts/watcher/detect-stalled-tickets.test.mjs
+// for the Vitest cases that pin this exact difference.
+export function findStalledTicketsFromDb(db, nowMs, stallMs) {
+	const rows = db.prepare("SELECT * FROM tickets WHERE status = 'running' ORDER BY updated_at ASC").all();
+	let stalled = rows.filter((t) => nowMs - new Date(t.updated_at).getTime() > stallMs);
+	if (stalled.length) {
+		const holdRows = db.prepare("SELECT DISTINCT run_id FROM decision_holds WHERE status = 'open'").all();
+		const pausedRuns = new Set(holdRows.map((row) => row.run_id));
+		stalled = stalled.filter((t) => !pausedRuns.has(t.run_id));
+	}
+	return stalled;
+}
+
 export async function runWatch({ cwd, argv, packageRoot = null }) {
 	if (argv.includes("--help") || argv.includes("-h")) {
 		console.log(watchUsage());
@@ -979,16 +999,7 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 	const now = Date.now();
 	let stalled = [];
 	try {
-	const rows = db.prepare("SELECT * FROM tickets WHERE status = 'running' ORDER BY updated_at ASC").all();
-		// An open human decision hold is an intentional pause, not a worker
-		// stall.  Refactor specialists, for example, may exit after proposing
-		// their plan while the planner waits for user confirmation.
-		stalled = rows.filter((t) => now - new Date(t.updated_at).getTime() > opts.stallMs);
-		if (stalled.length) {
-			const holdRows = db.prepare("SELECT DISTINCT run_id FROM decision_holds WHERE status = 'open'").all();
-			const pausedRuns = new Set(holdRows.map((row) => row.run_id));
-			stalled = stalled.filter((t) => !pausedRuns.has(t.run_id));
-		}
+		stalled = findStalledTicketsFromDb(db, now, opts.stallMs);
 	} catch (err) {
 		appendWatcherScan({ cwd: watchCwd, project, opts, startedAt, status: "error", reason: "sqlite_query_failed", liveAgents: liveAgents.length, livePlanners: livePlanners.length });
 		console.error(`yano watch: query SQLite fallita (${err instanceof Error ? err.message : String(err)})`);

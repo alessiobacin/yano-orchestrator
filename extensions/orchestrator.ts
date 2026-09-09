@@ -2587,7 +2587,7 @@ interface StalledTicketInfo {
 	elapsed_ms: number;
 }
 
-function yanoFindStalledTickets(storage: OrchestratorStorage, project: string, nowMs: number, stallMs: number): StalledTicketInfo[] {
+export function yanoFindStalledTickets(storage: OrchestratorStorage, project: string, nowMs: number, stallMs: number): StalledTicketInfo[] {
 	const stalled: StalledTicketInfo[] = [];
 	const runs = storage.listRuns(project).filter((r) => r.status === "active");
 	// An open human decision hold is an intentional pause.  A worker may have

@@ -74,6 +74,7 @@ async function main() {
 		["capability lint", npmCommand, ["run", "lint:capabilities"]],
 		["playbook lint", npmCommand, ["run", "lint:playbooks"]],
 		["skill isolation", npmCommand, ["run", "check-skill-isolation"]],
+		["unit tests (vitest)", npmCommand, ["run", "test:unit"]],
 		...smokeTests.map((file) => [file, "node", ["--experimental-strip-types", `scripts/${file}`]]),
 		["full e2e", "node", ["--experimental-strip-types", "scripts/e2e-full-flow.mjs"]],
 	];

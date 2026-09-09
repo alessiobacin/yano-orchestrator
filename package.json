@@ -58,6 +58,7 @@
     "end-project": "node scripts/end-project.mjs",
     "recovery": "node scripts/yano-recovery.mjs",
     "setup-dev-stubs": "node scripts/setup-dev-stubs.mjs",
+    "test:unit": "vitest run",
     "postinstall": "node scripts/install-yano-cli.mjs --if-global --quiet && node scripts/install-yano-watcher-cron.mjs --if-global --quiet && node scripts/install-yano-scheduler-cron.mjs --if-global --quiet"
   },
   "dependencies": {
@@ -65,6 +66,7 @@
     "yaml": "^2.8.0"
   },
   "devDependencies": {
-    "@sinclair/typebox": "^0.34.52"
+    "@sinclair/typebox": "^0.34.52",
+    "vitest": "^5.0.0"
   }
 }

@@ -11,9 +11,12 @@
 // scripts/smoke-test-whatsapp-notify.mjs — but unlike that test, this one
 // exercises the REAL globalConfigPath()/loadConfigFile() from
 // scripts/yano-config.mjs (not a reimplementation) and additionally asserts
-// the real extensions/orchestrator.ts source still contains the exact
-// fallback expression, so the mirror below cannot silently drift from the
-// real implementation over time.
+// the real source still contains the exact fallback expression, so the
+// mirror below cannot silently drift from the real implementation over
+// time. Fase 2/M2 moved that implementation out of extensions/
+// orchestrator.ts into scripts/yano-notifications.ts (dedented, identity
+// injected as an explicit parameter) — the drift guard below now points at
+// its new home.
 
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
@@ -80,11 +83,11 @@ check("process.env still wins over both project .env and the global default", ()
 	assert.equal(getEnvVar(projectWithChannel, "TELEGRAM_BOT_TOKEN", { ...env, TELEGRAM_BOT_TOKEN: "shell-override" }), "shell-override");
 });
 
-check("the real extensions/orchestrator.ts source actually implements this fallback (guards the mirror above against drift)", () => {
-	const source = fs.readFileSync(path.join(PACKAGE_ROOT, "extensions", "orchestrator.ts"), "utf8");
+check("the real scripts/yano-notifications.ts source actually implements this fallback (guards the mirror above against drift)", () => {
+	const source = fs.readFileSync(path.join(PACKAGE_ROOT, "scripts", "yano-notifications.ts"), "utf8");
 	assert.match(source, /loadEnvFile\(cwd\)\[key\]\s*\|\|\s*globalYanoConfig\(\)\[key\]/, "getEnvVar() must fall back to globalYanoConfig() after the project .env");
 	assert.match(source, /globalConfigPath\(\)/, "globalYanoConfig() must read the same global config file yano-config.mjs / `yano config` uses");
-	assert.match(source, /import\s*\{\s*globalConfigPath,\s*loadConfigFile\s*\}\s*from\s*"\.\.\/scripts\/yano-config\.mjs"/, "orchestrator.ts must import the real yano-config.mjs helpers, not reimplement them");
+	assert.match(source, /import\s*\{\s*globalConfigPath,\s*loadConfigFile\s*\}\s*from\s*"\.\/yano-config\.mjs"/, "yano-notifications.ts must import the real yano-config.mjs helpers, not reimplement them");
 });
 
 fs.rmSync(root, { recursive: true, force: true });

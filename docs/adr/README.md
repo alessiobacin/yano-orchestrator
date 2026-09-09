@@ -9,6 +9,7 @@ contesto con evidenze dal repository, decisione e conseguenze.
 - [0001 — Worktree Git isolato per task](./0001-worktree-isolation-per-task.md)
 - [0002 — Namespace MQTT project-scoped con presence per ruolo/istanza](./0002-mqtt-role-presence.md)
 - [0003 — Prompt dei ruoli letti sempre dall'installazione globale](./0003-prompts-dal-pacchetto-globale.md)
+- [0004 — La riscrittura del watcher/supervisore mantiene SQLite, MQTT e Herdr](./0004-watcher-rewrite-mantiene-sqlite-mqtt-herdr.md)
 
 Se un nuovo documento contraddice un ADR esistente, il conflitto va
 segnalato esplicitamente (`docs/notes/agents/domain.md`): "Contraddice ADR-000X —

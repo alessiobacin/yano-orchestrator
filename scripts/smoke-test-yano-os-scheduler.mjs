@@ -117,14 +117,18 @@ console.log("\n=== yano-watcher-registry.mjs and yano-scheduler.mjs actually cal
 	assert.equal(serviceHealthAcceptable({ processHealthy: true, healthyState: true, applicationHeartbeatHealthy: false, heartbeatRequired: false }), true, "yano-local-pc resta sano se Pi è vivo e idle anche con heartbeat applicativo in ritardo");
 	assert.equal(serviceHealthAcceptable({ processHealthy: true, healthyState: true, applicationHeartbeatHealthy: false, heartbeatRequired: true }), false, "gli altri servizi continuano a richiedere un heartbeat recente");
 	assert.equal(serviceHealthAcceptable({ processHealthy: false, healthyState: true, applicationHeartbeatHealthy: true, heartbeatRequired: false }), false, "un processo assente non viene mai considerato sano");
-	// Both files import installOneMinuteWindowsJob/removeOneMinuteWindowsJob/
+	// Both the watcher's cron wiring and yano-scheduler.mjs import
+	// installOneMinuteWindowsJob/removeOneMinuteWindowsJob/
 	// statusOneMinuteWindowsJob from yano-os-scheduler.mjs and branch on
 	// platform before falling through to their existing, already-tested
 	// crontab path — verified by source inspection here (a full run needs a
 	// real crontab binary, already covered by smoke-test-yano-watcher-cron.mjs
 	// and smoke-test-yano-scheduler.mjs on POSIX; those two continue to pass
 	// unmodified, proving the added branch does not disturb the POSIX path).
-	const watcherSource = fs.readFileSync(new URL("./yano-watcher-registry.mjs", import.meta.url), "utf8");
+	// Fase 3/M0 moved the watcher's cron install/status/remove wiring out of
+	// yano-watcher-registry.mjs into scripts/watcher/cron-schedule.mjs — the
+	// drift guard below now points at its new home.
+	const watcherSource = fs.readFileSync(new URL("./watcher/cron-schedule.mjs", import.meta.url), "utf8");
 	const schedulerSource = fs.readFileSync(new URL("./yano-scheduler.mjs", import.meta.url), "utf8");
 	assert.match(watcherSource, /installOneMinuteWindowsJob/);
 	assert.match(watcherSource, /removeOneMinuteWindowsJob/);

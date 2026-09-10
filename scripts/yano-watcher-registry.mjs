@@ -46,13 +46,13 @@ import { globalDataPath } from "./yano-config.mjs";
 // shell profile before any Herdr probe or recovery command is attempted.
 const herdrBinDir = path.join(os.homedir(), ".local", "bin");
 if (!String(process.env.PATH || "").split(path.delimiter).includes(herdrBinDir)) process.env.PATH = [herdrBinDir, process.env.PATH || ""].filter(Boolean).join(path.delimiter);
-import { installOneMinuteWindowsJob, removeOneMinuteWindowsJob, statusOneMinuteWindowsJob } from "./yano-os-scheduler.mjs";
 import { agentTabIdentityAudit, findAgentIdentityConflicts, formatAgentIdentityConflicts } from "./yano-agent-identity.mjs";
 import { superviseScheduler } from "./yano-scheduler.mjs";
 import { closeTerminalArchitectSessions } from "./yano-architect.mjs";
 import { closeTerminalAutoImproverSessions } from "./yano-auto-improver.mjs";
 import mqtt from "mqtt";
 import { claimFeedback, listFeedback, openDatabase as openFeedbackDatabase, updateFeedback } from "./yano-feedback.mjs";
+import { cronInstall, cronStatus, cronRemove } from "./watcher/cron-schedule.mjs";
 
 const require = createRequire(import.meta.url);
 const WORKSPACE_LABEL = "yano-watcher";
@@ -66,7 +66,6 @@ const IDLE_WATCHER_GRACE_MS = 60 * 60_000;
 // work. Give a planner a generous recovery window before returning it to the
 // operator-controlled Received column.
 const ORPHANED_FEEDBACK_PROCESSING_MS = 15 * 60_000;
-const CRON_MARKER = "# yano-watcher-supervisor";
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 function value(argv, flag) { const i = argv.indexOf(flag); return i === -1 ? null : argv[i + 1]; }
@@ -1497,49 +1496,9 @@ async function runSupervisePass(db, rows, mqttClientProvider) {
 		return result;
 }
 
-function readCrontab() {
-	const result = spawnSync("crontab", ["-l"], { encoding: "utf8", maxBuffer: 1_000_000 });
-	if (result.status === 0) return result.stdout || "";
-	if (/no crontab for|can't open crontab/i.test(`${result.stdout || ""}\n${result.stderr || ""}`)) return "";
-	throw new Error(`yano watcher: impossibile leggere il crontab${result.stderr ? `: ${result.stderr.trim()}` : ""}`);
-}
-
-function cronCommand() {
-	return `PATH=${shellQuote(herdrBinDir)}:\$PATH ${shellQuote(process.execPath)} ${shellQuote(path.join(PACKAGE_ROOT, "bin", "yano.mjs"))} watcher supervise --json >/dev/null 2>&1 ${CRON_MARKER}`;
-}
-
-function cronInstall() {
-	const windows = installOneMinuteWindowsJob({ marker: CRON_MARKER, command: cronCommand() });
-	if (windows) return windows;
-	const line = `* * * * * ${cronCommand()}`;
-	const existing = readCrontab().split("\n").filter((item) => item.trim() && !item.includes(CRON_MARKER));
-	const content = [...existing, line].join("\n") + "\n";
-	const result = spawnSync("crontab", ["-"], { input: content, encoding: "utf8", maxBuffer: 1_000_000 });
-	if (result.status !== 0) throw new Error(`yano watcher: impossibile installare il crontab${result.stderr ? `: ${result.stderr.trim()}` : ""}`);
-	return { installed: true, schedule: "* * * * *", command: line, marker: CRON_MARKER, backend: "crontab" };
-}
-
-function cronStatus() {
-	const windows = statusOneMinuteWindowsJob({ marker: CRON_MARKER });
-	let heartbeat = null;
-	try { heartbeat = JSON.parse(fs.readFileSync(supervisorHeartbeatPath(), "utf8")); } catch { /* not run yet */ }
-	const heartbeatAt = heartbeat?.checked_at || null;
-	const heartbeatAgeMs = heartbeatAt ? Math.max(0, Date.now() - Date.parse(heartbeatAt)) : null;
-	const healthy = Boolean(heartbeatAt && heartbeatAgeMs <= 130_000);
-	if (windows) return { ...windows, installed: windows.installed, last_heartbeat_at: heartbeatAt, heartbeat_age_ms: heartbeatAgeMs, healthy: Boolean(windows.installed && healthy) };
-	const line = readCrontab().split("\n").find((item) => item.includes(CRON_MARKER)) || null;
-	return { installed: Boolean(line), schedule: line ? "* * * * *" : null, command: line, marker: CRON_MARKER, backend: "crontab", last_heartbeat_at: heartbeatAt, heartbeat_age_ms: heartbeatAgeMs, healthy: Boolean(line && healthy) };
-}
-
-function cronRemove() {
-	const windows = removeOneMinuteWindowsJob({ marker: CRON_MARKER });
-	if (windows) return windows;
-	const existing = readCrontab().split("\n").filter((item) => item.trim() && !item.includes(CRON_MARKER));
-	const content = existing.length ? `${existing.join("\n")}\n` : "";
-	const result = spawnSync("crontab", ["-"], { input: content, encoding: "utf8", maxBuffer: 1_000_000 });
-	if (result.status !== 0) throw new Error(`yano watcher: impossibile rimuovere il crontab${result.stderr ? `: ${result.stderr.trim()}` : ""}`);
-	return { installed: false, removed: true, marker: CRON_MARKER, backend: "crontab" };
-}
+// ━━ Cron / OS-scheduler integration (Fase 3 / M0) ━━━━━━━━━━━━━━━━━━━━━━━━━
+// readCrontab/cronCommand/cronInstall/cronStatus/cronRemove moved verbatim
+// into scripts/watcher/cron-schedule.mjs — imported above.
 
 function print(valueToPrint, machine) {
 	if (machine) console.log(JSON.stringify(valueToPrint, null, 2));

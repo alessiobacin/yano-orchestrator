@@ -92,6 +92,12 @@ import { createCapabilityCardTools } from "../scripts/orchestrator-tools/capabil
 import { createPlaybookTools } from "../scripts/orchestrator-tools/playbooks.ts";
 import { createTicketTools } from "../scripts/orchestrator-tools/tickets.ts";
 import { SLUG_RE, execGit, worktreePaths, normalizePath, ensureWorktreesGitignored, assertGitRepo, findExistingWorktree } from "../scripts/orchestrator-tools/git-worktree.ts";
+import { yanoWorkspaceDir, yanoSubdirs } from "../scripts/orchestrator-tools/yano-workspace.ts";
+import {
+	reportsDir, reportPath, locksPath, readLocks, writeLocks, lockExpired, assertSafeRelativeFile, createRequireWorktree,
+	planPath, planMarkdownPath, readPlan, renderPlanMarkdown, writePlan, appendPlanAudit, findPhaseForRole, createAssertRoleHandoffAllowed,
+	type Plan, type PlanPhase, type PlanPhaseStatus, type FileLock,
+} from "../scripts/orchestrator-tools/plan-gate.ts";
 import { yanoComputeReadyBlocked, yanoComputeExecutionWaves } from "../scripts/orchestrator-tools/ticket-scheduling.ts";
 
 // ━━ Constants ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -930,70 +936,8 @@ function loadRuntimePackageVersion(): string | null {
 
 const YANO_RUNTIME_PACKAGE_VERSION = loadRuntimePackageVersion();
 
-function yanoWorkspaceDir(projectCwd: string, explicitProject?: string): string {
-	const modern = path.join(projectCwd, ".pi", "extensions", "yano-orchestrator");
-	const readConfig = (dir: string): any | null => {
-		try { return JSON.parse(fs.readFileSync(path.join(dir, "config", "project.json"), "utf8")); } catch { return null; }
-	};
-	const modernConfig = readConfig(modern);
-	if (modernConfig && (!explicitProject || String(modernConfig.project) === String(explicitProject))) return modern;
-	// Compatibility with projects scaffolded before the workspace rename. Do
-	// not move or rewrite that state: select the existing extension directory
-	// by its project config and durable database, then keep writing there.
-	try {
-		const extensionsRoot = path.join(projectCwd, ".pi", "extensions");
-		for (const entry of fs.readdirSync(extensionsRoot, { withFileTypes: true })) {
-			if (!entry.isDirectory()) continue;
-			const candidate = path.join(extensionsRoot, entry.name);
-			if (!fs.existsSync(path.join(candidate, "orchestratorStorage", "orchestrator.db"))) continue;
-			const config = readConfig(candidate);
-			if (config && (!explicitProject || String(config.project) === String(explicitProject))) return candidate;
-		}
-	} catch { /* use the canonical path when no legacy workspace is present */ }
-	return modern;
-}
-
-// Revisione 28: "logs" removed from this list (was created but never
-// written to by any tool — dead scaffold). This workspace's own event
-// trail already lives in SQLite (the `events` table, written by
-// recordEvent()), so a second, parallel logs/*.jsonl location here would
-// only duplicate it.
-//
-// Revisione 37: "reports", "prompts", and "logs" ADDED back — this time on
-// purpose, at the operator's explicit request. Root-level reports/<slug>.md
-// and prompts/<role>.md, and the ROOT-level logs/<instance>.jsonl (Revisione
-// 18) all used to live directly under the project root, tracked by git like
-// any other source file. The operator's point: these are process artifacts
-// of THIS project's development with `yano-orchestrator` — the planner's
-// task reports, the role prompts, the raw debug trace — not the project's
-// own deliverable. If the scaffolded project is later pushed to a public
-// GitHub repo, they'd sit right next to the real application code, fully
-// public, revealing internal AI-orchestration process and possibly
-// hand-tuned prompts that are effectively personal working notes. Moving
-// all three under `.pi/extensions/yano-orchestrator/`, which has been
-// gitignored by every scaffolded project since Revisione 31, makes "not
-// tracked, not pushed, stays only on the machine where the project was
-// developed" the default with zero extra configuration. See
-// docs/notes/development-notes.md, Revisione 37, for the full rationale
-// (including why prompts/ is NOT meant to be edited per-project in the
-// first place — role prompts are customized in the extension itself, once,
-// for every project, not forked per scaffold).
-function yanoSubdirs(workspaceDir: string) {
-	return {
-		config: path.join(workspaceDir, "config"),
-		specs: path.join(workspaceDir, "specs"),
-		playbooks: path.join(workspaceDir, "playbooks"),
-		diagrams: path.join(workspaceDir, "diagrams"),
-		knowledge: path.join(workspaceDir, "knowledge"),
-		policies: path.join(workspaceDir, "policies"),
-		artifacts: path.join(workspaceDir, "artifacts"),
-		overrides: path.join(workspaceDir, "overrides"),
-		orchestratorStorage: path.join(workspaceDir, "orchestratorStorage"),
-		reports: path.join(workspaceDir, "reports"),
-		prompts: path.join(workspaceDir, "prompts"),
-		logs: path.join(workspaceDir, "logs"),
-	};
-}
+// yanoWorkspaceDir/yanoSubdirs moved verbatim into
+// scripts/orchestrator-tools/yano-workspace.ts (Fase 5 / M1) — imported above.
 
 interface YanoProjectConfig {
 	schema_version: number;
@@ -3989,242 +3933,18 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
-	// ━━ Shared-worktree coordination: report_append + file_claim/file_release ━━
-	//
-	// Once the planner can bring several specialists into the SAME worktree at
-	// once (Revisione 15), two concrete collision risks appear that plain file
-	// Read/Write tools don't protect against:
-	//  1. Two agents both read the report file, each append their own section
-	//     to their own in-memory copy, then both write the whole file back —
-	//     the second write silently clobbers the first agent's section (a
-	//     classic lost-update race), even though neither agent did anything
-	//     wrong on its own.
-	//  2. Two agents editing the same SOURCE file at once can overwrite each
-	//     other's changes the same way, with no signal to either that it
-	//     happened.
-	// report_append fixes (1) with a real OS-level append instead of read-
-	// modify-write. file_claim/file_release provide an ADVISORY lock for (2)
-	// — advisory means it only works if agents check it, which the updated
-	// prompts now instruct them to do; it cannot force good behavior out of
-	// an agent that ignores it, the same limit any file lock has in a system
-	// without a kernel-enforced mandatory lock.
-
-	// Revisione 37: spostato da `<worktreePath>/reports/<slug>.md` (root del
-	// progetto o del worktree, tracciato da git) a
-	// `<worktreePath>/.pi/extensions/yano-orchestrator/reports/<slug>.md`
-	// (gitignored) — stessa logica di logsDir()/yanoSubdirs più sopra: i
-	// report sono reportistica di sviluppo di QUESTO progetto, non
-	// deliverable applicativo, e non devono finire in un repo pubblico.
-	// worktreePath può essere sia un worktree attivo (`.worktrees/<slug>`)
-	// sia identity.cwd dopo il merge — in entrambi i casi risolve dentro il
-	// `.pi/...` di quella specifica directory, quindi il codice più sotto
-	// che copia da wtPath a identity.cwd dopo il merge continua a funzionare
-	// invariato.
-	function reportsDir(base: string): string {
-		return yanoSubdirs(yanoWorkspaceDir(base)).reports;
-	}
-
-	function reportPath(worktreePath: string, slug: string): string {
-		return path.join(reportsDir(worktreePath), `${slug}.md`);
-	}
-
-	function locksPath(worktreePath: string): string {
-		return path.join(worktreePath, ".orchestrator-locks.json");
-	}
-
-	interface FileLock {
-		file: string;
-		holder: string;
-		claimed_at: string;
-		ttl_minutes: number;
-	}
-
-	function readLocks(worktreePath: string): FileLock[] {
-		try {
-			const parsed = JSON.parse(fs.readFileSync(locksPath(worktreePath), "utf-8"));
-			return Array.isArray(parsed) ? parsed : [];
-		} catch {
-			return [];
-		}
-	}
-
-	function writeLocks(worktreePath: string, locks: FileLock[]): void {
-		fs.writeFileSync(locksPath(worktreePath), JSON.stringify(locks, null, 2));
-	}
-
-	function lockExpired(lock: FileLock): boolean {
-		return Date.now() - new Date(lock.claimed_at).getTime() > lock.ttl_minutes * 60_000;
-	}
-
-	function assertSafeRelativeFile(file: string): void {
-		if (path.isAbsolute(file) || file.split(/[\\/]/).includes("..")) {
-			throw new Error(`"${file}" must be a relative path inside the worktree (no leading "/", no "..").`);
-		}
-	}
-
-	function requireWorktree(slug: string): { path: string; branch: string } {
-		if (!SLUG_RE.test(slug)) throw new Error(`"${slug}" is not a valid kebab-case slug.`);
-		const wt = worktreePaths(identity!.cwd, slug);
-		if (!fs.existsSync(wt.path)) throw new Error(`No worktree found for slug "${slug}" at ${wt.path} — call worktree_create first.`);
-		return wt;
-	}
-
-	// ━━ Structured execution plan + deterministic phase gate (Revisione 21) ━━
-	// Revisione 18 introduced the phase-plan CONCEPT, but only as free-form
-	// markdown (reports/<slug>.plan.md) the LLM planner writes and re-reads by
-	// eye — nothing in the code ever checks it. That's how a real test (see
-	// Revisione 20 analysis, claude/e2e-codice-fiscale-analysis.md) produced a
-	// planner that scheduled a specialist (tdd-agent) in a phase BEFORE coder,
-	// violating "coder is always phase 1" — a rule that only lived in prose,
-	// so nothing stopped it from being violated. This section makes the plan
-	// a small structured file the code can actually read and enforce, on top
-	// of (not instead of) the human-readable .plan.md, which plan_set/
-	// plan_advance now render automatically instead of the planner writing it
-	// by hand.
-	//
-	// The enforcement itself lives in TWO places, deliberately:
-	//  1. plan_set validates STRUCTURE at declaration time: phase 1 must
-	//     include "coder", no role may appear in more than one phase. This
-	//     is what actually prevents the tdd-agent-before-coder case: a plan
-	//     that puts it in an earlier phase is rejected before it's ever
-	//     acted on, not caught after the fact.
-	//  2. agent_send validates TIMING at send time: a send addressed to a
-	//     role that belongs to a locked (not-yet-unlocked) phase is refused
-	//     outright, for ANY sender — not just the planner — because gating
-	//     only the planner's own sends wouldn't catch every path a message
-	//     could take.
-	// Both are best-effort in the sense that they only apply when a
-	// structured plan exists for the slug (plan_set was called) — ad hoc/
-	// user-direct flows that never call it are completely ungated, exactly
-	// as before this revision.
-	type PlanPhaseStatus = "locked" | "unlocked" | "complete";
-	interface PlanPhase {
-		phase: number;
-		roles: string[];
-		note?: string;
-		status: PlanPhaseStatus;
-	}
-	interface Plan {
-		slug: string;
-		phases: PlanPhase[];
-		created_at: string;
-		updated_at: string;
-	}
-
-	function planPath(worktreePath: string, slug: string): string {
-		return path.join(reportsDir(worktreePath), `${slug}.plan.json`);
-	}
-
-	function planMarkdownPath(worktreePath: string, slug: string): string {
-		return path.join(reportsDir(worktreePath), `${slug}.plan.md`);
-	}
-
-	function readPlan(worktreePath: string, slug: string): Plan | null {
-		try {
-			const raw = fs.readFileSync(planPath(worktreePath, slug), "utf-8");
-			const parsed = JSON.parse(raw);
-			if (parsed && Array.isArray(parsed.phases)) return parsed as Plan;
-			return null;
-		} catch {
-			return null;
-		}
-	}
-
-	function renderPlanMarkdown(plan: Plan): string {
-		const icon: Record<PlanPhaseStatus, string> = { complete: "[x]", unlocked: "[~]", locked: "[ ]" };
-		const label: Record<PlanPhaseStatus, string> = { complete: "completa", unlocked: "sbloccata — in corso", locked: "bloccata, in attesa della fase precedente" };
-		const lines = [
-			`# Piano di esecuzione: ${plan.slug}`,
-			"",
-			"Una fase parte solo quando TUTTI i ruoli della fase precedente hanno",
-			"segnalato il completamento. Ruoli nella STESSA fase partono insieme.",
-			"Generato automaticamente da plan_set/plan_advance (Revisione 21) — non",
-			"modificare a mano, lo stato reale è in .plan.json accanto a questo file.",
-			"",
-		];
-		for (const p of plan.phases) {
-			lines.push(`- ${icon[p.status]} Fase ${p.phase} (${label[p.status]}): ${p.roles.join(", ")}`);
-			if (p.note) lines.push(`      ${p.note}`);
-		}
-		return lines.join("\n") + "\n";
-	}
-
-	function writePlan(worktreePath: string, slug: string, plan: Plan): void {
-		fs.mkdirSync(path.dirname(planPath(worktreePath, slug)), { recursive: true });
-		fs.writeFileSync(planPath(worktreePath, slug), JSON.stringify(plan, null, 2));
-		fs.writeFileSync(planMarkdownPath(worktreePath, slug), renderPlanMarkdown(plan));
-	}
-
-	// Best-effort audit line in the task's report, same spirit as report_append/
-	// agent_send's own auto-footer (Revisione 19) — never lets a report-
-	// bookkeeping problem fail the plan operation itself.
-	function appendPlanAudit(worktreePath: string, slug: string, text: string): void {
-		try {
-			const file = reportPath(worktreePath, slug);
-			if (fs.existsSync(file)) {
-				fs.appendFileSync(file, `\n> _[evento] ${text} — alle ${nowIso()}_\n`);
-			}
-		} catch {
-			// best-effort — see comment above
-		}
-	}
-
-	// Which phase (if any) a given role belongs to in this plan — used both
-	// by plan_set's own validation and by agent_send's runtime gate.
-	function findPhaseForRole(plan: Plan, role: string): PlanPhase | undefined {
-		const normalized = role.trim().toLowerCase();
-		return plan.phases.find((p) => p.roles.some((r) => r.trim().toLowerCase() === normalized));
-	}
-
-	// Phase ordering alone does not prevent shortcuts when coder and reviewer
-	// share a phase. Keep the core code handoff deterministic while also
-	// recognising the dedicated refactor coding role.
-	function assertRoleHandoffAllowed(senderRole: string, targetRole: string, slug: string): void {
-		const sender = senderRole.trim().toLowerCase();
-		const target = targetRole.trim().toLowerCase();
-		const backendRoles = new Set(["coder", "reviewer"]);
-		const refactorRoles = new Set(["refactoring-specialist"]);
-		const frontendRoles = new Set(["frontend-developer", "frontend-reviewer"]);
-		const coreRoles = new Set(["planner", ...backendRoles, ...frontendRoles]);
-		if (!coreRoles.has(target) && !refactorRoles.has(target)) return;
-		const isRefactorPlan = (() => {
-			try {
-				const wt = requireWorktree(slug);
-				const plan = readPlan(wt.path, slug);
-				return !!plan?.phases.some((p) => p.roles.some((r) => r.trim().toLowerCase() === "refactoring-specialist"));
-			} catch {
-				return false;
-			}
-		})();
-		const isCleanRepoPlan = (() => {
-			try {
-				const wt = requireWorktree(slug);
-				const plan = readPlan(wt.path, slug);
-				return !!plan?.phases.some((p) => p.roles.some((r) => r.trim().toLowerCase() === "repo-curator"));
-			} catch {
-				return false;
-			}
-		})();
-		const allowed = target === "planner"
-			? sender === "reviewer" || sender === "frontend-reviewer" || sender === "full-stack-reviewer" || !coreRoles.has(sender)
-			: target === "reviewer"
-				? sender === "coder" || sender === "refactoring-specialist" || (sender === "planner" && (isRefactorPlan || isCleanRepoPlan))
-				: target === "refactoring-specialist"
-					? sender === "planner" || sender === "reviewer"
-				: target === "frontend-reviewer"
-					? sender === "frontend-developer"
-					: sender === "planner" || sender === "reviewer" || sender === "frontend-reviewer";
-		if (!allowed) {
-			throw new Error(
-				`agent_send: refused — handoff ${senderRole} → ${targetRole} is not allowed for "${slug}". ` +
-				"The enforced paths are planner → coder → reviewer → planner, planner → refactoring-specialist → reviewer → planner, " +
-				"planner → repo-curator → reviewer → planner for clean-repo; and " +
-				"planner → frontend-developer → frontend-reviewer → planner; " +
-				"planner → full-stack-developer → full-stack-reviewer → planner; " +
-				"each reviewer may return corrections only to its matching developer role.",
-			);
-		}
-	}
+// ━━ Plan-gate cluster (Fase 5 / M1) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+	// reportsDir/reportPath/locksPath/readLocks/writeLocks/lockExpired/
+	// assertSafeRelativeFile/planPath/planMarkdownPath/readPlan/
+	// renderPlanMarkdown/writePlan/appendPlanAudit/findPhaseForRole and the
+	// Plan/PlanPhase/PlanPhaseStatus/FileLock types moved verbatim into
+	// scripts/orchestrator-tools/plan-gate.ts — imported above. requireWorktree
+	// and assertRoleHandoffAllowed close over identity, so they are built once
+	// here via the exported factories (same getter pattern as every other
+	// Fase 4/5 module) — every existing call site below keeps calling them by
+	// the same name, unchanged.
+	const requireWorktree = createRequireWorktree({ getIdentity: () => identity });
+	const assertRoleHandoffAllowed = createAssertRoleHandoffAllowed({ getIdentity: () => identity });
 
 	pi.registerTool({
 		name: "plan_set",

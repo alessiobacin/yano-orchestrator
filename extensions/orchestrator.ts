@@ -87,6 +87,7 @@ import { createWatchdogSweep } from "../scripts/watcher/watchdog-sweep.ts";
 import { redactRuntimeProjection } from "../scripts/orchestrator-tools/redact.ts";
 import { createDecisionHoldTools } from "../scripts/orchestrator-tools/decision-holds.ts";
 import { createRetentionPolicyTools } from "../scripts/orchestrator-tools/retention-policy.ts";
+import { createGovernanceProposalTools } from "../scripts/orchestrator-tools/governance-proposals.ts";
 
 // ━━ Constants ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -5485,61 +5486,13 @@ export default function (pi: ExtensionAPI) {
 		renderResult(result, _options, theme) { return new Text(theme.fg("success", "→ ") + theme.fg("accent", (result.details as any)?.benchmark?.status ?? "?"), 0, 0); },
 	});
 
-	pi.registerTool({
-		name: "governance_proposal_create",
-		label: "Create Governance Proposal",
-		description: "Create a sandboxed Playbook or role proposal with checksum and declared capabilities; never activates it.",
-		parameters: Type.Object({ kind: Type.Union([Type.Literal("playbook"), Type.Literal("role")]), identifier: Type.String(), document: Type.String(), required_capabilities: Type.Optional(Type.Array(Type.String())) }),
-		async execute(_callId, params) {
-			if (!identity || (identity.role !== "planner" && identity.role !== "playbook-author" && identity.role !== "role-definition")) throw new Error("governance_proposal_create: role is not authorised.");
-			const proposal = ensureYanoStorage().createGovernanceProposal(params) as any;
-			return { content: [{ type: "text" as const, text: `governance_proposal_create: ${proposal.kind}/${proposal.identifier} sandboxed.` }], details: { proposal: redactRuntimeProjection(proposal) } };
-		},
-		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("governance_proposal_create ")) + theme.fg("accent", (args as any).identifier ?? "?"), 0, 0); },
-		renderResult(result, _options, theme) { return new Text(theme.fg("success", "→ sandbox"), 0, 0); },
-	});
-
-	pi.registerTool({
-		name: "governance_proposal_validate",
-		label: "Validate Governance Proposal",
-		description: "Validate a sandboxed proposal before human approval.",
-		parameters: Type.Object({ id: Type.Integer({ minimum: 1 }) }),
-		async execute(_callId, params) {
-			if (!identity || identity.role !== "planner") throw new Error("governance_proposal_validate: only planner may validate proposals.");
-			const proposal = ensureYanoStorage().validateGovernanceProposal(params.id) as any;
-			return { content: [{ type: "text" as const, text: `governance_proposal_validate: ${proposal.id} validated.` }], details: { proposal: redactRuntimeProjection(proposal) } };
-		},
-		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("governance_proposal_validate ")) + theme.fg("accent", String((args as any).id ?? "?")), 0, 0); },
-		renderResult(result, _options, theme) { return new Text(theme.fg("success", "→ validated"), 0, 0); },
-	});
-
-	pi.registerTool({
-		name: "governance_proposal_approve",
-		label: "Approve Governance Proposal",
-		description: "Approve a validated proposal as an immutable governance decision; approval does not mutate active runs.",
-		parameters: Type.Object({ id: Type.Integer({ minimum: 1 }) }),
-		async execute(_callId, params) {
-			if (!identity || identity.role !== "user") throw new Error("governance_proposal_approve: explicit user approval is required.");
-			const proposal = ensureYanoStorage().approveGovernanceProposal(params.id) as any;
-			return { content: [{ type: "text" as const, text: `governance_proposal_approve: ${proposal.id} approved.` }], details: { proposal: redactRuntimeProjection(proposal) } };
-		},
-		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("governance_proposal_approve ")) + theme.fg("accent", String((args as any).id ?? "?")), 0, 0); },
-		renderResult(result, _options, theme) { return new Text(theme.fg("success", "→ approved"), 0, 0); },
-	});
-
-	pi.registerTool({
-		name: "governance_proposal_reject",
-		label: "Reject Governance Proposal",
-		description: "Reject a sandboxed or validated governance proposal with an explicit reason; no active run is changed.",
-		parameters: Type.Object({ id: Type.Integer({ minimum: 1 }), reason: Type.String() }),
-		async execute(_callId, params) {
-			if (!identity || (identity.role !== "planner" && identity.role !== "user")) throw new Error("governance_proposal_reject: role is not authorised.");
-			const proposal = ensureYanoStorage().rejectGovernanceProposal(params.id, params.reason) as any;
-			return { content: [{ type: "text" as const, text: `governance_proposal_reject: ${proposal.id} rejected.` }], details: { proposal: redactRuntimeProjection(proposal) } };
-		},
-		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("governance_proposal_reject ")) + theme.fg("accent", String((args as any).id ?? "?")), 0, 0); },
-		renderResult(result, _options, theme) { return new Text(theme.fg("success", "→ rejected"), 0, 0); },
-	});
+// ━━ Governance-proposal tools (Fase 4 / M2) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+	// governance_proposal_create/validate/approve/reject moved verbatim into
+	// scripts/orchestrator-tools/governance-proposals.ts — wired below via deps.
+	for (const tool of createGovernanceProposalTools({
+		getIdentity: () => identity,
+		ensureYanoStorage,
+	})) pi.registerTool(tool);
 
 	pi.registerTool({
 		name: "package_manifest_audit",

@@ -1,13 +1,22 @@
-// Fase 4 / M4 — playbook_* tool handlers (8 of 9; playbook_reconcile stays
-// in orchestrator.ts), extracted from extensions/orchestrator.ts. Same
-// mock-storage pattern as decision-holds.test.mjs (Fase 4/M0), plus a
-// vi.mock of playbook-loader.mjs's loadPlaybook for playbook_bind.
-import { beforeEach, describe, expect, it, vi } from "vitest";
+// Fase 4 / M4 — playbook_* tool handlers, extracted from
+// extensions/orchestrator.ts. Same mock-storage pattern as
+// decision-holds.test.mjs (Fase 4/M0), plus a vi.mock of
+// playbook-loader.mjs's loadPlaybook for playbook_bind. Fase 5/M5 added
+// the 9th handler, playbook_reconcile — it calls the real
+// readPlan/requireWorktree from plan-gate.ts (not mocked, same reasoning
+// as worktree.test.mjs/plan.test.mjs: these are the actual coupling being
+// verified), so its own describe block below uses a real temp worktree
+// directory instead of the plain mock storage identity used elsewhere.
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 const loadPlaybookMock = vi.fn();
 vi.mock("../playbook-loader.mjs", () => ({ loadPlaybook: (...args) => loadPlaybookMock(...args) }));
 
 const { createPlaybookTools } = await import("./playbooks.ts");
+const { createRequireWorktree, writePlan } = await import("./plan-gate.ts");
 
 function makeDeps(overrides = {}) {
 	const storage = {
@@ -24,6 +33,7 @@ function makeDeps(overrides = {}) {
 	const deps = {
 		getIdentity: () => ({ role: "planner", cwd: "/p", project: "demo", instance: "planner-01" }),
 		ensureYanoStorage: () => storage,
+		requireWorktree: () => { throw new Error("requireWorktree not needed by this test"); },
 		...overrides,
 	};
 	return { deps, storage };
@@ -132,6 +142,91 @@ describe("playbooks", () => {
 			expect(result.details.effect.delivery_state).toBe("retrying");
 			const { deps } = makeDeps();
 			await expect(toolByName(deps, "playbook_effect_fail").execute("c2", { id: 1, owner: "o", token: "t", error: "timeout", max_attempts: 3 })).rejects.toThrow(/only effect-adapter/);
+		});
+	});
+
+	describe("playbook_reconcile", () => {
+		let cwd;
+
+		beforeEach(() => {
+			cwd = fs.mkdtempSync(path.join(os.tmpdir(), "playbook-reconcile-test-"));
+			fs.mkdirSync(path.join(cwd, ".worktrees", "demo"), { recursive: true });
+		});
+		afterEach(() => {
+			fs.rmSync(cwd, { recursive: true, force: true });
+		});
+
+		function makeReconcileDeps(overrides = {}) {
+			const identity = { role: "planner", cwd, project: "demo", instance: "planner-01" };
+			const { deps, storage } = makeDeps({
+				getIdentity: () => identity,
+				requireWorktree: createRequireWorktree({ getIdentity: () => identity }),
+				...overrides,
+			});
+			Object.assign(storage, {
+				getPlaybookBinding: vi.fn(() => ({ checksum: "abc123", snapshot: { states: [{ id: "s1" }] } })),
+				getTicket: vi.fn((id) => (id === "t1" ? { id: "t1", run_id: "run-1" } : null)),
+				listTickets: vi.fn(() => [{ id: "t1", status: "done" }]),
+				listDependencies: vi.fn(() => []),
+				getPlaybookRuntimeState: vi.fn(() => ({ generation: 2 })),
+				listCheckpoints: vi.fn(() => []),
+				createCheckpoint: vi.fn(),
+			});
+			return { deps, storage };
+		}
+
+		it("reports coherent and persists a checkpoint when the plan/ticket mapping lines up", async () => {
+			const wtPath = path.join(cwd, ".worktrees", "demo");
+			writePlan(wtPath, "demo", { slug: "demo", phases: [{ phase: 1, roles: ["coder"], status: "unlocked" }], created_at: "t0", updated_at: "t0" });
+			const { deps, storage } = makeReconcileDeps();
+			const result = await toolByName(deps, "playbook_reconcile").execute("c1", {
+				run_id: "run-1",
+				slug: "demo",
+				idempotency_key: "k1",
+				mappings: [{ state_id: "s1", phase: 1, ticket_ids: ["t1"] }],
+			});
+			expect(result.details.reconciliation.outcome).toBe("coherent");
+			expect(storage.createCheckpoint).toHaveBeenCalledTimes(1);
+		});
+
+		it("reports needs_replan for an unknown state and an unmapped ticket", async () => {
+			const wtPath = path.join(cwd, ".worktrees", "demo");
+			writePlan(wtPath, "demo", { slug: "demo", phases: [{ phase: 1, roles: ["coder"], status: "unlocked" }], created_at: "t0", updated_at: "t0" });
+			const { deps } = makeReconcileDeps();
+			const result = await toolByName(deps, "playbook_reconcile").execute("c1", {
+				run_id: "run-1",
+				slug: "demo",
+				idempotency_key: "k1",
+				mappings: [{ state_id: "unknown-state", phase: 1, ticket_ids: [] }],
+			});
+			expect(result.details.reconciliation.outcome).toBe("needs_replan");
+			const kinds = result.details.reconciliation.diff.map((d) => d.kind);
+			expect(kinds).toContain("unknown_state");
+			expect(kinds).toContain("unmapped_ticket");
+		});
+
+		it("throws when the run has no structured plan", async () => {
+			const { deps } = makeReconcileDeps();
+			await expect(
+				toolByName(deps, "playbook_reconcile").execute("c1", { run_id: "run-1", slug: "demo", idempotency_key: "k1", mappings: [] }),
+			).rejects.toThrow(/no structured plan/);
+		});
+
+		it("is idempotent: a repeated idempotency_key does not create a second checkpoint", async () => {
+			const wtPath = path.join(cwd, ".worktrees", "demo");
+			writePlan(wtPath, "demo", { slug: "demo", phases: [{ phase: 1, roles: ["coder"], status: "unlocked" }], created_at: "t0", updated_at: "t0" });
+			const { deps, storage } = makeReconcileDeps();
+			storage.listCheckpoints = vi.fn(() => [{ label: "playbook_reconciliation", payload: { idempotency_key: "k1" } }]);
+			const result = await toolByName(deps, "playbook_reconcile").execute("c1", { run_id: "run-1", slug: "demo", idempotency_key: "k1", mappings: [] });
+			expect(result.details.idempotent).toBe(true);
+			expect(storage.createCheckpoint).not.toHaveBeenCalled();
+		});
+
+		it("rejects a non-planner caller", async () => {
+			const { deps } = makeReconcileDeps({ getIdentity: () => ({ role: "coder", cwd, project: "demo", instance: "coder-01" }) });
+			await expect(
+				toolByName(deps, "playbook_reconcile").execute("c1", { run_id: "run-1", slug: "demo", idempotency_key: "k1", mappings: [] }),
+			).rejects.toThrow(/only planner/);
 		});
 	});
 });

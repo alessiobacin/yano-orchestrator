@@ -3130,62 +3130,12 @@ export default function (pi: ExtensionAPI) {
 	for (const tool of createPlaybookTools({
 		getIdentity: () => identity,
 		ensureYanoStorage,
+		requireWorktree,
 	})) pi.registerTool(tool);
 
-	pi.registerTool({
-		name: "playbook_reconcile",
-		label: "Reconcile Playbook",
-		description: "Compare a bound Playbook with its structured plan and ticket DAG. Persists a deterministic diff and never invents or mutates work.",
-		parameters: Type.Object({
-			run_id: Type.String(),
-			slug: Type.String(),
-			idempotency_key: Type.String(),
-			mappings: Type.Array(Type.Object({ state_id: Type.String(), phase: Type.Integer({ minimum: 1 }), ticket_ids: Type.Array(Type.String()) })),
-		}),
-		async execute(_callId, params) {
-			if (!identity || identity.role !== "planner") throw new Error("playbook_reconcile: only planner may reconcile a run.");
-			if (!params.idempotency_key.trim()) throw new Error("playbook_reconcile: idempotency_key is required.");
-			const storage = ensureYanoStorage();
-			const binding = storage.getPlaybookBinding(params.run_id);
-			if (!binding) throw new Error(`playbook_reconcile: run "${params.run_id}" has no bound Playbook.`);
-			const plan = readPlan(requireWorktree(params.slug).path, params.slug);
-			if (!plan) throw new Error(`playbook_reconcile: no structured plan for "${params.slug}".`);
-			const states = (binding.snapshot as any)?.states ?? [];
-			const stateIds = new Set(states.map((state: any) => state.id));
-			const seenStates = new Set<string>();
-			const seenTickets = new Set<string>();
-			const diff: any[] = [];
-			for (const mapping of params.mappings) {
-				if (!stateIds.has(mapping.state_id)) diff.push({ kind: "unknown_state", state_id: mapping.state_id });
-				if (seenStates.has(mapping.state_id)) diff.push({ kind: "duplicate_state", state_id: mapping.state_id });
-				seenStates.add(mapping.state_id);
-				if (!plan.phases.some((phase) => phase.phase === mapping.phase)) diff.push({ kind: "unknown_phase", state_id: mapping.state_id, phase: mapping.phase });
-				for (const ticketId of mapping.ticket_ids) {
-					if (seenTickets.has(ticketId)) diff.push({ kind: "duplicate_ticket", ticket_id: ticketId });
-					seenTickets.add(ticketId);
-					const ticket = storage.getTicket(ticketId);
-					if (!ticket || ticket.run_id !== params.run_id) diff.push({ kind: "ticket_not_in_run", ticket_id: ticketId });
-				}
-			}
-			for (const state of states) if (!seenStates.has(state.id)) diff.push({ kind: "unmapped_state", state_id: state.id });
-			const tickets = storage.listTickets(params.run_id);
-			for (const ticket of tickets) if (!seenTickets.has(ticket.id)) diff.push({ kind: "unmapped_ticket", ticket_id: ticket.id, status: ticket.status });
-			const phaseByTicket = new Map<string, number>();
-			for (const mapping of params.mappings) for (const ticketId of mapping.ticket_ids) phaseByTicket.set(ticketId, mapping.phase);
-			for (const dependency of storage.listDependencies(params.run_id)) {
-				const dependentPhase = phaseByTicket.get(dependency.ticket_id);
-				const prerequisitePhase = phaseByTicket.get(dependency.depends_on_id);
-				if (dependentPhase !== undefined && prerequisitePhase !== undefined && prerequisitePhase > dependentPhase) diff.push({ kind: "dependency_phase_inversion", ticket_id: dependency.ticket_id, depends_on_id: dependency.depends_on_id });
-			}
-			const outcome = diff.length ? "needs_replan" : "coherent";
-			const payload = { outcome, run_id: params.run_id, slug: params.slug, playbook_checksum: binding.checksum, generation: storage.getPlaybookRuntimeState(params.run_id)?.generation ?? 0, idempotency_key: params.idempotency_key, diff };
-			const prior = storage.listCheckpoints(params.run_id).find((checkpoint: any) => checkpoint.label === "playbook_reconciliation" && checkpoint.payload?.idempotency_key === params.idempotency_key);
-			if (!prior) { storage.createCheckpoint(params.run_id, "playbook_reconciliation", payload); storage.recordEvent(params.run_id, "playbook_reconciliation", payload); }
-			return { content: [{ type: "text" as const, text: `playbook_reconcile: ${outcome} (${diff.length} finding(s)).` }], details: { reconciliation: payload, idempotent: !!prior } };
-		},
-		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("playbook_reconcile ")) + theme.fg("accent", (args as any).run_id ?? "?"), 0, 0); },
-		renderResult(result, _options, theme) { return new Text(theme.fg("success", "→ ") + theme.fg("accent", (result.details as any)?.reconciliation?.outcome ?? "?"), 0, 0); },
-	});
+// playbook_reconcile moved into scripts/orchestrator-tools/playbooks.ts
+	// as its 9th handler (Fase 5 / M5) — the existing createPlaybookTools(...)
+	// wiring loop above already registers it, no new wiring needed here.
 
 // playbook_evidence_list moved above with its 7 siblings (Fase 4 / M4).
 // ━━ Capability-card tools (Fase 4 / M3) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

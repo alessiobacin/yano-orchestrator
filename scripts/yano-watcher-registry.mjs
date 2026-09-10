@@ -53,6 +53,10 @@ import { closeTerminalAutoImproverSessions } from "./yano-auto-improver.mjs";
 import mqtt from "mqtt";
 import { claimFeedback, listFeedback, openDatabase as openFeedbackDatabase, updateFeedback } from "./yano-feedback.mjs";
 import { cronInstall, cronStatus, cronRemove } from "./watcher/cron-schedule.mjs";
+import {
+	renameHerdrTab, closeHerdrTab, watcherProcessMatches, repairAgentTabIdentities,
+	closeUnusedInitialTab, findOrCreateWatcherWorkspace, pruneOrphanWatcherTabs,
+} from "./watcher/herdr-tab-lifecycle.mjs";
 
 const require = createRequire(import.meta.url);
 const WORKSPACE_LABEL = "yano-watcher";
@@ -191,66 +195,11 @@ function shellQuote(valueToQuote) {
 	return process.platform === "win32" ? `"${String(valueToQuote).replaceAll('"', '\\"')}"` : `'${String(valueToQuote).replaceAll("'", `'"'"'`)}'`;
 }
 
-function renameHerdrTab(tabId, label) {
-	if (!tabId || !label) return;
-	const result = spawnSync("herdr", ["tab", "rename", tabId, label], { encoding: "utf8" });
-	if (result.status !== 0) throw new Error(`yano watcher: impossibile rinominare la tab ${tabId} in ${label}${result.stderr ? `: ${result.stderr.trim()}` : ""}`);
-}
-
-function closeHerdrTab(tabId) {
-	if (!tabId) return { closed: false, reason: "missing_tab_id" };
-	const result = spawnSync("herdr", ["tab", "close", tabId], { encoding: "utf8" });
-	return result.status === 0
-		? { closed: true, tab_id: tabId }
-		: { closed: false, tab_id: tabId, error: (result.stderr || result.stdout || "Herdr non ha chiuso la tab").trim() };
-}
-
-function watcherProcessMatches(row, paneId) {
-	if (!paneId) return null;
-	const result = spawnSync("herdr", ["pane", "process-info", "--pane", paneId], { encoding: "utf8", maxBuffer: 2_000_000 });
-	if (result.status !== 0) return null;
-	try {
-		const payload = JSON.parse(result.stdout || "");
-		const processes = payload?.result?.process_info?.foreground_processes || [];
-		if (!processes.length) return null;
-		const command = processes.map((item) => item.cmdline || item.argv?.join(" ") || "").join(" ");
-		return command.includes("yano watch") && command.includes(`--project-root ${row.root}`) && command.includes(`--interval-ms ${Math.max(1000, Number(row.interval_ms))}`) && command.includes(`--lookback-ms ${Math.max(1000, Number(row.lookback_ms))}`);
-	} catch { return null; }
-}
-
-function repairAgentTabIdentities(snapshot) {
-	const repaired = [];
-	for (const conflict of agentTabIdentityAudit(snapshot)) {
-		if (conflict.type !== "tab_identity_mismatch") continue;
-		try {
-			renameHerdrTab(conflict.tab_id, conflict.actual);
-			repaired.push({ tab_id: conflict.tab_id, from: conflict.label, to: conflict.actual });
-		} catch (error) {
-			repaired.push({ tab_id: conflict.tab_id, from: conflict.label, to: conflict.actual, error: error instanceof Error ? error.message : String(error) });
-		}
-	}
-	// Recovery tabs are implementation artefacts, never durable agents. A
-	// previous race could leave several empty planner recovery tabs behind;
-	// remove only tabs with no live pane/agent, never an active work tab.
-	for (const tab of snapshot?.tabs || []) {
-		if (!/^planner-\d{2}-recovery-/i.test(tab.label || "")) continue;
-		const pane = (snapshot.panes || []).find((item) => item.tab_id === tab.tab_id);
-		const agent = pane && (snapshot.agents || []).find((item) => item.pane_id === pane.pane_id);
-		if (agent && !["done", "offline", "unknown", "stopped"].includes(String(agent.agent_status || "").toLowerCase())) continue;
-		const closed = closeHerdrTab(tab.tab_id);
-		repaired.push({ tab_id: tab.tab_id, action: "close_orphan_recovery_tab", ...closed });
-	}
-	return repaired;
-}
-
-function closeUnusedInitialTab(snapshot, workspaceId, keepTabId) {
-	const initial = (snapshot?.tabs || []).find((tab) => tab.workspace_id === workspaceId && tab.tab_id !== keepTabId && /^(1|\d+)$/.test(tab.label || ""));
-	if (!initial) return null;
-	const pane = (snapshot?.panes || []).find((item) => item.tab_id === initial.tab_id);
-	const agent = pane && (snapshot?.agents || []).find((item) => item.pane_id === pane.pane_id);
-	if (agent && !["done", "offline", "unknown"].includes(String(agent.agent_status || "").toLowerCase())) return null;
-	return closeHerdrTab(initial.tab_id);
-}
+// ━━ Herdr tab-lifecycle primitives (Fase 3 / M1) ━━━━━━━━━━━━━━━━━━━━━━━━━━
+// renameHerdrTab/closeHerdrTab/watcherProcessMatches/repairAgentTabIdentities/
+// closeUnusedInitialTab/findOrCreateWatcherWorkspace/pruneOrphanWatcherTabs
+// moved verbatim into scripts/watcher/herdr-tab-lifecycle.mjs — imported
+// above. shellQuote stays here (used by other call sites below).
 
 export function projectRuns(root) {
 	const db = openProjectDatabase(root);
@@ -954,21 +903,6 @@ async function reconcileProjectRun(db, row, snapshot, mqttClientProvider = null)
 	return { recovery: "project_completed", watcher_kept: true, playbook_flow: flowViolations.length ? "violation" : "ordered", playbook_flow_violations: flowViolations };
 }
 
-function findOrCreateWatcherWorkspace(snapshot, root, dryRun = false) {
-	let workspace = snapshot?.workspaces?.find((item) => item.label === WORKSPACE_LABEL);
-	if (workspace) return { workspace, created: false };
-	if (dryRun) return { workspace: { workspace_id: null, label: WORKSPACE_LABEL }, created: false, dry_run: true };
-	const result = spawnSync("herdr", ["workspace", "create", "--cwd", root, "--label", WORKSPACE_LABEL, "--focus"], { encoding: "utf8" });
-	if (result.status !== 0) throw new Error(`yano watcher: impossibile creare il workspace Herdr "${WORKSPACE_LABEL}"${result.stderr ? `: ${result.stderr.trim()}` : ""}`);
-	try {
-		const parsed = JSON.parse(result.stdout);
-		workspace = parsed?.result?.workspace || parsed?.workspace;
-	} catch { /* refresh below */ }
-	if (!workspace?.workspace_id) workspace = herdrSnapshot()?.workspaces?.find((item) => item.label === WORKSPACE_LABEL);
-	if (!workspace?.workspace_id) throw new Error("yano watcher: Herdr ha creato il workspace ma non ha restituito workspace_id");
-	return { workspace, created: true };
-}
-
 // Same shared-tab convention documented in docs/quick-guides/10-watcher-falle-yano.md
 // for the Architect ephemeral-proposal flow (workspace `yano-watcher`, tab
 // `watcher-<project-name>`): a project watched through either path lands on
@@ -1226,27 +1160,6 @@ async function withSupervisorLock(callback) {
 		try { if (fd !== undefined) fs.closeSync(fd); } catch { /* best effort */ }
 		try { fs.unlinkSync(lock); } catch { /* best effort */ }
 	}
-}
-
-function pruneOrphanWatcherTabs(snapshot, rows) {
-	if (!snapshot) return [];
-	const knownRoots = new Set(rows.map((row) => path.resolve(row.root)));
-	const removed = [];
-	for (const tab of snapshot.tabs || []) {
-		if (/^(debugger|suggester)(-|$)/i.test(tab.label || "")) {
-			const closed = closeHerdrTab(tab.tab_id);
-			removed.push({ tab_id: tab.tab_id, label: tab.label, root: null, obsolete_agent: true, ...closed });
-			continue;
-		}
-		if (!/^watcher-/i.test(tab.label || "")) continue;
-		const pane = (snapshot.panes || []).find((item) => item.tab_id === tab.tab_id);
-		const root = pane?.cwd ? path.resolve(pane.cwd) : null;
-		if (!root || (root !== path.resolve(traceRoot()) && !knownRoots.has(root) && !fs.existsSync(root))) {
-			const closed = closeHerdrTab(tab.tab_id);
-			removed.push({ tab_id: tab.tab_id, label: tab.label, root, ...closed });
-		}
-	}
-	return removed;
 }
 
 function activateDefaultWorkers(db, row) {

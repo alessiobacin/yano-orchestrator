@@ -84,6 +84,8 @@ import {
 } from "../scripts/yano-terminal-integration.ts";
 import * as notifications from "../scripts/yano-notifications.ts";
 import { createWatchdogSweep } from "../scripts/watcher/watchdog-sweep.ts";
+import { redactRuntimeProjection } from "../scripts/orchestrator-tools/redact.ts";
+import { createDecisionHoldTools } from "../scripts/orchestrator-tools/decision-holds.ts";
 
 // ━━ Constants ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -480,25 +482,8 @@ function contextTextLength(value: unknown): number {
 	try { return JSON.stringify(value ?? null).length; } catch { return 0; }
 }
 
-const SENSITIVE_PROJECTION_KEY = /(?:secret|password|token|authorization|api[_-]?key|private[_-]?key)/i;
-// These are numeric/context-catalog fields, not credentials. They must remain
-// visible in forensic logs even though the generic redactor quite correctly
-// treats the word "token" as sensitive elsewhere.
-const SAFE_CONTEXT_PROJECTION_KEYS = new Set([
-	"context_tokens",
-	"effective_context_tokens",
-	"estimated_context_tokens",
-	"context_window_tokens",
-	"context_tokens_source",
-]);
-function redactRuntimeProjection(value: unknown, key?: string): unknown {
-	if (key && SENSITIVE_PROJECTION_KEY.test(key) && !SAFE_CONTEXT_PROJECTION_KEYS.has(key)) return "[REDACTED]";
-	if (Array.isArray(value)) return value.map((item) => redactRuntimeProjection(item));
-	if (value && typeof value === "object") {
-		return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([childKey, childValue]) => [childKey, redactRuntimeProjection(childValue, childKey)]));
-	}
-	return value;
-}
+// redactRuntimeProjection moved verbatim into
+// scripts/orchestrator-tools/redact.ts (Fase 4 / M0) — imported above.
 
 function isValidHex(hex: string): boolean {
 	return /^#[0-9a-fA-F]{6}$/.test(hex);
@@ -5466,116 +5451,16 @@ export default function (pi: ExtensionAPI) {
 		renderResult(result, _options, theme) { return new Text(theme.fg("success", "→ ") + theme.fg("accent", (result.details as any)?.recovery?.status ?? "none"), 0, 0); },
 	});
 
-	pi.registerTool({
-		name: "decision_hold_create",
-		label: "Create Decision Hold",
-		description: "Create or retrieve an idempotent human decision hold. Only planner/user authority may create holds; execution remains paused until answer, cancel, or expiry.",
-		parameters: Type.Object({
-			run_id: Type.String(), ticket_id: Type.Optional(Type.String()), generation: Type.Optional(Type.Integer({ minimum: 0 })),
-			question: Type.String(), context: Type.Optional(Type.Unknown()), owner: Type.String(),
-			expires_at: Type.Optional(Type.String()), idempotency_key: Type.String(),
-		}),
-		async execute(_callId, params) {
-			if (!identity) throw new Error("orchestrator not initialised");
-			if (identity.role !== "planner" && identity.role !== "user") throw new Error(`decision_hold_create: role "${identity.role}" is not authorised.`);
-			const storage = ensureYanoStorage();
-			const hold = storage.createDecisionHold({ ...params, ticket_id: params.ticket_id ?? null, context: params.context ?? {}, idempotency_key: params.idempotency_key });
-			storage.recordEvent(hold.run_id, "decision_hold_created", { hold_id: hold.id, generation: hold.generation, owner: hold.owner, expires_at: hold.expires_at }, hold.ticket_id);
-			// Exactly one "I'm waiting for your reply" notification per hold, ever
-			// — gated on storage-level `created` (true only the one time this
-			// call actually inserted a new row), never on anything the calling
-			// agent could retry into firing twice. Silent (never throws) if no
-			// channel is configured, same contract as every other notification
-			// path in this file.
-			if (hold.created) {
-				const notifyText = `❓ Il progetto "${identity.project}" ha una domanda in attesa di risposta: "${hold.question}" (hold ${hold.id}). Non serve fare nulla finché non rispondi — nessun altro processo interverrà su questo hold.`;
-				const notifyResult = await sendNotifications(notifyText);
-				logEvent("notification_dispatch", { hold_id: hold.id, ok: notifyResult.ok, detail: notifyResult.detail, channels: notifyResult.channels, reason: "decision_hold_waiting_for_user" });
-			}
-			return { content: [{ type: "text" as const, text: `decision hold ${hold.id}: ${hold.status} (generation ${hold.generation})` }], details: { hold: redactRuntimeProjection(hold) } };
-		},
-		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("decision_hold_create ")) + theme.fg("accent", (args as any).run_id ?? "?"), 0, 0); },
-		renderResult(result, _options, theme) { return new Text(theme.fg("success", "→ ") + theme.fg("accent", (result.details as any)?.hold?.status ?? "?"), 0, 0); },
-	});
-
-	pi.registerTool({
-		name: "decision_hold_get",
-		label: "Get Decision Hold",
-		description: "Read one persisted decision hold by id.",
-		parameters: Type.Object({ id: Type.String() }),
-		async execute(_callId, params) {
-			const hold = ensureYanoStorage().getDecisionHold(params.id);
-			if (!hold) throw new Error(`decision_hold_get: no hold "${params.id}".`);
-			return { content: [{ type: "text" as const, text: `decision hold ${hold.id}: ${hold.status}` }], details: { hold: redactRuntimeProjection(hold) } };
-		},
-		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("decision_hold_get ")) + theme.fg("accent", (args as any).id ?? "?"), 0, 0); },
-		renderResult(result, _options, theme) { return new Text(theme.fg("success", "→ ") + theme.fg("accent", (result.details as any)?.hold?.status ?? "?"), 0, 0); },
-	});
-
-	pi.registerTool({
-		name: "decision_hold_list",
-		label: "List Decision Holds",
-		description: "List persisted decision holds for a run, optionally filtered by status.",
-		parameters: Type.Object({ run_id: Type.String(), status: Type.Optional(Type.Union([Type.Literal("open"), Type.Literal("answered"), Type.Literal("expired"), Type.Literal("cancelled"), Type.Literal("blocked")])) }),
-		async execute(_callId, params) {
-			const holds = ensureYanoStorage().listDecisionHolds(params.run_id, params.status as DecisionHoldStatus | undefined).map((hold) => redactRuntimeProjection(hold));
-			return { content: [{ type: "text" as const, text: `${holds.length} decision hold(s) for run ${params.run_id}.` }], details: { holds } };
-		},
-		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("decision_hold_list ")) + theme.fg("accent", (args as any).run_id ?? "?"), 0, 0); },
-		renderResult(result, _options, theme) { return new Text(theme.fg("success", "→ ") + theme.fg("accent", String(((result.details as any)?.holds ?? []).length)), 0, 0); },
-	});
-
-	pi.registerTool({
-		name: "decision_hold_answer",
-		label: "Answer Decision Hold",
-		description: "Answer an open decision hold with generation fencing and retry-safe idempotency.",
-		parameters: Type.Object({ id: Type.String(), generation: Type.Integer({ minimum: 0 }), answer: Type.String(), idempotency_key: Type.String(), resolution_metadata: Type.Optional(Type.Unknown()), expected_checksum: Type.Optional(Type.String()), principal: Type.Optional(Type.String()) }),
-		async execute(_callId, params) {
-			if (!identity) throw new Error("orchestrator not initialised");
-			if (identity.role !== "planner" && identity.role !== "user") throw new Error(`decision_hold_answer: role "${identity.role}" is not authorised.`);
-			const storage = ensureYanoStorage();
-			const hold = storage.answerDecisionHold(params.id, params);
-			storage.recordEvent(hold.run_id, "decision_hold_answered", { hold_id: hold.id, generation: hold.generation, idempotency_key: params.idempotency_key }, hold.ticket_id);
-			await yanoPublishEvent(hold.run_id, "decision_hold_answered", { hold_id: hold.id, generation: hold.generation });
-			return { content: [{ type: "text" as const, text: `decision hold ${hold.id}: answered` }], details: { hold: redactRuntimeProjection(hold) } };
-		},
-		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("decision_hold_answer ")) + theme.fg("accent", (args as any).id ?? "?"), 0, 0); },
-		renderResult(_result, _options, theme) { return new Text(theme.fg("success", "→ answered"), 0, 0); },
-	});
-
-	pi.registerTool({
-		name: "decision_hold_cancel",
-		label: "Cancel Decision Hold",
-		description: "Cancel an open decision hold with generation fencing and retry-safe idempotency.",
-		parameters: Type.Object({ id: Type.String(), generation: Type.Integer({ minimum: 0 }), reason: Type.Optional(Type.String()), idempotency_key: Type.String(), expected_checksum: Type.Optional(Type.String()), principal: Type.Optional(Type.String()) }),
-		async execute(_callId, params) {
-			if (!identity) throw new Error("orchestrator not initialised");
-			if (identity.role !== "planner" && identity.role !== "user") throw new Error(`decision_hold_cancel: role "${identity.role}" is not authorised.`);
-			const storage = ensureYanoStorage();
-			const hold = storage.cancelDecisionHold(params.id, params);
-			storage.recordEvent(hold.run_id, "decision_hold_cancelled", { hold_id: hold.id, generation: hold.generation, idempotency_key: params.idempotency_key, reason_provided: Boolean(params.reason) }, hold.ticket_id);
-			await yanoPublishEvent(hold.run_id, "decision_hold_cancelled", { hold_id: hold.id, generation: hold.generation });
-			return { content: [{ type: "text" as const, text: `decision hold ${hold.id}: cancelled` }], details: { hold: redactRuntimeProjection(hold) } };
-		},
-		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("decision_hold_cancel ")) + theme.fg("accent", (args as any).id ?? "?"), 0, 0); },
-		renderResult(_result, _options, theme) { return new Text(theme.fg("success", "→ cancelled"), 0, 0); },
-	});
-
-	pi.registerTool({
-		name: "decision_hold_escalate",
-		label: "Escalate Decision Hold",
-		description: "Escalate an open decision hold to another principal with generation and idempotency fencing.",
-		parameters: Type.Object({ id: Type.String(), generation: Type.Integer({ minimum: 0 }), escalated_to: Type.String(), idempotency_key: Type.String(), expected_checksum: Type.Optional(Type.String()) }),
-		async execute(_callId, params) {
-			if (!identity) throw new Error("orchestrator not initialised");
-			if (identity.role !== "planner" && identity.role !== "user") throw new Error(`decision_hold_escalate: role "${identity.role}" is not authorised.`);
-			const hold = ensureYanoStorage().escalateDecisionHold(params.id, params);
-			ensureYanoStorage().recordEvent(hold.run_id, "decision_hold_escalated", { hold_id: hold.id, generation: hold.generation, escalated_to: hold.escalated_to, escalation_version: hold.escalation_version }, hold.ticket_id);
-			return { content: [{ type: "text" as const, text: `decision hold ${hold.id}: escalated to ${hold.escalated_to}` }], details: { hold: redactRuntimeProjection(hold) } };
-		},
-		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("decision_hold_escalate ")) + theme.fg("accent", (args as any).id ?? "?"), 0, 0); },
-		renderResult(result, _options, theme) { return new Text(theme.fg("success", "→ ") + theme.fg("accent", (result.details as any)?.hold?.escalated_to ?? "?"), 0, 0); },
-	});
+// ━━ Decision-hold tools (Fase 4 / M0) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+	// decision_hold_create/get/list/answer/cancel/escalate moved verbatim into
+	// scripts/orchestrator-tools/decision-holds.ts — wired below via deps.
+	for (const tool of createDecisionHoldTools({
+		getIdentity: () => identity,
+		ensureYanoStorage,
+		logEvent,
+		sendNotifications,
+		yanoPublishEvent,
+	})) pi.registerTool(tool);
 
 	pi.registerTool({
 		name: "retention_policy_set",

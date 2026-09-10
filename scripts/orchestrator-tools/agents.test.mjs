@@ -1,26 +1,47 @@
-// Fase 5 / M2 — agent_* tool handlers (7 of 8; agent_send arrives in
-// Fase 5/M6), extracted from extensions/orchestrator.ts. Plain deps
-// objects with vi.fn() spies, same pattern as decision-holds.test.mjs
-// (Fase 4/M0).
+// Fase 5 / M2 — agent_* tool handlers (7 of 8), extracted from
+// extensions/orchestrator.ts. Fase 5/M6 added agent_send as the 8th; its
+// own describe block below uses a real temp worktree (createRequireWorktree/
+// writePlan from plan-gate.ts, not mocked) for the phase-gate tests, same
+// reasoning as worktree.test.mjs/plan.test.mjs — that coupling is the
+// actual thing being verified. Plain deps objects with vi.fn() spies
+// elsewhere, same pattern as decision-holds.test.mjs (Fase 4/M0).
 import { describe, expect, it, vi } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { createAgentTools } from "./agents.ts";
+import { createAssertRoleHandoffAllowed, createRequireWorktree, reportPath, writePlan } from "./plan-gate.ts";
 
 function makeDeps(overrides = {}) {
 	const presence = new Map();
 	const pendingReplies = new Map();
 	const activityLog = [];
+	const identity = { role: "planner", cwd: "/p", project: "demo", instance: "planner-01", team: ["core"], capacity: 5 };
 	const deps = {
-		getIdentity: () => ({ role: "planner", cwd: "/p", project: "demo", instance: "planner-01", team: ["core"], capacity: 5 }),
+		getIdentity: () => identity,
 		getClient: () => ({ publishAsync: vi.fn(async () => {}) }),
-		getT: () => ({ teamEvents: (t) => `team/${t}`, agentCommands: (i) => `agent/${i}` }),
+		getT: () => ({
+			teamEvents: (t) => `team/${t}`,
+			agentCommands: (i) => `agent/${i}`,
+			agentResponses: (i) => `agent/${i}/responses`,
+			roleTasks: (r) => `role/${r}/tasks`,
+			agentFallback: () => "system/agent-fallback",
+		}),
 		getMqttConnected: () => true,
 		getPresenceHydration: () => Promise.resolve(),
+		getCurrentInbound: () => null,
 		presence,
 		pendingReplies,
 		activityLog,
 		computeSelfStatus: () => "idle",
 		currentLoad: () => 0,
 		logEvent: vi.fn(),
+		sendNotifications: vi.fn(async () => ({ ok: true, detail: "sent", channels: {} })),
+		agentStatusSnapshot: () => "planner-01 idle",
+		scheduleEviction: vi.fn(),
+		requireWorktree: () => { throw new Error("requireWorktree not needed by this test"); },
+		assertRoleHandoffAllowed: () => {},
+		pi: { sendMessage: vi.fn(), appendEntry: vi.fn() },
 		...overrides,
 	};
 	return { deps, presence, pendingReplies, activityLog };
@@ -157,6 +178,135 @@ describe("agents", () => {
 			const { deps } = makeDeps();
 			const result = await toolByName(deps, "agent_terminate").execute("c1", { target_instance: "coder-99", reason: "x" });
 			expect(result.details.was_live).toBe(false);
+		});
+	});
+
+	describe("agent_send", () => {
+		it("rejects when neither target_instance nor target_role is given", async () => {
+			const { deps } = makeDeps();
+			await expect(toolByName(deps, "agent_send").execute("c1", { prompt: "do it" })).rejects.toThrow(/provide target_instance or target_role/);
+		});
+
+		it("publishes to the target instance and returns assignment_id/hops", async () => {
+			const publishAsync = vi.fn(async () => {});
+			const { deps, presence } = makeDeps({ getClient: () => ({ publishAsync }) });
+			presence.set("coder-01", { instance: "coder-01", role: "coder", status: "idle" });
+			const result = await toolByName(deps, "agent_send").execute("c1", { target_instance: "coder-01", prompt: "do it" });
+			expect(result.details.hops).toBe(0);
+			expect(result.details.no_live_target).toBe(false);
+			expect(publishAsync).toHaveBeenCalledWith("agent/coder-01", expect.stringContaining("do it"), { qos: 1 });
+		});
+
+		it("inherits hops+1 from the current inbound context, and refuses past MAX_HOPS", async () => {
+			const { deps, presence } = makeDeps({ getCurrentInbound: () => ({ hops: 5 }) });
+			presence.set("coder-01", { instance: "coder-01", role: "coder", status: "idle" });
+			const result = await toolByName(deps, "agent_send").execute("c1", { target_instance: "coder-01", prompt: "x" });
+			expect(result.details.hops).toBe(6);
+
+			const { deps: maxedDeps } = makeDeps({ getCurrentInbound: () => ({ hops: 999 }) });
+			await expect(toolByName(maxedDeps, "agent_send").execute("c1", { target_instance: "coder-01", prompt: "x" })).rejects.toThrow(/hop limit reached/);
+		});
+
+		it("new_round:true resets the hop chain to 0 even with an inbound context", async () => {
+			const { deps, presence } = makeDeps({ getCurrentInbound: () => ({ hops: 5 }) });
+			presence.set("coder-01", { instance: "coder-01", role: "coder", status: "idle" });
+			const result = await toolByName(deps, "agent_send").execute("c1", { target_instance: "coder-01", prompt: "x", new_round: true });
+			expect(result.details.hops).toBe(0);
+		});
+
+		it("routes to a live planner and warns when the requested target is not live", async () => {
+			const publishAsync = vi.fn(async () => {});
+			const { deps, presence } = makeDeps({ getClient: () => ({ publishAsync }) });
+			presence.set("planner-02", { instance: "planner-02", role: "planner", status: "idle" });
+			const result = await toolByName(deps, "agent_send").execute("c1", { target_instance: "coder-99", prompt: "x" });
+			expect(result.details.no_live_target).toBe(true);
+			expect(result.details.route).toBe("planner");
+			expect(result.details.fallback_target).toBe("planner-02");
+			expect(publishAsync).toHaveBeenCalledWith("agent/planner-02", expect.stringContaining("[yano-routing]"), { qos: 1 });
+		});
+
+		it("routes to the watcher fallback topic when nobody is live, skipping the real bootstrap under the test env flag", async () => {
+			const prior = process.env.PI_ORCH_TEST_NO_EXIT;
+			process.env.PI_ORCH_TEST_NO_EXIT = "1";
+			try {
+				const publishAsync = vi.fn(async () => {});
+				const { deps } = makeDeps({ getClient: () => ({ publishAsync }) });
+				const result = await toolByName(deps, "agent_send").execute("c1", { target_role: "coder", prompt: "x" });
+				expect(result.details.route).toBe("watcher");
+				expect(result.details.watcher_bootstrap).toEqual({ attempted: false, ok: false, detail: "test harness: bootstrap skipped" });
+				expect(publishAsync).toHaveBeenCalledWith("system/agent-fallback", expect.stringContaining("agent_route_fallback"), { qos: 1, retain: true });
+			} finally {
+				if (prior === undefined) delete process.env.PI_ORCH_TEST_NO_EXIT;
+				else process.env.PI_ORCH_TEST_NO_EXIT = prior;
+			}
+		});
+
+		describe("phase gate (real plan-gate.ts, temp worktree)", () => {
+			let cwd;
+
+			function setup() {
+				cwd = fs.mkdtempSync(path.join(os.tmpdir(), "agent-send-test-"));
+				fs.mkdirSync(path.join(cwd, ".worktrees", "demo"), { recursive: true });
+				return path.join(cwd, ".worktrees", "demo");
+			}
+
+			it("refuses a send to a role in a still-locked phase, for any sender", async () => {
+				const wtPath = setup();
+				writePlan(wtPath, "demo", {
+					slug: "demo",
+					phases: [
+						{ phase: 1, roles: ["coder"], status: "unlocked" },
+						{ phase: 2, roles: ["docs-sync"], status: "locked" },
+					],
+					created_at: "t0",
+					updated_at: "t0",
+				});
+				try {
+					const identity = { role: "planner", cwd, project: "demo", instance: "planner-01", team: ["core"], capacity: 5 };
+					const { deps, presence } = makeDeps({
+						getIdentity: () => identity,
+						requireWorktree: createRequireWorktree({ getIdentity: () => identity }),
+						assertRoleHandoffAllowed: createAssertRoleHandoffAllowed({ getIdentity: () => identity }),
+					});
+					presence.set("docs-sync-01", { instance: "docs-sync-01", role: "docs-sync", status: "idle" });
+					await expect(
+						toolByName(deps, "agent_send").execute("c1", { target_instance: "docs-sync-01", prompt: "x", slug: "demo" }),
+					).rejects.toThrow(/still.*locked/);
+				} finally {
+					fs.rmSync(cwd, { recursive: true, force: true });
+				}
+			});
+
+			it("allows a send to a role in an unlocked phase and appends an audit line to the task report", async () => {
+				const wtPath = setup();
+				writePlan(wtPath, "demo", {
+					slug: "demo",
+					phases: [{ phase: 1, roles: ["coder"], status: "unlocked" }],
+					created_at: "t0",
+					updated_at: "t0",
+				});
+				const report = reportPath(wtPath, "demo");
+				fs.mkdirSync(path.dirname(report), { recursive: true });
+				fs.writeFileSync(report, "# Report: demo\n");
+				try {
+					const identity = { role: "planner", cwd, project: "demo", instance: "planner-01", team: ["core"], capacity: 5 };
+					const publishAsync = vi.fn(async () => {});
+					const { deps, presence } = makeDeps({
+						getIdentity: () => identity,
+						getClient: () => ({ publishAsync }),
+						requireWorktree: createRequireWorktree({ getIdentity: () => identity }),
+						assertRoleHandoffAllowed: createAssertRoleHandoffAllowed({ getIdentity: () => identity }),
+					});
+					presence.set("coder-01", { instance: "coder-01", role: "coder", status: "idle" });
+					const result = await toolByName(deps, "agent_send").execute("c1", { target_instance: "coder-01", prompt: "x", slug: "demo" });
+					expect(result.details.no_live_target).toBe(false);
+					const content = fs.readFileSync(report, "utf-8");
+					expect(content).toContain("agent_send:");
+					expect(content).toContain("coder-01");
+				} finally {
+					fs.rmSync(cwd, { recursive: true, force: true });
+				}
+			});
 		});
 	});
 });

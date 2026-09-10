@@ -2678,301 +2678,18 @@ export default function (pi: ExtensionAPI) {
 		renderResult(_result, _options, theme) { return new Text(theme.fg("success", "✓ audit completed (project docs/reports)"), 0, 0); },
 	});
 
-// ━━ Agent-messaging tools (Fase 5 / M2) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-	// agent_control/list/get/await/publish_event/activity/terminate (7 of the
-	// 8 agent_* tools) moved verbatim into scripts/orchestrator-tools/agents.ts
-	// — wired below via deps, all registered together here. agent_send (right
-	// below) stays: it needs the plan-gate cluster, added to this same module
-	// as the 8th tool once that dependency is itself extracted (Fase 5 / M6).
-	for (const tool of createAgentTools({
-		getIdentity: () => identity,
-		getClient: () => client,
-		getT: () => T,
-		getMqttConnected: () => mqttConnected,
-		getPresenceHydration: () => presenceHydration,
-		presence,
-		pendingReplies,
-		activityLog,
-		computeSelfStatus,
-		currentLoad,
-		logEvent,
-	})) pi.registerTool(tool);
+// ━━ Agent-messaging tools (Fase 5 / M2 + M6) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+	// All 8 agent_* tools (control/list/get/await/publish_event/activity/
+	// terminate/send) moved into scripts/orchestrator-tools/agents.ts — wired
+	// below via deps, all registered together here.
+// agent_* tools (createAgentTools) wired below (Fase 5 / M6), after
+	// requireWorktree/assertRoleHandoffAllowed/sendNotifications exist —
+	// agent_send (the 8th handler, added this milestone) needs all three,
+	// and this position is textually before them (TDZ), same reasoning as
+	// worktree_*'s move in Fase 5/M3.
 
-	pi.registerTool({
-		name: "agent_send",
-		label: "Agent Send",
-		description:
-			"Send a task command to a peer agent, addressed either by exact instance id (target_instance, 1:1) or by role " +
-			"(target_role, fans out to every live instance of that role — no claim arbitration at this stage, all of them will receive it). " +
-			"Returns immediately with an assignment_id. Use agent_get (non-blocking) or agent_await (blocking) to retrieve the reply.\n\n" +
-			"Every send inherits a hop count from whatever inbound task you're currently replying to, and is dropped once it exceeds " +
-			`${MAX_HOPS} hops — a safety net against runaway auto-forwarding loops within ONE delegation chain. If you are deliberately ` +
-			"starting a NEW round of work that is only logically related to a previous one (e.g. planner kicking off another full " +
-			"correction cycle after reviewing a completed review, rather than just relaying/replying within the same chain), pass " +
-			"new_round: true so it isn't mistaken for a runaway loop and dropped.\n\n" +
-			"Pass slug whenever this send is part of a task (almost always) — it auto-appends a one-line audit event to that task's " +
-			"report (reports/<slug>.md), recording who sent to whom, when, and a snapshot of every known agent's status at that " +
-			"exact moment (Revisione 19), so the report alone shows whether the team followed the planner's phase plan. Best-effort: " +
-			"if the report doesn't exist yet (or the slug is wrong), the send itself still succeeds, this just silently skips.",
-		parameters: Type.Object({
-			target_instance: Type.Optional(Type.String({ description: "Exact instance id, e.g. coder-01" })),
-			target_role: Type.Optional(Type.String({ description: "Role name, e.g. coder — broadcasts to all live instances of that role" })),
-			prompt: Type.String({ description: "The task/prompt to send." }),
-			response_schema: Type.Optional(Type.Any({ description: "Optional JSON Schema describing the expected response shape." })),
-			new_round: Type.Optional(Type.Boolean({
-				description:
-					"Set true to start a fresh hop-count chain (0) instead of inheriting hops from the inbound task you're currently " +
-					"handling. Use this when you're intentionally beginning a new round of work, not simply forwarding/replying within " +
-					"the current one — otherwise a multi-round correction cycle can silently hit the hop limit and get dropped.",
-			})),
-			slug: Type.Optional(Type.String({
-				description: "Task slug (same one used for worktree_create), if this send is part of a task — see above for what it enables.",
-			})),
-		}),
-		async execute(_callId, params) {
-			if (!identity || !client || !T) throw new Error("orchestrator not initialised");
-			if (!params.target_instance && !params.target_role) throw new Error("agent_send: provide target_instance or target_role");
-			const hops = params.new_round ? 0 : currentInbound ? currentInbound.hops + 1 : 0;
-			if (hops >= MAX_HOPS) throw new Error(`orchestrator: hop limit reached (${hops} >= ${MAX_HOPS})`);
-
-			// Deterministic phase gate (Revisione 21) — refuses a send to a role
-			// that belongs to a locked phase of this task's structured plan (see
-			// plan_set/plan_advance above). Best-effort in scope, not in
-			// enforcement: it only applies when a structured plan exists for
-			// this slug — no plan_set call ever made for this task means no
-			// gate, exactly the old ungated behavior. But once a plan DOES
-			// exist, a genuine violation is refused for real, for ANY sender —
-			// this is the one check in the whole file that's allowed to block
-			// a send outright, on purpose (everything else here is advisory).
-			if (params.slug) {
-				try {
-					const wt = requireWorktree(params.slug);
-					const plan = readPlan(wt.path, params.slug);
-					if (plan) {
-						const targetRole = params.target_role ?? (params.target_instance ? presence.get(params.target_instance)?.role : undefined);
-						if (targetRole) {
-							assertRoleHandoffAllowed(identity.role, targetRole, params.slug);
-							const phase = findPhaseForRole(plan, targetRole);
-							if (phase && phase.status === "locked") {
-								const blocker = plan.phases.find((p) => p.phase < phase.phase && p.status !== "complete");
-								throw new Error(
-									`agent_send: refused — "${targetRole}" belongs to phase ${phase.phase} of the plan for "${params.slug}", which is still ` +
-										`locked${blocker ? ` (phase ${blocker.phase} isn't marked complete yet — call plan_advance on it first)` : ""}. ` +
-										"Use plan_get to see the current plan and what's still pending.",
-								);
-							}
-						}
-					}
-				} catch (err) {
-					// Only a genuine gate violation propagates. Anything else that
-					// went wrong while trying to CHECK the gate (bad slug, no
-					// worktree, unreadable plan file) fails open — same best-
-					// effort principle as the audit-line block further down: a
-					// bookkeeping problem must never block a send that has
-					// nothing to do with it.
-					if (err instanceof Error && err.message.startsWith("agent_send: refused")) throw err;
-				}
-			}
-
-			// Revisione 41: agent_send used to report success (a real
-			// assignment_id, no warning of any kind) even when nobody was
-			// actually subscribed to receive it — an MQTT publish doesn't fail
-			// just because no one is listening. A planner that forgot to
-			// actually launch the target role's instance first (see
-			// prompts/planner.md, "Meccanismo di selezione", sezione 40) got no
-			// feedback at all until the agent_send timeout fired 30 minutes
-			// later (Revisione 30) — plenty of time to have already told the
-			// user "delegated to the coder" while no coder existed. Check
-			// presence NOW, before publishing, and surface a loud warning in
-			// the tool's own return value if nobody live matches the target.
-			// Still send regardless (the instance may be about to come online,
-			// or this presence snapshot may be a beat stale) — this only makes
-			// the silence visible immediately instead of half an hour later.
-			const hasLiveMatch = () => params.target_instance
-				? presence.get(params.target_instance)?.status !== "offline" && presence.has(params.target_instance)
-				: [...presence.values()].some((c) => c.role === params.target_role && c.status !== "offline");
-			// Retained MQTT presence can arrive just after the connect callback of a
-			// newly started peer. Give that retained snapshot one short event-loop
-			// window before declaring the target absent; otherwise two agents started
-			// back-to-back are incorrectly escalated to watcher.
-			let liveMatch = hasLiveMatch();
-			if (!liveMatch) {
-				await new Promise((resolve) => setTimeout(resolve, 150));
-				liveMatch = hasLiveMatch();
-			}
-			const requestedTarget = params.target_instance || `role:${params.target_role}`;
-			const livePlanners = [...presence.values()].filter((card) => card.role === "planner" && card.status !== "offline");
-			let route: "target" | "planner" | "watcher" = "target";
-			let fallbackTarget: string | null = null;
-			let watcherBootstrap: { attempted: boolean; ok: boolean; detail?: string } = { attempted: false, ok: false };
-			const ensureWatcherForFallback = (): { attempted: boolean; ok: boolean; detail?: string } => {
-				if (!identity || process.env.PI_ORCH_TEST_NO_EXIT === "1") return { attempted: false, ok: false, detail: "test harness: bootstrap skipped" };
-				try {
-					const output = execFileSync("yano", ["watcher", "start", "--project-root", identity.cwd, "--project", identity.project], {
-						cwd: identity.cwd,
-						encoding: "utf8",
-						timeout: 20_000,
-						maxBuffer: 2_000_000,
-					});
-					return { attempted: true, ok: true, detail: String(output || "").trim().slice(-500) };
-				} catch (error) {
-					return { attempted: true, ok: false, detail: error instanceof Error ? error.message : String(error) };
-				}
-			};
-			const noLiveTargetWarning = liveMatch
-				? null
-				: `⚠️ Nessuna istanza online per ${params.target_instance ? `"${params.target_instance}"` : `il ruolo "${params.target_role}"`} in questo progetto: la delega viene inoltrata automaticamente a planner o watcher.`;
-			if (noLiveTargetWarning) {
-				if (livePlanners.length) {
-					route = "planner";
-					fallbackTarget = livePlanners[0].instance;
-				} else {
-					route = "watcher";
-					watcherBootstrap = ensureWatcherForFallback();
-				}
-				logEvent("agent_send_no_live_target", {
-					target: requestedTarget,
-					route,
-					fallback_target: fallbackTarget,
-					watcher_bootstrap: watcherBootstrap,
-				});
-			}
-
-			const assignment_id = ulid();
-			const env: CommandEnvelope = {
-				type: "command",
-				assignment_id,
-				sender_instance: identity.instance,
-				sender_role: identity.role,
-				target_instance: params.target_instance,
-				target_role: params.target_role,
-				project: identity.project,
-				prompt: params.prompt,
-				reply_to: T.agentResponses(identity.instance),
-				hops,
-				timestamp: nowIso(),
-				response_schema: (params.response_schema as object | undefined) ?? null,
-			};
-
-			let destTopic: string;
-			if (route === "planner" && fallbackTarget) {
-					destTopic = T.agentCommands(fallbackTarget);
-					env.target_instance = fallbackTarget;
-					env.target_role = "planner";
-					env.prompt = `[yano-routing] Destinatario originale offline: ${requestedTarget}. Prendi in carico il messaggio originale e decidi se rilanciare o sostituire l'agente; non lasciare il flusso in attesa.\n\n${params.prompt}`;
-				await client.publishAsync(destTopic, JSON.stringify(env), { qos: 1 });
-			} else if (route === "watcher") {
-				destTopic = T.agentFallback();
-				// The watcher is a process, not a Pi peer. Keep the original command
-				// intact inside a routing envelope so it can be replayed after it has
-				// spawned planner-01. Retained QoS1 closes the startup race.
-				await client.publishAsync(destTopic, JSON.stringify({
-					type: "agent_route_fallback",
-					fallback_id: ulid(),
-					project: identity.project,
-					original_target: requestedTarget,
-					original: env,
-					timestamp: nowIso(),
-				}), { qos: 1, retain: true });
-			} else {
-				destTopic = params.target_instance ? T.agentCommands(params.target_instance) : T.roleTasks(params.target_role!);
-				await client.publishAsync(destTopic, JSON.stringify(env), { qos: 1 });
-			}
-
-			let resolveFn!: (v: { response?: any; error?: string | null }) => void;
-			const promise = new Promise<{ response?: any; error?: string | null }>((res) => { resolveFn = res; });
-			const entry: PendingReply = {
-				resolve: resolveFn,
-				timer: null,
-				promise,
-				target: params.target_instance || `role:${params.target_role}`,
-				created_at: nowIso(),
-				prompt_preview: params.prompt.slice(0, 200),
-			};
-			entry.timer = setTimeout(() => {
-				if (entry.result) return;
-				entry.result = { error: "timeout" };
-				entry.resolve(entry.result);
-				scheduleEviction(assignment_id);
-				// Revisione 30: nobody ever replied within TIMEOUT_MS (default 30
-				// min) — same silent-black-hole risk as handleResponse above, but
-				// for the "target never answered at all" case (dead/hung/ignored
-				// the assignment) instead of "answered but nobody was listening".
-				// Wake the sender (unless it's actively blocked in agent_await,
-				// which already gets this via its own race) and, since a
-				// half-hour of silence on a real delegation is a genuinely
-				// actionable signal, also notify configured channels — mirrors the
-				// watchdog's escalation for the same class of "something's
-				// stuck and nobody would otherwise know" problem, just reached
-				// via a different code path (agent_send timeout vs. a stale
-				// ticket).
-				if (!entry.awaiting) {
-					try {
-						pi.sendMessage(
-							{
-								customType: "orchestrator-timeout",
-								content:
-									`[nessuna risposta] ${entry.target} non ha risposto entro ${Math.round(TIMEOUT_MS / 60000)} minuti ` +
-									`(assignment_id ${assignment_id}, prompt: "${entry.prompt_preview}${params.prompt.length > 200 ? "…" : ""}"). ` +
-									"L'istanza target potrebbe essere bloccata, offline, o aver ignorato l'assegnazione — controlla agent_list/agent_activity " +
-									"e valuta se riassegnare il lavoro.",
-								display: true,
-								details: { assignment_id, target: entry.target, timeout_ms: TIMEOUT_MS },
-							},
-							{ deliverAs: "followUp", triggerTurn: true },
-						);
-					} catch { /* best-effort, see handleResponse's identical guard */ }
-					void sendNotifications(
-						`⏱️ Nessuna risposta da ${entry.target} entro ${Math.round(TIMEOUT_MS / 60000)} min (assignment ${assignment_id}) — ${identity?.instance ?? "?"} è stato risvegliato per decidere come procedere.`,
-					).then((r) => logEvent("notification_dispatch", { ok: r.ok, detail: r.detail, channels: r.channels, reason: "agent_send_timeout", assignment_id, target: entry.target }));
-				}
-			}, TIMEOUT_MS);
-			try { (entry.timer as any).unref?.(); } catch { /* ignore */ }
-			pendingReplies.set(assignment_id, entry);
-
-			pi.appendEntry("orchestrator-log", { event: "outbound_command", assignment_id, target: entry.target, hops });
-			logEvent("agent_send_out", { assignment_id, target: entry.target, hops, new_round: !!params.new_round, prompt_preview: params.prompt.slice(0, 200), route, fallback_target: fallbackTarget, watcher_bootstrap: watcherBootstrap });
-
-			// Best-effort audit line in the task's report (Revisione 19) — never
-			// lets a report-bookkeeping problem fail the actual send, which is
-			// the thing that matters. Silently skipped if slug wasn't passed, the
-			// worktree doesn't exist yet, or the report hasn't been created yet
-			// (e.g. the very first agent_send of a task, sent by the planner
-			// BEFORE it creates reports/<slug>.md — nothing to append to yet).
-			if (params.slug) {
-				try {
-					const wt = requireWorktree(params.slug);
-					const file = reportPath(wt.path, params.slug);
-					if (fs.existsSync(file)) {
-						const line =
-							`\n> _[evento] agent_send: \`${identity.instance}\` (\`${identity.role}\`) → \`${entry.target}\`` +
-							` — assignment_id \`${assignment_id}\`, hops ${hops}${params.new_round ? ", new_round" : ""} — alle ${nowIso()}_\n` +
-							`> _Stato team in quel momento: ${agentStatusSnapshot()}_\n`;
-						fs.appendFileSync(file, line);
-					}
-				} catch {
-					// best-effort — see comment above
-				}
-			}
-
-			return {
-				content: [{
-					type: "text" as const,
-					text: `agent_send → ${entry.target}\nassignment_id ${assignment_id}${noLiveTargetWarning ? `\n\n${noLiveTargetWarning}` : ""}`,
-				}],
-				details: { assignment_id, target: entry.target, hops, no_live_target: !!noLiveTargetWarning, route, fallback_target: fallbackTarget, watcher_bootstrap: watcherBootstrap },
-			};
-		},
-		renderCall(args, theme) {
-			const tgt = (args as any).target_instance || `role:${(args as any).target_role}` || "?";
-			return new Text(theme.fg("toolTitle", theme.bold("agent_send ")) + theme.fg("accent", tgt), 0, 0);
-		},
-		renderResult(result, _options, theme) {
-			const d = result.details as any;
-			const base = theme.fg("success", "→ ") + theme.fg("accent", d?.target ?? "?") + theme.fg("dim", "  assignment_id ") + theme.fg("warning", d?.assignment_id ?? "?");
-			return new Text(d?.no_live_target ? theme.fg("warning", "⚠ nessuna istanza online  ") + base : base, 0, 0);
-		},
-	});
+// agent_send moved into scripts/orchestrator-tools/agents.ts as its 8th
+	// handler (Fase 5 / M6) — wired together with its 7 siblings below.
 
 // agent_get/agent_await/agent_publish_event/agent_activity/agent_terminate
 	// moved above with agent_control/agent_list (Fase 5 / M2).
@@ -3099,6 +2816,26 @@ export default function (pi: ExtensionAPI) {
 	// the same name, unchanged.
 	const requireWorktree = createRequireWorktree({ getIdentity: () => identity });
 	const assertRoleHandoffAllowed = createAssertRoleHandoffAllowed({ getIdentity: () => identity });
+	for (const tool of createAgentTools({
+		getIdentity: () => identity,
+		getClient: () => client,
+		getT: () => T,
+		getMqttConnected: () => mqttConnected,
+		getPresenceHydration: () => presenceHydration,
+		getCurrentInbound: () => currentInbound,
+		presence,
+		pendingReplies,
+		activityLog,
+		computeSelfStatus,
+		currentLoad,
+		logEvent,
+		sendNotifications,
+		agentStatusSnapshot,
+		scheduleEviction,
+		requireWorktree,
+		assertRoleHandoffAllowed,
+		pi,
+	})) pi.registerTool(tool);
 	for (const tool of createWorktreeTools({
 		getIdentity: () => identity,
 		requireWorktree,

@@ -103,6 +103,7 @@ import { createWorktreeTools } from "../scripts/orchestrator-tools/worktree.ts";
 import { createPlanTools } from "../scripts/orchestrator-tools/plan.ts";
 import { createRunTools } from "../scripts/orchestrator-tools/run.ts";
 import { createAutoImproveTools } from "../scripts/orchestrator-tools/auto-improve.ts";
+import { createMiscTools } from "../scripts/orchestrator-tools/misc.ts";
 import { yanoComputeReadyBlocked, yanoComputeExecutionWaves } from "../scripts/orchestrator-tools/ticket-scheduling.ts";
 
 // ━━ Constants ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1303,6 +1304,17 @@ export default function (pi: ExtensionAPI) {
 	}
 	let currentCtx: ExtensionContext | null = null;
 	let currentInputScreenshots: unknown[] = [];
+	// Fase 6 / M2 — feedback_create (moved into scripts/orchestrator-tools/
+	// misc.ts) reads AND resets this array; the other write site
+	// (tool_execution_end below) is untouched. A plain read-only getter
+	// isn't enough here — read-then-clear must be atomic from the caller's
+	// perspective, so this is exposed as a single take*() dep instead of a
+	// separate getter+setter pair.
+	const takeInputScreenshots = (): unknown[] => {
+		const shots = currentInputScreenshots;
+		currentInputScreenshots = [];
+		return shots;
+	};
 	// Collected by tool_execution_end below and consumed/reset at turn_end by
 	// updateAgentMemory() (Revisione 67) — deterministic, zero-LLM-call input
 	// for the "structured lessons" memory: which tool calls failed THIS turn,
@@ -2528,84 +2540,11 @@ export default function (pi: ExtensionAPI) {
 	// A bug reported in the planner chat must be persisted before diagnosis. This
 	// tool gives the planner the same durable intake used by REST, including the
 	// screenshot references supplied with the user's message.
-	pi.registerTool({
-		name: "feedback_create",
-		label: "Persist Bug or Suggestion",
-		description: "Persist a user-reported bug or suggestion before analysing it. Planner-only. For a bug received with an image, include its local path or HTTPS URL in screenshots; the record is created before any fix is attempted.",
-		parameters: Type.Object({
-			type: Type.Union([Type.Literal("bug"), Type.Literal("suggestion")]),
-			message: Type.String({ description: "Faithful user report, including route and observed behaviour." }),
-			resolution: Type.Optional(Type.Union([Type.Literal("automatic"), Type.Literal("user_confirmation")])),
-			screenshots: Type.Optional(Type.Array(Type.Any({ description: "Screenshot path, HTTPS URL, or attachment descriptor." }))),
-			username: Type.Optional(Type.String({ description: "Credenziale utente per i test E2E; obbligatoria per i bug." })),
-			password: Type.Optional(Type.String({ description: "Password per i test E2E; obbligatoria per i bug e salvata cifrata." })),
-		}),
-		async execute(_callId, params) {
-			if (!identity || identity.role !== "planner") throw new Error("feedback_create: tool riservato al planner.");
-			const db = openFeedbackDatabase();
-			try {
-				const result = await createFeedbackRecord(db, {
-					type: params.type,
-					project_id: identity.project,
-					message: params.message,
-					resolution: params.resolution,
-					screenshots: params.screenshots?.length ? params.screenshots : currentInputScreenshots,
-					test_username: params.username,
-					test_password: params.password,
-					notify: false,
-				});
-				claimFeedback(db, result.id);
-				const claimed = listFeedback(db, { project_id: identity.project, type: params.type, statuses: ["processing"] }).find((item: any) => item.id === result.id) || result;
-				currentInputScreenshots = [];
-				logEvent("feedback_persisted_from_planner_chat", { feedback_id: claimed.id, feedback_type: claimed.type, screenshot_count: claimed.screenshots?.length ?? 0 });
-				return { content: [{ type: "text" as const, text: JSON.stringify({ feedback_id: claimed.id, status: claimed.status, screenshots: claimed.screenshots }, null, 2) }], details: { feedback_id: claimed.id, status: claimed.status, screenshot_count: claimed.screenshots?.length ?? 0 } };
-			} finally { db.close(); }
-		},
-		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("feedback_create ")) + theme.fg("accent", `${(args as any).type ?? "bug"} · ${String((args as any).message ?? "").slice(0, 60)}`), 0, 0); },
-		renderResult(result, _options, theme) { const d = result.details as any; return new Text(theme.fg("success", `→ ${d?.feedback_id ?? "feedback"} persistito (${d?.screenshot_count ?? 0} screenshot)`), 0, 0); },
-	});
-
-	// The auto-improver is an observer. Prompt instructions alone are not a
-	// sufficient safety boundary because a resumed/stale Pi transcript can still
-	// request bash/edit/write. Give that role a narrow runtime tool surface and
-	// keep the only write operation below inside the global Yano data directory.
-	pi.registerTool({
-		name: "api_request",
-		label: "Registered REST API Request",
-		description: "Call one user-registered REST API. Only registered hosts, declared methods and configured credentials are allowed; never an arbitrary URL fetch.",
-		parameters: Type.Object({
-			api: Type.String({ description: "Registered API name from the REST API registry." }),
-			method: Type.String({ description: "Declared HTTP method: GET, POST, PUT, PATCH or DELETE." }),
-			path: Type.String({ description: "Path relative to the registered base URL, for example /api/status." }),
-			body: Type.Optional(Type.Any({ description: "JSON request body when required by the API." })),
-		}),
-		async execute(_callId, params) {
-			if (!identity) throw new Error("api_request: identity non disponibile");
-			const api = getProjectApi(identity.cwd, params.api);
-			if (!api || api.enabled === false) throw new Error(`api_request: API registrata non disponibile: ${params.api}`);
-			const method = String(params.method || "").toUpperCase();
-			if (!api.methods.includes(method)) throw new Error(`api_request: metodo ${method} non dichiarato per ${api.name}`);
-			if (!String(params.path || "").startsWith("/") || String(params.path).includes("\\") || String(params.path).includes("..")) throw new Error("api_request: path deve essere relativo e sicuro (inizia con /, senza ..)");
-			const requestedPath = new URL(params.path, "https://placeholder.invalid").pathname;
-			const endpoint = (api.endpoints || []).find((candidate: any) => candidate.method === method && candidate.path === requestedPath);
-			if (!endpoint) throw new Error(`api_request: endpoint non rilevato nella sorgente registrata: ${method} ${requestedPath}`);
-			const url = new URL(params.path, `${api.base_url}/`);
-			if (url.origin !== new URL(api.base_url).origin) throw new Error("api_request: host fuori dal registro");
-			const headers: Record<string, string> = { accept: "application/json, text/plain, */*" };
-			const secret = resolveApiSecret(api);
-			if (api.auth_env && !secret) throw new Error(`api_request: credenziale mancante; configura ${api.auth_env} con yano config set ${api.auth_env} --stdin`);
-			if (secret) headers[api.auth_header || "x-api-key"] = secret;
-			if (params.body !== undefined) headers["content-type"] = "application/json";
-			const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), 30_000);
-			try {
-				const response = await fetch(url, { method, headers, body: params.body === undefined ? undefined : JSON.stringify(params.body), signal: controller.signal });
-				const text = (await response.text()).slice(0, 50_000); let parsed: unknown = text; try { parsed = JSON.parse(text); } catch { /* plain response */ }
-				return { content: [{ type: "text" as const, text: JSON.stringify({ api: api.name, method, path: params.path, status: response.status, ok: response.ok, response: parsed }, null, 2) }], details: { api: api.name, method, path: params.path, status: response.status, ok: response.ok, response_chars: text.length } };
-			} finally { clearTimeout(timer); }
-		},
-		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("api_request ")) + theme.fg("accent", `${(args as any).api ?? "?"} ${(args as any).method ?? "GET"} ${(args as any).path ?? "/"}`), 0, 0); },
-		renderResult(result, _options, theme) { const d = result.details as any; return new Text(theme.fg(d?.ok ? "success" : "error", `${d?.ok ? "✓" : "✗"} ${d?.status ?? "?"} ${d?.api ?? "API"}`), 0, 0); },
-	});
+// feedback_create/api_request/notify_whatsapp/notify_all/
+	// benchmark_record/package_manifest_audit wired below (Fase 6 / M2),
+	// after sendWhatsAppNotification/sendNotifications exist — this
+	// position is textually before them (TDZ), same reasoning as
+	// worktree_*'s move in Fase 5/M3.
 	for (const tool of createAutoImproveTools({
 		getIdentity: () => identity,
 	})) pi.registerTool(tool);
@@ -2643,6 +2582,14 @@ export default function (pi: ExtensionAPI) {
 	const sendTelegramNotification = (message: string) => notifications.sendTelegramNotification(message, identity);
 	const sendEmailNotification = (message: string) => notifications.sendEmailNotification(message, identity);
 	const sendNotifications = (message: string) => notifications.sendNotifications(message, identity);
+	for (const tool of createMiscTools({
+		getIdentity: () => identity,
+		ensureYanoStorage,
+		logEvent,
+		sendWhatsAppNotification,
+		sendNotifications,
+		takeInputScreenshots,
+	})) pi.registerTool(tool);
 
 	// createWatchdogSweep()'s dependency object closes over the live
 	// identity/yanoStorage/client/T `let` bindings via getters (each can be
@@ -2677,60 +2624,9 @@ export default function (pi: ExtensionAPI) {
 		WATCHDOG_FINALIZE_GRACE_MS,
 	});
 
-	pi.registerTool({
-		name: "notify_whatsapp",
-		label: "Notify WhatsApp",
-		description:
-			"Send a WhatsApp-only message via Evolution API to the fixed destination number configured in .env (DESTINATION_PHONE_NUMBER), " +
-			"from the WhatsApp connection named in EVOLUTION_INSTANCE_NAME. worktree_finalize already calls this automatically on " +
-			"success (Revisione 19) — use this tool directly only for other cases, e.g. notifying the user when you escalate after " +
-			"repeated failed correction rounds instead of finalizing. Silently reports back if .env isn't configured rather than " +
-			"throwing, since WhatsApp notification is optional infrastructure, not a required part of any task.",
-		parameters: Type.Object({
-			message: Type.String({ description: "The WhatsApp message text to send." }),
-		}),
-		async execute(_callId, params) {
-			const result = await sendWhatsAppNotification(params.message);
-			logEvent("whatsapp_notify", { ok: result.ok, detail: result.detail, manual: true });
-			return {
-				content: [{ type: "text" as const, text: result.ok ? `notify_whatsapp: message sent.` : `notify_whatsapp: NOT sent — ${result.detail}` }],
-				details: { ok: result.ok, detail: result.detail },
-			};
-		},
-		renderCall(_args, theme) {
-			return new Text(theme.fg("toolTitle", theme.bold("notify_whatsapp")), 0, 0);
-		},
-		renderResult(result, _options, theme) {
-			const d = result.details as any;
-			return d?.ok ? new Text(theme.fg("success", "✓ sent"), 0, 0) : new Text(theme.fg("error", `✗ ${d?.detail ?? "not sent"}`), 0, 0);
-		},
-	});
-
-	pi.registerTool({
-		name: "notify_all",
-		label: "Notify All Channels",
-		description:
-			"Send a notification through every configured channel: WhatsApp via Evolution API, Telegram via the Bot API, and email via SendGrid. " +
-			"Each channel is optional; the tool reports the result independently and never fails the task because a channel is unavailable.",
-		parameters: Type.Object({
-			message: Type.String({ description: "The notification text to send through all configured channels." }),
-		}),
-		async execute(_callId, params) {
-			const result = await sendNotifications(params.message);
-			logEvent("notification_dispatch", { ok: result.ok, detail: result.detail, channels: result.channels, manual: true });
-			return {
-				content: [{ type: "text" as const, text: result.ok ? `notify_all: ${result.detail}` : `notify_all: no channel sent the message — ${result.detail}` }],
-				details: result,
-			};
-		},
-		renderCall(_args, theme) {
-			return new Text(theme.fg("toolTitle", theme.bold("notify_all")), 0, 0);
-		},
-		renderResult(result, _options, theme) {
-			const d = result.details as any;
-			return d?.ok ? new Text(theme.fg("success", "✓ channels dispatched"), 0, 0) : new Text(theme.fg("warning", "⚠ no channel sent"), 0, 0);
-		},
-	});
+// notify_whatsapp/notify_all moved into scripts/orchestrator-tools/
+	// misc.ts (Fase 6 / M2) — wired together with feedback_create/
+	// api_request/benchmark_record/package_manifest_audit below.
 
 // finalize_evidence_collect/finalize_evidence_list/worktree_finalize/
 	// worktree_abandon moved above with worktree_create/worktree_list_open
@@ -2859,19 +2755,7 @@ export default function (pi: ExtensionAPI) {
 		ensureYanoStorage,
 	})) pi.registerTool(tool);
 
-	pi.registerTool({
-		name: "benchmark_record",
-		label: "Record Benchmark",
-		description: "Record a reproducible benchmark result against versioned hard thresholds.",
-		parameters: Type.Object({ project: Type.String(), name: Type.String(), dataset: Type.String(), metrics: Type.Record(Type.String(), Type.Number()), thresholds: Type.Record(Type.String(), Type.Number()) }),
-		async execute(_callId, params) {
-			if (!identity || identity.role !== "planner") throw new Error("benchmark_record: only planner may record benchmarks.");
-			const benchmark = ensureYanoStorage().recordBenchmark(params);
-			return { content: [{ type: "text" as const, text: `benchmark_record: ${benchmark.name} ${benchmark.status}.` }], details: { benchmark: redactRuntimeProjection(benchmark) } };
-		},
-		renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("benchmark_record ")) + theme.fg("accent", (args as any).name ?? "?"), 0, 0); },
-		renderResult(result, _options, theme) { return new Text(theme.fg("success", "→ ") + theme.fg("accent", (result.details as any)?.benchmark?.status ?? "?"), 0, 0); },
-	});
+// benchmark_record moved into scripts/orchestrator-tools/misc.ts (Fase 6 / M2).
 
 // ━━ Governance-proposal tools (Fase 4 / M2) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 	// governance_proposal_create/validate/approve/reject moved verbatim into
@@ -2881,19 +2765,7 @@ export default function (pi: ExtensionAPI) {
 		ensureYanoStorage,
 	})) pi.registerTool(tool);
 
-	pi.registerTool({
-		name: "package_manifest_audit",
-		label: "Audit Package Manifest",
-		description: "Audit package name, public yano binary and distributed Playbook assets, recording checksum and findings.",
-		parameters: Type.Object({}),
-		async execute(_callId, _params) {
-			if (!identity || identity.role !== "planner") throw new Error("package_manifest_audit: only planner may audit the package.");
-			const audit = ensureYanoStorage().auditPackageManifest();
-			return { content: [{ type: "text" as const, text: `package_manifest_audit: ${audit.status}.` }], details: { audit: redactRuntimeProjection(audit) } };
-		},
-		renderCall(_args, theme) { return new Text(theme.fg("toolTitle", theme.bold("package_manifest_audit")), 0, 0); },
-		renderResult(result, _options, theme) { return new Text(theme.fg("success", "→ ") + theme.fg("accent", (result.details as any)?.audit?.status ?? "?"), 0, 0); },
-	});
+// package_manifest_audit moved into scripts/orchestrator-tools/misc.ts (Fase 6 / M2).
 
 	for (const tool of createRunTools({
 		getIdentity: () => identity,

@@ -47,6 +47,11 @@ try {
 	assert.equal(assessment.team.strategy, "planner-selectable");
 	assert.deepEqual(assessment.team.variants.find((variant) => variant.id === "full-team").parallel_groups[0], ["market-researcher", "seo-strategist"]);
 
+	const stitchAssessment = runCli(["architect", "assess", "--project-root", projectRoot, "--task", "Audita e ridisegna il progetto Stitch senza modificare il codice", "--json"]);
+	assert.equal(stitchAssessment.candidate_playbook, "design-redesign");
+	assert.equal(stitchAssessment.roles[0], "design-redesign-specialist");
+	assert.deepEqual(stitchAssessment.requirements.mcp, ["stitch"]);
+
 	const reused = runCli(["architect", "propose", "--project-root", projectRoot, "--task", "Prepara documenti strategici di vendita, ricerca di mercato, SEO e sito", "--json"]);
 	assert.equal(reused.reused, true);
 	assert.equal(reused.no_project_mutation, true);

@@ -56,3 +56,23 @@ installare/verificare `agentation` come devDependency e l'import/mount solo in
 development, poi `yano frontend-review start` per avviare l'app. Deve fornire
 l'URL reale restituito dal comando, non un URL ipotizzato. Puoi annotare la
 pagina e il planner riceve le annotazioni tramite il server MCP `agentation`.
+### MCP nel progetto e nei worktree
+
+I server project-wide vanno dichiarati nel `.mcp.json` del checkout principale.
+I coder Yano possono però partire da `.worktrees/<nome>`: il launcher copia
+ora la configurazione in un overlay runtime per-agent, quindi Stitch e gli
+altri server restano disponibili anche lì. Dopo una modifica al file occorre
+riavviare l’istanza, non solo aggiornare il prompt.
+
+Esempio Stitch (la chiave non va committata):
+
+```json
+"stitch": {
+  "url": "https://stitch.googleapis.com/mcp",
+  "auth": "bearer",
+  "bearerToken": "!gcloud auth application-default print-access-token",
+  "headers": { "X-Goog-User-Project": "!gcloud config get-value project" }
+}
+```
+
+Controllo: `yano mcp --project-root <root>`.

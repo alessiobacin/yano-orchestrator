@@ -14,6 +14,14 @@ yano watcher resume --project-root "$PWD"        # riattiva esplicitamente un pr
 yano watch --project-root "$PWD" --once
 ~~~
 
+La scansione rileva anche due timeout `agent_await` consecutivi sullo stesso
+assignment (`agent_await_stalled`), indipendentemente dallo stato del ticket.
+L'evento diagnostico è `yano_watcher_await_check`.
+
+La pulizia confronta anche l'identificativo della sessione Pi: se più pane
+vive puntano alla stessa sessione persistita, conserva una sola superficie e
+chiude le copie duplicate (`duplicate_pi_session`).
+
 `yano watcher start`/`resume` registrano il progetto in un piccolo registro
 SQLite e lanciano/riusano `yano watch --interval-ms ... --away` (zero-token,
 nessun LLM) in una tab Herdr supervisionata del workspace `yano-watcher`. A
@@ -35,3 +43,8 @@ Ogni passata chiude anche le tab degli agenti che hanno concluso il lavoro
 Herdr) — anche per un progetto in pausa. La tab del planner e quella
 `human` non vengono mai toccate. Dettaglio: `docs/quick-guides/10-watcher-falle-yano.md`,
 `docs/diagram/12-pulizia-tab-agenti.mmd`.
+
+Se una nuova sessione viene rilanciata dopo un ticket terminale precedente, il
+watcher la riconosce come sostituzione e non la chiude. Se un ticket pronto
+resta non assegnato, invia inoltre al planner vivo il comando deduplicato
+`watcher_ready_queue_retry` per ritentare l'apertura del worker.

@@ -371,7 +371,7 @@ function ensureDeclaredMcp(cwd, packageRoot, server) {
 	const current = readMcpConfig(cwd);
 	if (Object.hasOwn(current.servers, server)) return true;
 	if (!packageRoot || !ESSENTIAL_MCP_SERVERS.includes(server)) return false;
-	const example = path.join(packageRoot, "mcp.json.example");
+	const example = path.join(packageRoot, ".mcp.json.example");
 	try {
 		const template = JSON.parse(fs.readFileSync(example, "utf8"));
 		const target = current.file ?? path.join(cwd, ".mcp.json");

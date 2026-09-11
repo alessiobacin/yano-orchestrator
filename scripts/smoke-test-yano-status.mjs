@@ -46,7 +46,7 @@ async function bootstrapScratchRepo() {
 	fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "yano-status-smoke" }, null, 2));
 	fs.mkdirSync(path.join(dir, "agents"), { recursive: true });
 	fs.writeFileSync(path.join(dir, "agents", "roles.yaml"), ["roles:", "  planner:", "    skills: [wayfinder, to-spec]", "    mcp: [github]", "  coder:", "    skills: [tdd-development]"].join("\n"));
-	fs.writeFileSync(path.join(dir, "mcp.json"), JSON.stringify({ mcpServers: { github: { command: "x" }, local: {} } }));
+	fs.writeFileSync(path.join(dir, ".mcp.json"), JSON.stringify({ mcpServers: { github: { command: "x" }, local: {} } }));
 	await execFileP("git", ["add", "-A"], { cwd: dir });
 	await execFileP("git", ["commit", "-q", "-m", "init"], { cwd: dir });
 	return dir;

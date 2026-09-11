@@ -56,7 +56,7 @@ import { ensureProjectSummary, projectBootstrapPrompt, scanProject } from "../sc
 import { collectCodeMemContext } from "../scripts/yano-code-mem-context.mjs";
 import { getProjectApi, listProjectApis, resolveApiSecret } from "../scripts/yano-api-registry.mjs";
 import { llmProxyAutoModel, switchImageTurnToAuto } from "../scripts/yano-vision-routing.mjs";
-import { switchPinnedModelToAuto } from "../scripts/yano-model-fallback.mjs";
+import { recoverUnavailableRestoredModel, switchPinnedModelToAuto } from "../scripts/yano-model-fallback.mjs";
 import { recommend as recommendModel } from "../scripts/yano-model-advisor.mjs";
 import { openDatabase as openFeedbackDatabase, createFeedback as createFeedbackRecord, claimFeedback, claimNextQueuedFeedback, listFeedback, buildQueuedFeedbackWakeMessage, terminalStatusForFeedbackId } from "../scripts/yano-feedback.mjs";
 import { detectStalledTickets } from "../scripts/watcher/detect-stalled-tickets.mjs";
@@ -1960,6 +1960,29 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 		T = topics(project, process.env.PI_ORCH_TEST_NO_EXIT === "1" ? project : (flags.projectScope || projectKey(cwd, project)));
+
+		// Pi attempts to restore the last persisted model before this hook runs.
+		// If that model vanished from the provider catalog (or its auth vanished),
+		// Pi falls back internally and only displays a warning. Make the recovery
+		// observable to Yano and enforce the llmProxy automatic route even when Pi
+		// chose a non-auto default.
+		try {
+			const persistedModel = ctx.sessionManager?.buildSessionContext?.()?.model;
+			const autoModel = llmProxyAutoModel(ctx);
+			const persistedAvailable = Boolean(
+				persistedModel && ctx.modelRegistry?.find?.(persistedModel.provider, persistedModel.modelId),
+			);
+			await recoverUnavailableRestoredModel({
+				persistedModel,
+				activeModel: ctx.model,
+				restoredModelAvailable: persistedAvailable,
+				autoModel,
+				setModel: (model) => pi.setModel(model),
+				log: logEvent,
+			});
+		} catch (error) {
+			logEvent("model_restore_fallback_failed", { reason: "preflight_error", error: error instanceof Error ? error.message : String(error) });
+		}
 
 		// Existing projects get a deterministic, lightweight documentation
 		// preflight before the planner explores the code deeply. The scan is

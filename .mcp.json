@@ -18,6 +18,15 @@
     "github": {
       "url": "https://api.githubcopilot.com/mcp/",
       "auth": "oauth"
+    },
+    "stitch": {
+      "type": "http",
+      "url": "https://stitch.googleapis.com/mcp",
+      "auth": "bearer",
+      "bearerToken": "!gcloud auth application-default print-access-token",
+      "headers": {
+        "X-Goog-User-Project": "!gcloud config get-value project"
+      }
     }
   }
 }

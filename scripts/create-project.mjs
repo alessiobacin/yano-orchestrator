@@ -298,7 +298,7 @@ async function ensureMcpCredentials(targetDir) {
 function mergeEssentialMcpServers(targetDir, packageRoot) {
 	const activePath = [path.join(targetDir, ".mcp.json"), path.join(targetDir, ".pi", "mcp.json")].find((candidate) => fs.existsSync(candidate));
 	if (!activePath) return true;
-	const examplePath = path.join(packageRoot, "mcp.json.example");
+	const examplePath = path.join(packageRoot, ".mcp.json.example");
 	try {
 		const current = JSON.parse(fs.readFileSync(activePath, "utf8"));
 		const example = JSON.parse(fs.readFileSync(examplePath, "utf8"));
@@ -474,10 +474,9 @@ export async function runCreateProject({ packageRoot, cwd, argv, preflightTools 
 	// Questo script copia anche una versione `.example` per riferimento. Il
 	// server resta tecnicamente disponibile a qualunque ruolo: Pi non offre
 	// scope MCP per ruolo.
-	const mcpExample = path.join(packageRoot, "mcp.json.example");
+	const mcpExample = path.join(packageRoot, ".mcp.json.example");
 	if (fs.existsSync(mcpExample)) {
-		copyFileMissing(mcpExample, path.join(targetDir, "mcp.json.example"));
-		copyFileMissing(mcpExample, path.join(targetDir, ".mcp.json.example"));
+	copyFileMissing(mcpExample, path.join(targetDir, ".mcp.json.example"));
 		const activeMcp = path.join(targetDir, ".mcp.json");
 		if (!fs.existsSync(activeMcp)) {
 			fs.copyFileSync(mcpExample, activeMcp);

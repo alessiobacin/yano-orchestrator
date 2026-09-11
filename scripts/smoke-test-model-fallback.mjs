@@ -1,5 +1,32 @@
 import assert from "node:assert/strict";
-import { getModelFallbackState, isProviderFailure, switchPinnedModelToAuto } from "./yano-model-fallback.mjs";
+import { getModelFallbackState, isProviderFailure, recoverUnavailableRestoredModel, switchPinnedModelToAuto } from "./yano-model-fallback.mjs";
+
+const restoreEvents = [];
+const restoreAuto = { provider: "llmproxy", id: "llmproxy" };
+const restoreResult = await recoverUnavailableRestoredModel({
+	persistedModel: { provider: "llmproxy", modelId: "z-ai/glm-5.3-flash@openrouter-glm" },
+	activeModel: { provider: "llmproxy", id: "llmproxy" },
+	restoredModelAvailable: false,
+	autoModel: restoreAuto,
+	setModel: async () => { throw new Error("must not replace an already-auto model"); },
+	log: (type, data) => restoreEvents.push({ type, data }),
+});
+assert.deepEqual(restoreResult, { handled: true, switched: false, reason: "already_auto" });
+assert.equal(restoreEvents[0].type, "model_restore_fallback");
+assert.equal(restoreEvents[0].data.from, "llmproxy/z-ai/glm-5.3-flash@openrouter-glm");
+
+let restoredSelection;
+const forcedRestore = await recoverUnavailableRestoredModel({
+	persistedModel: { provider: "llmproxy", modelId: "z-ai/glm-5.3-flash@openrouter-glm" },
+	activeModel: { provider: "llmproxy", id: "some-default" },
+	restoredModelAvailable: false,
+	autoModel: restoreAuto,
+	setModel: async (model) => { restoredSelection = model; return true; },
+	log: (type, data) => restoreEvents.push({ type, data }),
+});
+assert.equal(forcedRestore.switched, true);
+assert.equal(restoredSelection, restoreAuto);
+assert.equal(restoreEvents.at(-1).type, "model_restore_fallback");
 
 assert.equal(isProviderFailure("402 insufficient credit"), true);
 assert.equal(isProviderFailure("429 rate limit exceeded"), true);

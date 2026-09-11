@@ -50,7 +50,7 @@ fs.writeFileSync(path.join(fakeBin, "herdr"), [
 ].join("\n"));
 fs.chmodSync(path.join(fakeBin, "herdr"), 0o700);
 process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH || ""}`;
-process.env.YANO_TEST_ALIVE_PANES = "p-coder-running,p-real-coder";
+process.env.YANO_TEST_ALIVE_PANES = "p-coder-running,p-real-coder,p-coder-retry";
 
 const row = { root: "/tmp/fixture-project", name: "fixture-project" };
 
@@ -106,6 +106,19 @@ check("a mixed snapshot: planner survives, finished coder is closed, in-progress
 	assert.deepEqual(removed.map((item) => item.instance), ["coder-01"], "only the finished, non-planner agent is closed — planner and in-progress worker both survive");
 });
 
+check("a fresh replacement session survives an old terminal assignment", () => {
+	const ticketFinishedAt = "2026-09-11T06:17:30.925Z";
+	const snapshot = {
+		agents: [{ name: "coder-01", cwd: row.root, tab_id: "t-coder-retry", pane_id: "p-coder-retry", agent_status: "idle", agent_session: { value: "/tmp/sessions/2026-09-11T06-20-00.000Z_retry.jsonl" } }],
+		tabs: [{ tab_id: "t-coder-retry", workspace_id: "w1", label: "coder-01" }],
+		panes: [{ pane_id: "p-coder-retry", tab_id: "t-coder-retry", workspace_id: "w1", cwd: row.root }],
+		workspaces: [{ workspace_id: "w1", label: row.name }],
+	};
+	const runs = [{ tickets: [{ status: "done", assigned_instance: "coder-01", updated_at: ticketFinishedAt }] }];
+	assert.deepEqual(cleanupCompletedAgentTabs(snapshot, row, runs), [], "a retry started after the old ticket finished must not be closed");
+	assert.deepEqual(cleanupStaleProjectTabs(snapshot, row, runs), [], "the stale-tab sweep must apply the same session replacement protection");
+});
+
 check("a worker reused by a NEW active run is never closed because of an OLD terminal ticket", () => {
 	const snapshot = {
 		agents: [
@@ -139,7 +152,7 @@ check("an agent instance from a DIFFERENT project's cwd is never touched", () =>
 	assert.deepEqual(removed, [], "cwd scoping prevents cross-project tab closure");
 });
 
-check("REAL Herdr shape (2026-09-05 audit): a genuine snapshot has no agent.name/agent.instance and a generic terminal_title_stripped — the tab's own label must be used, or a finished agent is never closed", () => {
+check("REAL Herdr shape (2026-09-05 audit): a live process wins over terminal ticket history", () => {
 	// This is not a hypothetical: it is what herdr api snapshot actually
 	// returns in production. agent.name/agent.instance are simply absent, and
 	// agent.terminal_title_stripped is Pi's own generic pane title ("π -
@@ -151,9 +164,7 @@ check("REAL Herdr shape (2026-09-05 audit): a genuine snapshot has no agent.name
 	const tabs = [{ tab_id: "t-real-coder", workspace_id: "w1", label: "coder-07-fixture-project" }];
 	const runs = [{ tickets: [{ status: "done", assigned_instance: "coder-07" }] }];
 	const removed = cleanupCompletedAgentTabs({ agents, tabs }, row, runs);
-	assert.equal(removed.length, 1, "the real-shaped agent is still correctly matched and closed, via the tab's label");
-	assert.equal(removed[0].instance, "coder-07-fixture-project");
-	assert.equal(removed[0].reason, "terminal_ticket", "closed because the ticket is done (agent is alive), not because it looked dead");
+	assert.deepEqual(removed, [], "a live real-shaped agent must not be closed solely because its old ticket is done");
 });
 
 delete process.env.YANO_TEST_ALIVE_PANES;

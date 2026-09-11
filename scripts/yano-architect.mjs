@@ -305,6 +305,7 @@ function candidateForTask(task) {
 	if (/get-the-best-from|(?:confront|compare|benchmark|learn from|ispirat)[^\n]{0,180}https?:\/\/github\.com|confronta (questa )?repo(sitory)? con|confronta il progetto con|confronta (questo )?progetto con|confrontare (questa )?repo(sitory)? con|confronto con un'altra repo|confronto[^\n]{0,180}(?:repo(sitory)?|progetto)[^\n]{0,180}(?:esterna|github|https?:\/\/|[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)|cosa possiamo importare da|cosa possiamo prendere da (un altro progetto|un'altra repo)|benchmark against another repo(sitory)?|cosa fa meglio (questo altro progetto|l'altro progetto)|analizza (questo )?repository github e confronta|learn from another repository|ispirati a (questo|un altro) progetto (su )?github/.test(text)) return { playbook: "get-the-best-from", roles: ["repo-benchmarker"], reason: "comparative repository benchmarking intent" };
 	if (/refactor|refactoring|architettura|modular|cleanup|manutenibil/.test(text)) return { playbook: "refactor", roles: ["refactoring-specialist", "reviewer"], reason: "pure refactoring intent — no behavior change" };
 	if (/document|documenti|documentale|changelog|readme|release notes|architecture documentation/.test(text)) return { playbook: "documentation-release", roles: ["docs-sync"], primaryRole: "docs-sync", reason: "documentation/release intent" };
+	if (/stitch|design system|design[ -]?redesign|redesign|prototipo|prototype|ux audit|ux review|user experience/.test(text)) return { playbook: "design-redesign", roles: ["design-redesign-specialist", "frontend-reviewer"], primaryRole: "design-redesign-specialist", reason: "design/redesign/Stitch intent", requirements: { mcp: ["stitch"] } };
 	const frontendIntent = /(^|[^a-z])(frontend|front-end|ui|ux|browser|responsive|redesign|design system|dashboard|sito|applicazione)([^a-z]|$)/.test(text);
 	const backendIntent = /(^|[^a-z])(backend|back-end|api|endpoint|server|database|persistenza|db)([^a-z]|$)/.test(text);
 	if (frontendIntent && backendIntent) return { playbook: "full-stack-developer", roles: ["full-stack-developer", "full-stack-reviewer"], reason: "cross-layer frontend/backend intent; planner must confirm proportional topology" };
@@ -572,7 +573,7 @@ function verifySkill(name) {
 }
 
 function verifyMcp(name, projectRoot) {
-	const files = [path.join(projectRoot, ".mcp.json"), path.join(projectRoot, "mcp.json"), path.join(PACKAGE_ROOT, ".mcp.json"), path.join(PACKAGE_ROOT, "mcp.json")];
+	const files = [path.join(projectRoot, ".mcp.json"), path.join(PACKAGE_ROOT, ".mcp.json")];
 	for (const file of files) {
 		if (!fs.existsSync(file)) continue;
 		const parsed = parseJson(fs.readFileSync(file, "utf8"), {});

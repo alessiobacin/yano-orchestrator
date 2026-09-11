@@ -53,7 +53,7 @@ assert.doesNotMatch(angularHost, /Agentation\(\{ endpoint/);
 fs.writeFileSync(path.join(angular, "src", "yano-agentation-host.ts"), angularHost.replace(/createElement<AgentationProps>\(Agentation, \{ endpoint: "http:\/\/localhost:4747" \}\)/, "Agentation({ endpoint: \"http://localhost:4747\" })"));
 ensureAngularAgentationIntegration(angular);
 assert.match(fs.readFileSync(path.join(angular, "src", "yano-agentation-host.ts"), "utf8"), /createElement<AgentationProps>\(Agentation/);
-const template = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "mcp.json.example"), "utf8"));
+const template = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", ".mcp.json.example"), "utf8"));
 assert.deepEqual(template.mcpServers.agentation, { command: "npx", args: ["-y", "agentation-mcp", "server"] });
 const roles = YAML.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agents", "roles.yaml"), "utf8")).roles;
 assert.deepEqual(roles.planner.mcp, ["github", "agentation"]);

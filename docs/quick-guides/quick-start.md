@@ -185,6 +185,12 @@ operativo già previsto dal ciclo Yano.
 Nel terminale del planner descrivi l'obiettivo; dopo la tua conferma creerà i
 worktree e delegherà il lavoro.
 
+Per attività di UX/UI puoi avviare l'agente standard `design-redesign-01` (ruolo
+`design-redesign-specialist`). La skill `stitch-design-redesign` è inoltre
+disponibile a `frontend-developer`, `frontend-reviewer`,
+`full-stack-developer` e `full-stack-reviewer`; il server Stitch va dichiarato
+nel `.mcp.json` del progetto e le chiamate di gestione richiedono OAuth2.
+
 Per ogni task di sviluppo il planner passa dalla skill `/to-tickets` dopo la
 spec: propone slice verticali, criteri di accettazione e dipendenze, chiede se
 la granularità è corretta e solo dopo importa i ticket approvati in SQLite/DAG.

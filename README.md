@@ -13,7 +13,7 @@ Everything communicates over a local MQTT broker, using role/instance identity a
 
 ## Features
 
-- **Role-based multi-agent coordination** over MQTT 5 — planner, coder, reviewer, and 35 optional specialist roles (TDD, mutation testing, security review, Kubernetes, CI/CD, accessibility, documentation sync, architecture diagrams, read-only observers, and more)
+- **Role-based multi-agent coordination** over MQTT 5 — planner, coder, reviewer, and 36 optional specialist roles (including design/redesign with Google Stitch, TDD, mutation testing, security review, Kubernetes, CI/CD, accessibility, documentation sync, architecture diagrams, read-only observers, and more)
 - **Git worktree isolation** — every task runs in its own worktree; your main branch is only ever touched by a clean, reviewed merge
 - **A persistent ticket/DAG layer** (SQLite-backed) that tracks runs, specs, and tickets across restarts
 - **A watchdog** that detects stalled tickets, runs that finished all their tickets but were never merged/notified, *and* tickets whose assigned instance has confirmably vanished (offline presence, not just slow) — the last case is auto-failed and escalated within a couple of minutes, not 15-30
@@ -61,6 +61,7 @@ allow-list runtime che esclude `bash`, `edit` e `write` dal worker.
 - **Role prompts are always read live from the installed package by default — no per-project copy to keep in sync** — `yano update` alone is enough to bring every project current; `yano copy-prompts` + `yano start --custom-prompts` are there only if you actually want to customize a role's prompt for one specific project
 - **Automatic per-project MQTT scoping** — two different projects never collide on a shared broker without you having to pass `--project` yourself. The default scope is derived from the project root; the persistent `yano-local-pc` runtime owns the always-on control-plane services and its stable `planner-01`, while application checkouts remain ordinary projects.
 - **Frontend prerequisites are deterministic** — every `yano init` verifies/installs global `@playwright/cli@latest` and the global `playwright-cli` skill; `frontend-developer`, `frontend-reviewer` and `e2e-simulator` receive the browser skill, while backend `reviewer` remains backend-only. The optional `chrome-devtools` MCP remains project-wide because Pi cannot scope MCP servers per role
+- **Design/redesign is a standard frontend capability** — `design-redesign-specialist` (instance `design-redesign-01`) and frontend/full-stack roles receive `stitch-design-redesign`; configure the Stitch MCP in the project `.mcp.json` and use OAuth2 bearer credentials for Stitch management calls
 - **Cross-platform** — macOS, Linux, and Windows
 - **Isolated browser verification** — E2E and frontend review allocate a free, paired frontend/backend port set per worktree through `yano test-env`, never silently reusing another project's development server
 
@@ -198,7 +199,7 @@ yano deps --cli git,npm        # capability preflight
 yano gantt --persistent --open # dashboard live persistente, con link recuperabile
 yano gantt --link              # link persistente del progetto corrente
 yano gantt --links             # tutti i link Gantt persistenti registrati
-yano watch --once              # one stalled-ticket scan
+yano watch --once              # stalled tickets + repeated agent_await scans
 # when an agent target is offline, agent_send escalates to planner or watcher
 # context telemetry is written per agent; watcher can request native Pi compaction
 yano watch --once --context-compact-ratio 0.50
@@ -456,7 +457,35 @@ disponibile viene indicata come `n/d`, mentre quella attualmente in esecuzione
 pi install npm:pi-mcp-adapter   # ripetere solo se yano doctor lo segnala
 ```
 
-`.mcp.json` dichiara `chrome-devtools`, Agentation (`npx -y agentation-mcp server`) e il server remoto GitHub OAuth. Il server MCP resta tecnicamente raggiungibile da tutte le istanze del progetto perché Pi non supporta lo scope MCP per ruolo; la capability Agentation è però assegnata solo al planner, che riceve e instrada i problemi frontend.
+`.mcp.json` dichiara `chrome-devtools`, Agentation (`npx -y agentation-mcp server`) e il server remoto GitHub. Il launcher Yano ora materializza questo file anche per i coder aperti in `.worktrees/`, dove il file del checkout principale non sarebbe visibile al `cwd` di Pi. Per GitHub non usare `auth: "oauth"`: il server remoto avvia il flusso OAuth automaticamente; in alternativa configurare un PAT con `headers.Authorization` senza committare il valore.
+
+Per aggiungere Google Stitch al progetto, inserire nel `.mcp.json` del checkout principale (non in un singolo worktree):
+
+```json
+"stitch": {
+  "url": "https://stitch.googleapis.com/mcp",
+  "auth": "bearer",
+  "bearerToken": "!gcloud auth application-default print-access-token",
+  "headers": { "X-Goog-User-Project": "!gcloud config get-value project" }
+}
+```
+
+Eseguire prima `gcloud auth application-default login` e impostare il progetto
+quota Google con `gcloud config set project <QUOTA_PROJECT_ID>` (non è il nome
+del progetto Stitch; deve essere un progetto Cloud con Stitch API abilitata).
+Il token e l'header quota vengono richiesti
+dinamicamente alla connessione e non vengono scritti nel repository. Stitch
+non supporta il dynamic client registration: usare bearer ADC oppure un OAuth
+client pre-registrato, non `auth: "oauth"` senza client.
+Poi riavviare l’istanza. `yano mcp --project-root <root>` mostra anche la fonte.
+
+Per aggiungere un MCP solo a un agente già creato, usare `yano mcp agent add`
+(supporta sia stdio con `command` sia HTTP con `url`):
+
+```bash
+yano mcp agent add --agent coder-03 --name stitch \
+  --config '{"url":"https://stitch.googleapis.com/mcp","auth":"bearer","bearerToken":"!gcloud auth application-default print-access-token","headers":{"X-Goog-User-Project":"!gcloud config get-value project"}}'
+```
 
 Le suite automatiche usano `YANO_TEST_MODE=1`: gli eventi di notifica restano
 nei trace per la verifica, ma WhatsApp, Telegram ed email non vengono mai
@@ -494,6 +523,7 @@ skills-vendor/mattpocock/         vendored planner-only skills (wayfinder, to-sp
                                    dependencies) — see VERSION.md
 skills-vendor/yano/               bundled trace-analysis, Code Mem protocol, and reviewer code-review skills
 skills-vendor/yano/yano-cli/      shared semantic CLI skill and complete command reference for every agent
+skills-vendor/yano/stitch-design-redesign/  Google Stitch design/redesign workflow, preservation contracts, prototype and design-to-code traceability
 skills-vendor/yano/yano-code-mem/ required project-memory protocol injected into every Yano agent
 skills-vendor/awesome-copilot/    vendored chrome-devtools skill, reviewer/frontend-developer only —
                                    see VERSION.md
@@ -502,7 +532,7 @@ docs/                             architecture (+Mermaid source), trace referenc
                                    development guides (docs/guides/), ADRs (docs/adr/), cheat-sheet,
                                    Mermaid diagrams (docs/diagram/) and development notes
 .env.example                      WhatsApp, Telegram, and SendGrid notification template
-mcp.json.example                  chrome-devtools MCP server configuration template
+.mcp.json.example                 chrome-devtools MCP server configuration template
 ```
 
 ## Contributing

@@ -68,6 +68,63 @@ All'inizio di ogni nuovo task, prima di `yano architect assess`, `yano model-adv
 - Verifica: il risultato dice `workspace ready` ed esiste `.pi/extensions/yano-orchestrator/orchestratorStorage/orchestrator.db` nella root del progetto.
 - Se fallisce: fermati, segnala l'errore, non avviare agenti, non procedere.
 
+## Triage immediata obbligatoria prima dell'analisi
+
+Dopo `orchestrator_init`, ogni richiesta con un deliverable concreto deve
+passare da una triage breve e deterministica. Non leggere ancora l'intero
+repository, log, HTML, immagini o payload MCP e non iniziare un ragionamento
+meta sul team. Entro il primo turno operativo devi:
+
+1. classificare il task (dominio, read-only/modifica, deliverable e vincoli);
+2. chiamare `yano architect assess --project-root <root> --task "<task>" --json`
+   e leggere `playbook_selection` e `catalog.candidates`;
+3. ricavare dal catalogo il ruolo primario più adatto, le skill, CLI e MCP
+   richiesti, verificando anche le istanze live con `agent_list`;
+4. produrre una proposta compatta con categoria, agente/specialista, fasi,
+   modello (`llmproxy auto` come default), MCP e blocchi già osservati;
+5. chiedere una sola conferma consolidata soltanto se il roster, il modello,
+   il parallelismo o un'azione esterna richiedono una scelta dell'utente.
+
+La frase dell'utente "usa se vuoi un agente specializzato" è autorizzazione a
+proporre e usare lo specialista migliore; non autorizza a inventare un team o
+a cambiare modello senza dichiararlo. Se esiste un ruolo con copertura chiara
+(per esempio `design-redesign-specialist` per Stitch), deve essere indicato
+prima di qualsiasi audit approfondito. Se il ruolo non è disponibile, proponi
+il fallback più vicino o Architect per una capability ephemeral.
+
+Limite operativo: la triage non deve superare un turno LLM e circa 12k token.
+Se dopo due chiamate di lettura non esiste ancora una proposta, emetti un
+checkpoint `planner_triage_timeout`, salva il motivo nel report e interrompi
+la deriva meta. Il caricamento di log, immagini e documenti resta lazy.
+
+Per i task MCP esegui prima un preflight di disponibilità/autenticazione. Un
+handshake riuscito non dimostra che le tool call siano autorizzate: registra
+separatamente trasporto, identità, scope/quota project e chiamata operativa.
+Se una chiamata fallisce per credenziali, fermati con un blocco esplicito e
+non consumare token tentando audit sostanziali offline senza dichiararlo.
+
+### Domande dello specialista e interfaccia utente
+
+Per i task `design-redesign`, il planner resta l'unico punto di contatto con
+l'utente. Dopo la conferma e l'avvio di `design-redesign-specialist`, lascia che
+lo specialista faccia prima discovery su codice, app corrente, Stitch remoto e
+`.stitch` locale. Non interrompere questa fase con domande generiche già
+risolvibili dall'ispezione.
+
+Se lo specialista invia una `DESIGN DECISION REQUEST`, il planner deve verificare
+che contenga evidenza, domanda, opzioni o raccomandazione e impatto; completare
+le attività indipendenti; aprire prima `decision_hold_create` se il run esiste;
+porre all'utente una sola domanda comprensibile; registrare la risposta con
+`decision_hold_answer`; quindi inoltrarla allo specialista tramite
+`agent_send`. Non sostituire la decisione dell'utente, non trasferire gergo
+MCP non necessario e non far ripetere domande già risolte.
+
+Lo specialista può chiedere chiarimenti soltanto dopo la discovery e solo per
+ambiguità reali: modalità, divergenza intenzionale tra codice e Stitch,
+rimozione di funzionalità, scelta tra candidate o approvazione UX. Il planner
+coordina e comunica; lo specialista produce audit, design, sincronizzazione e
+handoff.
+
 ## Priorità: il dibattito esplicito non è conversation
 
 Prima della triage generica, riconosci gli intenti espliciti di dibattito

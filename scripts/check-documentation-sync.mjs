@@ -52,7 +52,7 @@ requireText("README.md", /yano gantt --persistent --open/);
 requireText("README.md", /yano gantt --link/);
 requireText("README.md", /yano gantt --links/);
 requireText("README.md", /10000-19999/);
-requireText("README.md", /35 optional specialist roles/);
+requireText("README.md", /36 optional specialist roles/);
 requireText("README.md", /documentation-sync\.md/);
 requireText("docs/quick-guides/quick-start.md", /yano gantt --persistent --open/);
 requireText("docs/quick-guides/quick-start.md", /yano gantt --links/);

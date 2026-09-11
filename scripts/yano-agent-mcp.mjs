@@ -5,6 +5,7 @@
 // while materialising the runtime config passed to Pi.
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { globalDataPath, resolveYanoConfig } from "./yano-config.mjs";
 
 const filePath = () => path.join(globalDataPath(), "mcp", "agents.json");
@@ -15,13 +16,37 @@ const json = (argv, flag) => { const i = argv.indexOf(flag); return i < 0 ? null
 const has = (argv, flag) => argv.includes(flag);
 function read() { try { return JSON.parse(fs.readFileSync(filePath(), "utf8")); } catch { return { agents: {} }; } }
 function write(value) { fs.mkdirSync(path.dirname(filePath()), { recursive: true, mode: 0o700 }); fs.writeFileSync(filePath(), JSON.stringify(value, null, 2) + "\n", { mode: 0o600 }); }
+function projectMcpPath(cwd) {
+	const candidates = [path.join(cwd, ".mcp.json"), path.join(cwd, ".pi", "mcp.json")];
+	// Herdr coders often run from a git worktree. The shared project MCP file
+	// lives in the main checkout, not inside .worktrees/<name>.
+	try {
+		const common = spawnSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd, encoding: "utf8" }).stdout?.trim();
+		if (common) {
+			const root = path.dirname(common.endsWith("/.git") ? common : path.join(common, ".git"));
+			candidates.push(path.join(root, ".mcp.json"), path.join(root, ".pi", "mcp.json"));
+		}
+	} catch { /* plain non-git project */ }
+	return candidates.find((candidate) => fs.existsSync(candidate)) || null;
+}
+function readProjectMcp(cwd) {
+	const source = cwd ? projectMcpPath(cwd) : null;
+	if (!source) return { source: null, servers: {} };
+	try { return { source, servers: JSON.parse(fs.readFileSync(source, "utf8")).mcpServers || {} }; }
+	catch { return { source, servers: {} }; }
+}
 function validate(name, value) {
 	if (!name || !/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(name)) throw new Error("nome MCP non valido");
 	if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("config MCP: deve essere un oggetto JSON");
-	if (typeof value.command !== "string" || !value.command.trim()) throw new Error("config MCP: command deve essere una stringa non vuota");
+	const hasCommand = typeof value.command === "string" && value.command.trim();
+	const hasUrl = typeof value.url === "string" && value.url.trim();
+	if (!hasCommand && !hasUrl) throw new Error("config MCP: specificare command (stdio) oppure url (HTTP)");
+	if (hasCommand && hasUrl) throw new Error("config MCP: command e url sono mutuamente esclusivi");
 	if (value.args !== undefined && (!Array.isArray(value.args) || value.args.some((x) => typeof x !== "string"))) throw new Error("config MCP: args deve essere un array di stringhe");
 	if (value.env !== undefined && (!value.env || typeof value.env !== "object" || Array.isArray(value.env) || Object.entries(value.env).some(([k, v]) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(k) || typeof v !== "string"))) throw new Error("config MCP: env deve essere una mappa di stringhe");
-	return { command: value.command, ...(value.args ? { args: value.args } : {}), ...(value.env ? { env: value.env } : {}) };
+	if (value.headers !== undefined && (!value.headers || typeof value.headers !== "object" || Array.isArray(value.headers) || Object.entries(value.headers).some(([k, v]) => typeof k !== "string" || typeof v !== "string"))) throw new Error("config MCP: headers deve essere una mappa di stringhe");
+	if (hasCommand) return { command: value.command, ...(value.args ? { args: value.args } : {}), ...(value.env ? { env: value.env } : {}) };
+	return { url: value.url, ...(value.type ? { type: value.type } : {}), ...(value.headers ? { headers: value.headers } : {}), ...(value.auth ? { auth: value.auth } : {}), ...(value.oauth ? { oauth: value.oauth } : {}), ...(value.bearerToken ? { bearerToken: value.bearerToken } : {}), ...(value.bearerTokenEnv ? { bearerTokenEnv: value.bearerTokenEnv } : {}), ...(value.bearerTokenStore ? { bearerTokenStore: value.bearerTokenStore } : {}) };
 }
 function resolve(value) {
 	const cfg = resolveYanoConfig({});
@@ -41,15 +66,15 @@ function effectiveMcp(agent, db) {
 	return { built_in: builtIn, added: addedDisplay, effective, runtime_config: runtimePath(agent) };
 }
 export function agentMcpConfigPath(agent) { return configPath(agent); }
-export function materializeAgentMcp(agent) {
-	const db = read(); const servers = db.agents?.[agent] || {};
+export function materializeAgentMcp(agent, { cwd = null } = {}) {
+	const db = read(); const project = readProjectMcp(cwd); const servers = { ...project.servers, ...(db.agents?.[agent] || {}) };
 	if (!Object.keys(servers).length) return null;
 	const output = { mcpServers: Object.fromEntries(Object.entries(servers).map(([name, value]) => [name, { ...value, ...(value.env ? { env: resolve(value.env) } : {}) }])) };
 	fs.mkdirSync(path.dirname(configPath(agent)), { recursive: true, mode: 0o700 });
 	fs.writeFileSync(configPath(agent), JSON.stringify(output, null, 2) + "\n", { mode: 0o600 });
 	return configPath(agent);
 }
-export function agentMcpUsage() { return ["Uso: yano mcp agent <list|show|add|update|remove>", "", "  list [--agent <nome|id>] mostra built-in, aggiunti ed effective", "  --agent <nome|id>   agente destinatario, es. yano-local-pc", "  add/update --name <server> --config '<JSON>'", "  remove --name <server>", "  --json"].join("\n"); }
+export function agentMcpUsage() { return ["Uso: yano mcp agent <list|show|add|update|remove>", "", "  list [--agent <nome|id>] mostra built-in, aggiunti ed effective", "  --agent <nome|id>   agente destinatario, es. coder-03", "  add/update --name <server> --config '<JSON>' (stdio: command; HTTP: url + headers)", "  remove --name <server>", "  --json"].join("\n"); }
 export function runYanoAgentMcp({ argv = [] } = {}) {
 	const sub = argv[0]; if (!sub || has(argv, "--help") || has(argv, "-h")) { console.log(agentMcpUsage()); return; }
 	const agent = json(argv, "--agent") || json(argv, "--instance");

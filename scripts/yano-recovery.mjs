@@ -308,9 +308,19 @@ function requiredAgents({ cwd, db, runIds, snapshots }) {
 	for (const snapshot of snapshots) for (const card of (snapshot?.data?.presence || []).filter((item) => item.status !== "offline")) {
 		if (card.instance && card.role) result.set(card.instance, { instance: card.instance, role: card.role, source: "pause-presence" });
 	}
-	for (const snapshot of snapshots) for (const tab of (snapshot?.data?.herdr?.tabs || [])) {
-		if (tab.label && looksLikeAgentInstance(tab.label)) {
+	for (const snapshot of snapshots) {
+		const projectRoot = path.resolve(snapshot?.data?.project_cwd || cwd);
+		const panesByTab = new Map((snapshot?.data?.herdr?.panes || [])
+			.filter((pane) => path.resolve(pane.cwd || "") === projectRoot)
+			.map((pane) => [pane.tab_id, pane]));
+		for (const tab of (snapshot?.data?.herdr?.tabs || [])) {
+			// The Herdr snapshot in a recovery manifest is global. Only tabs whose
+			// pane belongs to this project's root are part of this run; otherwise a
+			// membox resume can accidentally relaunch agents from newMioDOC, etc.
+			if (!panesByTab.has(tab.tab_id)) continue;
+			if (tab.label && looksLikeAgentInstance(tab.label)) {
 			result.set(tab.label, { instance: tab.label, role: roleFromInstance(tab.label), source: result.get(tab.label)?.source || "herdr-snapshot" });
+			}
 		}
 	}
 	for (const assignment of collectAssignments(db, runIds)) {

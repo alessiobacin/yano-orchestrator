@@ -124,6 +124,19 @@ yano watch --project-root /path/progetto --interval-ms 3600000
 indica l'intervallo tra le scansioni. Con `--once` viene eseguita una sola
 scansione e il processo termina.
 
+Oltre ai ticket SQLite, il watcher controlla anche il trace degli assignment:
+due timeout di `agent_await` sullo stesso `assignment_id` producono il finding
+`agent_await_stalled`, anche quando il ticket risulta già `done` o il lavoro è
+un round senza ticket. Il controllo registra `yano_watcher_await_check` e
+instrada il finding al planner (oppure a Telegram se nessun planner MQTT è
+live). Le notifiche sono deduplicate per assignment e numero di timeout.
+
+La supervisione non considera sufficiente che il processo `pi` sia vivo: dopo
+un restart può esistere più di una pane Herdr collegata alla stessa sessione
+persistita. Il watcher raggruppa queste pane per `agent_session`, conserva una
+sola superficie e chiude le copie con motivo `duplicate_pi_session`; questo
+vale anche quando il progetto non ha più ticket leggibili o attivi.
+
 `yano watch --help` e `yano watcher <init|start|status|pause|resume> --help`
 sono sempre read-only: stampano l'uso senza aprire il broker, creare il registro
 o avviare un processo. Se il progetto è appena inizializzato e manca
@@ -191,6 +204,14 @@ marcato con la causa, ritentato una sola volta per finestra e registrato in
 `watcher-global.jsonl` e nelle `instances` dello schedule. Il planner di
 `yano-local-pc` può ricevere il task anche mentre il tab dell'agente Local PC è
 in recovery: è il planner il destinatario durevole degli schedule generici.
+
+Quando un ticket pronto resta `pending` senza assegnatario dopo una race di
+recovery, il watcher invia al planner vivo un wake-up deduplicato per finestra
+(`watcher_ready_queue_retry`). Il messaggio chiede di ricontrollare eventuali
+decision hold e, se autorizzato, ritentare l'apertura del worker senza ricreare
+ticket. Le nuove sessioni Herdr vengono inoltre protette dalla storia terminale
+di un vecchio ticket: il watcher confronta l'orario della sessione con l'ultimo
+aggiornamento terminale del ticket.
 
 Ogni passata lascia nel trace un evento `yano_watcher_scan`, con data e ora di
 inizio (`started_at`), fine (`completed_at`), durata, esito, numero di finding e
@@ -355,6 +376,15 @@ riprende il turno dal checkpoint osservabile. Registra
 `model_runtime_fallback` oppure `model_runtime_fallback_failed`. Il watcher
 verifica comunque l'esito e inoltra il finding al planner; errori applicativi e
 dei tool non attivano lo switch.
+
+Anche il fallimento di ripristino all'avvio viene gestito: se Pi mostra
+`Could not restore model ... Using llmproxy/llmproxy`, Yano verifica il modello
+persistito contro il catalogo corrente e registra `model_restore_fallback`.
+Se Pi avesse scelto un default diverso da `llmproxy/llmproxy`, l'estensione lo
+sostituisce prima del primo turno; un errore di questa correzione produce
+`model_restore_fallback_failed`. Prima di questa guardia il warning restava
+solo nella UI di Pi e il control plane non poteva distinguere un pin obsoleto
+da un agente realmente pronto.
 
 Il `pinned_id` mostrato nel piano, per esempio
 `z-ai/glm-5.3-flash@openrouter-glm`, appartiene al catalogo llmProxy. Il lancio

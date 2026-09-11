@@ -94,8 +94,8 @@ documentazione.
    workspace is focused in the UI. The shared `yano-cli` and
    trace-analysis skill are attached to every worker, so every Pi agent can
    interpret and report the complete Yano CLI consistently. Planner-only vendor
-   skills remain restricted to the planner, and browser skills remain
-   restricted to frontend roles. The CLI skill is packaged at the repository
+   skills remain restricted to the planner, and browser/design skills remain
+   restricted to frontend-capable roles. The CLI skill is packaged at the repository
    root and included in the global npm package; it is not copied into managed
    application repositories.
 3. After `to-spec`, the planner invokes the vendored `to-tickets` skill for

@@ -50,6 +50,11 @@ agents:
   frontend-reviewer-01:
     role: frontend-reviewer
 
+  design-redesign-01:
+    role: design-redesign-specialist
+    label: "Design & Redesign Specialist 01"
+    teams: [core, frontend, design]
+
   reviewer-security-01:
     role: reviewer
     inherit_role_tools: true

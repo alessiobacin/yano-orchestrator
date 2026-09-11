@@ -13,7 +13,7 @@
 //     if present);
 //   - CLI (`which <cmd>`);
 //   - auth CLI login (es. `gh auth status`);
-//   - MCP server dichiarati (mcp.json) → presenza del comando server.
+//   - MCP server dichiarati (.mcp.json) → presenza del comando server.
 //
 // Uso:
 //   yano deps --cli gh,docker --env GITHUB_TOKEN,DESTINATION_PHONE_NUMBER [--auth gh]

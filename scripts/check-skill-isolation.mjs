@@ -9,7 +9,8 @@
 //
 // Revisione 49 — stessi identici controlli (7-11 sotto), seconda skill
 // vendorizzata: skills-vendor/awesome-copilot/chrome-devtools/, cablata SOLO
-// per i ruoli reviewer e frontend-developer (vedi VERSION.md lì dentro).
+// per i ruoli browser (vedi VERSION.md lì dentro). La skill Yano
+// stitch-design-redesign è invece riservata ai ruoli con competenza frontend.
 // Revisione 50 — l'adapter Yano della skill /code-review è cablato SOLO per
 // reviewer e frontend-reviewer; la snapshot originale Matt resta un
 // riferimento vendorizzato e non viene iniettata come workflow autonomo.
@@ -48,7 +49,7 @@ const YANO_AUTO_IMPROVEMENT_SKILL_ROLES = ["auto-improver"];
 const YANO_ARCHITECT_SKILL = "yano-architect";
 const YANO_ARCHITECT_SKILL_ROLES = ["architect"];
 const CHROME_DEVTOOLS_SKILL = "chrome-devtools";
-const CHROME_DEVTOOLS_SKILL_ROLES = ["frontend-reviewer", "frontend-developer", "e2e-simulator", "full-stack-developer", "full-stack-reviewer"];
+const CHROME_DEVTOOLS_SKILL_ROLES = ["frontend-reviewer", "frontend-developer", "e2e-simulator", "full-stack-developer", "full-stack-reviewer", "design-redesign-specialist"];
 
 function read(relPath) {
 	return readFileSync(path.join(repoRoot, relPath), "utf8");

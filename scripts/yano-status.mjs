@@ -14,7 +14,7 @@
 //   yano logs [instance]          ultime righe del log JSONL di un'istanza
 //   yano logs --project <scope>   log per uno scope MQTT esplicito
 //   yano fleet [--project <scope>] lista agenti live da MQTT, verificati in Herdr quando disponibile
-//   yano mcp [role]               MCP dichiarati per ruolo/istanza (mcp.json + roles)
+//   yano mcp [role]               MCP dichiarati per ruolo/istanza (.mcp.json + roles)
 //   yano skills [role]            skill dichiarate per ruolo/istanza (roles.yaml/agents.yaml)
 //   yano doctor --network         verifica raggiungibilità broker + git + pi
 //
@@ -201,13 +201,15 @@ function runMcp(cwd, argv) {
 	cwd = projectCwd(cwd, argv);
 	const project = resolveProject(cwd, argv);
 	const dir = path.join(cwd, ".pi");
-	const mcpJson = loadYamlOrNull(path.join(cwd, "mcp.json")) || loadYamlOrNull(path.join(dir, "mcp.json")) || {};
+	const mcpFile = [path.join(cwd, ".mcp.json"), path.join(dir, "mcp.json")].find((candidate) => fs.existsSync(candidate));
+	const mcpJson = mcpFile ? (loadYamlOrNull(mcpFile) || {}) : {};
 	const servers = Object.keys(mcpJson.mcpServers ?? mcpJson);
 	const rolesDoc = loadYamlOrNull(path.join(cwd, "agents", "roles.yaml"));
 	const agentsDoc = loadYamlOrNull(path.join(cwd, "agents", "agents.yaml"));
 	const roleFilter = positionalArg(argv);
 	console.log(`yano mcp — server dichiarati per il progetto "${project}":`);
-	if (!servers.length) console.log("   (nessun server MCP dichiarato in mcp.json)");
+	if (!servers.length) console.log("   (nessun server MCP dichiarato in .mcp.json)");
+	else console.log(`   fonte: ${mcpFile}`);
 	servers.forEach((s) => console.log(`   • ${s}`));
 	// Per-role mcp declarations from roles.yaml/agents.yaml
 	if (rolesDoc?.roles) {

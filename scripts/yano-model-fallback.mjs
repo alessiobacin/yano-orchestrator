@@ -15,6 +15,35 @@ export function getModelFallbackState(ctx) {
 	return ctx && typeof ctx === "object" ? fallbackState.get(ctx) || null : null;
 }
 
+// Pi resolves a persisted session model before emitting session_start. When
+// that model disappeared (or lost provider auth), Pi silently selects the
+// configured default and only shows a UI warning. Keep Yano's control plane
+// aware of that transition and make the auto route explicit when Pi selected
+// something other than it.
+export async function recoverUnavailableRestoredModel({ persistedModel, activeModel, restoredModelAvailable, autoModel, setModel, log }) {
+	if (!persistedModel || restoredModelAvailable || !autoModel) {
+		return { handled: false, switched: false, reason: "restored_model_available_or_no_auto" };
+	}
+	const from = `${persistedModel.provider || "?"}/${persistedModel.modelId || persistedModel.id || "?"}`;
+	const activeIsAuto = isAutoModel(activeModel);
+	if (activeIsAuto) {
+		log?.("model_restore_fallback", { from, to: "llmproxy/llmproxy", reason: "persisted_model_unavailable", switched: false });
+		return { handled: true, switched: false, reason: "already_auto" };
+	}
+	try {
+		const switched = await setModel(autoModel);
+		if (!switched) {
+			log?.("model_restore_fallback_failed", { from, requested: "llmproxy/llmproxy", reason: "set_model_rejected" });
+			return { handled: true, switched: false, reason: "set_model_rejected" };
+		}
+		log?.("model_restore_fallback", { from, to: "llmproxy/llmproxy", reason: "persisted_model_unavailable", switched: true });
+		return { handled: true, switched: true, reason: "persisted_model_unavailable" };
+	} catch (error) {
+		log?.("model_restore_fallback_failed", { from, requested: "llmproxy/llmproxy", reason: "set_model_error", error: error instanceof Error ? error.message : String(error) });
+		return { handled: true, switched: false, reason: "set_model_error" };
+	}
+}
+
 export async function switchPinnedModelToAuto({ message, ctx, autoModel, setModel, resume, log }) {
 	const errorMessage = message?.errorMessage;
 	if (message?.role !== "assistant" || !isProviderFailure(errorMessage) || !ctx || !autoModel || isAutoModel(ctx.model)) {

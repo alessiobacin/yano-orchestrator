@@ -71,6 +71,7 @@
 // (quello del pacchetto, non quello del progetto).
 
 import { spawn, spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -131,6 +132,7 @@ const YANO_AI_OPTIMIZATION_SKILL_ROLES = ["ai-optimizer"];
 // Skill vendorizzata destinata ai ruoli che devono verificare davvero il
 // browser: reviewer frontend e simulatore E2E.
 const CHROME_DEVTOOLS_SKILL = "chrome-devtools";
+const STITCH_DESIGN_SKILL = "stitch-design-redesign";
 
 // Blocking sleep sul thread principale. Node (a differenza dei browser)
 // permette Atomics.wait sul main thread: qui serve un'attesa sincrona
@@ -141,7 +143,8 @@ function sleepSync(ms) {
 	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
-const CHROME_DEVTOOLS_SKILL_ROLES = ["frontend-reviewer", "frontend-developer", "e2e-simulator", "full-stack-developer", "full-stack-reviewer"];
+const CHROME_DEVTOOLS_SKILL_ROLES = ["frontend-reviewer", "frontend-developer", "e2e-simulator", "full-stack-developer", "full-stack-reviewer", "design-redesign-specialist"];
+const STITCH_DESIGN_SKILL_ROLES = ["design-redesign-specialist", "design-to-code", "frontend-developer", "frontend-reviewer", "full-stack-developer", "full-stack-reviewer"];
 
 function resolveVendoredSkillPaths(packageRoot, vendorDir, names) {
 	const base = path.join(packageRoot, "skills-vendor", vendorDir);
@@ -166,6 +169,10 @@ function resolveSkillPaths(packageRoot) {
 
 function resolveChromeDevToolsSkillPath(packageRoot) {
 	return resolveVendoredSkillPaths(packageRoot, "awesome-copilot", [CHROME_DEVTOOLS_SKILL])[0];
+}
+
+function resolveStitchDesignSkillPath(packageRoot) {
+	return resolveVendoredSkillPaths(packageRoot, "yano", [STITCH_DESIGN_SKILL])[0];
 }
 
 function resolveYanoPlannerSkillPath(packageRoot) {
@@ -623,6 +630,9 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 	const chromeDevToolsSkillFlags = CHROME_DEVTOOLS_SKILL_ROLES.includes(role)
 		? ["--skill", resolveChromeDevToolsSkillPath(packageRoot)]
 		: [];
+	const stitchDesignSkillFlags = STITCH_DESIGN_SKILL_ROLES.includes(role)
+		? ["--skill", resolveStitchDesignSkillPath(packageRoot)]
+		: [];
 	const yanoReviewSkillFlags = YANO_REVIEW_SKILL_ROLES.includes(role)
 		? ["--skill", resolveYanoReviewSkillPath(packageRoot)]
 		: [];
@@ -651,7 +661,7 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 	const yanoCliSkillFlags = ["--skill", resolveYanoCliSkillPath(packageRoot)];
 	const yanoCodeMemSkillFlags = ["--skill", resolveYanoCodeMemSkillPath(packageRoot)];
 	const yanoObserverDryRunSkillFlags = ["--skill", resolveYanoObserverDryRunSkillPath(packageRoot)];
-	const allSkillFlags = [...mattPocockSkillFlags, ...yanoTraceSkillFlags, ...yanoCliSkillFlags, ...yanoCodeMemSkillFlags, ...yanoObserverDryRunSkillFlags, ...chromeDevToolsSkillFlags, ...yanoReviewSkillFlags, ...yanoDeploymentSkillFlags, ...yanoObserverSkillFlags, ...yanoAutoImprovementSkillFlags, ...yanoArchitectSkillFlags, ...yanoAiOptimizationSkillFlags, ...generatedSkillFlags];
+	const allSkillFlags = [...mattPocockSkillFlags, ...yanoTraceSkillFlags, ...yanoCliSkillFlags, ...yanoCodeMemSkillFlags, ...yanoObserverDryRunSkillFlags, ...chromeDevToolsSkillFlags, ...stitchDesignSkillFlags, ...yanoReviewSkillFlags, ...yanoDeploymentSkillFlags, ...yanoObserverSkillFlags, ...yanoAutoImprovementSkillFlags, ...yanoArchitectSkillFlags, ...yanoAiOptimizationSkillFlags, ...generatedSkillFlags];
 	const requestedSkillPaths = allSkillFlags.filter((_, index) => index % 2 === 1);
 	const skillFlags = explicitSkillPathsWithoutPiConflicts(requestedSkillPaths).flatMap((skillPath) => ["--skill", skillPath]);
 	// -e esplicito SOLO in sviluppo del pacchetto stesso (looksLikePackageRepo)
@@ -680,7 +690,7 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 	// consumed here and becomes the only Pi provider/model pair.
 	const llmproxyFlags = llmproxyPin ? ["--provider", "llmproxy", "--model", llmproxyPin] : [];
 	const instanceForMcp = passthrough[passthrough.indexOf("--instance") + 1] || null;
-	const agentMcpPath = instanceForMcp ? materializeAgentMcp(instanceForMcp) : null;
+	const agentMcpPath = instanceForMcp ? materializeAgentMcp(instanceForMcp, { cwd }) : null;
 	const agentMcpFlags = agentMcpPath && !passthrough.includes("--mcp-config") ? ["--mcp-config", agentMcpConfigPath(instanceForMcp)] : [];
 	const piArgs = [...extensionFlags, ...normalizedPassthrough, ...projectScopeFlags, ...legacyConfigDirFlags, ...generatedConfigFlags, ...agentMcpFlags, ...llmproxyFlags, "--role", role, ...skillFlags];
 
@@ -739,7 +749,11 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 			console.error(`launch-planner: Herdr non ha creato una tab isolata per ${instance}: ${((tabResult && tabResult.stderr) || "risposta senza pane").trim()}`);
 			process.exit(1);
 		}
-		const agentName = `${slugify(instance)}-${slugify(traceProject)}`.slice(0, 32);
+		// Herdr agent registrations can outlive a crashed pane. Reusing the
+		// deterministic instance-project name then fails with agent_name_taken
+		// even after the old tab disappeared. The Pi identity remains the stable
+		// `--instance`; this is only Herdr's disposable registration key.
+		const agentName = `${slugify(instance)}-${slugify(traceProject)}-${randomUUID().slice(0, 8)}`.slice(0, 48);
 		// `herdr agent start` requires the pane to be at an interactive shell
 		// prompt. A freshly created (or just-renamed) tab's shell may not be
 		// ready yet: Herdr then rejects the start with "agent_pane_busy" even

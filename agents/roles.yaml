@@ -289,7 +289,7 @@ roles:
     label: "Full-stack Developer"
     brief: "Implementa in un unico worktree task bounded che coinvolgono frontend e backend. Prima restringe il perimetro leggendo memoria e documenti; poi modifica davvero API, persistenza e UI quando servono, esegue test backend e verifiche browser pertinenti, aggiorna i documenti applicabili e consegna al full-stack-reviewer salvo topology single-developer approvata dal planner."
     model: { provider: llmproxy, model: llmproxy }
-    skills: [tdd-development, playwright-best-practices, playwright-cli, chrome-devtools, yano-planner-trace-analysis, yano-code-mem, yano-cli]
+    skills: [tdd-development, stitch-design-redesign, playwright-best-practices, playwright-cli, chrome-devtools, yano-planner-trace-analysis, yano-code-mem, yano-cli]
     cli: [git, npm, npx]
     mcp: [chrome-devtools]
     teams: [core, frontend, backend]
@@ -300,7 +300,7 @@ roles:
     label: "Full-stack Reviewer"
     brief: "Revisiona in modo indipendente cambi cross-layer separando Spec e Standards: verifica API, persistenza, UI, test, browser/E2E, regressioni e documentazione. Respinge con evidenze riproducibili oppure approva e informa il planner; non sostituisce il frontend-reviewer quando il task richiede una review visuale Agentation dedicata."
     model: { provider: llmproxy, model: llmproxy }
-    skills: [code-review, playwright-best-practices, playwright-cli, chrome-devtools, yano-planner-trace-analysis, yano-code-mem, yano-cli]
+    skills: [code-review, stitch-design-redesign, playwright-best-practices, playwright-cli, chrome-devtools, yano-planner-trace-analysis, yano-code-mem, yano-cli]
     cli: [git, npm, npx]
     mcp: [chrome-devtools]
     teams: [core, frontend, backend]
@@ -504,7 +504,7 @@ roles:
     label: "Frontend Developer"
     brief: "Implementi/aggiorni i componenti UI nel worktree secondo la specifica del task, integrandoti con le API già esposte dal coder backend (o segnalando a coder cosa manca lato API)."
     model: { provider: llmproxy, model: llmproxy }
-    skills: [frontend-development, playwright-cli, chrome-devtools, code-review, yano-planner-trace-analysis, yano-cli]
+    skills: [frontend-development, stitch-design-redesign, playwright-cli, chrome-devtools, code-review, yano-planner-trace-analysis, yano-cli]
     cli: [git, npm, npx, playwright-cli]
     mcp: [chrome-devtools]
     teams: [core, frontend]
@@ -515,7 +515,7 @@ roles:
     label: "Frontend Reviewer"
     brief: "Rivedi esclusivamente il lavoro UI del frontend-developer: usa playwright-cli per aprire e verificare il flusso reale nel browser, chrome-devtools per console/rete/screenshot e la checklist code-review per qualità, regressioni e test. Prima alloca porte isolate con yano test-env nel worktree. Rimanda le correzioni al frontend-developer e informa il planner solo dopo un'approvazione verificata."
     model: { provider: llmproxy, model: llmproxy }
-    skills: [code-review, yano-code-review, playwright-cli, chrome-devtools, yano-planner-trace-analysis, yano-cli]
+    skills: [code-review, yano-code-review, stitch-design-redesign, playwright-cli, chrome-devtools, yano-planner-trace-analysis, yano-cli]
     cli: [git, npm, npx, playwright-cli]
     mcp: [chrome-devtools]
     teams: [core, frontend]
@@ -540,6 +540,18 @@ roles:
     skills: [design-to-code, yano-planner-trace-analysis, yano-cli]
     cli: [git, npm, npx]
     teams: [frontend]
+
+  design-redesign-specialist:
+    activation: lazy
+    playbook: design-redesign
+    prompt: design-redesign-specialist
+    label: "Design & Redesign Specialist"
+    brief: "Audita l'interfaccia esistente e i progetti Stitch, produce design system, alternative UX quando servono, prototipo navigabile e mapping design-to-code; preserva funzionalità e shell e consegna evidenze al planner e al frontend developer senza implementare codice applicativo non assegnato."
+    model: { provider: llmproxy, model: llmproxy }
+    skills: [stitch-design-redesign, playwright-cli, chrome-devtools, yano-planner-trace-analysis, yano-cli]
+    cli: [git, npm, npx, playwright-cli]
+    mcp: [chrome-devtools, stitch]
+    teams: [core, frontend, design]
 
   speed-benchmarker:
     activation: lazy

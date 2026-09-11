@@ -1122,6 +1122,28 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 		return { route: "telegram", telegram };
 	};
 
+	let awaitFindings = [];
+	try {
+		const awaitRecords = readTraceRecords({ cwd: watchCwd, project, since: new Date(Date.now() - Math.max(0, opts.lookbackMs)), limit: 100000 });
+		awaitFindings = detectAwaitStalls(awaitRecords);
+		try { appendRawTraceRecord({ cwd: watchCwd, project, record: {
+			type: "yano_watcher_await_check", record_type: "event", source: "yano-watcher", instance: "yano-watcher", project,
+			status: awaitFindings.length ? "finding" : "healthy", checked_at: new Date().toISOString(), findings: awaitFindings.length,
+			assignments: awaitFindings.map((finding) => ({ assignment_id: finding.assignment_id, instance: finding.instance, timeouts: finding.timeouts })),
+		} }); } catch { /* tracing must never block the watcher */ }
+		const routedAwaitKeys = new Set(awaitRecords
+			.filter((record) => record.type === "yano_watcher_notification_route" && record.signal === "agent_await_stalled")
+			.map((record) => record.fingerprint).filter(Boolean));
+		for (const finding of awaitFindings) {
+			if (routedAwaitKeys.has(finding.fingerprint)) continue;
+			try { await routeNotice({ summary: finding.summary, signal: finding.signal, details: finding }); }
+			catch (error) { try { appendRawTraceRecord({ cwd: watchCwd, project, record: { type: "yano_watcher_notification_route", record_type: "event", source: "yano-watcher", instance: "yano-watcher", route: "local", delivered: 0, signal: finding.signal, fingerprint: finding.fingerprint, notification_error: error instanceof Error ? error.message : String(error) } }); } catch { /* best effort */ } }
+			routedAwaitKeys.add(finding.fingerprint);
+		}
+	} catch (error) {
+		console.warn(`yano watch: controllo agent_await non riuscito — ${error instanceof Error ? error.message : String(error)}`);
+	}
+
 	// Context maintenance is playbook-agnostic. The extension emits one
 	// bounded context_usage record per lifecycle point; the watcher keeps only
 	// the newest record for each live instance and asks Pi to compact when the
@@ -1489,7 +1511,7 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 		}
 	}
 
-	const scanStatus = marker.length || validationFindings.length || contextFindings.length ? "finding" : "healthy";
+	const scanStatus = marker.length || awaitFindings.length || validationFindings.length || contextFindings.length ? "finding" : "healthy";
 	const scan = appendWatcherScan({
 		cwd: watchCwd,
 		project,
@@ -1497,8 +1519,8 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 		startedAt,
 		status: scanStatus,
 		reason: null,
-		stalls: marker.length,
-		findings: validationFindings.length + contextFindings.length,
+		stalls: marker.length + awaitFindings.length,
+		findings: validationFindings.length + contextFindings.length + awaitFindings.length,
 		liveAgents: liveAgents.length,
 		livePlanners: livePlanners.length,
 	});
@@ -1521,6 +1543,39 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 
 function awayEnabled(opts) {
 	return opts.away || String(process.env.PI_ORCH_AWAY || "") === "1";
+}
+
+export function detectAwaitStalls(records, { now = Date.now(), minTimeouts = 2 } = {}) {
+	const byAssignment = new Map();
+	for (const record of records || []) {
+		if (record?.type !== "tool_execution_end_payload" || record.tool !== "agent_await") continue;
+		const assignmentId = record.args?.assignment_id || record.result?.details?.assignment_id;
+		const error = record.result?.details?.error;
+		const text = record.result?.content?.[0]?.text;
+		if (!assignmentId || (error !== "timeout" && !String(text || "").includes("agent_await: error") && !String(text || "").includes("timeout"))) continue;
+		const timestamp = Date.parse(record.ts || "");
+		if (!Number.isFinite(timestamp) || timestamp > now) continue;
+		const current = byAssignment.get(assignmentId) || { assignment_id: assignmentId, instance: record.instance || null, role: record.role || null, timestamps: [] };
+		current.timestamps.push(timestamp);
+		byAssignment.set(assignmentId, current);
+	}
+	return [...byAssignment.values()]
+		.filter((item) => item.timestamps.length >= minTimeouts)
+		.map((item) => {
+			const latest = Math.max(...item.timestamps);
+			return {
+				signal: "agent_await_stalled",
+				fingerprint: crypto.createHash("sha256").update(`${item.instance}|${item.assignment_id}|${item.timestamps.length}`).digest("hex"),
+				severity: "high",
+				assignment_id: item.assignment_id,
+				instance: item.instance,
+				role: item.role,
+				timeouts: item.timestamps.length,
+				last_timeout_at: new Date(latest).toISOString(),
+				elapsed_ms: Math.max(0, now - latest),
+				summary: `${item.instance || "Un planner"} ha ricevuto ${item.timestamps.length} timeout consecutivi aspettando l'assignment ${item.assignment_id}.`,
+			};
+		});
 }
 
 async function discoverLiveAgents(client, topicScope, expectedProjectKey = null) {

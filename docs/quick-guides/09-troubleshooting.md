@@ -108,6 +108,13 @@ Yano individua il database e il roster esistenti, compreso il layout legacy in
 
 # Immagini e modelli llmProxy pinnati
 
+Se all'avvio compare `Could not restore model ... Using llmproxy/llmproxy`, il
+modello persistito della sessione non è più disponibile nel catalogo o non ha
+più autenticazione. Yano confronta quel modello con il catalogo corrente in
+`session_start`, rende esplicito il fallback auto e registra
+`model_restore_fallback` (oppure `model_restore_fallback_failed`). Non è
+necessario rilanciare manualmente il modello obsoleto.
+
 Quando un turno contiene un'immagine, l'estensione Yano seleziona runtime
 `llmproxy/llmproxy` prima della richiesta al modello. Questo mantiene il pin
 scelto all'avvio come default per i turni testuali, ma lascia a llmProxy la

@@ -255,10 +255,11 @@ function allProjectPanes(snapshot, root) {
 			pane_id: pane.pane_id,
 			tab_id: pane.tab_id,
 			workspace_id: pane.workspace_id,
-			label: pane.label,
+			label: paneLabel(pane),
 			agent: pane.agent || null,
 			agent_status: pane.agent_status || "unknown",
-			instance: pane.instance || (pane.agent === "pi" ? pane.label : null),
+			instance: pane.instance || paneInstance(pane),
+			agent_session: pane.agent_session || null,
 			raw_labels: pane.raw_labels || [pane.label].filter(Boolean),
 			cwd: pane.cwd || pane.foreground_cwd || root,
 		}));
@@ -512,6 +513,12 @@ function canonicalTabLabel(info, role) {
 	return null;
 }
 
+function projectAgentIdentityKey(info, label) {
+	const text = String(label || "").trim().toLowerCase();
+	if (!text || /^(human|pi|terminal)$/.test(text)) return "";
+	return text.replace(new RegExp(`-${slugifyProject(info.name)}(?:-|$).*`, "i"), "");
+}
+
 function herdrAgentNameForProject(info, instance) {
 	// Herdr agent names are globally unique, while Pi's `--instance` is the
 	// project-facing identity (for example `planner-01`). A bare planner-01
@@ -625,6 +632,15 @@ function restartObservedAgents(info, beforePanes, traceMode, projectWorkspace, p
 		}
 		const instance = canonicalInstance(info, oldPane, role);
 		let launched = launchAgentInPane(info, pane, role, instance, traceMode, true, packageRoot);
+		// Herdr keeps the agent name lease while the existing Pi process is still
+		// alive, even if the stop command already made the pane look idle. Reuse
+		// that exact pane instead of aborting the whole repair on agent_name_taken;
+		// the duplicate-session cleanup below will remove any other copies.
+		if (!launched.ok && /agent_name_taken/.test(launched.error || "")) {
+			const candidatePaneId = String(launched.error).match(/pane_id=([^\s]+)/)?.[1];
+			const existing = allProjectPanes(herdrSnapshot(), info.root).find((candidate) => candidate.pane_id === candidatePaneId);
+			if (existing) launched = { ok: true, pane_id: existing.pane_id, tab_id: existing.tab_id, instance, role, reused_existing: true, launch_method: "herdr-agent-existing-name" };
+		}
 		if (!launched.ok && projectWorkspace?.workspace_id && /busy|available shell|non disponibile/i.test(launched.error || "")) {
 			const freshPane = createProjectAgentPane(info, projectWorkspace, role);
 			if (freshPane) launched = launchAgentInPane(info, freshPane, role, instance, traceMode, true, packageRoot);
@@ -665,6 +681,38 @@ async function closeDuplicateProjectTabs(info, restarted, force) {
 		}
 		const result = spawnSync("herdr", ["tab", "close", pane.tab_id], { encoding: "utf8" });
 		if (result.status === 0) closed.push({ role, pane_id: pane.pane_id, tab_id: pane.tab_id, label: pane.label });
+	}
+	// A recovery can leave multiple Herdr panes attached to the same persisted
+	// Pi session. They all look live/idle, so role-based duplicate cleanup does
+	// not see them. Keep the pane produced by this repair when possible and
+	// close every other copy; one Pi session must have one visible surface.
+	const keepPaneIds = new Set(restarted.filter((candidate) => candidate.ok && candidate.pane_id).map((candidate) => candidate.pane_id));
+	const groups = new Map();
+	for (const pane of current) {
+		const session = String(pane.agent_session?.value || pane.agent_session?.source || "").trim();
+		const identity = projectAgentIdentityKey(info, pane.label);
+		if (!session || !identity || !pane.tab_id || /human|planner/i.test(String(pane.label || ""))) continue;
+		if (!groups.has(identity)) groups.set(identity, []);
+		groups.get(identity).push({ pane, session });
+	}
+	for (const [identity, members] of groups) {
+		if (members.length < 2) continue;
+		const keep = members.find((member) => keepPaneIds.has(member.pane.pane_id)) || members[0];
+		for (const member of members) {
+			const pane = member.pane;
+			if (pane.pane_id === keep.pane.pane_id || closed.some((item) => item.tab_id === pane.tab_id)) continue;
+			let live = pane.agent === "pi" && !["unknown", "offline", "done", "completed"].includes(String(pane.agent_status || "").toLowerCase());
+			if (live && force) sendPaneKeys(pane.pane_id, ["ctrl-c", "ctrl-d"]);
+			if (live && !force) {
+				sendPaneKeys(pane.pane_id, ["ctrl-c"]);
+				await sleep(300);
+				const refreshed = allProjectPanes(herdrSnapshot(), info.root).find((candidate) => candidate.pane_id === pane.pane_id);
+				live = refreshed?.agent === "pi" && !["unknown", "offline", "done", "completed"].includes(String(refreshed.agent_status || "").toLowerCase());
+			}
+			if (live && !force) continue;
+			const result = spawnSync("herdr", ["tab", "close", pane.tab_id], { encoding: "utf8" });
+			if (result.status === 0) closed.push({ role: "identity-duplicate", identity, session: member.session, pane_id: pane.pane_id, tab_id: pane.tab_id, label: pane.label });
+		}
 	}
 	return closed;
 }

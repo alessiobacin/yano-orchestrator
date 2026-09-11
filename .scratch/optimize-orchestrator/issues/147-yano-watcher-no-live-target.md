@@ -8,7 +8,7 @@ category: delegation
 signal: no_live_target
 fingerprint: f8d2a8d2a3e96065e0820af9d3e3ad4ffa1c17838b67a6b6fb0236ae707b4eb4
 detected_at: 2026-09-07T07:04:07.871Z
-last_seen_at: 2026-09-07T08:58:20.616Z
+last_seen_at: 2026-09-10T20:42:21.922Z
 source_project: newmiodoc
 source_project_root: /Users/alessiobacin/Development/Code/newMioDOC
 source_project_key: workspace-57a4005feedc

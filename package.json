@@ -1,6 +1,6 @@
 {
   "name": "yano-orchestrator",
-  "version": "1.5.63",
+  "version": "1.5.64",
   "private": true,
   "type": "module",
   "engines": {
@@ -34,7 +34,7 @@
     "bin",
     "docs",
     "extensions",
-    "mcp.json.example",
+    ".mcp.json.example",
     "mqtt",
     "playbooks",
     "prompts",

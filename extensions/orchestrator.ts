@@ -101,6 +101,7 @@ import {
 import { createAgentTools } from "../scripts/orchestrator-tools/agents.ts";
 import { createWorktreeTools } from "../scripts/orchestrator-tools/worktree.ts";
 import { createPlanTools } from "../scripts/orchestrator-tools/plan.ts";
+import { createRunTools } from "../scripts/orchestrator-tools/run.ts";
 import { yanoComputeReadyBlocked, yanoComputeExecutionWaves } from "../scripts/orchestrator-tools/ticket-scheduling.ts";
 
 // ━━ Constants ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -2886,114 +2887,10 @@ export default function (pi: ExtensionAPI) {
 // playbook_effect_list/ack/claim/fail moved above with their siblings
 	// (Fase 4 / M4).
 
-	pi.registerTool({
-		name: "orchestrator_init",
-		label: "Orchestrator Init",
-		description:
-			"Idempotently create/open the YanoOrchestrator project workspace (.pi/extensions/yano-orchestrator/ — " +
-			"config/specs/playbooks/diagrams/knowledge/policies/artifacts/overrides/orchestratorStorage) and its SQLite " +
-			"database. Safe to call every session start: never destroys existing state. Any role may call it (it's just " +
-			"workspace setup) — planner normally does it once before run_create. Optional project_name (Revisione 28) sets/" +
-			"renames the human-facing project name stored in config/project.json — distinct from the MQTT --project scope " +
-			"flag, which this never touches. Call this WITHOUT project_name first to see the current name (in the returned " +
-			"config) before deciding whether to ask the user for one.",
-		parameters: Type.Object({
-			project_name: Type.Optional(Type.String({ description: "Human-facing project name to set/rename in config/project.json. Omit to just read the current one." })),
-		}),
-		async execute(_callId, params) {
-			if (!identity) throw new Error("orchestrator not initialised");
-			const cfg = yanoEnsureWorkspace(identity.cwd, identity.project, params.project_name);
-			const storage = ensureYanoStorage();
-			const reconciledRuns = identity.role === "planner" ? yanoReconcilePersistedState(storage, identity.project, presence) : 0;
-			const schemaVersion = storage.getSchemaVersion();
-			logEvent("yano_init", { schema_version: schemaVersion, extension_version: cfg.extension_version, project: cfg.project, reconciled_runs: reconciledRuns });
-			return {
-				content: [{ type: "text" as const, text: `orchestrator_init: workspace ready at .pi/extensions/yano-orchestrator/ (schema v${schemaVersion}, extension ${cfg.extension_version}, project "${cfg.project}").${reconciledRuns ? ` Reconciled ${reconciledRuns} active run(s).` : ""}` }],
-				details: { config: cfg, schema_version: schemaVersion, reconciled_runs: reconciledRuns },
-			};
-		},
-		renderCall(_args, theme) {
-			return new Text(theme.fg("toolTitle", theme.bold("orchestrator_init")), 0, 0);
-		},
-		renderResult(_result, _options, theme) {
-			return new Text(theme.fg("success", "→ workspace ready"), 0, 0);
-		},
-	});
-
-	pi.registerTool({
-		name: "run_create",
-		label: "Run Create",
-		description:
-			"Start a new orchestration run — planner-only. A run is the top-level container for one objective's spec + " +
-			"tickets + dependency graph + event history, persisted in SQLite. Implicitly ensures the workspace exists " +
-			"(same effect as orchestrator_init) if this is the first run.",
-		parameters: Type.Object({
-			objective: Type.String({ description: "The user's objective for this run, in plain language." }),
-			domain: Type.Optional(Type.String({ description: 'Work domain, e.g. "software", "research", "documentation", "operations", "marketing" — defaults to "generic".' })),
-		}),
-		async execute(_callId, params) {
-			if (!identity) throw new Error("orchestrator not initialised");
-			if (identity.role !== "planner") throw new Error(`run_create: only the planner role may start a run (this instance is "${identity.role}").`);
-			const storage = ensureYanoStorage();
-			const run = storage.createRun({ project: identity.project, objective: params.objective, domain: params.domain || "generic" });
-			storage.recordEvent(run.id, "run_created", { objective: run.objective, domain: run.domain });
-			logEvent("yano_run_created", { run_id: run.id, domain: run.domain });
-			await yanoPublishEvent(run.id, "run_created", { objective: run.objective, domain: run.domain });
-			return {
-				content: [{ type: "text" as const, text: `run_create: run "${run.id}" started (domain: ${run.domain}).` }],
-				details: { run },
-			};
-		},
-		renderCall(args, theme) {
-			return new Text(theme.fg("toolTitle", theme.bold("run_create ")) + theme.fg("accent", String((args as any).objective ?? "?").slice(0, 60)), 0, 0);
-		},
-		renderResult(result, _options, theme) {
-			const run = (result.details as any)?.run;
-			return new Text(theme.fg("success", "→ run ") + theme.fg("accent", run?.id ?? "?"), 0, 0);
-		},
-	});
-
-	pi.registerTool({
-		name: "spec_create",
-		label: "Spec Create",
-		description:
-			"Attach a canonical specification to a run — planner-only. Persisted both in SQLite (queryable by tickets) and " +
-			"as a markdown file under specs/ (human/agent-readable) — the To-Spec-inspired canonical spec (objective/scope/" +
-			"requirements/constraints/acceptance-criteria for software, looser structure for other domains). Content is " +
-			"free-form markdown; this tool does not force a schema on it.",
-		parameters: Type.Object({
-			run_id: Type.String(),
-			title: Type.String(),
-			content: Type.String({ description: "Full spec content, markdown." }),
-		}),
-		async execute(_callId, params) {
-			if (!identity) throw new Error("orchestrator not initialised");
-			if (identity.role !== "planner") throw new Error(`spec_create: only the planner role may create a specification (this instance is "${identity.role}").`);
-			const storage = ensureYanoStorage();
-			const run = storage.getRun(params.run_id);
-			if (!run) throw new Error(`spec_create: no run "${params.run_id}" — call run_create first.`);
-			const specsDir = yanoSubdirs(yanoWorkspaceDir(identity.cwd)).specs;
-			const slugTitle = params.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "").slice(0, 60) || "spec";
-			const specId = ulid();
-			const filePath = path.join(specsDir, `${specId}-${slugTitle}.md`);
-			fs.writeFileSync(filePath, `# ${params.title}\n\n${params.content}\n`);
-			const spec = storage.createSpec({ id: specId, run_id: params.run_id, title: params.title, content: params.content, file_path: path.relative(identity.cwd, filePath) });
-			storage.recordEvent(run.id, "spec_created", { spec_id: spec.id, title: spec.title });
-			logEvent("yano_spec_created", { run_id: run.id, spec_id: spec.id });
-			await yanoPublishEvent(run.id, "spec_created", { spec_id: spec.id, title: spec.title });
-			return {
-				content: [{ type: "text" as const, text: `spec_create: "${spec.title}" saved (${spec.id}), at ${spec.file_path}.` }],
-				details: { spec },
-			};
-		},
-		renderCall(args, theme) {
-			return new Text(theme.fg("toolTitle", theme.bold("spec_create ")) + theme.fg("accent", (args as any).title ?? "?"), 0, 0);
-		},
-		renderResult(result, _options, theme) {
-			const spec = (result.details as any)?.spec;
-			return new Text(theme.fg("success", "→ spec ") + theme.fg("accent", spec?.id ?? "?"), 0, 0);
-		},
-	});
+// orchestrator_init/run_create/spec_create moved into
+	// scripts/orchestrator-tools/run.ts (Fase 6 / M0), wired together with
+	// run_status/run_watchdog_check below via a single createRunTools(...)
+	// loop.
 
 // ━━ Ticket tools (Fase 4 / M5) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 	// ticket_create/tickets_ready/ticket_claim/ticket_complete/ticket_requeue/
@@ -3067,112 +2964,18 @@ export default function (pi: ExtensionAPI) {
 		renderResult(result, _options, theme) { return new Text(theme.fg("success", "→ ") + theme.fg("accent", (result.details as any)?.audit?.status ?? "?"), 0, 0); },
 	});
 
-	pi.registerTool({
-		name: "run_status",
-		label: "Run Status",
-		description:
-			"Read the full persisted state of a run — status, every ticket with its computed READY/BLOCKED/RUNNING/DONE/" +
-			"FAILED bucket, execution waves, recent events, and any currently stalled tickets (Revisione 29 — RUNNING for " +
-			"longer than the watchdog's stall threshold with no ticket_complete, the same check the background watchdog " +
-			"runs automatically for the planner). This is the resumability surface: after a crash/restart, a fresh planner " +
-			"session calls this instead of regenerating the plan, to see exactly what's done, what's in flight, and " +
-			"what's next. A ticket left \"running\" from a dead process is surfaced as running here, not silently treated " +
-			"as done or auto-requeued (automatic crash retry is deferred, see docs/notes/development-notes.md Revisione 26).",
-		parameters: Type.Object({ run_id: Type.String() }),
-		async execute(_callId, params) {
-			if (!identity) throw new Error("orchestrator not initialised");
-			const storage = ensureYanoStorage();
-			const run = storage.getRun(params.run_id);
-			if (!run) throw new Error(`run_status: no run "${params.run_id}".`);
-			const tickets = storage.listTickets(params.run_id);
-			const deps = storage.listDependencies(params.run_id);
-			const buckets = yanoComputeReadyBlocked(tickets, deps);
-			const waves = yanoComputeExecutionWaves(tickets, deps);
-			const events = storage.listEvents(params.run_id, { limit: 50 });
-			const checkpoints = storage.listCheckpoints(params.run_id);
-			const playbook_binding = redactRuntimeProjection(storage.getPlaybookBinding(params.run_id));
-			const playbook_state = storage.getPlaybookRuntimeState(params.run_id);
-			const playbook_evidence = storage.listPlaybookEvidence(params.run_id).map((item) => redactRuntimeProjection(item));
-			const capability_cards = storage.listCapabilityCards(params.run_id).map((card) => redactRuntimeProjection(card));
-			const playbook_effects = storage.listPlaybookEffects(params.run_id).map((effect) => redactRuntimeProjection(effect));
-			const decision_holds = storage.listDecisionHolds(params.run_id).map((hold) => redactRuntimeProjection(hold));
-			const stalled = yanoFindStalledTickets(storage, identity.project, Date.now(), WATCHDOG_STALL_MS).filter((s) => s.run_id === params.run_id);
-			const unfinalized = yanoFindUnfinalizedRuns(storage, identity.project, Date.now(), WATCHDOG_FINALIZE_GRACE_MS).filter((r) => r.run_id === params.run_id);
-			return {
-				content: [
-					{
-						type: "text" as const,
-						text:
-							`run "${run.id}" (${run.status}, domain: ${run.domain}): ${tickets.length} ticket(s) — ` +
-							`${buckets.done.length} done, ${buckets.running.length} running, ${buckets.ready.length} ready, ${buckets.blocked.length} blocked, ${buckets.failed.length} failed.` +
-							(stalled.length ? `\n⚠️ ${stalled.length} ticket bloccato/i: ${stalled.map((s) => `${s.ticket_id} (${Math.round(s.elapsed_ms / 60_000)} min, ${s.assigned_instance ?? "?"})`).join(", ")}.` : "") +
-							(unfinalized.length ? `\n⚠️ run completato da ${Math.round(unfinalized[0].elapsed_ms / 60_000)} min — stato ${run.finalization_status || "pending_finalize"}: verifica se worktree_finalize va ancora chiamato.` : ""),
-					},
-				],
-				details: { run, finalization_status: run.finalization_status || (run.status === "completed" ? "pending_finalize" : "not_started"), tickets, dependencies: deps, ...buckets, waves, recent_events: events, checkpoints, playbook_binding, playbook_state, playbook_evidence, capability_cards, playbook_effects, decision_holds, stalled_tickets: stalled, unfinalized_run: unfinalized.length > 0 },
-			};
-		},
-		renderCall(args, theme) {
-			return new Text(theme.fg("toolTitle", theme.bold("run_status ")) + theme.fg("accent", (args as any).run_id ?? "?"), 0, 0);
-		},
-		renderResult(result, _options, theme) {
-			const run = (result.details as any)?.run;
-			return new Text(theme.fg("success", "→ ") + theme.fg("accent", run?.status ?? "?"), 0, 0);
-		},
-	});
-
-	pi.registerTool({
-		name: "run_watchdog_check",
-		label: "Run Watchdog Check",
-		description:
-			"Manually run the same stall-detection sweep the planner's background watchdog performs automatically every " +
-			`${Math.round(WATCHDOG_INTERVAL_MS / 60_000)} minute(s) (Revisione 29): finds tickets stuck "running" for more ` +
-			`than ${Math.round(WATCHDOG_STALL_MS / 60_000)} minutes with no ticket_complete — the only externally observable ` +
-			"signal for a worker whose single LLM turn hung or got truncated by the provider without ever calling a tool " +
-			"(heartbeat/presence alone can't catch this: the process's event loop can stay alive, publishing \"working\", " +
-			"the whole time). Any role may call this on demand — useful right after resuming a session, or just to check. " +
-			"The automatic background sweep (planner instance only) additionally records a ticket_stalled event, notifies " +
-			"the user via WhatsApp, and wakes the planner's own turn with an actionable message the first time a given " +
-			"running episode crosses each stall-threshold multiple — this manual tool only reports, it never escalates. " +
-			"Also reports runs stuck \"completed\" with no worktree_finalize/notification follow-up for more than " +
-			`${Math.round(WATCHDOG_FINALIZE_GRACE_MS / 60_000)} minutes (Revisione 40) — a run can auto-complete the moment ` +
-			"its last ticket is done, independently of whether the planner ever actually merged/notified. And — Revisione 42 — " +
-			"any RUNNING ticket whose assigned instance has no live MQTT presence right now (confirmably disconnected, not " +
-			"just slow): by the time you see one here it's already been auto-marked \"failed\" by the background watchdog, " +
-			"this just surfaces which instance you still need to relaunch.",
-		parameters: Type.Object({ run_id: Type.Optional(Type.String({ description: "Limit to one run; omit to check every active run for this project." })) }),
-		async execute(_callId, params) {
-			if (!identity) throw new Error("orchestrator not initialised");
-			const storage = ensureYanoStorage();
-			const all = yanoFindStalledTickets(storage, identity.project, Date.now(), WATCHDOG_STALL_MS);
-			const stalled = params.run_id ? all.filter((s) => s.run_id === params.run_id) : all;
-			const allUnfinalized = yanoFindUnfinalizedRuns(storage, identity.project, Date.now(), WATCHDOG_FINALIZE_GRACE_MS);
-			const unfinalized = params.run_id ? allUnfinalized.filter((r) => r.run_id === params.run_id) : allUnfinalized;
-			const allOrphaned = yanoFindOrphanedTickets(storage, identity.project, presence, { ignoreOpenDecisionHolds: true });
-			const orphaned = params.run_id ? allOrphaned.filter((o) => o.run_id === params.run_id) : allOrphaned;
-			const lines = [
-				...stalled.map((s) => `⚠️ ${s.ticket_id} "${s.title}" — assegnato a ${s.assigned_instance ?? "?"}, running da ${Math.round(s.elapsed_ms / 60_000)} min.`),
-				...unfinalized.map((r) => `⚠️ run ${r.run_id} "${r.objective}" — completato da ${Math.round(r.elapsed_ms / 60_000)} min, nessun finalize/notifica risulta ancora arrivato.`),
-				...orphaned.map((o) => `🔴 ${o.ticket_id} "${o.title}" — assegnato a "${o.assigned_instance}", OFFLINE (nessuna presence viva). Rilanciala prima di ripianificare.`),
-			];
-			return {
-				content: [
-					{
-						type: "text" as const,
-						text: lines.length === 0 ? "run_watchdog_check: nessun blocco (né ticket, né run non finalizzati, né istanze offline)." : lines.join("\n"),
-					},
-				],
-				details: { stalled, unfinalized, orphaned },
-			};
-		},
-		renderCall(_args, theme) {
-			return new Text(theme.fg("toolTitle", theme.bold("run_watchdog_check")), 0, 0);
-		},
-		renderResult(result, _options, theme) {
-			const n = ((result.details as any)?.stalled ?? []).length + ((result.details as any)?.unfinalized ?? []).length;
-			return n === 0 ? new Text(theme.fg("success", "→ nessun blocco"), 0, 0) : new Text(theme.fg("warning", `→ ${n} bloccat${n === 1 ? "o" : "i"}`), 0, 0);
-		},
-	});
+	for (const tool of createRunTools({
+		getIdentity: () => identity,
+		ensureYanoStorage,
+		logEvent,
+		yanoPublishEvent,
+		yanoEnsureWorkspace,
+		yanoReconcilePersistedState,
+		yanoFindStalledTickets,
+		yanoFindUnfinalizedRuns,
+		yanoFindOrphanedTickets,
+		presence,
+	})) pi.registerTool(tool);
 
 	// ━━ agent_end: capture turn output and publish the response ━━━━━━━━━━
 	//

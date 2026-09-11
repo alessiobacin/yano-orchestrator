@@ -139,6 +139,31 @@ const STITCH_DESIGN_SKILL = "stitch-design-redesign";
 // perché tutto il percorso --herdr è costruito su spawnSync (bin/yano.mjs
 // chiama runLaunchPlanner in modo sincrono). Nessuna shell coinvolta,
 // quindi funziona identico su macOS/Linux e Windows.
+// Herdr rifiuta qualunque nome di registrazione oltre i 32 caratteri:
+//   invalid_agent_name: agent name must start with a lowercase letter and
+//   contain only lowercase letters, digits, '-' or '_' (1-32 characters)
+// Il suffisso casuale è l'unica parte che garantisce l'unicità contro una
+// registrazione Herdr sopravvissuta a un pane morto (agent_name_taken),
+// quindi non va mai perso per troncamento: se il nome completo non entra nei
+// 32 caratteri si accorcia la parte leggibile `<istanza>-<progetto>`, mai il
+// suffisso. Vedi docs/notes/development-notes.md (Revisione 66) e la verifica
+// deterministica in scripts/smoke-test-herdr-agent-name.mjs.
+export const HERDR_AGENT_NAME_MAX = 32;
+export const HERDR_AGENT_NAME_HASH_LENGTH = 8;
+export function herdrAgentName(instance, project, randomSuffix = randomUUID().replace(/-/g, "")) {
+	const hash = (String(randomSuffix ?? "").replace(/[^a-z0-9]/gi, "").toLowerCase() || "0".repeat(HERDR_AGENT_NAME_HASH_LENGTH)).slice(0, HERDR_AGENT_NAME_HASH_LENGTH);
+	const instanceSlug = slugify(instance) || "agent";
+	const projectSlug = project ? slugify(project) : "";
+	const readable = projectSlug ? `${instanceSlug}-${projectSlug}` : instanceSlug;
+	const budget = Math.max(1, HERDR_AGENT_NAME_MAX - hash.length - 1);
+	let prefix = readable.slice(0, budget).replace(/-+$/, "");
+	// Herdr richiede che il nome inizi con una lettera minuscola: un'istanza
+	// che inizia con una cifra (es. "01-coder") verrebbe rifiutata.
+	if (!/^[a-z]/.test(prefix)) prefix = `a${prefix.replace(/^[^a-z]+/, "")}`.slice(0, budget).replace(/-+$/, "");
+	if (!prefix) prefix = "agent".slice(0, budget);
+	return `${prefix}-${hash}`;
+}
+
 function sleepSync(ms) {
 	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
@@ -753,7 +778,7 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 		// deterministic instance-project name then fails with agent_name_taken
 		// even after the old tab disappeared. The Pi identity remains the stable
 		// `--instance`; this is only Herdr's disposable registration key.
-		const agentName = `${slugify(instance)}-${slugify(traceProject)}-${randomUUID().slice(0, 8)}`.slice(0, 48);
+		const agentName = herdrAgentName(instance, traceProject);
 		// `herdr agent start` requires the pane to be at an interactive shell
 		// prompt. A freshly created (or just-renamed) tab's shell may not be
 		// ready yet: Herdr then rejects the start with "agent_pane_busy" even

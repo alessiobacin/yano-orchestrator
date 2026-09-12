@@ -92,7 +92,8 @@ già, Yano lo riusa solo quando è associato alla stessa directory.
 
 Durante l'avvio Herdr può rispondere con `agent_kind_mismatch` mentre il
 lifecycle hook di Pi sta ancora registrando l'identità del processo. Yano
-verifica automaticamente lo stesso pane per un breve intervallo e recupera
+verifica automaticamente lo stesso pane per una finestra bounded, sufficiente
+anche a un avvio a freddo, e recupera
 il caso solo quando Herdr mostra `agent: pi` in uno stato live. Non rilanciare
 manualmente il planner prima di questa verifica: si rischia di creare un
 secondo pane. Se l'errore resta, raccogli:

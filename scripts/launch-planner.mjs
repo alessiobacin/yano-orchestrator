@@ -184,7 +184,10 @@ function herdrPaneHasLivePi(paneId) {
 }
 
 function waitForHerdrPanePi(paneId) {
-	for (const delay of [100, 250, 500, 1000, 1500]) {
+	// The lifecycle hook is asynchronous and a cold Herdr/Pi launch can take
+	// several seconds before its first authoritative report reaches the
+	// server. Keep the recovery bounded, but longer than the normal warm path.
+	for (const delay of [100, 250, 500, 1000, 1500, 2000, 2500, 3000]) {
 		sleepSync(delay);
 		if (herdrPaneHasLivePi(paneId)) return true;
 	}

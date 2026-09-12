@@ -60,7 +60,7 @@ Use the smallest command that answers the request. Typical translations are:
 | Check whether AI work can become a script | `node scripts/audit-delegation.mjs --manifest audit-manifest.json` | D0/D1/AI classification, postconditions and measurement plan |
 | Initialize a new or existing repository | `yano init --name "<name>"` (or `--no-git` for a conversation-only folder) | Requires `cm`; initializes Code Mem with `cm init pi`, then preserves application files while adding missing Yano infrastructure |
 | Initialize and open Herdr with planner | `yano init --name "<name>" --herdr` | Herdr workspace, root pane, and `planner-01` launch |
-| Start an agent in Herdr | `yano start --herdr --instance <id> --role <role>` | verifies workspace label + project root before tab creation |
+| Start an agent in Herdr | `yano start --herdr --instance <id> --role <role>` | verifies workspace/root; recovers only a transient mismatch after `agent: pi` confirmation |
 | Prepare a visual frontend review | `yano frontend-review start` | installs project-local React `agentation`, infers the dev script/URL and starts the development app after user consent |
 | Allocate isolated E2E ports | `yano test-env allocate --worktree <dir> --json` | selects and persists a free paired frontend/backend port set; never silently reuses another checkout |
 | Start an instance on the persistent Local PC runtime | `yano local-pc status` | `yano-local-pc` and its `planner-01` are supervised in the persistent `yano-local-pc` workspace; scheduler and watcher remain in their own service workspaces |

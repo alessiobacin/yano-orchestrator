@@ -64,7 +64,9 @@ yano start --herdr --instance <instance> --role <role>
 The launcher verifies that a Herdr workspace with the project label also has a
 pane rooted at the current project. It refuses to create a tab in the currently
 focused workspace when that verification fails. Do not substitute raw `herdr
-tab create` / `herdr agent start` for Yano agents.
+tab create` / `herdr agent start` for Yano agents. A transient
+`agent_kind_mismatch` is accepted only after the same pane is confirmed by a
+Herdr snapshot as a live `pi` agent; other launch errors remain fatal.
 
 `yano start --project-scope <scope>` overrides the MQTT scope derived from the
 project root: without the flag the runtime uses `projectKey(cwd)` (canonical

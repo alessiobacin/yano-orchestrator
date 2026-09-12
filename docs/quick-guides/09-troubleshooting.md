@@ -88,6 +88,23 @@ yano doctor
 Poi ripeti 'yano init --herdr' dalla root del progetto. Se il workspace esiste
 già, Yano lo riusa solo quando è associato alla stessa directory.
 
+## `yano start --herdr` segnala `agent_kind_mismatch`
+
+Durante l'avvio Herdr può rispondere con `agent_kind_mismatch` mentre il
+lifecycle hook di Pi sta ancora registrando l'identità del processo. Yano
+verifica automaticamente lo stesso pane per un breve intervallo e recupera
+il caso solo quando Herdr mostra `agent: pi` in uno stato live. Non rilanciare
+manualmente il planner prima di questa verifica: si rischia di creare un
+secondo pane. Se l'errore resta, raccogli:
+
+~~~bash
+herdr agent explain <pane-id> --json
+yano fleet --project-root "$PWD" --json
+~~~
+
+Un'identità diversa da `pi`, oppure uno stato `done`/`offline`/`unknown`, resta
+un errore reale da diagnosticare.
+
 ## Il reload resta in attesa del safe point
 
 Prima prova ad aumentare il timeout:

@@ -412,7 +412,7 @@ Other roles (coder, reviewer, and any specialist) are launched the same way, dir
 pi --instance coder-01 --role coder
 ```
 
-`yano start` also works for any role now. When the role must receive its own Herdr tab, use `yano start --herdr --instance coder-01 --role coder`: it verifies the project workspace label and root before creating anything, so a focused tab from another project cannot receive the new agent. The planner uses this form for team members.
+`yano start` also works for any role now. When the role must receive its own Herdr tab, use `yano start --herdr --instance coder-01 --role coder`: it verifies the project workspace label and root before creating anything, so a focused tab from another project cannot receive the new agent. Se Herdr risponde transitoriamente `agent_kind_mismatch`, Yano verifica lo stesso pane e considera l'avvio riuscito solo quando Herdr lo registra come Pi live; gli altri errori restano fatali. Il planner usa questa forma per i membri del team.
 
 ## Configuration
 

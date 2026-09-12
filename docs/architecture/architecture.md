@@ -123,7 +123,10 @@ documentazione.
    trace-analysis skill are attached to every worker, so every Pi agent can
    interpret and report the complete Yano CLI consistently. Planner-only vendor
    skills remain restricted to the planner, and browser/design skills remain
-   restricted to frontend-capable roles. The CLI skill is packaged at the repository
+   restricted to frontend-capable roles. If Herdr's synchronous start handshake
+   briefly reports `agent_kind_mismatch`, the launcher verifies the same pane
+   in a snapshot and recovers only when it is registered as live `pi`; other
+   launch errors remain fatal. The CLI skill is packaged at the repository
    root and included in the global npm package; it is not copied into managed
    application repositories.
 3. After `to-spec`, the planner invokes the vendored `to-tickets` skill for

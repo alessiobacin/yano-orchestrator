@@ -168,6 +168,29 @@ function sleepSync(ms) {
 	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
+// Herdr's `agent start` handshake can race the Pi lifecycle hook: the pane
+// may already be running Pi while the synchronous command still reports
+// `agent_kind_mismatch` because it briefly sees the Yano instance label. Do
+// not turn that specific false negative into a successful launch blindly —
+// accept it only after the same pane is visible as a live Pi agent.
+function herdrPaneHasLivePi(paneId) {
+	const snapshotResult = spawnSync("herdr", ["api", "snapshot"], { encoding: "utf8", maxBuffer: 4_000_000 });
+	if (snapshotResult.status !== 0) return false;
+	let snapshot;
+	try { snapshot = JSON.parse(snapshotResult.stdout || "")?.result?.snapshot; } catch { return false; }
+	const agent = snapshot?.agents?.find((item) => item.pane_id === paneId);
+	if (String(agent?.agent || "").toLowerCase() !== "pi") return false;
+	return !["done", "offline", "unknown"].includes(String(agent?.agent_status || "").toLowerCase());
+}
+
+function waitForHerdrPanePi(paneId) {
+	for (const delay of [100, 250, 500, 1000, 1500]) {
+		sleepSync(delay);
+		if (herdrPaneHasLivePi(paneId)) return true;
+	}
+	return false;
+}
+
 const CHROME_DEVTOOLS_SKILL_ROLES = ["frontend-reviewer", "frontend-developer", "e2e-simulator", "full-stack-developer", "full-stack-reviewer", "design-redesign-specialist"];
 const STITCH_DESIGN_SKILL_ROLES = ["design-redesign-specialist", "design-to-code", "frontend-developer", "frontend-reviewer", "full-stack-developer", "full-stack-reviewer"];
 
@@ -791,7 +814,15 @@ export function runLaunchPlanner({ packageRoot, cwd, argv }) {
 			if (attempt > 0) sleepSync(1000);
 			started = spawnSync("herdr", agentStartArgs, { cwd, encoding: "utf8", maxBuffer: 4_000_000 });
 			const stderrText = String(started.stderr || "");
-			if (started.status === 0 || !/agent_pane_busy|not an available shell/i.test(stderrText)) break;
+			if (started.status === 0) break;
+			if (/agent_kind_mismatch/i.test(stderrText)) {
+				// `agent start` may have spawned Pi before returning this
+				// mismatch. Only suppress the error after Herdr itself confirms
+				// that exact pane as a live Pi registration.
+				if (waitForHerdrPanePi(paneId)) started = { ...started, status: 0 };
+				break;
+			}
+			if (!/agent_pane_busy|not an available shell/i.test(stderrText)) break;
 		}
 		if (started.status !== 0) {
 			console.error(`launch-planner: Herdr non ha avviato ${instance}: ${(started.stderr || "errore sconosciuto").trim()}`);

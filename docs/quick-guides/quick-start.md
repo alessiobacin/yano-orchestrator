@@ -75,6 +75,11 @@ eseguito dentro Herdr, evita di aprire un client annidato. È in-place e non
 accetta `--target`: evita che il workspace Herdr e la root reale del progetto
 puntino a directory diverse.
 
+Per avviare un ruolo in una tab dedicata usa `yano start --herdr --instance
+<id> --role <ruolo>`. Se Herdr restituisce durante l'handshake
+`agent_kind_mismatch`, Yano attende una verifica bounded dello stesso pane:
+l'avvio viene accettato solo se la snapshot lo mostra come agente `pi` live.
+
 `yano init` prepara configurazione, ruoli e workspace del progetto senza
 copiarvi il codice dell'estensione; il database SQLite operativo viene creato
 quando il primo planner inizializza l'orchestratore.

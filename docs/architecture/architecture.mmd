@@ -10,6 +10,8 @@ flowchart TD
     CLI --> EXT_STATUS["architect|watcher|feedback|auto-improve|feedback projects\nactive vs registered"]
     CLI --> RELOAD["update --reload\ncontrolled restart"]
     CLI --> REPAIR["repair\nsnapshot + Herdr agent start\nreconcile + stale singleton cleanup"]
+    CLI --> HERDR_LAUNCH["start --herdr\nagent start --kind pi"]
+    HERDR_LAUNCH --> HERDR_READY["agent_kind_mismatch?\nverify same pane as live pi"]
     CLI --> REPAIR_ALL["repair --all-projects\nsequential global sweep"]
     CLI --> GLOBAL_CONFIG["Global config.env\nmanaged by `yano config`\ncredentials + runtime defaults"]
     CLI --> CLI_SKILL["yano-cli\nshared Pi-agent command contract\nsemantic intent → scoped CLI"]

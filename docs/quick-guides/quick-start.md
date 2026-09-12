@@ -107,7 +107,9 @@ resta `agents/roles.yaml` nella root.
 Per ogni task con impatto frontend, dopo la verifica E2E, il planner chiede il
 consenso dell'utente: “Vuoi fare una review visuale dell'app in sviluppo con
 Agentation?”. Se accetti, usa `yano frontend-review setup` per installare e
-verificare `agentation` e l'import/mount solo in development, poi
+verificare `agentation` e l'import/mount solo in development (per React e
+Angular; per Streamlit, app Python o siti statici il setup non installa nulla
+e non tocca il sorgente — review browser-only via wrapper Yano), poi
 `yano frontend-review start` per avviare lo script rilevato. Il planner deve
 fornire l'URL reale restituito dal comando, non inventarlo; le annotazioni
 vengono ricevute dal planner tramite il server MCP Agentation.

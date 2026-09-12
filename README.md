@@ -500,14 +500,17 @@ risposta affermativa esegue:
 yano frontend-review start
 ```
 
-Il comando installa `agentation` come devDependency, inferisce il comando e
-l'URL del frontend (`dev`, `start` o `serve`) e stampa l'URL raggiungibile.
-Per React il componente viene usato nel root dell'app; per Angular Yano crea
-un host adapter che monta Agentation tramite React dopo il bootstrap Angular.
-Entrambi sono caricati solo in development. L'utente può annotare la pagina;
-il planner riceve le annotazioni via MCP e le instrada nel normale ciclo
-frontend. Framework non riconosciuti restano esplicitamente browser-only finché
-non viene aggiunto un adapter dedicato.
+Il comando inferisce il comando e l'URL del frontend e stampa l'URL
+raggiungibile. Per React installa `agentation` come devDependency e il
+componente viene usato nel root dell'app; per Angular Yano crea un host
+adapter che monta Agentation tramite React dopo il bootstrap Angular.
+Entrambi sono caricati solo in development. Per Streamlit, app Python generiche
+e siti statici non installa nulla e non tocca il sorgente: la review è
+browser-only tramite un wrapper servito da Yano che incorpora l'app e inoltra
+le annotazioni al webhook agentation del progetto (`setup --print-only` stampa
+il contratto JSON senza installare né avviare nulla). L'utente può annotare la
+pagina; il planner riceve le annotazioni via MCP e le instrada nel normale
+ciclo frontend.
 
 ## Project layout
 

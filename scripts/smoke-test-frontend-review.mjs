@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import YAML from "yaml";
-import { ensureAngularAgentationIntegration, inferFrontendDev, resolveFrontendRoots } from "./yano-frontend-review.mjs";
+import { browserOnlyWebhook, ensureAngularAgentationIntegration, inferFrontendDev, renderBrowserOnlyWrapper, resolveFrontendRoots, setup, wrapperProjectSlug } from "./yano-frontend-review.mjs";
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "yano-agentation-"));
 fs.mkdirSync(path.join(root, "src"));
@@ -53,6 +53,70 @@ assert.doesNotMatch(angularHost, /Agentation\(\{ endpoint/);
 fs.writeFileSync(path.join(angular, "src", "yano-agentation-host.ts"), angularHost.replace(/createElement<AgentationProps>\(Agentation, \{ endpoint: "http:\/\/localhost:4747" \}\)/, "Agentation({ endpoint: \"http://localhost:4747\" })"));
 ensureAngularAgentationIntegration(angular);
 assert.match(fs.readFileSync(path.join(angular, "src", "yano-agentation-host.ts"), "utf8"), /createElement<AgentationProps>\(Agentation/);
+// Fixture deterministiche non-Node in tmp dir: solo resolve/infer + contratto
+// print-only. Nessuna rete, nessuna porta occupata, nessuno start() di processi.
+const streamlit = fs.mkdtempSync(path.join(os.tmpdir(), "yano-frontend-streamlit-"));
+fs.writeFileSync(path.join(streamlit, "streamlit_app.py"), "import streamlit as st\nst.title('demo')\n");
+const streamlitInferred = inferFrontendDev(streamlit);
+assert.equal(streamlitInferred.framework, "streamlit");
+assert.equal(streamlitInferred.review_mode, "browser-only");
+assert.equal(streamlitInferred.agentation_supported, false);
+assert.equal(streamlitInferred.port, 8501, "default Streamlit 8501");
+assert.equal(streamlitInferred.url, "http://localhost:8501");
+assert.match(streamlitInferred.command, /streamlit run streamlit_app\.py/);
+assert.deepEqual(resolveFrontendRoots(streamlit), { projectRoot: streamlit, frontendRoot: streamlit });
+
+const streamlitPort = fs.mkdtempSync(path.join(os.tmpdir(), "yano-frontend-streamlit-port-"));
+fs.writeFileSync(path.join(streamlitPort, "app.py"), "import streamlit as st\nst.write('x')\n");
+fs.mkdirSync(path.join(streamlitPort, ".streamlit"));
+fs.writeFileSync(path.join(streamlitPort, ".streamlit", "config.toml"), "[server]\nport = 9999\n");
+assert.equal(inferFrontendDev(streamlitPort).port, 9999, "override porta da .streamlit/config.toml");
+
+const python = fs.mkdtempSync(path.join(os.tmpdir(), "yano-frontend-python-"));
+fs.writeFileSync(path.join(python, "app.py"), "from flask import Flask\napp = Flask(__name__)\n");
+const pythonInferred = inferFrontendDev(python);
+assert.equal(pythonInferred.framework, "python");
+assert.equal(pythonInferred.review_mode, "browser-only");
+assert.equal(pythonInferred.port, 8000);
+assert.equal(pythonInferred.url, "http://localhost:8000");
+
+const statix = fs.mkdtempSync(path.join(os.tmpdir(), "yano-frontend-static-"));
+fs.writeFileSync(path.join(statix, "index.html"), "<!doctype html><html></html>\n");
+const staticInferred = inferFrontendDev(statix);
+assert.equal(staticInferred.framework, "static");
+assert.equal(staticInferred.review_mode, "browser-only");
+assert.equal(staticInferred.port, 8080);
+
+// Contratto print-only: nessun install, nessun processo, sorgente intoccato.
+const streamlitContract = await setup(streamlit, { printOnly: true });
+assert.equal(streamlitContract.dry_run, true);
+assert.equal(streamlitContract.review_mode, "browser-only");
+assert.equal(streamlitContract.installed, false);
+assert.equal(streamlitContract.package_changed, false);
+assert.equal(streamlitContract.source_touched, false);
+assert.match(streamlitContract.webhook_url, /^http:\/\/127\.0\.0\.1:11000\/api\/agentation\//);
+const before = fs.readFileSync(path.join(streamlit, "streamlit_app.py"), "utf8");
+const liveContract = await setup(streamlit);
+assert.equal(fs.readFileSync(path.join(streamlit, "streamlit_app.py"), "utf8"), before, "setup browser-only non tocca il sorgente");
+assert.equal(liveContract.source_touched, false);
+assert.equal(liveContract.package_changed, false);
+const reactContract = await setup(root, { printOnly: true });
+assert.equal(reactContract.dry_run, true);
+assert.equal(reactContract.review_mode, "agentation");
+assert.equal(reactContract.installed, false, "print-only non installa");
+
+// Wrapper browser-only: pagina servita da Yano, sorgente target intoccato.
+const webhook = browserOnlyWebhook(streamlit);
+assert.match(webhook, /^http:\/\/127\.0\.0\.1:11000\/api\/agentation\//);
+assert.equal(streamlitContract.webhook_url, webhook);
+assert.equal(streamlitContract.wrapper_path, `/${wrapperProjectSlug(streamlit)}/__yano-review`);
+assert.match(streamlitContract.wrapper_command, /yano frontend-dash start/);
+const page = renderBrowserOnlyWrapper({ projectId: wrapperProjectSlug(streamlit), webhookUrl: webhook, framework: "streamlit", targetUrl: streamlitInferred.url });
+assert.match(page, /<iframe[^>]*yano-target/);
+assert.match(page, new RegExp(webhook.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+assert.doesNotMatch(page, /<script src=/);
+assert.equal(wrapperProjectSlug("/tmp/Mio Progetto_1"), "mio-progetto-1");
+
 const template = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", ".mcp.json.example"), "utf8"));
 assert.deepEqual(template.mcpServers.agentation, { command: "npx", args: ["-y", "agentation-mcp", "server"] });
 const roles = YAML.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agents", "roles.yaml"), "utf8")).roles;

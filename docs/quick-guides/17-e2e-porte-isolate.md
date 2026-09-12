@@ -26,4 +26,9 @@ il pacchetto ufficiale richiede React 18+, il setup installa le dipendenze React
 solo come devDependency e crea un piccolo wrapper React montato da Angular.
 L'import viene caricato esclusivamente dentro `isDevMode()`: il toolbar compare
 nel dev server ma non viene montato in produzione. Per React continua invece a
-installare e usare Agentation direttamente.
+installare e usare Agentation direttamente. Streamlit (`streamlit_app.py` o
+dipendenza `streamlit`, default porta 8501), app Python generiche e siti
+statici (`index.html`) sono riconosciuti senza `package.json` e restano
+browser-only: il setup non installa nulla e non tocca il sorgente, la review
+avviene tramite un wrapper servito da Yano che inoltra le annotazioni al
+webhook agentation del progetto.

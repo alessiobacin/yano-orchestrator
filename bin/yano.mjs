@@ -134,7 +134,7 @@ function printTopUsage() {
 			'  end [opzioni]    Chiude i run "active" del progetto nella directory corrente — `yano end --help`',
 			'  leave [--project-root <dir>] --yes Rimuove definitivamente il progetto corrente dal registro watcher',
 			"  copy-prompts     Copia prompts/ dal pacchetto installato nel progetto corrente, per personalizzarli",
-			"  frontend-review setup|start  Prepara Agentation e avvia il frontend dev con URL inferito",
+			"  frontend-review setup|start|url  Prepara Agentation e avvia il frontend dev con URL inferito (React/Angular/Streamlit/Python/statico)",
 			"  memory agents|list|show|create|update|delete  Consulta e gestisce le memorie Yano",
 			"  status|logs|fleet|mcp          Viste read-only del progetto e della flotta",
 			"  projects [--json]             Conta i progetti Yano con agenti live in Herdr",
@@ -337,7 +337,7 @@ async function main() {
 	}
 	if (sub === "frontend-dash") {
 		if (rest.includes("--help") || rest.includes("-h")) {
-			console.log("Uso: yano frontend-dash start|stop|list --project-path <path> [--project-id ID] [--command CMD] [--frontend-command CMD] [--backend-command CMD] [--backend-port PORT] [--target-port PORT]");
+			console.log("Uso: yano frontend-dash start|stop|list --project-path <path> [--project-id ID] [--command CMD] [--frontend-command CMD] [--backend-command CMD] [--backend-port PORT] [--target-port PORT]\n  start serve anche la pagina wrapper browser-only su /<project-id>/__yano-review (Streamlit/Python/statico: incorpora l'app e inoltra le annotazioni al webhook agentation)");
 			return;
 		}
 		await runFrontendDashboard({ argv: rest });

@@ -50,10 +50,16 @@ yano frontend-review start
 ```
 
 `setup` installa `agentation` come devDependency se manca e verifica
-import/mount; il toolbar deve essere montato solo in development. `start`
-avvia il comando dev rilevato e restituisce l'URL reale da comunicare
-all'utente. Il planner non deve inventare l'URL: se l'avvio fallisce, riporta
-il blocco preciso.
+import/mount (per React e Angular); il toolbar deve essere montato solo in
+development. Per Streamlit, app Python generiche e siti statici il setup non
+installa nulla e non tocca il sorgente: la review è browser-only tramite un
+wrapper servito da Yano che inoltra le annotazioni al webhook agentation del
+progetto (`setup --print-only` stampa il contratto JSON senza effetti
+collaterali). `start` avvia il comando dev rilevato e restituisce l'URL reale
+da comunicare all'utente. Per i frontend browser-only la pagina wrapper è
+servita da `yano frontend-dash start` sulla route `/<project-id>/__yano-review`.
+Il planner non deve inventare l'URL: se l'avvio
+fallisce, riporta il blocco preciso.
 
 Il server MCP Agentation è a disposizione del planner. Le annotazioni vengono
 classificate dal planner; quelle di frontend vengono affidate al

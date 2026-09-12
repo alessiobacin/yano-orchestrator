@@ -53,7 +53,9 @@ Dopo `frontend-developer`, `frontend-reviewer` ed E2E, il planner deve chiedere
 esplicitamente: “Vuoi fare una review visuale dell'app in sviluppo con
 Agentation?”. Se accetti, esegue `yano frontend-review setup` per
 installare/verificare `agentation` come devDependency e l'import/mount solo in
-development, poi `yano frontend-review start` per avviare l'app. Deve fornire
+development (per React e Angular; per Streamlit, app Python o siti statici il
+setup non installa nulla e non tocca il sorgente — review browser-only via
+wrapper Yano), poi `yano frontend-review start` per avviare l'app. Deve fornire
 l'URL reale restituito dal comando, non un URL ipotizzato. Puoi annotare la
 pagina e il planner riceve le annotazioni tramite il server MCP `agentation`.
 ### MCP nel progetto e nei worktree

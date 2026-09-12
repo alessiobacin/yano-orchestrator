@@ -8,7 +8,7 @@ import net from "node:net";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { globalDataPath } from "./yano-config.mjs";
-import { inferFrontendDev, resolveFrontendRoots } from "./yano-frontend-review.mjs";
+import { browserOnlyWebhook, inferFrontendDev, renderBrowserOnlyWrapper, resolveFrontendRoots, wrapperProjectSlug } from "./yano-frontend-review.mjs";
 
 const DASH_MIN = 10000,
   DASH_MAX = 10999,
@@ -86,6 +86,15 @@ function loadState(id) {
 }
 function injectAgentation(root) {
   const info = inferFrontendDev(root);
+  if (info.review_mode === "browser-only" && info.framework !== "angular")
+    return {
+      supported: true,
+      browser_only: true,
+      framework: info.framework,
+      wrapper_path: `/${wrapperProjectSlug(info.project_root)}/__yano-review`,
+      webhook_url: browserOnlyWebhook(info.project_root),
+      reason: "review browser-only via wrapper Yano; sorgente intoccato",
+    };
   if (info.framework !== "react")
     return {
       supported: false,
@@ -263,6 +272,7 @@ export async function runFrontendDashboard({ argv = [] } = {}) {
   const command =
     val(argv, "--command") ||
     val(argv, "--frontend-command") ||
+    info.command ||
     `${info.manager} run ${info.script}`;
   const targetPort = Number(val(argv, "--target-port", info.port));
   const backendCommand = val(argv, "--backend-command");
@@ -305,6 +315,18 @@ export async function runFrontendDashboard({ argv = [] } = {}) {
           target_port: targetPort,
         }),
       );
+    // Pagina wrapper browser-only: incorpora l'app target e inoltra le
+    // annotazioni al webhook agentation. Il sorgente target resta intoccato.
+    if (url.pathname === `/${projectId}/__yano-review`) {
+      const page = renderBrowserOnlyWrapper({
+        projectId,
+        webhookUrl: browserOnlyWebhook(projectRoot),
+        framework: info.framework,
+        targetUrl: info.url,
+      });
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      return res.end(page);
+    }
     if (url.pathname === "/" || url.pathname.startsWith(`/${projectId}`))
       return proxy(server, projectId, targetPort, req, res);
     res.writeHead(302, { location: `/${projectId}/` });

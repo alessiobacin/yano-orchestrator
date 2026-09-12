@@ -297,7 +297,7 @@ if (!armed) return;
 event.preventDefault();
 const text = window.prompt("Annotazione Yano (inviata al webhook del progetto):");
 if (text === null) return;
-fetch(webhook, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ annotation: { x: event.clientX, y: event.clientY, text }, page_url: frame.contentDocument.location.href, created_by: "yano-wrapper", framework: ${JSON.stringify(framework)} }) }).then((res) => { window.alert(res.ok ? "Annotazione inviata" : ("Invio fallito (HTTP " + res.status + ")"); }).catch(() => window.alert("Webhook non raggiungibile"));
+fetch(webhook, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ annotation: { x: event.clientX, y: event.clientY, text }, page_url: frame.contentDocument.location.href, created_by: "yano-wrapper", framework: ${JSON.stringify(framework)} }) }).then((res) => { window.alert(res.ok ? "Annotazione inviata" : "Invio fallito (HTTP " + res.status + ")"); }).catch(() => window.alert("Webhook non raggiungibile"));
 }, true);
 } catch (err) { window.alert("Annotazione non disponibile su questa pagina (stessa origine richiesta)"); }
 });

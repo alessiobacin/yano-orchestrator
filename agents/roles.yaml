@@ -262,6 +262,139 @@ roles:
     cli: [git, npm, npx, curl]
     teams: [qa]
 
+  # Audit campaign — shared discovery, chapter specialists and synthesis.
+  repo-cartographer:
+    activation: lazy
+    playbook: toolchain-readiness-audit
+    prompt: repo-cartographer
+    label: "Repository Cartographer"
+    brief: "Costruisci una sola mappa deterministica e riusabile del progetto: file, moduli, comandi, test, playbook, ruoli, MCP, skill, GUI, log e punti di stato. Produci manifesto e capability index senza giudizi o modifiche al progetto osservato."
+    model: { provider: llmproxy, model: llmproxy }
+    skills: [yano-planner-trace-analysis, yano-cli]
+    cli: [node, git, yano]
+    mcp: []
+    teams: [quality, architecture]
+
+  toolchain-evaluator:
+    activation: lazy
+    playbook: toolchain-readiness-audit
+    prompt: toolchain-evaluator
+    label: "Toolchain Evaluator"
+    brief: "Verifica con probe sicuri CLI, MCP, skill, script e playbook: distinguendo dichiarazione, disponibilità, documentazione, suitability e fallback senza installare o stampare segreti."
+    model: { provider: llmproxy, model: llmproxy }
+    skills: [yano-planner-trace-analysis, yano-cli]
+    cli: [node, git, yano]
+    mcp: []
+    teams: [quality, platform]
+
+  delegation-efficiency-auditor:
+    activation: lazy
+    playbook: ai-delegation-audit
+    prompt: delegation-efficiency-auditor
+    label: "AI Delegation Efficiency Auditor"
+    brief: "Classifica ogni fase D0/D1/AI e propone migrazioni verso script deterministici solo con pre/post-condizioni, fallback e piano di misura; non dichiara risparmi senza baseline."
+    model: { provider: llmproxy, model: llmproxy }
+    skills: [yano-planner-trace-analysis, yano-cli]
+    cli: [node, git, yano]
+    mcp: []
+    teams: [quality, performance]
+
+  test-adequacy-analyst:
+    activation: lazy
+    playbook: test-adequacy-audit
+    prompt: test-adequacy-analyst
+    label: "Test Adequacy Analyst"
+    brief: "Mappa use case, comportamento atteso, test esistenti, percorsi negativi, persistenza e effetti cross-command; distingue copertura reale da semplice presenza di test e propone gap prioritizzati."
+    model: { provider: llmproxy, model: llmproxy }
+    skills: [yano-planner-trace-analysis, yano-cli]
+    cli: [node, npm, npx, git]
+    mcp: []
+    teams: [qa, quality]
+
+  architecture-health-reviewer:
+    activation: lazy
+    playbook: architecture-health-audit
+    prompt: architecture-health-reviewer
+    label: "Architecture Health Reviewer"
+    brief: "Valuta boundary, dipendenze, coupling/cohesion, complessità, file enormi, error path, stato, concorrenza e refactor seam usando evidenze statiche e senza modificare codice."
+    model: { provider: llmproxy, model: llmproxy }
+    skills: [yano-planner-trace-analysis, yano-cli]
+    cli: [node, git]
+    mcp: []
+    teams: [architecture, quality]
+
+  maintainability-reviewer:
+    activation: lazy
+    playbook: architecture-health-audit
+    prompt: maintainability-reviewer
+    label: "Maintainability Reviewer"
+    brief: "Cerca duplicazioni semantiche, dead-code candidates, funzioni/file sproporzionati e semplificazioni meccaniche, collegando ogni proposta ai test di comportamento necessari."
+    model: { provider: llmproxy, model: llmproxy }
+    skills: [yano-planner-trace-analysis, yano-cli]
+    cli: [node, git]
+    mcp: []
+    teams: [architecture, quality]
+
+  automation-control-auditor:
+    activation: lazy
+    playbook: automation-control-audit
+    prompt: automation-control-auditor
+    label: "Automation Control Auditor"
+    brief: "Ricostruisci trigger, code, deleghe, retry, timeout, idempotenza, state propagation e recovery; identifica failure mode e opportunità script-first con postcondition verificabili."
+    model: { provider: llmproxy, model: llmproxy }
+    skills: [yano-planner-trace-analysis, yano-cli]
+    cli: [node, git, yano]
+    mcp: []
+    teams: [quality, automation]
+
+  observability-reviewer:
+    activation: lazy
+    playbook: automation-control-audit
+    prompt: observability-reviewer
+    label: "Observability Reviewer"
+    brief: "Verifica log e trace per correlazione, modelli, round, durate, token, retry, privacy e redazione; distingue misurato, stimato e unknown e definisce la telemetria mancante."
+    model: { provider: llmproxy, model: llmproxy }
+    skills: [yano-planner-trace-analysis, yano-cli]
+    cli: [node, git, yano]
+    mcp: []
+    teams: [quality, performance]
+
+  product-ux-analyst:
+    activation: lazy
+    playbook: auto-improvement-360
+    prompt: product-ux-analyst
+    label: "Product, UX and Market Analyst"
+    brief: "Valuta comandi dal punto di vista umano, opzioni mancanti, GUI, visualizzazioni, feature gap, concorrenti e opportunità di mercato separando fatti, inferenze e ipotesi."
+    model: { provider: llmproxy, model: llmproxy }
+    skills: [yano-planner-trace-analysis, yano-cli, documentation-lookup]
+    cli: [node, git, npm]
+    mcp: []
+    teams: [product, design, quality]
+
+  refactor-planner:
+    activation: lazy
+    playbook: architecture-health-audit
+    prompt: refactor-planner
+    label: "Refactor Planner"
+    brief: "Trasforma findings architetturali già verificati in task piccoli, ordinati e parallelizzabili con test, dipendenze, rollback e criteri di done; non implementa e non finalizza."
+    model: { provider: llmproxy, model: llmproxy }
+    skills: [yano-planner-trace-analysis, yano-cli]
+    cli: [node, git]
+    mcp: []
+    teams: [architecture, quality]
+
+  audit-synthesizer:
+    activation: lazy
+    playbook: audit-campaign
+    prompt: audit-synthesizer
+    label: "Audit Campaign Synthesizer"
+    brief: "Incrocia capitoli specialistici senza rifare discovery, deduplica findings, mantiene contraddizioni esplicite e costruisce la implementation DAG separata dalla DAG dell'audit."
+    model: { provider: llmproxy, model: llmproxy }
+    skills: [yano-planner-trace-analysis, yano-cli]
+    cli: [node, git]
+    mcp: []
+    teams: [quality, architecture, product]
+
   debater:
     activation: lazy
     playbook: debate

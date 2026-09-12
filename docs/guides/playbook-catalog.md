@@ -31,12 +31,40 @@ workflow instead of launching every specialist.
 | `architect-provisioning` | architect | proposal scope, capability readiness, watcher validation, user feedback and explicit promotion evidence |
 | `knowledge-authoring` | market-researcher, seo-strategist, website-content-strategist, business-docs-author, business-docs-reviewer | catalog-first intent match, parameterized project context, research evidence, structured deliverables and review; variants `single-author`, `research-and-author`, `full-team` |
 | `qa-full-audit` | qa-inventory-analyst, qa-functional-verifier (+ existing QA/security/perf specialists coordinated in parallel) | canonical command/feature matrix with source, PASS/FAIL/BLOCKED verdict and evidence per entry, full matrix re-run after remediation, zero open blocking findings; variants `quick-gate`, `full-audit`, `self-audit` |
+| `audit-campaign` | repo-cartographer, toolchain-evaluator, test-adequacy-analyst, architecture-health-reviewer, automation-control-auditor, product-ux-analyst, audit-synthesizer | one shared manifest, chapter DAG, cross-review and separate implementation DAG; variants `standard`, `medium`, `deep`; resource ledger per chapter |
+| `architecture-health-audit` | architecture-health-reviewer, maintainability-reviewer, refactor-planner | boundaries, coupling, complexity, duplication, dead-code candidates, oversized files and behavior-preserving refactor seams |
+| `test-adequacy-audit` | test-adequacy-analyst, qa-functional-verifier, mutation-tester | use-case-to-test mapping, human expectation, negative paths, persistence/cross-command effects and mutation signal |
+| `toolchain-readiness-audit` | repo-cartographer, toolchain-evaluator, delegation-efficiency-auditor | CLI/MCP/skill/script/playbook inventory, safe probes, readiness and fallbacks |
+| `automation-control-audit` | automation-control-auditor, observability-reviewer, delegation-efficiency-auditor | retries, timeouts, state propagation, logging, trace correlation and deterministic opportunities |
+| `ai-delegation-audit` | delegation-efficiency-auditor, observability-reviewer | D0/D1/AI classification, baseline measurements and guarded script migrations |
 
 The `architect` role is global rather than project-scoped. It stages generated
 playbooks and roles under `<YANO_DATA_DIR>/architect/proposals/`, validates every declared
 skill/CLI/MCP before operation, and promotes immutable versions only into the
 global `<YANO_DATA_DIR>/catalog/` after a healthy watcher round and positive planner/user
 feedback. See [`yano-architect.md`](../quick-guides/yano-architect.md).
+
+### Audit campaign composition
+
+`audit-campaign` è il playbook parent quando la richiesta attraversa due o più
+assi. Esegue una discovery una sola volta, condivide `audit-manifest.json`,
+esegue i capitoli indipendenti in parallelo solo dopo approvazione, sblocca i
+capitoli dipendenti quando gli input esistono e crea una implementation DAG solo
+dopo la cross-review. I playbook specialistici restano riusabili singolarmente
+con le varianti `standard`, `medium` e `deep`. Ogni relazione distingue
+`evidence_confidence` dalla `judgment_confidence` dell'LLM e conserva una
+motivazione breve della seconda; `confidence` resta l'alias retrocompatibile
+della confidenza nelle evidenze.
+
+```text
+node scripts/audit-manifest.mjs --project-root <dir> --output audit-manifest.json
+node scripts/audit-delegation.mjs --manifest audit-manifest.json --output delegation.json
+node scripts/audit-resource-ledger.mjs --trace-root <YANO_DATA_DIR>/traces --project <name>
+```
+
+Il ledger conserva modello/provider, turni, inference round, tempi, token,
+chiamate deterministiche e retry per capitolo; valori non esposti restano
+`unknown` e non vengono inventati.
 
 ## Universal gates
 

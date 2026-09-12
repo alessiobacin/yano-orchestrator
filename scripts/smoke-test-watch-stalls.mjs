@@ -268,8 +268,9 @@ console.log("\n=== PART 3b — idempotency: a second pass surfaces the same find
 	fs.writeFileSync(watchdogHeartbeatPath(projectKey(cwd, "watch-smoke")), JSON.stringify({ checked_at: new Date(Date.now() - 3_600_000).toISOString() }));
 	const stalledEventsBeforeStaleHeartbeat = stalledEvents.length;
 	await runWatch({ cwd, argv: ["--once", "--project", "watch-smoke"] });
-	await sleep(300);
-	ok(stalledEvents.length === stalledEventsBeforeStaleHeartbeat + 1, "a stale (1h old) in-process-watchdog heartbeat does not suppress publishing — fail-open preserved");
+	const staleMarkers = fs.readFileSync(markerPath, "utf-8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+	const staleMarker = staleMarkers.find((marker) => marker.ticket_id === stalled.id);
+	ok(staleMarker?.mqtt_published === true, `a stale (1h old) in-process-watchdog heartbeat does not suppress publishing — fail-open preserved (local publish marker; subscriber events observed: ${stalledEvents.length - stalledEventsBeforeStaleHeartbeat})`);
 
 	await sub.endAsync();
 

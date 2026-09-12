@@ -54,7 +54,11 @@ try {
 	assert.equal(evidence.comparison_audit.required, true);
 	assert.deepEqual(evidence.comparison_audit.discovery_tools, ["auto_improve_web_search", "auto_improve_web_fetch"]);
 	assert.match(fs.readFileSync(planned.reportPath, "utf8"), /Esporre un comando test standard/);
-	assert.match(fs.readFileSync(planned.reportPath, "utf8"), /Audit 360° obbligatorio/);
+	const reportText = fs.readFileSync(planned.reportPath, "utf8");
+	assert.match(reportText, /Audit 360° obbligatorio/);
+	assert.match(reportText, /evidence_confidence/);
+	assert.match(reportText, /judgment_confidence/);
+	assert.match(reportText, /judgment_confidence_rationale/);
 	assert.equal(fs.readFileSync(path.join(projectRoot, "package.json"), "utf8").includes("sample-project"), true);
 
 	const summaryFile = path.join(dataDir, "auto-improver", "summary.json");

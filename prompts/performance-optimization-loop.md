@@ -3,8 +3,10 @@ progetto `{{PROJECT}}`.
 
 Obiettivo: ridurre latenza, token, dimensione del contesto e costo senza
 peggiorare qualità, correttezza, affidabilità o sicurezza. Sii schietto: non
-inventare benchmark, numeri, capacità, prezzi, risultati o causalità. Ogni
-opinione deve avere score X/10, motivazione e confidence X/10.
+inventare benchmark, numeri, capacità, prezzi, risultati o causalità. Applica
+`prompts/audit-confidence-contract.md`: ogni opinione deve avere score X/10,
+motivazione, `evidence_confidence` X/10, `judgment_confidence` X/10 e
+`judgment_confidence_rationale`.
 
 ## Parametri e gate iniziale
 
@@ -92,7 +94,7 @@ Per ogni round usa:
 
 Il report deve contenere baseline originale/corrente, candidate, parametri,
 commit, benchmark prima/dopo, latenza, token, contesto, costo, qualità,
-errori, ipotesi con score/confidence, modifica esatta, test, decisione,
+errori, ipotesi con score e le due confidenze, modifica esatta, test, decisione,
 contatori, rischio residuo e prossimo round. Ogni promozione deve spiegare
 esattamente cosa è cambiato.
 

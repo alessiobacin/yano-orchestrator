@@ -1,0 +1,62 @@
+schema_version: 1
+id: architecture-health-audit
+label: Architecture health and maintainability audit
+description: >-
+  Read-only structural review covering module boundaries, dependency direction,
+  complexity, duplication, dead code, oversized files, error paths and safe
+  refactor seams. It produces a refactor plan without silently changing behavior.
+catalog:
+  scope: global
+  reusable: true
+  intents: [architecture review, maintainability audit, refactor assessment, dead code review, duplication review, large file decomposition]
+  exclusions: [behavior-changing refactor, unreviewed deletion, production mutation]
+  parameters: [project_root, variant, input_manifest, chapter_id, campaign_id]
+requirements:
+  cli: [node, git]
+  skills: [yano-cli, yano-planner-trace-analysis]
+team:
+  strategy: static evidence first, specialist interpretation second, refactor plan last
+  default_variant: medium
+  roles:
+    - {id: repo-cartographer, purpose: Consume or produce the bounded file and dependency index., outputs: [scope-index], write_scope: [chapter-report-only], capabilities: [node, git]}
+    - {id: architecture-health-reviewer, purpose: Review boundaries, coupling, cohesion, complexity and error flow., outputs: [architecture-findings], write_scope: [chapter-report-only], capabilities: [node, git]}
+    - {id: maintainability-reviewer, purpose: Find duplication, dead code, long files and low-risk simplifications., outputs: [maintainability-findings], write_scope: [chapter-report-only], capabilities: [node, git]}
+    - {id: refactor-planner, purpose: Convert accepted findings into dependency-aware, behavior-preserving tasks., outputs: [refactor-plan], write_scope: [chapter-report-only], capabilities: [node, git]}
+  variants:
+    - {id: standard, roles: [repo-cartographer, architecture-health-reviewer, refactor-planner], parallel_groups: [[architecture-health-reviewer]]}
+    - {id: medium, roles: [repo-cartographer, architecture-health-reviewer, maintainability-reviewer, refactor-planner], parallel_groups: [[architecture-health-reviewer, maintainability-reviewer]]}
+    - {id: deep, roles: [repo-cartographer, architecture-health-reviewer, maintainability-reviewer, refactor-planner], parallel_groups: [[architecture-health-reviewer, maintainability-reviewer]]}
+contract:
+  execution: manifest_then_static_scan_then_review_then_refactor_plan
+  checkpoint: every_scan_and_finding_batch
+  evidence: [manifest_reference, file_reference, metric, dependency_edge, code_excerpt_reference, static_command, exit_code, finding, confidence, evidence_confidence, judgment_confidence, judgment_confidence_rationale, limitation, resource_record]
+  report_sections: [scope, structural_map, module_boundaries, complexity_and_size, duplication_and_dead_code, error_paths, refactor_seams, prioritized_plan, risks, resource_accounting]
+  budgets: {max_commands: 180, max_files: 700, max_minutes: 90, max_tokens: 26000}
+  verification: {mode: static_evidence_with_behavior_preservation_contract, required: true}
+  recovery: [resume_from_manifest, rerun_failed_scan, preserve_findings, escalate_ambiguous_behavior]
+states:
+  - {id: received, owner: planner, terminal: false}
+  - {id: indexed, owner: repo-cartographer, terminal: false}
+  - {id: scanned, owner: maintainability-reviewer, terminal: false}
+  - {id: reviewed, owner: architecture-health-reviewer, terminal: false}
+  - {id: planned, owner: refactor-planner, terminal: false}
+  - {id: completed, owner: planner, terminal: true}
+  - {id: blocked, owner: planner_and_human, terminal: true}
+transitions:
+  - {id: start, from: received, to: indexed, actor: repo-cartographer, requires: [scope_confirmed, manifest_available]}
+  - {id: scan, from: indexed, to: scanned, actor: maintainability-reviewer, requires: [static_commands_recorded]}
+  - {id: review, from: scanned, to: reviewed, actor: architecture-health-reviewer, requires: [metrics_and_candidates_persisted]}
+  - {id: plan, from: reviewed, to: planned, actor: refactor-planner, requires: [findings_classified, behavior_risks_recorded]}
+  - {id: complete, from: planned, to: completed, actor: planner, requires: [plan_persisted, no_unresolved_scope_gap]}
+  - {id: block, from: [indexed, scanned, reviewed, planned], to: blocked, actor: planner_and_human, requires: [blocker_recorded]}
+failure_routes:
+  - {condition: static_tool_missing, action: record_missing_tool_and_use_bounded_fallback, terminal: false}
+  - {condition: behavior_uncertain, action: mark_as_hypothesis_and_route_to_functional_qa, terminal: false}
+  - {condition: suspected_dead_code_has_runtime_reference, action: do_not_delete_and_request_runtime_evidence, terminal: false}
+invariants:
+  - {id: no_behavior_change_claim_without_test, description: A behavior-preserving refactor recommendation names the regression test that must protect it.}
+  - {id: evidence_before_opinion, description: Every structural finding references a file, metric, dependency edge or reproducible scan.}
+  - {id: no_unreviewed_deletion, description: Dead-code candidates are recommendations, never automatic deletions.}
+  - {id: shared_manifest, description: If an input manifest exists, specialists reuse it and log only targeted reads.}
+  - {id: resource_accounting, description: Chapter resource data is recorded per agent and model.}
+  - {id: dual_confidence, description: Structural evidence confidence is separate from the LLM's confidence in its interpretation and refactor recommendation.}

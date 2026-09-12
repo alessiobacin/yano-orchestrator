@@ -161,6 +161,14 @@ finale immediata, registrando prima `yano_watcher_final_scan_requested` e poi
 un normale `yano_watcher_scan` con `once: true`; il polling configurato non
 viene sostituito né fermato.
 
+Il ciclo `agent_end` del planner applica anche un controllo di integrità tra
+promessa e azione. Se l'ultimo messaggio dice che sta per eseguire un controllo
+ma non contiene una `tool_call`, il trace registra
+`planner_action_claim_without_tool` e `planner_action_guard_wakeup`. Il
+planner riceve un follow-up correttivo e non viene pubblicato
+`planner_task_completed` finché il turno non contiene l'azione osservabile;
+`planner_action_guard_exhausted` segnala due tentativi senza correzione.
+
 Per elencare gli scan con data e ora di inizio/fine:
 
 ```bash
@@ -168,6 +176,15 @@ yano trace events --instance yano-watcher --type yano_watcher_scan --limit 50
 yano trace events --instance yano-watcher --type yano_watcher_scan --limit 50 --json
 yano trace events --instance yano-watcher --type yano_watcher_finding --limit 50
 find /Users/alessiobacin/Development/testCode/yano-orchestrator/.scratch/optimize-orchestrator/issues -type f -maxdepth 1 -print
+```
+
+Per diagnosticare un planner che ha annunciato un'azione:
+
+```bash
+yano trace events --project <name> --instance planner-01 \
+  --type planner_action_claim_without_tool --limit 20 --json
+yano trace events --project <name> --instance planner-01 \
+  --type planner_action_guard_wakeup --limit 20 --json
 ```
 
 La consegna Telegram è best-effort: un errore di rete non blocca il watcher e

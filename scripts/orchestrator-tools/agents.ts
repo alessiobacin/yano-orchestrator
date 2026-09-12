@@ -144,6 +144,11 @@ type CommandEnvelope = {
 	hops: number;
 	timestamp: string;
 	response_schema?: object | null;
+	// Optional audit-campaign correlation. These fields are metadata only and
+	// never contain the agent's private reasoning.
+	campaign_id?: string | null;
+	chapter_id?: string | null;
+	phase_id?: string | null;
 };
 
 function loadControlPolicy(cwd: string): { verbs: string[]; cli: Record<string, unknown> } {
@@ -175,7 +180,7 @@ export type AgentToolsDeps = {
 	} | null;
 	getMqttConnected: () => boolean;
 	getPresenceHydration: () => Promise<void>;
-	getCurrentInbound: () => { hops: number } | null;
+	getCurrentInbound: () => { hops: number; campaign_id?: string | null; chapter_id?: string | null; phase_id?: string | null } | null;
 	presence: Map<string, PresenceCard>;
 	pendingReplies: Map<string, PendingReply>;
 	activityLog: ActivityEvent[];
@@ -516,9 +521,12 @@ export function createAgentTools(deps: AgentToolsDeps) {
 						"handling. Use this when you're intentionally beginning a new round of work, not simply forwarding/replying within " +
 						"the current one — otherwise a multi-round correction cycle can silently hit the hop limit and get dropped.",
 				})),
-				slug: Type.Optional(Type.String({
+					slug: Type.Optional(Type.String({
 					description: "Task slug (same one used for worktree_create), if this send is part of a task — see above for what it enables.",
 				})),
+				campaign_id: Type.Optional(Type.String({ description: "Audit campaign correlation id, when this send belongs to a chaptered audit." })),
+				chapter_id: Type.Optional(Type.String({ description: "Audit chapter id, used to aggregate evidence and resource usage." })),
+				phase_id: Type.Optional(Type.String({ description: "Planner phase id associated with this delegation." })),
 			}),
 			async execute(_callId, params) {
 				const identity = getIdentity();
@@ -647,6 +655,9 @@ export function createAgentTools(deps: AgentToolsDeps) {
 					hops,
 					timestamp: nowIso(),
 					response_schema: (params.response_schema as object | undefined) ?? null,
+					campaign_id: params.campaign_id ?? currentInbound?.campaign_id ?? null,
+					chapter_id: params.chapter_id ?? currentInbound?.chapter_id ?? null,
+					phase_id: params.phase_id ?? currentInbound?.phase_id ?? null,
 				};
 
 				let destTopic: string;
@@ -726,7 +737,7 @@ export function createAgentTools(deps: AgentToolsDeps) {
 				pendingReplies.set(assignment_id, entry);
 
 				pi.appendEntry("orchestrator-log", { event: "outbound_command", assignment_id, target: entry.target, hops });
-				logEvent("agent_send_out", { assignment_id, target: entry.target, hops, new_round: !!params.new_round, prompt_preview: params.prompt.slice(0, 200), route, fallback_target: fallbackTarget, watcher_bootstrap: watcherBootstrap });
+				logEvent("agent_send_out", { assignment_id, target: entry.target, hops, new_round: !!params.new_round, prompt_preview: params.prompt.slice(0, 200), route, fallback_target: fallbackTarget, watcher_bootstrap: watcherBootstrap, campaign_id: env.campaign_id, chapter_id: env.chapter_id, phase_id: env.phase_id });
 
 				// Best-effort audit line in the task's report (Revisione 19) — never
 				// lets a report-bookkeeping problem fail the actual send, which is
@@ -755,7 +766,7 @@ export function createAgentTools(deps: AgentToolsDeps) {
 						type: "text" as const,
 						text: `agent_send → ${entry.target}\nassignment_id ${assignment_id}${noLiveTargetWarning ? `\n\n${noLiveTargetWarning}` : ""}`,
 					}],
-					details: { assignment_id, target: entry.target, hops, no_live_target: !!noLiveTargetWarning, route, fallback_target: fallbackTarget, watcher_bootstrap: watcherBootstrap },
+					details: { assignment_id, target: entry.target, hops, no_live_target: !!noLiveTargetWarning, route, fallback_target: fallbackTarget, watcher_bootstrap: watcherBootstrap, campaign_id: env.campaign_id, chapter_id: env.chapter_id, phase_id: env.phase_id },
 				};
 			},
 			renderCall(args: unknown, theme: Theme) {

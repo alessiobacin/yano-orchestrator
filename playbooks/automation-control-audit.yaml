@@ -1,0 +1,64 @@
+schema_version: 1
+id: automation-control-audit
+label: Automation, logging and control-flow audit
+description: >-
+  Reviews automated processes, event propagation, retries, timeouts, logging,
+  trace quality and failure recovery. It identifies where deterministic code
+  can replace an LLM step and where the system needs better observability.
+catalog:
+  scope: global
+  reusable: true
+  intents: [automation audit, observability review, logging audit, retry timeout review, deterministic script opportunities]
+  exclusions: [silent production instrumentation changes, invented latency or token figures]
+  parameters: [project_root, variant, input_manifest, campaign_id, chapter_id]
+requirements:
+  cli: [node, git, yano]
+  skills: [yano-cli, yano-planner-trace-analysis]
+team:
+  strategy: trace and control-flow inventory, failure-mode review, script-first recommendations
+  default_variant: medium
+  roles:
+    - {id: repo-cartographer, purpose: Inventory automation entrypoints and observable state., outputs: [automation-map], write_scope: [chapter-report-only], capabilities: [node, git]}
+    - {id: automation-control-auditor, purpose: Inspect retries, routing, state propagation, timeouts and idempotency., outputs: [control-findings], write_scope: [chapter-report-only], capabilities: [node, git, yano]}
+    - {id: observability-reviewer, purpose: Evaluate logs, trace fields, correlation identifiers and actionable failure evidence., outputs: [observability-findings], write_scope: [chapter-report-only], capabilities: [node, git, yano]}
+    - {id: delegation-efficiency-auditor, purpose: Classify AI work versus deterministic work and estimate measurement needs., outputs: [delegation-map], write_scope: [chapter-report-only], capabilities: [node, git, yano]}
+  variants:
+    - {id: standard, roles: [repo-cartographer, automation-control-auditor], parallel_groups: [[automation-control-auditor]]}
+    - {id: medium, roles: [repo-cartographer, automation-control-auditor, observability-reviewer, delegation-efficiency-auditor], parallel_groups: [[automation-control-auditor, observability-reviewer, delegation-efficiency-auditor]]}
+    - {id: deep, roles: [repo-cartographer, automation-control-auditor, observability-reviewer, delegation-efficiency-auditor], parallel_groups: [[automation-control-auditor, observability-reviewer, delegation-efficiency-auditor]]}
+contract:
+  execution: inventory_then_trace_review_then_failure_and_delegation_analysis
+  checkpoint: every_control_surface_and_failure_mode
+  evidence: [automation_surface, event_name, correlation_id, source_reference, trace_reference, failure_mode, retry_policy, timeout_policy, log_quality, deterministic_candidate, confidence, evidence_confidence, judgment_confidence, judgment_confidence_rationale, limitation, resource_record]
+  report_sections: [scope, automation_map, state_and_event_flow, retries_timeouts, logging_and_trace, failure_recovery, deterministic_opportunities, prioritized_actions, resource_accounting]
+  budgets: {max_commands: 220, max_files: 650, max_minutes: 110, max_tokens: 32000}
+  verification: {mode: observable_control_flow_and_script_first_review, required: true}
+  recovery: [resume_from_trace_checkpoint, preserve_raw_events, classify_unknowns, planner_handoff]
+states:
+  - {id: received, owner: planner, terminal: false}
+  - {id: inventoried, owner: repo-cartographer, terminal: false}
+  - {id: control_review, owner: automation-control-auditor, terminal: false}
+  - {id: observability_review, owner: observability-reviewer, terminal: false}
+  - {id: delegation_review, owner: delegation-efficiency-auditor, terminal: false}
+  - {id: synthesized, owner: planner, terminal: false}
+  - {id: completed, owner: planner, terminal: true}
+  - {id: blocked, owner: planner_and_human, terminal: true}
+transitions:
+  - {id: inventory, from: received, to: inventoried, actor: repo-cartographer, requires: [scope_confirmed]}
+  - {id: open_reviews, from: inventoried, to: control_review, actor: planner, requires: [automation_map_persisted]}
+  - {id: open_observability, from: control_review, to: observability_review, actor: planner, requires: [control_flow_evidence_persisted]}
+  - {id: open_delegation, from: control_review, to: delegation_review, actor: planner, requires: [control_flow_evidence_persisted]}
+  - {id: synthesize, from: [observability_review, delegation_review], to: synthesized, actor: planner, requires: [required_reviews_complete]}
+  - {id: complete, from: synthesized, to: completed, actor: planner, requires: [actions_prioritized, resource_ledger_persisted]}
+  - {id: block, from: [inventoried, control_review, observability_review, delegation_review, synthesized], to: blocked, actor: planner_and_human, requires: [blocker_recorded]}
+failure_routes:
+  - {condition: trace_disabled, action: record_telemetry_gap_and_use_static_evidence, terminal: false}
+  - {condition: retry_or_timeout_not_observable, action: recommend_instrumentation_before_claiming_reliability, terminal: false}
+  - {condition: deterministic_candidate_has_semantic_risk, action: keep_human_or_ai_gate_and_define_postcondition, terminal: false}
+invariants:
+  - {id: every_async_edge_correlatable, description: Delegation, retry, timeout and response events share a correlation identity.}
+  - {id: logs_are_actionable, description: Logs carry event, actor, project, chapter and outcome without secrets or hidden reasoning.}
+  - {id: script_first_with_guardrails, description: Deterministic candidates include preconditions, postconditions and fallback behavior.}
+  - {id: unknown_is_not_success, description: Missing telemetry is a limitation, never a green reliability claim.}
+  - {id: resource_accounting, description: The chapter accounts for inference and deterministic work separately.}
+  - {id: dual_confidence, description: Trace/evidence confidence is separated from the auditor's confidence in the control-flow judgment.}

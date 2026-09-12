@@ -281,13 +281,23 @@ function catalogDecision(candidate, task = "") {
 	const exact = entries.find((entry) => entry.id === candidate.playbook) || null;
 	const related = (candidate.catalog_alternatives || []).map((id) => entries.find((entry) => entry.id === id)).filter(Boolean);
 	const candidates = catalogCandidates(task, candidate);
+	const recommended = candidates[0] || null;
+	const runnerUp = candidates[1] || null;
+	// A strong exact candidate should not trigger a user-choice gate merely
+	// because a broad intent token overlaps a secondary playbook. Ask the user
+	// only when the top two candidates are genuinely close; this keeps explicit
+	// requests such as "refactor this module" deterministic while preserving
+	// the interview for ambiguous, non-specific tasks.
+	const ambiguityThreshold = recommended
+		? (recommended.score >= 100 ? recommended.score - 30 : Math.max(1, recommended.score * 0.75))
+		: Infinity;
 	return {
 		action: exact ? "reuse" : "create",
 		exact_match: exact ? { id: exact.id, label: exact.label, source: exact.source, path: exact.path } : null,
 		related_matches: related.map((entry) => ({ id: entry.id, label: entry.label, source: entry.source, path: entry.path })),
 		candidates,
-		recommended: candidates[0] || null,
-		selection_required: candidates.length > 1,
+		recommended,
+		selection_required: Boolean(runnerUp && runnerUp.score >= ambiguityThreshold),
 		catalog_size: entries.length,
 	};
 }
@@ -303,6 +313,33 @@ function candidateForTask(task) {
 	// "sito" when matched without word boundaries).
 	if (/\bdebat|dibattit|second opinion|seconda opinione|confronta (le )?prospettive|pro e contro|pros and cons|quale approccio.{0,20}meglio|which approach.{0,20}better|multi-?model discussion|discussione multi-?modello/.test(text)) return { playbook: "debate", roles: ["debater"], reason: "structured multi-model debate intent" };
 	if (/get-the-best-from|(?:confront|compare|benchmark|learn from|ispirat)[^\n]{0,180}https?:\/\/github\.com|confronta (questa )?repo(sitory)? con|confronta il progetto con|confronta (questo )?progetto con|confrontare (questa )?repo(sitory)? con|confronto con un'altra repo|confronto[^\n]{0,180}(?:repo(sitory)?|progetto)[^\n]{0,180}(?:esterna|github|https?:\/\/|[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)|cosa possiamo importare da|cosa possiamo prendere da (un altro progetto|un'altra repo)|benchmark against another repo(sitory)?|cosa fa meglio (questo altro progetto|l'altro progetto)|analizza (questo )?repository github e confronta|learn from another repository|ispirati a (questo|un altro) progetto (su )?github/.test(text)) return { playbook: "get-the-best-from", roles: ["repo-benchmarker"], reason: "comparative repository benchmarking intent" };
+	// Broad audit intent must win over a single-axis refactor, QA or UX match.
+	// The planner receives a reusable chapter DAG and can still select only one
+	// chapter when the user later narrows the scope.
+	const auditDomains = [
+		/architett|refactor|manutenibil|duplicat|file enorm/.test(text),
+		/test|qa|comand|funzion|regression/.test(text),
+		/ux|gui|mercat|competitor|feature|prodotto/.test(text),
+		/toolchain|tool|cli|mcp|skill|capabilit|playbook/.test(text),
+		/automat|orchestrat|log|token|agent|retry|timeout|trace/.test(text),
+	].filter(Boolean).length;
+	const explicitBroadSignal = /audit|quality assurance|quality analysis|controllo qualità|controllo qualita|quality audit|analisi completa|valutazione completa|revisione completa|full review|360|multi/.test(text);
+	const pureRefactorRequest = /^\s*(refactor|refactoring)\b/.test(text) && !explicitBroadSignal;
+	const broadAudit = !pureRefactorRequest && /audit|review|revisione|valut|analisi|quality assurance|controllo qualità|controllo qualita|quality analysis|quality audit/.test(text)
+		&& (auditDomains >= 2 || /complet|tutto|tutte|all|360|multi|profond|deep/.test(text));
+	if (broadAudit) return {
+		playbook: "audit-campaign",
+		roles: ["repo-cartographer", "toolchain-evaluator", "test-adequacy-analyst", "architecture-health-reviewer", "automation-control-auditor", "product-ux-analyst", "audit-synthesizer"],
+		primaryRole: "repo-cartographer",
+		catalog_alternatives: ["qa-full-audit", "architecture-health-audit", "test-adequacy-audit", "automation-control-audit", "toolchain-readiness-audit", "ai-delegation-audit", "auto-improvement-360"],
+		reason: "multi-axis application audit: functional QA, architecture, test adequacy, product/UX, toolchain and orchestration",
+	};
+	if (/token|consumo|costo.*llm|costo.*ai|delegare.*script|script determin|deterministic.*delegation|ai.*workflow|workflow.*agent/.test(text)
+		&& /audit|review|analisi|valut|ottimizz|ridur|miglior/.test(text)) return { playbook: "ai-delegation-audit", roles: ["repo-cartographer", "delegation-efficiency-auditor", "observability-reviewer"], primaryRole: "delegation-efficiency-auditor", reason: "AI versus deterministic delegation and measurement intent" };
+	if (!pureRefactorRequest && /test adequacy|adeguatezza.*test|copertura.*use.?case|use.?case.*test|test.*copr|copr.*test|test.*sufficient|sufficient.*test|gap.*test/.test(text)) return { playbook: "test-adequacy-audit", roles: ["repo-cartographer", "test-adequacy-analyst", "qa-functional-verifier"], primaryRole: "test-adequacy-analyst", reason: "use-case and test adequacy intent" };
+	if (!pureRefactorRequest && /toolchain|capabilit|cli.*mcp|mcp.*cli|skill.*playbook|readiness|prerequisit/.test(text) && /audit|review|verif|valut|analisi/.test(text)) return { playbook: "toolchain-readiness-audit", roles: ["repo-cartographer", "toolchain-evaluator", "delegation-efficiency-auditor"], primaryRole: "toolchain-evaluator", reason: "tool and capability readiness intent" };
+	if (!pureRefactorRequest && /logging|log(ging)?|observabil|retry|timeout|state propagation|propagazione.*stato|orchestrat|automatiz|watchdog|trace/.test(text) && /audit|review|verif|valut|analisi/.test(text)) return { playbook: "automation-control-audit", roles: ["repo-cartographer", "automation-control-auditor", "observability-reviewer", "delegation-efficiency-auditor"], primaryRole: "automation-control-auditor", reason: "automation, control-flow and observability intent" };
+	if (!pureRefactorRequest && /architett|maintainabil|manutenibil|dead.?code|codice morto|duplicat|file enorm|file troppo lungo|compless|refactor plan/.test(text) && /audit|review|verif|valut|analisi/.test(text)) return { playbook: "architecture-health-audit", roles: ["repo-cartographer", "architecture-health-reviewer", "maintainability-reviewer", "refactor-planner"], primaryRole: "architecture-health-reviewer", reason: "architecture health and maintainability audit intent" };
 	if (/refactor|refactoring|architettura|modular|cleanup|manutenibil/.test(text)) return { playbook: "refactor", roles: ["refactoring-specialist", "reviewer"], reason: "pure refactoring intent — no behavior change" };
 	if (/document|documenti|documentale|changelog|readme|release notes|architecture documentation/.test(text)) return { playbook: "documentation-release", roles: ["docs-sync"], primaryRole: "docs-sync", reason: "documentation/release intent" };
 	if (/stitch|design system|design[ -]?redesign|redesign|prototipo|prototype|ux audit|ux review|user experience/.test(text)) return { playbook: "design-redesign", roles: ["design-redesign-specialist", "frontend-reviewer"], primaryRole: "design-redesign-specialist", reason: "design/redesign/Stitch intent", requirements: { mcp: ["stitch"] } };

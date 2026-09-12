@@ -197,6 +197,24 @@ describe("agents", () => {
 			expect(publishAsync).toHaveBeenCalledWith("agent/coder-01", expect.stringContaining("do it"), { qos: 1 });
 		});
 
+		it("carries audit campaign metadata in the command envelope and result", async () => {
+			const publishAsync = vi.fn(async () => {});
+			const { deps, presence } = makeDeps({ getClient: () => ({ publishAsync }) });
+			presence.set("coder-01", { instance: "coder-01", role: "coder", status: "idle" });
+			const result = await toolByName(deps, "agent_send").execute("c1", {
+				target_instance: "coder-01",
+				prompt: "chapter work",
+				campaign_id: "camp-1",
+				chapter_id: "architecture",
+				phase_id: "parallel-chapters",
+			});
+			const envelope = JSON.parse(publishAsync.mock.calls[0][1]);
+			expect(envelope.campaign_id).toBe("camp-1");
+			expect(envelope.chapter_id).toBe("architecture");
+			expect(envelope.phase_id).toBe("parallel-chapters");
+			expect(result.details.chapter_id).toBe("architecture");
+		});
+
 		it("inherits hops+1 from the current inbound context, and refuses past MAX_HOPS", async () => {
 			const { deps, presence } = makeDeps({ getCurrentInbound: () => ({ hops: 5 }) });
 			presence.set("coder-01", { instance: "coder-01", role: "coder", status: "idle" });

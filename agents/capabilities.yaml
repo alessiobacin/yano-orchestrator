@@ -4,6 +4,10 @@
 schema_version: 1
 
 capabilities:
+  rg:
+    kind: cli
+    command: rg
+    probe: [--version]
   node:
     kind: cli
     command: node
@@ -68,3 +72,22 @@ capabilities:
     kind: cli
     command: curl
     probe: [--version]
+
+# Declarative MCP catalog used by the toolchain-readiness audit. Presence here
+# means "known capability", not "reachable now"; the audit must still probe it.
+mcp_capabilities:
+  chrome-devtools:
+    purpose: browser inspection and UI diagnostics
+    optional: true
+  agentation:
+    purpose: visual annotation intake
+    optional: true
+  github:
+    purpose: repository and issue evidence
+    optional: true
+  stitch:
+    purpose: UI design exploration
+    optional: true
+  mongodb:
+    purpose: database inspection
+    optional: true

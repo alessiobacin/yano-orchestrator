@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="it" data-theme="luxury">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Audit campaign · Yano</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/daisyui@5.5.19/daisyui.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/daisyui@5.5.19/themes.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.2.4/dist/index.global.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    :where(.grid, .flex) > * { min-width: 0; }
+    :where(p, h1, h2, h3, h4, li, td, th, .badge) { overflow-wrap: anywhere; }
+    body { background: radial-gradient(circle at top right, color-mix(in oklab, var(--color-primary) 12%, transparent), transparent 34rem), var(--color-base-200); }
+    .audit-shell { max-width: 1180px; margin: 0 auto; padding: 2rem 1.1rem 4rem; }
+    .audit-kicker { letter-spacing: .16em; text-transform: uppercase; font-size: .72rem; font-weight: 800; color: var(--color-primary); }
+    .audit-card { border: 1px solid color-mix(in oklab, var(--color-base-content) 13%, transparent); box-shadow: 0 18px 50px color-mix(in oklab, var(--color-base-content) 8%, transparent); }
+    .audit-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 1rem; }
+    .audit-wide { grid-column: 1 / -1; }
+    .audit-metric { border-left: 3px solid var(--color-primary); padding-left: .9rem; }
+    .audit-diagram { overflow-x: auto; background: var(--color-base-100); border-radius: 1rem; padding: 1rem; }
+    .audit-table { width: 100%; }
+    .audit-table td, .audit-table th { vertical-align: top; }
+    .audit-table code { white-space: normal; }
+    .audit-step { position: relative; padding-left: 2rem; }
+    .audit-step::before { content: attr(data-step); position: absolute; left: 0; top: 0; width: 1.35rem; height: 1.35rem; border-radius: 999px; display: grid; place-items: center; background: var(--color-primary); color: var(--color-primary-content); font-size: .72rem; font-weight: 900; }
+  </style>
+</head>
+<body>
+  <main class="audit-shell">
+    <header class="hero rounded-box bg-base-100 audit-card mb-6">
+      <div class="hero-content w-full items-start px-5 py-8 lg:px-10 lg:py-12">
+        <div class="max-w-4xl">
+          <div class="audit-kicker mb-3">Yano · proposed operating model</div>
+          <h1 class="text-4xl font-black tracking-tight lg:text-6xl">Una campagna di audit,<br><span class="text-primary">quattro prospettive.</span></h1>
+          <p class="mt-5 max-w-3xl text-lg opacity-80">La verifica completa non è un solo QA: deve dimostrare che il prodotto funziona, che il codice è sostenibile, che i controlli automatici sono affidabili e che l'applicazione offre valore reale.</p>
+          <div class="mt-6 flex flex-wrap gap-2">
+            <span class="badge badge-primary badge-lg">read-only first</span>
+            <span class="badge badge-outline badge-lg">shared evidence pack</span>
+            <span class="badge badge-outline badge-lg">standard · medium · deep</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <section class="audit-grid mb-6">
+      <div class="card bg-base-100 audit-card"><div class="card-body"><div class="audit-metric"><div class="text-sm opacity-60">Decisione</div><div class="text-2xl font-bold">Non un playbook monolitico</div><p class="mt-2 opacity-75">Una campagna coordina playbook specializzati attraverso una mappa creata una sola volta.</p></div></div></div>
+      <div class="card bg-base-100 audit-card"><div class="card-body"><div class="audit-metric"><div class="text-sm opacity-60">Problema rilevato</div><div class="text-2xl font-bold">Routing incompleto</div><p class="mt-2 opacity-75"><code>architect assess</code> classifica oggi l'audit ampio come <code>refactor</code>.</p></div></div></div>
+      <div class="card bg-base-100 audit-card"><div class="card-body"><div class="audit-metric"><div class="text-sm opacity-60">Risparmio cercato</div><div class="text-2xl font-bold">Read once, publish many</div><p class="mt-2 opacity-75">Gli specialisti ricevono simboli, evidenze e confini; non il repository intero.</p></div></div></div>
+    </section>
+
+    <section class="card bg-base-100 audit-card mb-6">
+      <div class="card-body p-5 lg:p-8">
+        <div class="audit-kicker">Topologia</div>
+        <h2 class="card-title mt-1 text-2xl">Che cosa coordina la campagna?</h2>
+        <div class="audit-diagram mt-5">
+          <div class="mermaid">
+flowchart TD
+  U[Richiesta utente + profondità] --> P[Planner: scope e rischio]
+  P --> D[Discovery condivisa]
+  D --> M[audit-manifest + project-map]
+  M --> C[Capability preflight]
+  C --> E[AI-vs-script delegation]
+  C --> Q[QA funzionale + test adequacy]
+  C --> A[Architecture health]
+  C --> L[Automation/control logic]
+  C --> O[Observability · performance · security]
+  C --> X[Product · UX · GUI · market]
+  Q --> B[Boundary cross-check]
+  A --> B
+  L --> B
+  O --> B
+  X --> B
+  E --> B
+  B --> S[Synthesis: finding IDs + refactor map]
+  S --> R[Report e backlog; remediation solo dopo decisione]
+  style D fill:#f2c94c,stroke:#8a6414,color:#111
+  style S fill:#e9b949,stroke:#8a6414,color:#111
+          </div>
+        </div>
+        <p class="mt-4 text-sm opacity-65">La discovery è il punto di condivisione. I workstream possono procedere in parallelo, ma solo dopo che ownership, confini e capability sono espliciti.</p>
+      </div>
+    </section>
+
+    <section class="card bg-base-100 audit-card mb-6">
+      <div class="card-body p-5 lg:p-8">
+        <div class="audit-kicker">AI-vs-deterministic delegation</div>
+        <h2 class="card-title mt-1 text-2xl">L'agente deve dimostrare di essere necessario</h2>
+        <p class="mt-2 max-w-4xl">Ogni fase viene classificata prima di essere delegata: ciò che è ripetitivo, formale e verificabile va in D0; ciò che richiede interpretazione usa D1, cioè script per raccogliere evidenza e AI per comprenderla.</p>
+        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 mt-5">
+          <div class="rounded-box border border-success/30 bg-success/10 p-4"><span class="badge badge-success badge-sm">D0</span><h3 class="font-bold mt-2">Deterministic now</h3><p class="text-sm mt-1">hash, help, JSON, snapshot, diff, exit code, cleanup, timeout.</p></div>
+          <div class="rounded-box border border-info/30 bg-info/10 p-4"><span class="badge badge-info badge-sm">D1</span><h3 class="font-bold mt-2">Script + AI</h3><p class="text-sm mt-1">lo script raccoglie; il modello interpreta anomalie e priorità.</p></div>
+          <div class="rounded-box border border-secondary/30 bg-secondary/10 p-4"><span class="badge badge-secondary badge-sm">AI</span><h3 class="font-bold mt-2">Judgment required</h3><p class="text-sm mt-1">UX, mercato, trade-off, root cause e refactor design.</p></div>
+          <div class="rounded-box border border-warning/30 bg-warning/10 p-4"><span class="badge badge-warning badge-sm">Human</span><h3 class="font-bold mt-2">Gate</h3><p class="text-sm mt-1">scope, distruttività, promozioni e decisioni di valore.</p></div>
+        </div>
+        <div class="stats stats-vertical lg:stats-horizontal shadow mt-5 w-full"><div class="stat"><div class="stat-title">Misurare</div><div class="stat-value text-2xl">Token</div><div class="stat-desc">input/output e contesto</div></div><div class="stat"><div class="stat-title">Misurare</div><div class="stat-value text-2xl">Tempo</div><div class="stat-desc">wall-clock e retry</div></div><div class="stat"><div class="stat-title">Proteggere</div><div class="stat-value text-2xl">Evidence</div><div class="stat-desc">JSON, checksum, exit code</div></div></div>
+        <div class="alert alert-info mt-5"><span>Nel pilot <code>code-mem</code>, help, hash, snapshot e harness di concorrenza sono candidati script; decidere se un mismatch è bug, contratto o opportunità resta lavoro AI/human.</span></div>
+      </div>
+    </section>
+
+    <section class="card bg-base-100 audit-card mb-6">
+      <div class="card-body p-5 lg:p-8">
+        <div class="audit-kicker">Dossier capitolato</div>
+        <h2 class="card-title mt-1 text-2xl">Non un report: un insieme di relazioni accettate</h2>
+        <p class="mt-2 max-w-4xl">Ogni specialista scrive un capitolo completo. Il planner governa prima il <strong>chapter DAG</strong> e poi costruisce l'<strong>implementation DAG</strong>: quali capitoli aspettare, quali sviluppare in parallelo e in quale ordine trasformare le raccomandazioni in lavoro.</p>
+        <div class="overflow-x-auto mt-5"><table class="table table-zebra audit-table"><thead><tr><th>Capitolo</th><th>Proprietario</th><th>Dipende da</th><th>Esito</th></tr></thead><tbody>
+          <tr><th>Toolchain</th><td><code>toolchain-evaluator</code></td><td>manifest, ruoli, MCP</td><td>capability e fallback</td></tr>
+          <tr><th>Architecture / maintainability</th><td>2 specialisti</td><td>grafo e ownership</td><td>refactor map</td></tr>
+          <tr><th>QA / test adequacy</th><td>inventory + verifier + analyst</td><td>command/use-case matrix</td><td>coverage envelope</td></tr>
+          <tr><th>Automation / observability</th><td>specialisti dedicati</td><td>control graph + runtime</td><td>failure modes</td></tr>
+          <tr><th>Product / UX / market</th><td>product + research</td><td>feature map e UI</td><td>gap e opportunità</td></tr>
+          <tr><th>Synthesis</th><td><code>audit-synthesizer</code> + planner</td><td>capitoli accepted</td><td>implementation DAG</td></tr>
+        </tbody></table></div>
+        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-5 mt-5 text-sm"><div class="rounded-box bg-base-200 p-4"><b>planned</b><br>capitolo previsto</div><div class="rounded-box bg-base-200 p-4"><b>collecting</b><br>evidenze in corso</div><div class="rounded-box bg-base-200 p-4"><b>draft</b><br>analisi completa</div><div class="rounded-box bg-base-200 p-4"><b>peer review</b><br>controllo indipendente</div><div class="rounded-box bg-success/15 p-4"><b>accepted</b><br>utilizzabile dal planner</div></div>
+        <div class="alert alert-info mt-5"><span>Un capitolo non è una lista di osservazioni: deve includere perimetro, metodo, step, evidenze, fatti/inferenze, casi d'uso, limiti, raccomandazioni e candidate task.</span></div>
+      </div>
+    </section>
+
+    <section class="card bg-base-100 audit-card mb-6">
+      <div class="card-body p-5 lg:p-8">
+        <div class="audit-kicker">Resource ledger</div>
+        <h2 class="card-title mt-1 text-2xl">Ogni relazione porta il proprio costo reale</h2>
+        <p class="mt-2 max-w-4xl">Il trace collega <code>campaign → chapter → agent → model → inference</code>. Il planner può così capire quali capitoli sono costosi, quali modelli vengono usati, dove si accumulano retry e quando conviene spostare un passaggio su script.</p>
+        <div class="overflow-x-auto mt-5"><table class="table table-zebra audit-table"><thead><tr><th>Dimensione</th><th>Registrare</th><th>Fonte</th></tr></thead><tbody>
+          <tr><th>Tempo</th><td>start/end, wall-clock, coda, tempo AI, tempo script</td><td>trace runtime</td></tr>
+          <tr><th>Token</th><td>input, output, totale, contesto, window</td><td>provider; Pi; estimate; unknown</td></tr>
+          <tr><th>Inferenze</th><td>campaign round, agent turn, inference index, retry</td><td>eventi visibili</td></tr>
+          <tr><th>Modello</th><td>provider, model ID, pin, fallback</td><td>identity + model events</td></tr>
+          <tr><th>Tool</th><td>CLI/MCP/script call, errori, cleanup e compattazioni</td><td>tool trace</td></tr>
+        </tbody></table></div>
+        <div class="alert alert-warning mt-5"><span>Mai inventare token non esposti dal provider e mai salvare prompt, risposte o ragionamento interno: il ledger conserva solo metadati osservabili.</span></div>
+      </div>
+    </section>
+
+    <section class="audit-grid mb-6">
+      <article class="card bg-base-100 audit-card"><div class="card-body"><div class="audit-kicker">01 · correctness</div><h3 class="card-title">Functional QA</h3><p>Comandi, feature, API, stati, errori, idempotenza, concorrenza, recovery e conseguenze sui comandi successivi.</p><div class="card-actions mt-2"><span class="badge badge-primary badge-soft">qa-full-audit</span></div></div></article>
+      <article class="card bg-base-100 audit-card"><div class="card-body"><div class="audit-kicker">02 · sustainability</div><h3 class="card-title">Architecture health</h3><p>File e funzioni enormi, confini, accoppiamento, duplicazioni, dead code candidato, complessità e seam di refactor.</p><div class="card-actions mt-2"><span class="badge badge-secondary badge-soft">nuovo playbook</span></div></div></article>
+      <article class="card bg-base-100 audit-card"><div class="card-body"><div class="audit-kicker">03 · reliability</div><h3 class="card-title">Automation + tests</h3><p>Ogni controllo ha scopo, oracle, output, retry, timeout, log, failure mode e una prova di adeguatezza dei test.</p><div class="card-actions mt-2"><span class="badge badge-accent badge-soft">cross-cutting</span></div></div></article>
+      <article class="card bg-base-100 audit-card"><div class="card-body"><div class="audit-kicker">04 · value</div><h3 class="card-title">Product health</h3><p>Comandi comprensibili, GUI, trend, onboarding, competitor, bisogni scoperti e opportunità di prodotto.</p><div class="card-actions mt-2"><span class="badge badge-info badge-soft">auto-improvement-360</span></div></div></article>
+      <article class="card bg-base-100 audit-card"><div class="card-body"><div class="audit-kicker">05 · efficiency</div><h3 class="card-title">AI vs deterministic</h3><p>Decide quali passaggi lasciare al modello e quali spostare su script riproducibili per ridurre token, tempo, retry e riletture.</p><div class="card-actions mt-2"><span class="badge badge-success badge-soft">script-first</span></div></div></article>
+    </section>
+
+    <section class="card bg-base-100 audit-card mb-6">
+      <div class="card-body p-5 lg:p-8">
+        <div class="audit-kicker">Profondità</div>
+        <h2 class="card-title mt-1 text-2xl">Lo stesso modello, tre costi controllati</h2>
+        <div class="overflow-x-auto mt-5">
+          <table class="table table-zebra audit-table">
+            <thead><tr><th>Variante</th><th>Team</th><th>Copertura</th><th>Budget iniziale</th></tr></thead>
+            <tbody>
+              <tr><th><span class="badge badge-primary">standard</span></th><td>3–4 agenti</td><td>Discovery, capability gate, QA principale, test-gap essenziale, sintesi.</td><td>100 cmd · 250 file · 45 min · 15k token</td></tr>
+              <tr><th><span class="badge badge-warning">medium</span></th><td>6–8 agenti / 2 ondate</td><td>Aggiunge architettura, automatismi, osservabilità, UX e test adequacy approfondita.</td><td>220 cmd · 500 file · 90 min · 30k token</td></tr>
+              <tr><th><span class="badge badge-error">deep</span></th><td>9–12 agenti / ondate limitate</td><td>Cross-check, mutation/fuzz, concorrenza, browser, sicurezza, performance, mercato e full rerun.</td><td>450 cmd · 1.000 file · 180 min · 60k token</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="alert alert-warning mt-5"><span><strong>Regola:</strong> il budget è globale e viene riservato per workstream. Nessun agente può consumarlo tutto lasciando gli altri senza evidenza.</span></div>
+      </div>
+    </section>
+
+    <section class="audit-grid mb-6">
+      <article class="card bg-base-100 audit-card audit-wide"><div class="card-body p-5 lg:p-8"><div class="audit-kicker">Test adequacy</div><h2 class="card-title text-2xl">“La suite passa” non significa “i casi d'uso sono coperti”</h2><p class="mt-2 max-w-4xl">Il nuovo workstream collega ogni caso d'uso a requisito, stato, test ed oracle. Misura casi critici mappati, transizioni coperte, mutation score sui moduli importanti, forza degli oracle, flakiness e blocchi ambientali. La line coverage resta soltanto un indicatore.</p><div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 mt-5"><div class="rounded-box bg-base-200 p-4"><b>Use case</b><br><span class="text-sm opacity-70">documentati + impliciti</span></div><div class="rounded-box bg-base-200 p-4"><b>Boundary</b><br><span class="text-sm opacity-70">input limite e partizioni</span></div><div class="rounded-box bg-base-200 p-4"><b>State</b><br><span class="text-sm opacity-70">cross-command e recovery</span></div><div class="rounded-box bg-base-200 p-4"><b>Oracle</b><br><span class="text-sm opacity-70">non solo exit code</span></div></div></div></article>
+    </section>
+
+    <section class="card bg-base-100 audit-card mb-6">
+      <div class="card-body p-5 lg:p-8">
+        <div class="audit-kicker">Condivisione del contesto</div>
+        <h2 class="card-title mt-1 text-2xl">Il manifesto è il contratto tra gli agenti</h2>
+        <div class="grid gap-5 lg:grid-cols-2 mt-5">
+          <div>
+            <h3 class="font-bold">Artefatti intermedi</h3>
+            <div class="mockup-code mt-3 text-xs"><pre data-prefix="$"><code>.scratch/&lt;audit-id&gt;/audit-manifest.json</code></pre><pre data-prefix="$"><code>.scratch/&lt;audit-id&gt;/project-map.md</code></pre><pre data-prefix="$"><code>.scratch/&lt;audit-id&gt;/evidence/index.jsonl</code></pre><pre data-prefix="$"><code>.scratch/&lt;audit-id&gt;/handoffs/&lt;agent&gt;.md</code></pre></div>
+          </div>
+          <div>
+            <h3 class="font-bold">Brief specialista</h3>
+            <ul class="list mt-3 rounded-box bg-base-200 text-sm"><li><code>already_read</code></li><li><code>do_not_reread</code></li><li><code>assigned_files</code> e simboli</li><li><code>allowed_expansion</code></li><li>budget e capability disponibili</li></ul>
+          </div>
+        </div>
+        <div class="divider"></div>
+        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><div class="audit-step" data-step="1"><b>Ownership</b><br><span class="text-sm opacity-70">un lettore principale per simbolo</span></div><div class="audit-step" data-step="2"><b>Boundary overlap</b><br><span class="text-sm opacity-70">riesame solo sulle interfacce</span></div><div class="audit-step" data-step="3"><b>Hash invalidation</b><br><span class="text-sm opacity-70">rileggere solo i nodi cambiati</span></div><div class="audit-step" data-step="4"><b>Evidence IDs</b><br><span class="text-sm opacity-70">sintesi senza duplicati</span></div></div>
+      </div>
+    </section>
+
+    <section class="card bg-base-100 audit-card mb-6">
+      <div class="card-body p-5 lg:p-8">
+        <div class="audit-kicker">Roster</div>
+        <h2 class="card-title mt-1 text-2xl">Chi fa cosa</h2>
+        <div class="overflow-x-auto mt-5"><table class="table table-zebra audit-table"><thead><tr><th>Ruolo</th><th>Responsabilità</th><th>Stato</th></tr></thead><tbody>
+          <tr><th><code>repo-cartographer</code></th><td>Inventario, simboli, grafo, comandi, test, automatismi e ownership.</td><td><span class="badge badge-secondary badge-soft">nuovo</span></td></tr>
+          <tr><th><code>toolchain-evaluator</code></th><td>Verifica CLI, MCP, skill, script, playbook, versioni, permessi, fallback e costo.</td><td><span class="badge badge-secondary badge-soft">nuovo</span></td></tr>
+          <tr><th><code>test-adequacy-analyst</code></th><td>Use-case/test matrix, oracle, transizioni, mutation, fuzz, flakiness.</td><td><span class="badge badge-secondary badge-soft">nuovo</span></td></tr>
+          <tr><th><code>architecture-health-reviewer</code></th><td>Confini, accoppiamento, complessità, source of truth e seam di refactor.</td><td><span class="badge badge-secondary badge-soft">nuovo</span></td></tr>
+          <tr><th><code>maintainability-reviewer</code></th><td>Duplicazioni sintattiche/semantiche, dead code candidato, file e funzioni grandi.</td><td><span class="badge badge-secondary badge-soft">nuovo</span></td></tr>
+          <tr><th><code>automation-control-auditor</code></th><td>Hook, watcher, scheduler, agenti, script e playbook: contratto e failure mode.</td><td><span class="badge badge-secondary badge-soft">nuovo</span></td></tr>
+          <tr><th><code>observability-reviewer</code></th><td>Log, trace, metriche, redazione, cleanup, lock e diagnosi.</td><td><span class="badge badge-secondary badge-soft">nuovo</span></td></tr>
+          <tr><th><code>product-ux-analyst</code></th><td>Comandi, GUI, onboarding, trend, user journey, gap e opportunità.</td><td><span class="badge badge-secondary badge-soft">nuovo</span></td></tr>
+          <tr><th><code>audit-synthesizer</code></th><td>Deduplica, severità, confidenza, dipendenze e refactor map.</td><td><span class="badge badge-secondary badge-soft">nuovo</span></td></tr>
+          <tr><th>Specialisti esistenti</th><td>QA funzionale, mutation, E2E, a11y, performance, security, design, benchmark, docs e watcher.</td><td><span class="badge badge-primary badge-soft">riuso</span></td></tr>
+        </tbody></table></div>
+        <div class="alert alert-info mt-5"><span><strong>Nota:</strong> l'attuale <code>observability-agent</code> può modificare il progetto. Per l'audit serve un ruolo read-only separato.</span></div>
+      </div>
+    </section>
+
+    <section class="card bg-base-100 audit-card mb-6">
+      <div class="card-body p-5 lg:p-8">
+        <div class="audit-kicker">Capability gate</div>
+        <h2 class="card-title mt-1 text-2xl">Tool giusti, soltanto quando servono</h2>
+        <div class="overflow-x-auto mt-5"><table class="table table-zebra audit-table"><thead><tr><th>Categoria</th><th>Capability</th><th>Regola di attivazione</th><th>Prova</th></tr></thead><tbody>
+          <tr><th>Discovery</th><td><code>rg · git · node</code></td><td>Sempre</td><td>versione, root, no segreti</td></tr>
+          <tr><th>Project</th><td><code>npm · cm · runner nativo</code></td><td>Se presenti</td><td>script reali, exit code, isolamento</td></tr>
+          <tr><th>Static</th><td>AST, lint, typecheck, dep graph, duplication</td><td>Se supportati dal progetto</td><td>nessuna installazione implicita</td></tr>
+          <tr><th>Runtime</th><td><code>Docker · Compose · curl</code></td><td>Servizi o integrazioni</td><td>timeout, cleanup, sandbox</td></tr>
+          <tr><th>Browser</th><td>Playwright, <code>chrome-devtools</code>, Agentation</td><td>Frontend reale</td><td>porte isolate, console/rete</td></tr>
+          <tr><th>External</th><td>GitHub, MongoDB, Postman, Stitch</td><td>Contratto dimostrato</td><td>auth, scope, costo, fallback</td></tr>
+        </tbody></table></div>
+        <p class="mt-4 text-sm opacity-65">Un tool assente è <strong>BLOCKED</strong> con fallback esplicito. Non viene sostituito da un comando inventato né da un'installazione nascosta.</p>
+      </div>
+    </section>
+
+    <section class="card bg-base-100 audit-card mb-6">
+      <div class="card-body p-5 lg:p-8">
+        <div class="audit-kicker">Piano di scrittura</div>
+        <h2 class="card-title mt-1 text-2xl">Cinque incrementi, con gate verificabili</h2>
+        <ul class="steps steps-vertical lg:steps-horizontal w-full mt-6">
+          <li class="step step-primary"><span class="text-left"><b>P0 · Contratto</b><br><small>manifest, finding, routing</small></span></li>
+          <li class="step"><span class="text-left"><b>P1 · Discovery</b><br><small>mappa + capability preflight</small></span></li>
+          <li class="step"><span class="text-left"><b>P2 · Playbook</b><br><small>campaign + architecture</small></span></li>
+          <li class="step"><span class="text-left"><b>P3 · Roster</b><br><small>ruoli, prompt, topology</small></span></li>
+          <li class="step"><span class="text-left"><b>P4 · Pilot</b><br><small>Yano + code-mem</small></span></li>
+        </ul>
+        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-5 mt-6 text-sm"><div class="rounded-box bg-base-200 p-4"><b>P0</b><br>La richiesta completa raccomanda <code>audit-campaign</code>; il refactor esplicito resta <code>refactor</code>.</div><div class="rounded-box bg-base-200 p-4"><b>P1</b><br>Manifesto, capability e delega AI/script con hash.</div><div class="rounded-box bg-base-200 p-4"><b>P2</b><br>QA, architecture e product restano separati.</div><div class="rounded-box bg-base-200 p-4"><b>P3</b><br>Nessun agente riceve capability non necessarie.</div><div class="rounded-box bg-base-200 p-4"><b>P4</b><br>Standard prima di medium e deep, misurando il risparmio.</div></div>
+      </div>
+    </section>
+
+    <section class="audit-grid mb-6">
+      <article class="card bg-base-100 audit-card"><div class="card-body"><div class="audit-kicker">Pilot evidence</div><h3 class="card-title">Perché code-mem è il caso giusto</h3><p class="text-sm">Il pilot deve verificare non soltanto nuovi bug, ma se la campagna li assegna all'asse corretto.</p><ul class="list list-disc pl-5 text-sm mt-3"><li>contract drift tra test, docs e CLI;</li><li>dipendenza installata a runtime;</li><li>lock in concorrenza;</li><li>help/behavior mismatch;</li><li>trend e logging insufficienti.</li></ul></div></article>
+      <article class="card bg-base-100 audit-card"><div class="card-body"><div class="audit-kicker">Safety</div><h3 class="card-title">Diagnosi prima, remediation dopo</h3><p class="text-sm">Nessun refactor automatico, nessun log iniettato durante l'audit e nessun ticket trasformato in codice senza una decisione separata.</p><div class="alert alert-warning mt-4 text-sm"><span>Il risultato è un report tracciabile, non un “verde” ottenuto riducendo i test.</span></div></div></article>
+    </section>
+
+    <footer class="rounded-box bg-neutral text-neutral-content p-5 lg:p-7">
+      <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"><div><div class="audit-kicker text-warning">Next safe action</div><h2 class="text-2xl font-bold mt-1">Implementare P0 + P1 in worktree separato</h2><p class="mt-2 opacity-75">Prima routing e manifesto; poi una campagna standard su code-mem. Solo dopo si attivano medium e deep.</p></div><span class="badge badge-warning badge-lg self-start lg:self-center">proposta pronta per review</span></div>
+    </footer>
+  </main>
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.15.0/dist/mermaid.esm.min.mjs";
+    const darkQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    const diagrams = [...document.querySelectorAll(".mermaid")];
+    diagrams.forEach((el) => { el.dataset.source = el.textContent; });
+    let rendering = false;
+    let queued = false;
+    async function render() {
+      queued = true;
+      if (rendering) return;
+      rendering = true;
+      try {
+        while (queued) {
+          queued = false;
+          mermaid.initialize({ startOnLoad: false, theme: darkQuery.matches ? "dark" : "default", securityLevel: "strict" });
+          for (const el of diagrams) { el.removeAttribute("data-processed"); el.textContent = el.dataset.source; }
+          await mermaid.run({ nodes: diagrams });
+        }
+      } finally { rendering = false; }
+    }
+    window.addEventListener("load", render, { once: true });
+    darkQuery.addEventListener("change", render);
+  </script>
+</body>
+</html>

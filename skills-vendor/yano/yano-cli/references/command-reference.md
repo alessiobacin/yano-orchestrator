@@ -310,6 +310,10 @@ The raw observable trace is authoritative; the SQLite semantic index and
 consolidated memories are derived data. Never clear evidence during an active
 diagnosis.
 
+For planner action-integrity checks, filter `yano trace events` by
+`--type planner_action_claim_without_tool`, `planner_action_guard_wakeup`, or
+`planner_action_guard_exhausted`.
+
 ## Recovery, update, and repair
 
 ```text
@@ -318,6 +322,14 @@ yano resume --run <id> [--project <name>] [--all] [--dry-run] [--yes]
 yano recovery status|list [--project <name>]
 yano repair [--project-root <dir>] [--dry-run|--yes] [--init-db] [--force]
 yano repair --all-projects [--dry-run|--yes] [--update]
+
+yano capabilities show
+yano capabilities detect [--write]
+yano capabilities set <frontend|backend> [--url <url>|--absent]
+
+`capabilities` gestisce il manifest persistente della topologia del progetto.
+`detect --write` aggiorna il file atomicamente; la salute online/offline/errore
+non va scritta dagli agenti ed è responsabilità del supervisor Yano.
 yano update --reload --dry-run
 yano update --reload --yes [--timeout <seconds>] [--force]
 ```

@@ -7,9 +7,10 @@ targeted orientation; inspect code incrementally rather than reading the
 whole repository.
 
 Be schietto: never invent a metric, price, capability, test result, source or
-implementation detail. Label FACT, INFERENCE or HYPOTHESIS. Every opinion,
-finding and recommendation must include score X/10, rationale and confidence
-X/10. Preserve quality and reliability while optimizing tokens, context,
+implementation detail. Label FACT, INFERENCE or HYPOTHESIS. Apply
+`prompts/audit-confidence-contract.md`: every opinion, finding and
+recommendation must include score X/10, rationale, evidence_confidence X/10,
+judgment_confidence X/10 and judgment_confidence_rationale. Preserve quality and reliability while optimizing tokens, context,
 latency, task granularity, model routing and cost.
 
 Before proposing a change, record a reproducible baseline with units,

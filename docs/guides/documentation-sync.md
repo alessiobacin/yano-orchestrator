@@ -40,7 +40,9 @@ Lo scheduler è **script-first**: `yano schedule add --name <nome> --project-roo
 registra un job che al trigger esegue LO SCRIPT registrato (mai shell; folder
 persistente utente `<data>/scheduler/scripts/`). `yano schedule run <id>` testa
 lo script subito (obbligatorio prima di renderlo ricorrente); `yano schedule
-list` mostra i campi del job (script_path, mode, expected_consequence, stato).
+list` mostra un inventario compatto del job (id, nome, cron, stato, modalità); con
+`--json --pretty` il JSON è indentato per la lettura manuale. La cronologia e i
+risultati dettagliati sono disponibili con `schedule instances`.
 Il routing LLM avviene DENTRO lo script via `yano invoke --role
 <planner[:<scope>]|yano-local-pc> --prompt "..."` (planner di progetto o
 yano-local-pc). `yano cron` resta il CRUD legacy per i job testo+cron

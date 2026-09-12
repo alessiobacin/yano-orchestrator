@@ -162,6 +162,33 @@ function requireValue(argv, flag) { return value(argv, flag) || fail(`${flag} ri
 function idPart(value) { return String(value).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "job"; }
 function executionId(job, now) { return `scheduled-${idPart(job.id)}-${now.toISOString().replace(/[^0-9]/g, "").slice(0, 12)}-${randomUUID().slice(0, 8)}`; }
 function runHistory(job) { if (!Array.isArray(job.instances)) job.instances = []; return job.instances; }
+
+// `schedule list` is a user-facing inventory, not a persistence/debug dump.
+// Keep execution history and nested command output behind `instances`; leaking
+// those fields here made three scheduled jobs expand into hundreds of lines.
+export function scheduleSummary(job) {
+	return {
+		id: job.id,
+		name: job.name,
+		cron: job.cron,
+		enabled: job.enabled !== false,
+		mode: job.mode || "legacy",
+		project: job.project_root ? path.basename(job.project_root) : null,
+	};
+}
+
+function printScheduleList(jobs, json, pretty = false) {
+	const summaries = jobs.map(scheduleSummary);
+	if (json) {
+		console.log(JSON.stringify(summaries, null, pretty ? 2 : 0));
+		return summaries;
+	}
+	for (const job of summaries) {
+		const state = job.enabled ? "attivo" : "disabilitato";
+		console.log(`${job.enabled ? "✓" : "–"} ${job.id} · ${job.name} · ${job.cron} · ${state} · ${job.mode}${job.project ? ` · ${job.project}` : ""}`);
+	}
+	return summaries;
+}
 // "self" jobs run synchronously and produce their outcome via exit code alone
 // — there is no further async acknowledgement to wait for. Recording their
 // success as "dispatched" (a PENDING state meant for planner:/yano-local-pc
@@ -587,7 +614,7 @@ function usage() {
 		"      Registra uno schedule che esegue LO SCRIPT registrato; --once = una sola esecuzione (poi si disabilita).",
 		"  add-natural: sintassi storica testo+cron (job legacy, dispatch planner come in passato).",
 		"  run --id <id> [--json]      Esegue LO SCRIPT registrato subito (test prima di renderlo ricorrente).",
-		"  list [--json]               Mostra i job con script_path, mode, expected_consequence e stato.",
+		"  list [--json] [--pretty]     Mostra una riga breve per job; --pretty formatta il JSON.",
 		"  instances --id <job-id> [--limit N] [--json]  Mostra le ultime istanze e il loro status.",
 		"  retry --id <instance-id> [--json]              Ripete un dispatch e collega retry_of.",
 		"  remove|enable|disable --id <id>",
@@ -617,7 +644,7 @@ async function spawnBridge() {
 }
 
 export async function runYanoScheduler({ argv, env = process.env, now = new Date(), spawn = spawnSync } = {}) {
-	const [sub, ...rest] = argv; const json = rest.includes("--json");
+	const [sub, ...rest] = argv; const json = rest.includes("--json"); const pretty = rest.includes("--pretty");
 	// Test-only injectable spawn: the bridge module exports the fake spawn.
 	if (!spawn || spawn === spawnSync) spawn = (await spawnBridge()) || spawnSync;
 	if (!sub || sub === "--help" || sub === "-h") { usage(); return; }
@@ -657,7 +684,10 @@ export async function runYanoScheduler({ argv, env = process.env, now = new Date
 		const { file, store } = readStore(env);
 		store.jobs.push(draft); writeStore(file, store);
 		result = { created: draft, cron: schedulerCronInstall({ spawn }) };
-	} else if (sub === "list") result = readStore(env).store.jobs;
+	} else if (sub === "list") {
+		result = printScheduleList(readStore(env).store.jobs, json, pretty);
+		return result;
+	}
 	else if (sub === "instances") {
 		const { store } = readStore(env); const scheduleId = value(rest, "--id") || value(rest, "--schedule-id");
 		const limitRaw = value(rest, "--limit"); const limit = limitRaw === null ? 20 : Number(limitRaw);

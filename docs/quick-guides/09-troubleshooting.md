@@ -47,6 +47,24 @@ Se l'istanza è realmente scomparsa, il planner deve rilanciarla con 'yano
 start' nella tab Herdr corretta. Non aprire una seconda istanza con lo stesso
 nome.
 
+## Il planner annuncia un test ma non lo esegue
+
+Controlla se l'ultimo messaggio del planner contiene una promessa operativa
+senza una `tool_call`:
+
+~~~
+yano trace events --project yano-orchestrator --instance planner-01 \
+  --type planner_action_claim_without_tool --limit 20 --json
+yano trace events --project yano-orchestrator --instance planner-01 \
+  --type planner_action_guard_wakeup --limit 20 --json
+~~~
+
+Yano mantiene il task non completato e riattiva il planner con un follow-up
+correttivo (al massimo due tentativi per lo stesso messaggio). Se compare
+`planner_action_guard_exhausted`, controlla anche `yano doctor --network` e
+`yano fleet --project-root "$PWD" --json`: indica che il modello ha continuato
+a non chiamare il tool, non un risultato positivo del test.
+
 ## yano init rifiuta una directory non vuota
 
 Per una repository applicativa esistente esegui il comando dalla sua root:

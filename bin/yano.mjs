@@ -105,6 +105,7 @@ import { runYanoAgentMcp } from "../scripts/yano-agent-mcp.mjs";
 import { runFrontendReview } from "../scripts/yano-frontend-review.mjs";
 import { runYanoMemory } from "../scripts/yano-memory-cli.mjs";
 import { runYanoApi } from "../scripts/yano-api-registry.mjs";
+import { capabilitiesPath, detectCapabilities, readCapabilities, syncCapabilities, writeCapabilities } from "../scripts/yano-capabilities.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, "..");
@@ -162,6 +163,7 @@ function printTopUsage() {
 			"  services [opzioni] Registro servizi esterni (Docker/pm2/comando) con health-check e restart deterministico — `yano services --help`",
 			"  api discover|list|show|add|verify|refresh|update|delete  REST API da Postman/OpenAPI — `yano api --help`",
 			"  test-env allocate|show|release  Alloca porte isolate per E2E/review in un worktree",
+			"  capabilities show|detect|set  Gestisce la topologia frontend/backend dichiarata del progetto",
 			"  data path|usage|migrate  Misura o migra il data-root globale — `yano data --help`",
 			"  pause [opzioni]  Salva uno snapshot non distruttivo e mette in pausa i run",
 			"  resume [opzioni] Ripristina uno snapshot e riapre gli agenti mancanti",
@@ -193,6 +195,32 @@ async function main() {
 	if (sub === "init") {
 		await runCreateProject({ packageRoot, cwd, argv: rest });
 		return;
+	}
+	if (sub === "capabilities") {
+		const action = rest[0] || "show";
+		if (action === "show") {
+			console.log(JSON.stringify(readCapabilities(cwd) || { path: capabilitiesPath(cwd), status: "missing" }, null, 2));
+			return;
+		}
+		if (action === "detect" && rest.includes("--write")) {
+			console.log(JSON.stringify(syncCapabilities(cwd), null, 2));
+			return;
+		}
+		if (action === "detect") {
+			console.log(JSON.stringify(detectCapabilities(cwd), null, 2));
+			return;
+		}
+		if (action === "set" && ["frontend", "backend"].includes(rest[1])) {
+			const kind = rest[1];
+			const existing = readCapabilities(cwd) || detectCapabilities(cwd);
+			const absent = rest.includes("--absent");
+			const urlIndex = rest.indexOf("--url");
+			const url = urlIndex >= 0 ? rest[urlIndex + 1] : null;
+			const component = absent ? { present: false, source: "planner", confidence: "confirmed" } : { ...(existing.components?.[kind] || {}), present: true, ...(url ? { url } : {}), source: "planner", confidence: "confirmed" };
+			console.log(JSON.stringify(writeCapabilities(cwd, { ...existing, components: { ...existing.components, [kind]: component } }), null, 2));
+			return;
+		}
+		throw new Error("Uso: yano capabilities show|detect [--write]|set <frontend|backend> [--url URL|--absent]");
 	}
 	if (sub === "start") {
 		runLaunchPlanner({ packageRoot, cwd, argv: rest });

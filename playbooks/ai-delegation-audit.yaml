@@ -1,0 +1,60 @@
+schema_version: 1
+id: ai-delegation-audit
+label: AI versus deterministic delegation audit
+description: >-
+  Reviews an agent workflow step by step and identifies work that can be moved
+  to deterministic scripts or bounded tools. It preserves AI for interpretation,
+  trade-offs and ambiguous semantics, and requires measurements before claiming
+  token, latency or quality savings.
+catalog:
+  scope: global
+  reusable: true
+  intents: [AI efficiency audit, token reduction, deterministic delegation, agent workflow optimization, LLM cost audit]
+  exclusions: [unmeasured savings claims, hidden reasoning capture, unsafe automation]
+  parameters: [project_root, variant, input_manifest, input_trace, campaign_id, chapter_id]
+requirements:
+  cli: [node, git, yano]
+  skills: [yano-cli, yano-planner-trace-analysis]
+team:
+  strategy: deterministic classification, trace-backed measurement, guarded delegation recommendations
+  default_variant: medium
+  roles:
+    - {id: repo-cartographer, purpose: Map workflow steps, scripts, tools and playbook transitions., outputs: [workflow-map], write_scope: [chapter-report-only], capabilities: [node, git]}
+    - {id: delegation-efficiency-auditor, purpose: Classify steps as D0, D1 or AI and define safe postconditions., outputs: [delegation-map], write_scope: [chapter-report-only], capabilities: [node, git, yano]}
+    - {id: observability-reviewer, purpose: Check whether timing, token, model and retry data are observable enough to measure savings., outputs: [measurement-gaps], write_scope: [chapter-report-only], capabilities: [node, git, yano]}
+  variants:
+    - {id: standard, roles: [repo-cartographer, delegation-efficiency-auditor], parallel_groups: [[delegation-efficiency-auditor]]}
+    - {id: medium, roles: [repo-cartographer, delegation-efficiency-auditor, observability-reviewer], parallel_groups: [[delegation-efficiency-auditor, observability-reviewer]]}
+    - {id: deep, roles: [repo-cartographer, delegation-efficiency-auditor, observability-reviewer], parallel_groups: [[delegation-efficiency-auditor, observability-reviewer]]}
+contract:
+  execution: workflow_inventory_then_deterministic_classification_then_measurement_review
+  checkpoint: every_workflow_stage_and_candidate
+  evidence: [workflow_step, current_actor, current_tool, input_shape, output_shape, determinism, semantic_risk, trace_reference, baseline_measurement, proposed_postcondition, confidence, evidence_confidence, judgment_confidence, judgment_confidence_rationale, resource_record]
+  report_sections: [scope, workflow_map, D0_candidates, D1_candidates, AI_required_steps, measurement_baseline, safe_migrations, risks, experiment_plan, resource_accounting]
+  budgets: {max_commands: 160, max_files: 450, max_minutes: 75, max_tokens: 24000}
+  verification: {mode: trace_backed_script_first_analysis, required: true}
+  recovery: [resume_from_trace_checkpoint, mark_unmeasured_unknown, preserve_baseline, planner_handoff]
+states:
+  - {id: received, owner: planner, terminal: false}
+  - {id: mapped, owner: repo-cartographer, terminal: false}
+  - {id: classified, owner: delegation-efficiency-auditor, terminal: false}
+  - {id: measured, owner: observability-reviewer, terminal: false}
+  - {id: completed, owner: planner, terminal: true}
+  - {id: blocked, owner: planner_and_human, terminal: true}
+transitions:
+  - {id: map, from: received, to: mapped, actor: repo-cartographer, requires: [scope_confirmed]}
+  - {id: classify, from: mapped, to: classified, actor: delegation-efficiency-auditor, requires: [workflow_map_persisted]}
+  - {id: measure, from: classified, to: measured, actor: observability-reviewer, requires: [candidates_and_baseline_requested]}
+  - {id: complete, from: measured, to: completed, actor: planner, requires: [postconditions_defined, unknowns_explicit, resource_ledger_persisted]}
+  - {id: block, from: [mapped, classified, measured], to: blocked, actor: planner_and_human, requires: [blocker_recorded]}
+failure_routes:
+  - {condition: provider_usage_unavailable, action: mark_token_fields_unknown_and_keep_wall_clock_if_available, terminal: false}
+  - {condition: deterministic_script_changes_semantics, action: retain_AI_gate_and_define_human_review, terminal: false}
+  - {condition: baseline_not_reproducible, action: do_not_claim_savings_and_propose_instrumentation, terminal: false}
+invariants:
+  - {id: D0_script_first, description: Inventory, parsing, counting, hashing, linting and aggregation are deterministic wherever possible.}
+  - {id: semantic_gate, description: Human expectation, product value and ambiguous behavior remain with a specialist or human gate.}
+  - {id: measurable_savings_only, description: Token or time savings are reported only with a baseline, measurement source and confidence.}
+  - {id: safe_postconditions, description: Every proposed migration names preconditions, postconditions, fallback and rollback.}
+  - {id: resource_accounting, description: The audit itself records measured versus estimated versus unknown resource data.}
+  - {id: dual_confidence, description: Measurement evidence confidence is separate from the auditor's confidence that delegation is safe and useful.}

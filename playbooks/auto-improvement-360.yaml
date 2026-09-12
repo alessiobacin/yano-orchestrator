@@ -15,6 +15,10 @@ catalog:
     - UX review
     - feature roadmap
     - full-stack audit
+    - product and UX audit
+    - GUI usability and data visualization review
+    - command ergonomics and missing options
+    - competitor and market-gap analysis
   exclusions:
     - project implementation
     - dependency installation
@@ -30,8 +34,8 @@ enforcement:
 contract:
   execution: sequential
   checkpoint: every_phase_before_next_phase
-  evidence: [scope, source, command, exit_code, output, classification, score, confidence, limitation]
-  report_sections: [executive_summary, evidence, findings, scored_recommendations, duplicates, gaps, handoff]
+  evidence: [scope, source, command, exit_code, output, classification, score, confidence, evidence_confidence, judgment_confidence, judgment_confidence_rationale, limitation]
+  report_sections: [executive_summary, evidence, findings, scored_recommendations, product_ux_market, command_ergonomics, gui_and_data_views, competitor_comparison, duplicates, gaps, resource_accounting, handoff]
   budgets: {max_commands: 120, max_files: 300, max_minutes: 90, max_tokens: 24000}
   verification: {mode: bounded_read_only_audit, required: true}
   recovery: [resume_from_last_checkpoint, preserve_previous_report, bounded_retry, planner_handoff_on_block]
@@ -76,7 +80,7 @@ invariants:
   - {id: read_only_project, description: The auto-improver never mutates the observed project.}
   - {id: sequential_checkpoints, description: Each phase persists its checkpoint before the next phase starts.}
   - {id: no_invention, description: Unknown facts remain explicitly unknown and are never presented as findings.}
-  - {id: every_opinion_scored, description: Every opinion, finding and recommendation has score X/10, rationale and confidence X/10.}
+  - {id: every_opinion_scored, description: Every opinion, finding and recommendation has score X/10, rationale, evidence_confidence X/10, judgment_confidence X/10 and a short judgment-confidence rationale.}
   - {id: evidence_classified, description: Every conclusion is FACT, INFERENCE or HYPOTHESIS with references or a stated limitation.}
   - {id: existing_improvements_reviewed, description: Previous improvement reports are indexed before proposing new work.}
   - {id: no_duplicate_recommendations, description: Duplicate and superseded proposals are marked and excluded from the new action list.}

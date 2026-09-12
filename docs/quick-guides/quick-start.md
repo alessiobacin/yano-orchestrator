@@ -195,6 +195,12 @@ Per ogni task di sviluppo il planner passa dalla skill `/to-tickets` dopo la
 spec: propone slice verticali, criteri di accettazione e dipendenze, chiede se
 la granularità è corretta e solo dopo importa i ticket approvati in SQLite/DAG.
 
+Se il planner annuncia un controllo operativo (per esempio “ora lancio il
+test”) senza chiamare un tool nello stesso turno, l'estensione registra
+`planner_action_claim_without_tool`, non pubblica il completamento e invia un
+follow-up correttivo. L'esito del controllo deve quindi comparire nel turno
+successivo, non restare una promessa.
+
 ## 5. Controlla il lavoro
 
 Da un altro terminale puoi usare viste read-only:
@@ -299,6 +305,15 @@ yano status --project mio-progetto
 yano fleet --project mio-progetto
 yano logs --project mio-progetto
 yano trace events --project mio-progetto --follow
+```
+
+Per controllare questo caso specifico:
+
+```bash
+yano trace events --project mio-progetto --instance planner-01 \
+  --type planner_action_claim_without_tool --limit 20 --json
+yano trace events --project mio-progetto --instance planner-01 \
+  --type planner_action_guard_wakeup --limit 20 --json
 ```
 
 SQLite mantiene run, ticket, dipendenze, evidenze e stato di recupero; il trace

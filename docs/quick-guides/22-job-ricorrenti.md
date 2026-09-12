@@ -71,7 +71,8 @@ in modo durevole (il bootstrap non lo riabilita mai da solo).
 ```bash
 yano schedule run --id <job-id> --dry-run --json # valida senza eseguire
 yano schedule run --id <job-id>        # esegue subito SOLO su richiesta esplicita
-yano schedule list --json         # job con script_path, mode, expected_consequence, stato
+yano schedule list                # inventario compatto con ID, nome, cron, stato, modalità
+yano schedule list --json --pretty # inventario JSON indentato per lettura manuale
 yano schedule disable --id <job-id>
 yano schedule enable --id <job-id>
 yano schedule remove --id <job-id>

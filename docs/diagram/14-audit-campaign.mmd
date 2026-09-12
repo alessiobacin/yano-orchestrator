@@ -1,0 +1,28 @@
+flowchart TD
+    USER["User"] --> P["Planner\nscope + variant + budget"]
+    P --> M["audit-manifest.mjs\nD0 deterministic discovery\nrun once"]
+    M --> C["Shared manifest\nfiles / commands / tests / tools / docs"]
+    C --> T["Toolchain readiness\nCLI / MCP / skills / playbooks"]
+    C --> Q["QA + test adequacy\nuse cases / expected behavior\nnegative + cross-command"]
+    C --> A["Architecture health\nboundaries / coupling / duplication\nlarge files / dead-code candidates"]
+    C --> O["Automation + observability\nretries / timeouts / logs / trace"]
+    C --> X["Product + UX + market\ncommands / GUI / data views / competitors"]
+    C --> D["AI delegation\nD0 / D1 / AI\nscript opportunities"]
+    T --> R["Dependent chapters\nonly after prerequisites"]
+    Q --> R
+    A --> R
+    O --> R
+    X --> R
+    D --> R
+    R --> S["Audit synthesizer\ndeduplicate + preserve conflicts"]
+    S --> I["Implementation DAG\norder / dependencies / parallel work"]
+    I --> H["Human approval\nremediation scope"]
+    H --> V["Coder + reviewer\nworktree + tests"]
+    V --> F["Full relevant rerun\nclose only with evidence"]
+    M -.-> L["resource ledger\nmodel / rounds / time / tokens\nmeasured or unknown"]
+    T -.-> L
+    Q -.-> L
+    A -.-> L
+    O -.-> L
+    X -.-> L
+    D -.-> L

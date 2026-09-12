@@ -9,7 +9,8 @@ yano schedule add --name backuppone-shot --project-root "$PWD" --script <path> -
 yano schedule run <job-id>
 
 # Gestione
-yano schedule list --json            # script_path, mode, expected_consequence, stato
+yano schedule list                   # inventario compatto con ID, nome, cron, stato, modalità
+yano schedule list --json --pretty   # inventario JSON indentato per lettura manuale
 yano schedule instances --id <job-id> --limit 20 --json  # ultime istanze e status
 yano schedule retry --id <instance-id> --json             # retry manuale dell'istanza
 yano schedule disable --id <job-id>

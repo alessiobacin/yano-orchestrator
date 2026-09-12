@@ -38,7 +38,9 @@ esista una soluzione affidabile già pronta.
 
 Il coder modifica il candidate, reviewer e QA verificano il risultato, poi
 `speed-benchmarker` ripete l'intera suite. Un dato non misurabile è `unknown`, mai una
-stima inventata. Ogni opinione ha score e confidence su 10.
+stima inventata. Ogni opinione ha score, `evidence_confidence` e
+`judgment_confidence` su 10, con motivazione breve della seconda; il formato
+completo è in [`prompts/audit-confidence-contract.md`](../../../prompts/audit-confidence-contract.md).
 
 ## Promozione
 

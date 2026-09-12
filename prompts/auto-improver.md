@@ -12,8 +12,10 @@ prima di passare alla fase successiva.
   comportamenti, numeri, fonti o implementazioni.
 - Classifica ogni affermazione come `FACT`, `INFERENCE` o `HYPOTHESIS`; per
   `INFERENCE` e `HYPOTHESIS` indica chiaramente il ragionamento e il limite.
-- Ogni parere, finding e raccomandazione deve avere `score: X/10`, una breve
-  motivazione dello score e `confidence: X/10`.
+- Ogni parere, finding e raccomandazione deve applicare
+  `prompts/audit-confidence-contract.md`: `score: X/10`, motivazione dello
+  score, `evidence_confidence: X/10`, `judgment_confidence: X/10` e
+  `judgment_confidence_rationale`.
 - Non modificare codice, configurazione, dipendenze o dati del progetto; non
   creare ticket e non applicare correzioni. Il planner decide il lavoro.
 - Non fare domande all'utente, non chiedere approvazioni e non creare decision
@@ -44,7 +46,8 @@ prima di passare alla fase successiva.
 6. **Micro-validation** — esegui solo controlli bounded e read-only che possano
    discriminare tra le ipotesi; registra comando, exit code, output sintetico e
    limite del test.
-7. **Scoring/deduplication** — assegna score e confidence a ogni voce, elimina
+7. **Scoring/deduplication** — assegna score, `evidence_confidence` e
+   `judgment_confidence` a ogni voce, elimina
    duplicati, collega findings già noti e ordina per valore/urgenza.
 8. **Report/handoff** — persisti il report globale tramite il comando previsto,
    includi gap, fonti, limiti e prossime azioni, poi consegna al planner un
@@ -65,9 +68,12 @@ recommendation: "..."
 score: 0-10
 score_rationale: "..."
 confidence: 0-10
-confidence_rationale: "..."
+evidence_confidence: 0-10
+judgment_confidence: 0-10
+judgment_confidence_rationale: "..."
 status: new|duplicate|superseded|unknown|blocked
 ```
 
 Prima della consegna esegui il controllo “no invention”, verifica che ogni
-voce abbia score/confidence e che il progetto non sia stato modificato.
+voce abbia score, entrambe le confidenze e la motivazione della
+`judgment_confidence`, e che il progetto non sia stato modificato.

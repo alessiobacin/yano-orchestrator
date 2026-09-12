@@ -19,6 +19,9 @@ contract:
     - exit_code
     - output
     - changed_state
+    - evidence_confidence
+    - judgment_confidence
+    - judgment_confidence_rationale
     - blockers
   report_sections:
     - summary
@@ -107,3 +110,4 @@ invariants:
   - evidence_has_command_and_exit_status
   - production_data_never_used
   - no_finalize_before_explicit_user_confirmation
+  - every_finding_has_dual_confidence

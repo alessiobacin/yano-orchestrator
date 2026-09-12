@@ -13,6 +13,12 @@ flowchart TD
     CLI --> REPAIR_ALL["repair --all-projects\nsequential global sweep"]
     CLI --> GLOBAL_CONFIG["Global config.env\nmanaged by `yano config`\ncredentials + runtime defaults"]
     CLI --> CLI_SKILL["yano-cli\nshared Pi-agent command contract\nsemantic intent → scoped CLI"]
+    CLI --> AUDIT_CAMPAIGN["audit-campaign\nstandard / medium / deep\nchapter DAG + implementation DAG"]
+    AUDIT_CAMPAIGN --> AUDIT_MANIFEST["audit-manifest.mjs\nshared deterministic discovery"]
+    AUDIT_CAMPAIGN --> AUDIT_CHAPTERS["QA / test adequacy\narchitecture / maintainability\ntoolchain / automation / product / AI delegation"]
+    AUDIT_MANIFEST --> AUDIT_CHAPTERS
+    AUDIT_CHAPTERS --> AUDIT_SYNTHESIS["audit-synthesizer\ncross-review + prioritization"]
+    AUDIT_SYNTHESIS --> AUDIT_LEDGER["resource ledger\ntime / turns / model / tokens\nmeasured or unknown"]
     INIT --> CODE_MEM_INIT["cm init pi\nrequired local-memory bootstrap"]
     PLANNER --> PROJECT_SCAN["light project scan\nmanifest / structure / entrypoints / docs"]
     PROJECT_SCAN --> PROJECT_MEMORY["project.md\nbounded shared summary\ncreated only when missing"]
@@ -66,6 +72,10 @@ flowchart TD
     PLANNER <--> COMMANDS
     PLANNER <--> RESPONSES
     PLANNER --> EVENTS
+    PLANNER --> ACTION_GUARD["planner action guard\nclaim without observable toolCall"]
+    ACTION_GUARD -->|missing tool call| ACTION_WAKE["corrective follow-up\nmax 2; completion stays pending"]
+    ACTION_GUARD --> TRACE
+    ACTION_WAKE --> PLANNER
 
     subgraph WORKERS["Worker instances"]
         CODER["coder"]
@@ -105,12 +115,15 @@ flowchart TD
 
     subgraph GLOBAL_TRACE["Global Yano per-user data root (platform default or YANO_DATA_DIR)"]
         TRACE["traces/<project-key>/events\nJSONL forensic trace\nevents / standard / full\ncontext_usage per agent"]
+        AUDIT_LEDGER_STORE["audit ledger\nby campaign_id + chapter_id\nD0/D1/AI resource split"]
         TRACE_ANALYSIS["feedback / summaries / opinions\nfiltered context + cross-project overview"]
         TRACE_INDEX["semantic-index.sqlite\ntrace_documents + Ollama embeddings\nhybrid filtered search"]
         TRACE_MEMORY["trace_memories\nepisodic failures/opinions/summaries\nsystemic recurring patterns"]
         TRACE_LINKS["trace_memory_links + context\nprovenance / causal evidence links"]
         PROJECTIONS["projections/\nplanner-context.json\nrecurring-failures.md"]
-        TRACE_CONFIG["tracing.json\nper-project mode"]
+    TRACE_CONFIG["tracing.json\nper-project mode"]
+    AUDIT_LEDGER --> AUDIT_LEDGER_STORE
+    TRACE --> AUDIT_LEDGER_STORE
         DATA_DEFAULT["macOS: ~/Library/Application Support/yano/data\nLinux: ~/.local/share/yano\nWindows: %LOCALAPPDATA%/yano/data"]
     end
 

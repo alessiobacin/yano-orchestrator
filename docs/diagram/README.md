@@ -39,6 +39,9 @@ cartella contiene viste più piccole, utili durante diagnosi e onboarding:
 - [`13-scheduler-dispatch-dedup.mmd`](./13-scheduler-dispatch-dedup.mmd) — il
   fix del duplicate-fire (self-mode sincrono, tetto sui retry asincroni
   stantii).
+- [`14-audit-campaign.mmd`](./14-audit-campaign.mmd) — discovery condivisa,
+  capitoli QA/architettura/prodotto/toolchain/automazione, DAG di audit e DAG
+  d'implementazione con resource ledger.
 
 I file `.mmd` sono sorgenti Mermaid: possono essere aperti in VS Code con una
 preview Mermaid o renderizzati con uno strumento Mermaid compatibile.

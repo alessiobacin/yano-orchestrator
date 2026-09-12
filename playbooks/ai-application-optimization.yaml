@@ -17,7 +17,7 @@ enforcement:
 contract:
   execution: sequential
   checkpoint: every_state_transition
-  evidence: [scope, source, command, exit_code, output, metric, score, confidence, limitation]
+  evidence: [scope, source, command, exit_code, output, metric, score, confidence, evidence_confidence, judgment_confidence, judgment_confidence_rationale, limitation]
   report_sections: [summary, baseline, findings, experiments, before_after, cost, risks, handoff]
   budgets: {max_commands: 120, max_files: 250, max_minutes: 90, max_tokens: 24000}
   verification: {mode: benchmark_and_regression_audit, required: true}
@@ -53,7 +53,7 @@ failure_routes:
   - {condition: model_catalog_unavailable, action: use_known_catalog_only_and_mark_unknowns, terminal: false}
 invariants:
   - {id: no_invention, description: Unknown metrics, prices, capabilities and quality remain explicitly unknown.}
-  - {id: every_opinion_scored, description: Every finding and recommendation has score X/10, rationale and confidence X/10.}
+  - {id: every_opinion_scored, description: Every finding and recommendation has score X/10, rationale, evidence_confidence X/10, judgment_confidence X/10 and a short judgment-confidence rationale.}
   - {id: quality_before_cost, description: Token or cost reduction cannot be accepted when measured quality regresses without explicit approval.}
   - {id: bounded_context, description: Read project memory and code-mem orientation first; inspect source incrementally and only as needed.}
   - {id: cross_command_effects, description: Re-run affected commands and workflows after changing shared prompts, routing, schemas or caching.}

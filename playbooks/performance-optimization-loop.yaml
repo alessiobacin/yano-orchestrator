@@ -31,7 +31,7 @@ enforcement:
 contract:
   execution: sequential
   checkpoint: every_round_and_state_transition
-  evidence: [scope, parameters, worktrees, commands, exit_code, repetitions, metric, score, confidence, limitation]
+  evidence: [scope, parameters, worktrees, commands, exit_code, repetitions, metric, score, confidence, evidence_confidence, judgment_confidence, judgment_confidence_rationale, limitation]
   report_sections: [summary, parameters, baseline, candidate, bottleneck, change, before_after, quality, tokens, cost, tests, decision, risks, next_round]
   budgets: {max_commands: 180, max_files: 300, max_minutes: 180, max_tokens: 30000}
   verification: {mode: repeated_benchmark_with_quality_guard, required: true}
@@ -75,7 +75,7 @@ invariants:
   - {id: quality_before_speed, description: A faster candidate is rejected when output quality, correctness, reliability or security regresses.}
   - {id: token_and_context_efficiency, description: Token count, context size and reasoning/tool overhead are first-class metrics alongside latency and cost.}
   - {id: no_invention, description: Missing benchmark, quality or cost evidence is reported as unknown and never fabricated.}
-  - {id: every_opinion_scored, description: Every bottleneck hypothesis, recommendation and risk has score X/10 and confidence X/10.}
+  - {id: every_opinion_scored, description: Every bottleneck hypothesis, recommendation and risk has score X/10, evidence_confidence X/10, judgment_confidence X/10 and a short judgment-confidence rationale.}
   - {id: promote_large_gain, description: A measured improvement >= promotion_threshold is promoted immediately.}
   - {id: promote_plateau, description: "Improvements in [stagnation_threshold, promotion_threshold) are retried for plateau_rounds; after that count the latest candidate becomes the baseline."}
   - {id: stop_low_gain, description: Improvements <= stagnation_threshold for stagnation_rounds consecutive rounds promote the latest improvement as final baseline and stop the loop.}

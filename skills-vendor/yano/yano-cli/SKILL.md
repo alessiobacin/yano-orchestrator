@@ -56,6 +56,8 @@ Use the smallest command that answers the request. Typical translations are:
 | Open the Gantt for this project | `yano gantt --project-root "$PWD" --persistent --open` | URL and automatically selected free port in `10000-19999` |
 | Recover the current or all persistent Gantt links | `yano gantt --link --json` or `yano gantt --links --json` | registered URL, project root and live/stopped status |
 | Is Yano ready? | `yano doctor --network` and `yano deps --json` | broker, Git, Pi, CLI, credentials and capability checks |
+| Run a complete QA/product/architecture audit | `yano architect assess --task "..." --json` then `yano playbook show audit-campaign --json` | recommended campaign, variant, chapter roles, capability gaps and dual confidence fields (`evidence_confidence`/`judgment_confidence`) |
+| Check whether AI work can become a script | `node scripts/audit-delegation.mjs --manifest audit-manifest.json` | D0/D1/AI classification, postconditions and measurement plan |
 | Initialize a new or existing repository | `yano init --name "<name>"` (or `--no-git` for a conversation-only folder) | Requires `cm`; initializes Code Mem with `cm init pi`, then preserves application files while adding missing Yano infrastructure |
 | Initialize and open Herdr with planner | `yano init --name "<name>" --herdr` | Herdr workspace, root pane, and `planner-01` launch |
 | Start an agent in Herdr | `yano start --herdr --instance <id> --role <role>` | verifies workspace label + project root before tab creation |
@@ -68,6 +70,7 @@ Use the smallest command that answers the request. Typical translations are:
 | Investigate a specific failure | `yano trace context ... --json`, then `yano trace search ... --mode hybrid --json` | filtered evidence before broad history |
 | Pause and resume work | `yano pause ... --yes`, then `yano resume ... --yes` | checkpoint, assignments, missing agents; never use `end` as pause |
 | Reconcile stale or missing agents | `yano repair --dry-run`, then `yano repair --yes` | proposed snapshot/restart/cleanup plan before applying it |
+| Declare project frontend/backend topology | `yano capabilities detect --write` | canonical manifest; runtime health stays supervisor-owned |
 | Apply a Yano update to live instances | `yano update --reload --dry-run`, then `yano update --reload --yes` | controlled checkpoint restart; converts an accidental npm link to a permanent global copy |
 | Find or inspect a playbook | `yano playbook list`, `show`, `candidates`, `agent show` | catalog source, requirements, roles and missing credentials |
 | Configure a missing requirement | `yano config set <KEY> <value>` or `... --stdin` | global per-user config path, never application `.env` for global installs |
@@ -342,6 +345,14 @@ Use `index` before semantic search when the index is absent or stale, and
 for the user's actual verdict and `opinion` only for a clearly labelled
 planner hypothesis. Never clear trace data during diagnosis.
 
+When a planner says it is about to run/check something, inspect the same
+planner trace for `planner_action_claim_without_tool`. This means the visible
+assistant message had no observable `toolCall`; Yano keeps completion pending
+and sends a bounded corrective follow-up, recorded as
+`planner_action_guard_wakeup`. `planner_action_guard_exhausted` means the
+planner still did not produce a tool call after the allowed attempts; it is not
+evidence that the announced operation succeeded.
+
 ### Playbook and capability requirements
 
 ```text
@@ -351,6 +362,9 @@ yano playbook show <id> --json
 yano playbook show clean-repo --json  # verifica anche il contratto documentale
 yano agent show <role> --json
 yano playbook check <file> --json
+node scripts/audit-manifest.mjs --project-root <dir> --output audit-manifest.json
+node scripts/audit-delegation.mjs --manifest audit-manifest.json --output delegation.json
+node scripts/audit-resource-ledger.mjs --trace-root <YANO_DATA_DIR>/traces --project <name>
 ```
 
 Read `credential_checks` and `warnings`. If a required CLI, MCP, skill, token,

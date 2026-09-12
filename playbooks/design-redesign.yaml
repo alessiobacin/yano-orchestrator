@@ -1,0 +1,56 @@
+schema_version: 1
+id: design-redesign
+label: Stitch design, UX review and redesign
+description: >-
+  Audits an application and/or existing Stitch project, preserves required
+  functionality, resolves candidates explicitly, synchronizes Stitch, .stitch
+  and code, produces a navigable prototype and hands off an accepted visual
+  specification to frontend implementation.
+enforcement:
+  status: partial
+  note: The design agent uses the project-registered Stitch MCP; runtime records evidence and gates transitions.
+contract:
+  execution: sequential
+  checkpoint: every_state_transition
+  evidence: [scope, inputs, commands, exit_code, output, changed_state, blockers]
+  report_sections: [summary, scope, evidence, design_audit, canvas_map, decision_requests, gate, result, blockers, handoff]
+  budgets: { max_commands: 100, max_files: 300, max_minutes: 90, max_tokens: 28000 }
+  verification: { mode: design-delivery, required: true }
+  recovery: [resume_from_last_checkpoint, preserve_evidence, bounded_retry, refetch_stitch, reconcile_remote_before_local]
+states:
+  - { id: received, owner: planner, terminal: false }
+  - { id: discovered, owner: design-redesign-specialist, terminal: false }
+  - { id: audited, owner: design-redesign-specialist, terminal: false }
+  - { id: designing, owner: design-redesign-specialist, terminal: false }
+  - { id: candidate_review, owner: planner_and_human, terminal: false }
+  - { id: synchronized, owner: design-redesign-specialist, terminal: false }
+  - { id: ready_for_implementation, owner: planner, terminal: true }
+  - { id: blocked, owner: planner_and_human, terminal: true }
+transitions:
+  - { id: discover, from: received, to: discovered, actor: design-redesign-specialist, requires: [scope_received, mode_classified, stitch_mcp_inventory_checked, local_and_remote_discovery_recorded] }
+  - { id: audit, from: discovered, to: audited, actor: design-redesign-specialist, requires: [remote_stitch_fetched, code_or_stitch_audit_recorded, app_inventory_recorded, structure_matrix_recorded, shell_recorded, contracts_recorded, canvas_map_recorded] }
+  - { id: design, from: audited, to: designing, actor: design-redesign-specialist, requires: [ux_review_recorded, prompt_compiled, ionic_structure_in_prompt, preserve_redesign_improve_add_remove_sections] }
+  - { id: resolve_candidates, from: designing, to: candidate_review, actor: planner, requires: [candidate_groups_recorded, coverage_calculated] }
+  - { id: synchronize, from: [designing, candidate_review], to: synchronized, actor: design-redesign-specialist, requires: [current_stitch_refetched, candidate_resolution_complete, three_way_diff_recorded, prototype_updated, stitch_writeback_recorded, all_revised_screens_written_to_stitch] }
+  - { id: accept, from: synchronized, to: ready_for_implementation, actor: planner, requires: [all_blocking_acceptance_gates_pass, design_code_mapping_complete, handoff_sent] }
+  - { id: block, from: [discovered, audited, designing, candidate_review, synchronized], to: blocked, actor: planner_and_human, requires: [blocker_recorded] }
+failure_routes:
+  - { condition: stitch_mcp_unavailable, action: record_capability_blocker_and_stop_design_calls, terminal: false }
+  - { condition: multiple_active_candidates, action: ask_user_for_explicit_choice, terminal: false }
+  - { condition: critical_feature_missing, action: reject_screen_and_return_to_design, terminal: false }
+  - { condition: stale_local_design, action: refetch_stitch_and_reconcile, terminal: false }
+  - { condition: structure_parity_missing, action: block_generation_and_request_complete_app_structure, terminal: false }
+  - { condition: stitch_writeback_missing, action: block_handoff_and_report_remote_write_limit, terminal: false }
+  - { condition: unresolved_design_decision, action: route_structured_question_to_planner_and_open_user_hold, terminal: false }
+invariants:
+  - { id: preserve_functionality, description: Existing required functionality is never removed without explicit approval. }
+  - { id: current_stitch_wins, description: Current Stitch state is fetched before implementation and beats stale local files. }
+  - { id: no_ambiguous_implementation, description: More than one active design for a logical page blocks implementation. }
+  - { id: three_way_sync, description: Stitch, .stitch and code are compared and recorded before handoff. }
+  - { id: stitch_mcp_from_yano, description: The agent uses the already registered project/Yano Stitch MCP and its live schema. }
+  - { id: prototype_is_navigable, description: Meaningful controls have a documented prototype action or destination. }
+  - { id: canvas_is_ordered, description: Every screen has a non-overlapping canvas position organized by navigation distance from the entry point; light/dark variants of one screen are adjacent and aligned; CANVAS-MAP records the layout and any UI-only repositioning limitation. }
+  - { id: structure_parity, description: Existing Ionic/application page structure is captured, included in the Stitch prompt and reconciled against every revised screen; deviations require explicit user approval. }
+  - { id: remote_writeback, description: Every revised screen is written back to the remote Stitch project and its operation/ID is recorded before synchronization is accepted. }
+  - { id: planner_is_user_interface, description: The planner is the only user-facing interlocutor; the specialist asks only post-discovery decision questions and routes them through the planner. }
+  - { id: no_generic_specialist_questions, description: The specialist performs local and remote discovery before asking questions that cannot be resolved from repository, app, Stitch or .stitch evidence. }

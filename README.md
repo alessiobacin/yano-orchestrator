@@ -19,6 +19,7 @@ Everything communicates over a local MQTT broker, using role/instance identity a
 - **A watchdog** that detects stalled tickets, runs that finished all their tickets but were never merged/notified, *and* tickets whose assigned instance has confirmably vanished (offline presence, not just slow) — the last case is auto-failed and escalated within a couple of minutes, not 15-30
 - **`agent_terminate`** lets the planner force a clean shutdown of a wedged instance instead of waiting it out — with an opt-in fully automatic tier for hard-stuck-but-connected tickets
 - **`agent_send` warns immediately, in the same turn, if nobody is actually there to receive it** — instead of silently reporting success when a role/instance was never launched
+- **Planner action guard** — if a planner announces an operational action without an observable tool call, Yano records the mismatch, keeps completion unacknowledged, and triggers a bounded corrective follow-up
 - **The planner is structurally barred from claiming ticket work itself** (`ticket_claim` refuses the planner role outright) — planning and delegating is the job, never quietly doing the work when an instance is missing
 - **A mandatory closing checklist**: `worktree_finalize` refuses to merge until you declare the user actually confirmed the result, e2e tests ran (or don't apply), the version was bumped (or doesn't apply), *and* a docs-sync pass actually reconciled the project's own README/QUICK-START/architecture diagram with what shipped (or doesn't apply) — and now pushes to the remote automatically after a successful merge
 - **Frontend work has its own enforced review loop** — `frontend-developer` always hands off to `frontend-reviewer`, never to the backend `reviewer`; the frontend reviewer uses Playwright CLI/skill, chrome-devtools, and `code-review`, rejects back with specifics if needed, and informs the planner only after verification
@@ -29,12 +30,16 @@ Everything communicates over a local MQTT broker, using role/instance identity a
 - **A global `yano` CLI** (`yano init`, `yano start`, `yano doctor`, `yano update`, `yano copy-prompts`, `yano uninstall`, `yano end`, `yano pause`, `yano resume`, `yano recovery`) for scaffolding, launching, verifying the environment, checkpointing and restoring active work, and closing projects — `yano resume` restores agents exclusively in the visible Herdr workspace
 - **Centralized bug/suggestion intake** — `yano feedback` persists records in SQLite and forwards them to the planner of the selected project; the planner owns triage and delegation
 - **Read-only external observer** — `yano auto-improve` esegue audit periodici (default 5 giorni) e consegna evidenze/raccomandazioni al planner
+- **Audit campaign a capitoli** — `audit-campaign` coordina varianti `standard`, `medium` e `deep` per QA funzionale, adeguatezza dei test, architettura/refactor, toolchain CLI/MCP/skill, automazione/logging, UX/prodotto/mercato e delega AI-vs-script; una discovery condivisa evita di rileggere tutto il repository per ogni agente e il resource ledger conserva tempi, turni, modelli e token misurati
 
 Gli audit auto-improve seguono il playbook globale `auto-improvement-360` in
 fasi sequenziali: preflight, rilevazione automatica backend/frontend,
 indicizzazione dei report precedenti, raccolta evidence, analisi 360°,
 micro-validazione, scoring/deduplicazione e handoff al planner. Ogni parere
-deve avere score e confidenza su 10; dati non verificati restano espliciti e
+deve avere score su 10 e due confidenze su 10: `evidence_confidence` (solidità
+delle prove) e `judgment_confidence` (autovalutazione dell'LLM sul proprio
+giudizio), con una motivazione breve per la seconda. `confidence` resta un
+alias retrocompatibile della prima. Dati non verificati restano espliciti e
 non vengono inventati.
 
 Gli audit auto-improve riconoscono test, build e lint anche quando il progetto
@@ -64,6 +69,9 @@ allow-list runtime che esclude `bash`, `edit` e `write` dal worker.
 - **Design/redesign is a standard frontend capability** — `design-redesign-specialist` (instance `design-redesign-01`) and frontend/full-stack roles receive `stitch-design-redesign`; configure the Stitch MCP in the project `.mcp.json` and use OAuth2 bearer credentials for Stitch management calls
 - **Cross-platform** — macOS, Linux, and Windows
 - **Isolated browser verification** — E2E and frontend review allocate a free, paired frontend/backend port set per worktree through `yano test-env`, never silently reusing another project's development server
+- **Server links in Pi** — every agent footer shows project frontend/backend status under MQTT: `×` when a component is absent, gray when present but stopped, green when reachable, and red on HTTP/server error; the frontend URL is clickable, while the backend remains informational.
+  URLs are read from the project-local `e2e-environment.json`, supported runtime environment variables (including `APP_URL` for the backend), or local `.env*` files. Detected FastAPI/Streamlit components use `8000`/`8501`, and Next/Vite apps use their configured development port (or `3000`/`5173`) when no explicit URL exists; no arbitrary port scan is performed.
+- **Declared project topology** — `yano capabilities detect --write` stores the canonical frontend/backend presence in `.pi/extensions/yano-orchestrator/config/capabilities.json`. Once present, that manifest overrides heuristic detection; runtime health remains supervisor-owned and is probed independently. Agents must synchronize it when changing component structure, as required by `AGENTS.md`.
 
 ## Installation
 
@@ -123,6 +131,9 @@ yano repair --dry-run          # detect stale MQTT/Herdr agents and scope drift
 yano repair --yes --update     # snapshot, reconcile, update if needed and restart
 yano repair --all-projects --dry-run # inventory every active project safely
 yano repair --all-projects --yes --update # repair all active projects sequentially
+yano capabilities show                # declared frontend/backend topology
+yano capabilities detect --write      # detect and persist topology atomically
+yano capabilities set backend --absent # explicitly confirm a component is absent
 yano uninstall        # remove the global installation (asks for confirmation; add --yes to skip it)
 ```
 
@@ -218,7 +229,8 @@ yano watcher projects --all --json          # tutti i progetti registrati, anche
 yano watcher resume --project-root /path/progetto  # riattiva esplicitamente un progetto idle
 yano schedule add --name <nome> --project-root "$PWD" --script <path> --mode self --cron '0 14,21 * * *' --expected-consequence "riepilogo inviato"  # script-first: al trigger esegue LO SCRIPT registrato
 yano schedule run <id>                              # testa lo script subito, prima di renderlo ricorrente
-yano schedule list --json                           # job con script_path, mode, expected_consequence, stato
+yano schedule list                                  # inventario compatto con ID, nome, cron, stato, modalità
+yano schedule list --json --pretty                 # stesso inventario JSON, indentato per lettura
 yano invoke --role planner:<progetto> --prompt "riepiloga lo stato" --project-root "$PWD"   # bridge deterministico dagli script (wake planner)
 yano invoke --role yano-local-pc --prompt "promemoria tra 10 minuti"                      # delega a yano-local-pc
 yano cron --add "ogni giorno alle 14 e alle 21 esegui la pulizia del progetto" --project-root "$PWD"  # legacy testo+cron (dispatch planner col testo)

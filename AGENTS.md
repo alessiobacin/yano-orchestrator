@@ -29,3 +29,16 @@ la procedura sono in [`docs/guides/documentation-sync.md`](docs/guides/documenta
 Prima del commit eseguire `npm run check:docs` e `npm test`; per imporre anche
 un diff documentale insieme alle modifiche locali al codice usare
 `YANO_DOCS_ENFORCE_DIFF=1 npm run check:docs`.
+
+### Mandatory Yano capability synchronization
+
+Se una modifica aggiunge, rimuove, rinomina o cambia il comportamento di avvio
+di un frontend o backend, l'agente DEVE eseguire prima del handoff o del completamento:
+
+```bash
+yano capabilities detect --write
+```
+
+Lo stato runtime online/offline/errore non va scritto manualmente dagli agenti:
+è responsabilità del supervisor Yano. Se la rilevazione è ambigua, l'agente deve
+lasciare il componente non confermato e segnalarlo al planner.

@@ -56,7 +56,9 @@ installa nulla e non tocca il sorgente: la review è browser-only tramite un
 wrapper servito da Yano che inoltra le annotazioni al webhook agentation del
 progetto (`setup --print-only` stampa il contratto JSON senza effetti
 collaterali). `start` avvia il comando dev rilevato e restituisce l'URL reale
-da comunicare all'utente. Per i frontend browser-only la pagina wrapper è
+da comunicare all'utente (per i frontend browser-only senza package manager
+`start` non avvia nulla: l'app target va lanciata manualmente col comando
+restituito da `setup`). Per i frontend browser-only la pagina wrapper è
 servita da `yano frontend-dash start` sulla route `/<project-id>/__yano-review`.
 Il planner non deve inventare l'URL: se l'avvio
 fallisce, riporta il blocco preciso.

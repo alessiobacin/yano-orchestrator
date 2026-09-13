@@ -173,7 +173,7 @@ function sleepSync(ms) {
 // `agent_kind_mismatch` because it briefly sees the Yano instance label. Do
 // not turn that specific false negative into a successful launch blindly —
 // accept it only after the same pane is visible as a live Pi agent.
-function herdrPaneHasLivePi(paneId) {
+export function herdrPaneHasLivePi(paneId) {
 	const snapshotResult = spawnSync("herdr", ["api", "snapshot"], { encoding: "utf8", maxBuffer: 4_000_000 });
 	if (snapshotResult.status !== 0) return false;
 	let snapshot;
@@ -183,7 +183,7 @@ function herdrPaneHasLivePi(paneId) {
 	return !["done", "offline", "unknown"].includes(String(agent?.agent_status || "").toLowerCase());
 }
 
-function waitForHerdrPanePi(paneId) {
+export function waitForHerdrPanePi(paneId) {
 	// The lifecycle hook is asynchronous and a cold Herdr/Pi launch can take
 	// several seconds before its first authoritative report reaches the
 	// server. Keep the recovery bounded, but longer than the normal warm path.

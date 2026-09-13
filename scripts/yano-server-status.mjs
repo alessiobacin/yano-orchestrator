@@ -68,7 +68,16 @@ function inferredUrl(root, kind) {
 	if (kind === "frontend" && projectComponent(root, kind)) {
 		if (fs.existsSync(path.join(root, "app", "gui", "streamlit_app.py"))) return "http://localhost:8501";
 		if (fs.existsSync(path.join(root, "vite.config.ts")) || fs.existsSync(path.join(root, "vite.config.js"))) return "http://localhost:5173";
-		return "http://localhost:3000";
+		if (fs.existsSync(path.join(root, "next.config.js")) || fs.existsSync(path.join(root, "next.config.mjs")) || fs.existsSync(path.join(root, "next.config.ts"))) return "http://localhost:3000";
+		// projectComponent()'s remaining frontend signals (a "frontend" directory,
+		// src/App.tsx|jsx, src/app) say only "this looks like a frontend",
+		// never which dev server or port — Angular (4200), Create React App
+		// (3000, but only by historical convention, not this codebase's own
+		// rule), a custom Express static server, anything. Guessing 3000 here
+		// used to always "work" in the sense of always showing a light, but the
+		// light was frequently wrong: green from an unrelated process that
+		// happens to own port 3000, or red for a server that is actually up on
+		// its own different port. No real signal beats no light at all.
 	}
 	return null;
 }
@@ -101,7 +110,15 @@ export function discoverServerEndpoints(root, env = process.env) {
 	return result;
 }
 
-export async function probeServer(url, timeoutMs = 800, fetchImpl = globalThis.fetch) {
+// 800ms (the original default) mislabeled a genuinely running dev server as
+// "stopped" on its very first probe after startup or after a file change:
+// Vite/Next/CRA all compile-on-first-request, and that alone routinely takes
+// longer than 800ms, so the request aborts, is caught below, and reports
+// "stopped" for a server that is actually up — exactly a false red/muted
+// light. 2500ms still comfortably fits the footer's 5s refresh cadence
+// (extensions/orchestrator.ts's serverStatusTimer) for both probes running
+// in parallel, while giving a cold compile a realistic chance to answer.
+export async function probeServer(url, timeoutMs = 2500, fetchImpl = globalThis.fetch) {
 	if (!url || typeof fetchImpl !== "function") return "stopped";
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -113,7 +130,7 @@ export async function probeServer(url, timeoutMs = 800, fetchImpl = globalThis.f
 	finally { clearTimeout(timer); }
 }
 
-export async function discoverAndProbeServers(root, env = process.env, timeoutMs = 800, fetchImpl = globalThis.fetch) {
+export async function discoverAndProbeServers(root, env = process.env, timeoutMs = 2500, fetchImpl = globalThis.fetch) {
 	const endpoints = discoverServerEndpoints(root, env);
 	const entries = await Promise.all(Object.entries(endpoints).map(async ([kind, endpoint]) => {
 		const state = await probeServer(endpoint.url, timeoutMs, fetchImpl);

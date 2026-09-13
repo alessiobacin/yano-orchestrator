@@ -10,10 +10,15 @@
 //
 // This proves: (1) the existing deferral behavior is unchanged for a fresh
 // or recent unhealthy observation (no regression on the legitimate
-// transient-blip protection), and (2) once the SAME unhealthy state has
-// persisted longer than PLANNER_UNHEALTHY_ESCALATION_MS, it stops deferring
-// and actually attempts recovery (closeHerdrTab gets invoked) instead of
-// returning the deferred status again.
+// transient-blip protection), (2) once the SAME unhealthy state has
+// persisted longer than PLANNER_UNHEALTHY_ESCALATION_MS AND Herdr's own
+// `agent explain` also agrees something is wrong, it stops deferring and
+// actually attempts recovery (closeHerdrTab gets invoked) instead of
+// returning the deferred status again, and (3) — the false positive this fix
+// must not introduce — a planner whose shallow `agent_status`/heartbeat file
+// look stale simply because it has been quietly idle between tasks, but
+// whose Herdr `agent explain` still reports genuinely healthy, is NEVER
+// escalated no matter how long that shallow staleness persists.
 
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -64,16 +69,25 @@ try {
 	// still-alive pane and returns its own deferred result gracefully — this
 	// test only needs to prove ensureRegisteredPlanner() actually reaches and
 	// calls closeHerdrTab(), not that the full multi-step recovery completes),
-	// and records every `tab close` invocation to a marker file.
+	// records every `tab close` invocation to a marker file, and answers
+	// `agent explain` per YANO_TEST_EXPLAIN_HEALTHY_PANES (default: unhealthy,
+	// matching a genuinely stuck planner — no warning/blocker fields at all).
 	fs.writeFileSync(path.join(fakeBin, "herdr"), [
 		"#!/usr/bin/env node",
 		"const fs=require('node:fs');",
 		"const args=process.argv.slice(2);",
 		'const alive = new Set((process.env.YANO_TEST_ALIVE_PANES || "").split(",").filter(Boolean));',
+		'const explainHealthy = new Set((process.env.YANO_TEST_EXPLAIN_HEALTHY_PANES || "").split(",").filter(Boolean));',
 		'if (args[0] === "pane" && args[1] === "process-info") {',
 		'  const paneId = args[args.indexOf("--pane") + 1];',
 		'  const foreground = alive.has(paneId) ? [{ argv0: "pi", argv: ["pi"] }] : [];',
 		'  process.stdout.write(JSON.stringify({ result: { process_info: { foreground_processes: foreground } } }));',
+		"  process.exit(0);",
+		"}",
+		'if (args[0] === "agent" && args[1] === "explain") {',
+		'  const paneId = args[2];',
+		'  const state = explainHealthy.has(paneId) ? { state: "idle", warning: null, visible_blocker: false } : { state: "unknown", warning: null, visible_blocker: false };',
+		"  process.stdout.write(JSON.stringify(state));",
 		"  process.exit(0);",
 		"}",
 		'if (args[0] === "api" && args[1] === "snapshot") {',
@@ -104,12 +118,32 @@ try {
 		assert.ok(!fs.existsSync(closedTabsMarker), "closeHerdrTab must not be called before the escalation threshold is reached");
 	});
 
-	check("an unhealthy observation older than PLANNER_UNHEALTHY_ESCALATION_MS (30 min) stops deferring and attempts recovery", () => {
+	check("an unhealthy observation older than PLANNER_UNHEALTHY_ESCALATION_MS (30 min) stops deferring and attempts recovery, when Herdr's own explain ALSO agrees something is wrong", () => {
 		const staleRow = { ...row, planner_unhealthy_since: new Date(Date.now() - 31 * 60_000).toISOString() };
 		const result = ensureRegisteredPlanner(staleRow, snapshot);
 		assert.notEqual(result.recovery, "planner_process_present_stale_heartbeat", "must stop returning the indefinite-deferral status once past the threshold");
 		assert.ok(fs.existsSync(closedTabsMarker), "closeHerdrTab must actually be invoked once escalated");
 		assert.equal(fs.readFileSync(closedTabsMarker, "utf8").trim(), "t-planner");
+	});
+
+	check("past the threshold, but Herdr's own `agent explain` says idle/no-warning: NEVER escalate — this is the false-positive this fix must not introduce", () => {
+		// This is the exact real shape observed live: agent_status "done" right
+		// after a finished turn (persists 45+ minutes, never auto-transitions to
+		// "idle"), heartbeat file stale simply because nothing new happened to
+		// refresh it — both look "unhealthy" to the shallow checks, while
+		// `agent explain` (the authoritative signal) reports a genuinely fine,
+		// merely-quiescent planner. Escalating here would close and relaunch
+		// every fleet planner that sits idle between tasks for half an hour.
+		process.env.YANO_TEST_EXPLAIN_HEALTHY_PANES = "p-planner";
+		fs.rmSync(closedTabsMarker, { force: true }); // the prior check legitimately closed a tab; start this one clean
+		try {
+			const staleRow = { ...row, planner_unhealthy_since: new Date(Date.now() - 31 * 60_000).toISOString() };
+			const result = ensureRegisteredPlanner(staleRow, snapshot);
+			assert.equal(result.recovery, "planner_process_present_stale_heartbeat", "must keep deferring when Herdr's own explain vouches for the planner, regardless of how long the shallow checks have called it unhealthy");
+			assert.ok(!fs.existsSync(closedTabsMarker), "closeHerdrTab must NOT be called for a planner Herdr itself reports as idle with no warning/blocker");
+		} finally {
+			delete process.env.YANO_TEST_EXPLAIN_HEALTHY_PANES;
+		}
 	});
 
 	console.log(`\nsmoke-test-yano-watcher-planner-unhealthy-escalation: ${passed} passed`);

@@ -73,6 +73,23 @@ export function plannerFileHeartbeatSaysDead(planner) {
 	return file.found && !file.healthy;
 }
 
+// Herdr's own `agent explain` is a deeper, authoritative liveness read than
+// the shallow `agent_status` string: a Pi pane that just finished responding
+// can sit in `agent_status: "done"` indefinitely (observed directly: 45+
+// minutes with no auto-transition to "idle") while `explain` already reports
+// `state: "idle", warning: null, visible_blocker: false` for that exact same
+// pane — genuinely healthy, simply quiescent between tasks. Exported so
+// escalation logic (ensureRegisteredPlanner) can use it as a final
+// confirmation before ever closing/relaunching a planner that only *looks*
+// unhealthy through the shallower checks below.
+export function plannerLooksHealthyViaExplain(paneId) {
+	if (!paneId) return false;
+	const explained = spawnSync("herdr", ["agent", "explain", paneId, "--json"], { encoding: "utf8" });
+	let explanation;
+	try { explanation = JSON.parse(explained.stdout || ""); } catch { explanation = null; }
+	return ["idle", "working"].includes(String(explanation?.state || "").toLowerCase()) && explanation?.warning == null && explanation?.visible_blocker !== true;
+}
+
 export function plannerHeartbeatHealthy(planner) {
 	const status = String(planner?.agent_status || "unknown").toLowerCase();
 	if (!["idle", "working"].includes(status)) return false;
@@ -87,10 +104,7 @@ export function plannerHeartbeatHealthy(planner) {
 	let process;
 	try { process = JSON.parse(processInfo.stdout || "")?.result?.process_info?.foreground_processes?.[0]; } catch { process = null; }
 	if (!process?.pid) return false;
-	const explained = spawnSync("herdr", ["agent", "explain", planner.pane_id, "--json"], { encoding: "utf8" });
-	let explanation;
-	try { explanation = JSON.parse(explained.stdout || ""); } catch { explanation = null; }
-	return ["idle", "working"].includes(String(explanation?.state || status).toLowerCase()) && explanation?.warning == null && explanation?.visible_blocker !== true;
+	return plannerLooksHealthyViaExplain(planner.pane_id);
 }
 
 export function paneHasLivePiProcess(paneId) {

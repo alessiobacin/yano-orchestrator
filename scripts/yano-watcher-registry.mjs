@@ -60,7 +60,7 @@ import { projectRuns, runNeedsPlanner } from "./watcher/project-runs.mjs";
 export { projectRuns, projectOpenHolds, runNeedsPlanner, projectNeedsPlanner } from "./watcher/project-runs.mjs";
 import {
 	findProjectWorkspace, plannerAgentsInWorkspace, plannerHeartbeatHealthy,
-	paneHasLivePiProcess, livePlannerPanesInWorkspace,
+	paneHasLivePiProcess, livePlannerPanesInWorkspace, plannerLooksHealthyViaExplain,
 } from "./watcher/planner-health.mjs";
 export { findProjectWorkspace, plannerHeartbeatHealthy } from "./watcher/planner-health.mjs";
 
@@ -265,7 +265,19 @@ export function ensureRegisteredPlanner(row, snapshot, db = null) {
 	const livePlanner = planners.find((planner) => paneHasLivePiProcess(planner.pane_id));
 	if (livePlanner) {
 		const unhealthySince = Date.parse(row.planner_unhealthy_since || "");
-		const escalate = Number.isFinite(unhealthySince) && Date.now() - unhealthySince >= PLANNER_UNHEALTHY_ESCALATION_MS;
+		const pastThreshold = Number.isFinite(unhealthySince) && Date.now() - unhealthySince >= PLANNER_UNHEALTHY_ESCALATION_MS;
+		// A final confirmation before ever closing a planner: `agent_status`
+		// (e.g. "done" right after a finished turn, observed to persist 45+
+		// minutes with no auto-transition) and the heartbeat FILE (only ever
+		// refreshed on activity, so any planner idle-between-tasks longer than
+		// its freshness window looks identical to genuinely stuck) can BOTH
+		// report "unhealthy" for a planner that Herdr's own deeper `agent
+		// explain` still calls idle with no warning/blocker. Only escalate when
+		// explain agrees something is actually wrong — otherwise this would
+		// eventually close and relaunch every fleet planner that simply sits
+		// quiet between tasks for half an hour, destroying live context for no
+		// reason.
+		const escalate = pastThreshold && !plannerLooksHealthyViaExplain(livePlanner.pane_id);
 		if (!escalate) {
 			if (db && !Number.isFinite(unhealthySince)) db.prepare("UPDATE watcher_projects SET planner_unhealthy_since = ?, updated_at = ? WHERE project_key = ?").run(now(), now(), row.project_key);
 			return { recovery: "planner_process_present_stale_heartbeat", planner_status: livePlanner.agent_status || "unknown", planner_instance: livePlanner.name || null, planner_pane_id: livePlanner.pane_id };

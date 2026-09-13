@@ -71,6 +71,16 @@ const DEFAULT_LOOKBACK_MS = 3600000;
 const DEFAULT_PLANNER_STALL_MS = 15 * 60_000;
 const ORPHANED_TICKET_IDLE_MS = 2 * 60_000;
 const PLANNER_RECOVERY_COOLDOWN_MS = 10 * 60_000;
+// A live OS-level `pi` process is not proof the application inside it is
+// still running (a wedged event loop or a connection that died without the
+// process exiting looks identical from Herdr's side). Deferring forever in
+// that case — the pre-existing behavior — left a genuinely crashed planner
+// unrecovered for 12+ hours overnight (2026-09-12/13 incident) until a
+// manual `yano repair --force`. Once the heartbeat has been continuously
+// stale-but-present for longer than any real transient blip could last,
+// stop trusting OS process presence and fall through to the normal
+// close+relaunch recovery below.
+const PLANNER_UNHEALTHY_ESCALATION_MS = 30 * 60_000;
 const IDLE_WATCHER_GRACE_MS = 60 * 60_000;
 // A processing card without a live planner is an orphaned claim, not active
 // work. Give a planner a generous recovery window before returning it to the
@@ -126,13 +136,14 @@ function openDatabase() {
 			lookback_ms INTEGER NOT NULL DEFAULT 3600000,
 			last_recovery_at TEXT,
 			last_recovery_reason TEXT,
+			planner_unhealthy_since TEXT,
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		);
 	`);
 	// Existing global registries predate recovery bookkeeping. Keep the upgrade
 	// idempotent so a supervisor can safely start after a package update.
-	for (const column of ["last_recovery_at TEXT", "last_recovery_reason TEXT"]) {
+	for (const column of ["last_recovery_at TEXT", "last_recovery_reason TEXT", "planner_unhealthy_since TEXT"]) {
 		try { db.exec(`ALTER TABLE watcher_projects ADD COLUMN ${column}`); } catch { /* already present */ }
 	}
 	// Migrate the old implicit five-minute cadence to the control-plane
@@ -239,16 +250,39 @@ export function ensureRegisteredPlanner(row, snapshot, db = null) {
 	const workspace = findProjectWorkspace(snapshot, row.root, row.name);
 	const planners = workspace ? plannerAgentsInWorkspace(snapshot, workspace.workspace_id, row.root) : [];
 	const healthy = planners.find(plannerHeartbeatHealthy);
-	if (healthy) return { recovery: "planner_healthy", planner_status: healthy.agent_status || "unknown", planner_instance: healthy.name || null };
+	if (healthy) {
+		if (db && row.planner_unhealthy_since) db.prepare("UPDATE watcher_projects SET planner_unhealthy_since = NULL, updated_at = ? WHERE project_key = ?").run(now(), row.project_key);
+		return { recovery: "planner_healthy", planner_status: healthy.agent_status || "unknown", planner_instance: healthy.name || null };
+	}
 	// A stale heartbeat does not prove that the Pi process has exited. Never
 	// inject a second planner-01 command into a pane that still owns a live Pi
 	// process: concurrent watcher/manual recovery used to produce duplicate
 	// identity errors and tabs whose purpose appeared to change between roles.
+	// But a wedged/hung process that never publishes a heartbeat again looks
+	// identical to this on every future pass too — bound the deferral so it
+	// cannot last forever (see PLANNER_UNHEALTHY_ESCALATION_MS above).
+	let escalatedUnhealthyPlanner = false;
 	const livePlanner = planners.find((planner) => paneHasLivePiProcess(planner.pane_id));
-	if (livePlanner) return { recovery: "planner_process_present_stale_heartbeat", planner_status: livePlanner.agent_status || "unknown", planner_instance: livePlanner.name || null, planner_pane_id: livePlanner.pane_id };
+	if (livePlanner) {
+		const unhealthySince = Date.parse(row.planner_unhealthy_since || "");
+		const escalate = Number.isFinite(unhealthySince) && Date.now() - unhealthySince >= PLANNER_UNHEALTHY_ESCALATION_MS;
+		if (!escalate) {
+			if (db && !Number.isFinite(unhealthySince)) db.prepare("UPDATE watcher_projects SET planner_unhealthy_since = ?, updated_at = ? WHERE project_key = ?").run(now(), now(), row.project_key);
+			return { recovery: "planner_process_present_stale_heartbeat", planner_status: livePlanner.agent_status || "unknown", planner_instance: livePlanner.name || null, planner_pane_id: livePlanner.pane_id };
+		}
+		// Escalating: fall through to the close+relaunch path below exactly as
+		// if the process had already exited. Reset the tracker now so the new
+		// planner gets its own full grace window instead of inheriting this one.
+		if (db) db.prepare("UPDATE watcher_projects SET planner_unhealthy_since = NULL, updated_at = ? WHERE project_key = ?").run(now(), row.project_key);
+		escalatedUnhealthyPlanner = true;
+	}
 	// During Herdr startup the pane can be live before the `agents` projection
 	// contains it. Treat a planner-labelled live pane as owned immediately.
-	const livePlannerPane = livePlannerPanesInWorkspace(snapshot, workspace?.workspace_id, row.root)[0];
+	// Skipped once we've just escalated past a stale-forever planner above —
+	// this check matches the exact same pane by tab label alone (it does not
+	// consult snapshot.agents), and would otherwise silently re-swallow the
+	// escalation before the close+relaunch below ever runs.
+	const livePlannerPane = !escalatedUnhealthyPlanner && livePlannerPanesInWorkspace(snapshot, workspace?.workspace_id, row.root)[0];
 	if (livePlannerPane) return { recovery: "planner_process_present_startup_race", planner_status: "working", planner_instance: "planner-01", planner_pane_id: livePlannerPane.pane_id };
 	const reason = "planner_missing_or_stale_heartbeat";
 	// Unlike reconcileProjectRun, this check used to run unconditionally on

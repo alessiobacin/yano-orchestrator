@@ -81,6 +81,16 @@ const PLANNER_RECOVERY_COOLDOWN_MS = 10 * 60_000;
 // stop trusting OS process presence and fall through to the normal
 // close+relaunch recovery below.
 const PLANNER_UNHEALTHY_ESCALATION_MS = 30 * 60_000;
+// cleanupCompletedAgentTabs()/cleanupStaleProjectTabs() protect a still-alive
+// worker so a retry can reuse the SAME live session moments after its last
+// ticket completed, instead of paying for a fresh relaunch. That protection
+// used to have no expiry at all — real evidence: workers whose last ticket
+// finished DAYS earlier were still open, because nothing ever re-evaluated
+// "alive" once true. Once a worker's most recent terminal ticket is older
+// than this, "alive and idle" no longer means "about to be reused" — it
+// means the planner simply never sent it anything else, so it should not sit
+// open forever just because the process never exited on its own.
+const COMPLETED_AGENT_IDLE_GRACE_MS = 30 * 60_000;
 const IDLE_WATCHER_GRACE_MS = 60 * 60_000;
 // A processing card without a live planner is an orphaned claim, not active
 // work. Give a planner a generous recovery window before returning it to the
@@ -418,6 +428,17 @@ function isFreshReplacementSession(instance, agent, pane, cutoffs) {
 	return [...cutoffs.entries()].some(([assigned, cutoff]) => sameAgentIdentity(instance, assigned) && startedAt > cutoff);
 }
 
+// How long ago this instance's most recent terminal ticket completed, using
+// the same cutoffs map isFreshReplacementSession() already reads. Infinity
+// when there is no matching cutoff at all, so a caller comparing against a
+// grace period never has to special-case "never seen" as "recent".
+function terminalCutoffAgeMs(instance, cutoffs) {
+	const matches = [...cutoffs.entries()].filter(([assigned]) => sameAgentIdentity(instance, assigned));
+	if (!matches.length) return Infinity;
+	const mostRecentCutoff = Math.max(...matches.map(([, cutoff]) => cutoff));
+	return Date.now() - mostRecentCutoff;
+}
+
 // Ticket history is append-only: an instance name can legitimately be reused
 // by a later run. Cleanup must therefore never let a terminal ticket from an
 // older run close a worker currently assigned to an active run.
@@ -468,10 +489,15 @@ export function cleanupCompletedAgentTabs(snapshot, row, runs) {
 		if (isProtected) continue;
 		// A live Pi process is authoritative over append-only ticket history. A
 		// retry can legitimately reuse an instance name after an older ticket
-		// completed; never kill that live session merely because the old name is
-		// terminal. Once the process exits, the orphan-tab pass below cleans it.
-		if (!terminalTask && !dead) continue;
-		if (terminalTask && !dead) continue;
+		// completed, so a JUST-finished live session is never killed merely
+		// because the old name is terminal — but that protection is not
+		// unconditional forever (see COMPLETED_AGENT_IDLE_GRACE_MS above): once
+		// nobody has reused it well past a normal retry window, it is closed
+		// even though the process never exited on its own.
+		if (!dead) {
+			if (!terminalTask) continue;
+			if (terminalCutoffAgeMs(instance, terminalCutoffs) < COMPLETED_AGENT_IDLE_GRACE_MS) continue;
+		}
 		if (!dead && !["idle", "offline", "unknown", "stopped", "done"].includes(status)) continue;
 		if (!tab) continue;
 		const closed = closeHerdrTab(tab.tab_id);
@@ -545,7 +571,8 @@ export function cleanupStaleProjectTabs(snapshot, row, runs, alreadyClosedTabIds
 		const terminalTask = !activeTask && [...terminalAssignments].some((value) => sameAgentIdentity(identity, value)) && !isFreshReplacementSession(identity, agent, pane, terminalCutoffs);
 		const livePaneId = agent?.pane_id || pane?.pane_id;
 		const live = Boolean(livePaneId && paneHasLivePiProcess(livePaneId));
-		if (!identity || (!live && terminalTask) || !live) {
+		const staleWhileLive = live && terminalTask && terminalCutoffAgeMs(identity, terminalCutoffs) >= COMPLETED_AGENT_IDLE_GRACE_MS;
+		if (!identity || !live || staleWhileLive) {
 			const result = closeHerdrTab(tab.tab_id);
 			closed.push({ tab_id: tab.tab_id, label: tab.label || "(senza nome)", reason: terminalTask ? "terminal_task" : live ? "unnamed_orphan_tab" : "dead_agent", ...result });
 		}

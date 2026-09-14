@@ -91,6 +91,16 @@ const PLANNER_UNHEALTHY_ESCALATION_MS = 30 * 60_000;
 // means the planner simply never sent it anything else, so it should not sit
 // open forever just because the process never exited on its own.
 const COMPLETED_AGENT_IDLE_GRACE_MS = 30 * 60_000;
+// cleanupStaleProjectTabs() also protects a live worker that has NEVER been
+// assigned any ticket at all — active or terminal — on the theory that it
+// might be a freshly-launched specialist the planner is about to delegate
+// to. Unlike COMPLETED_AGENT_IDLE_GRACE_MS above, that protection had no
+// time bound whatsoever: real evidence (newMioDOC, 2026-09-14) showed 7
+// worker panes with ZERO ticket history, sessions ~4 days old, still open. A
+// planner that actually intends to use a freshly-opened specialist acts
+// within minutes, not days, so a generous 1-hour window still protects any
+// legitimate "about to be delegated to" case while finally giving genuinely
+// abandoned, never-used panes an end.
 const IDLE_WATCHER_GRACE_MS = 60 * 60_000;
 // A processing card without a live planner is an orphaned claim, not active
 // work. Give a planner a generous recovery window before returning it to the
@@ -401,11 +411,22 @@ function sameAgentIdentity(left, right) {
 	return Boolean(a && b && (a === b || a.startsWith(`${b}-`) || b.startsWith(`${a}-`)));
 }
 
+// Pi's real session filenames dash-separate the milliseconds too
+// (…T12-30-23-986Z_<uuid>.jsonl, confirmed against a real `herdr api
+// snapshot`), not dot-separated as an earlier version of this regex assumed
+// (…T12-30-23.986Z…, a format no real session file ever uses). That earlier
+// regex silently failed to match virtually every real session path, making
+// isFreshReplacementSession() return false for every genuine fresh retry —
+// harmless while nothing actually closed live tabs, but load-bearing now
+// that COMPLETED_AGENT_IDLE_GRACE_MS actually closes them. Captures each
+// component directly instead of matching-then-reformatting, so it isn't
+// sensitive to which separator the milliseconds use.
 function sessionStartedAt(agent, pane) {
 	const value = agent?.agent_session?.value || pane?.agent_session?.value || "";
-	const match = String(value).match(/\/(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}(?:\.\d+)?Z)_/);
+	const match = String(value).match(/\/(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})(?:[.-](\d+))?Z_/);
 	if (!match) return null;
-	const iso = match[1].replace(/^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2}(?:\.\d+)?)Z$/, "$1T$2:$3:$4Z");
+	const [, year, month, day, hour, minute, second, ms] = match;
+	const iso = `${year}-${month}-${day}T${hour}:${minute}:${second}.${(ms || "0").padEnd(3, "0").slice(0, 3)}Z`;
 	const timestamp = Date.parse(iso);
 	return Number.isFinite(timestamp) ? timestamp : null;
 }
@@ -572,9 +593,16 @@ export function cleanupStaleProjectTabs(snapshot, row, runs, alreadyClosedTabIds
 		const livePaneId = agent?.pane_id || pane?.pane_id;
 		const live = Boolean(livePaneId && paneHasLivePiProcess(livePaneId));
 		const staleWhileLive = live && terminalTask && terminalCutoffAgeMs(identity, terminalCutoffs) >= COMPLETED_AGENT_IDLE_GRACE_MS;
-		if (!identity || !live || staleWhileLive) {
+		// A live tab whose identity never matched ANY ticket — active or
+		// terminal — is not "about to be reused" (that is the terminalTask case
+		// above); it may simply never have been delegated to at all. Protect it
+		// only long enough for a real delegation to plausibly still happen.
+		const everTicketed = activeTask || [...terminalAssignments].some((value) => sameAgentIdentity(identity, value));
+		const startedAt = sessionStartedAt(agent, pane);
+		const longIdleNeverTicketed = live && !everTicketed && startedAt !== null && (Date.now() - startedAt) >= IDLE_WATCHER_GRACE_MS;
+		if (!identity || !live || staleWhileLive || longIdleNeverTicketed) {
 			const result = closeHerdrTab(tab.tab_id);
-			closed.push({ tab_id: tab.tab_id, label: tab.label || "(senza nome)", reason: terminalTask ? "terminal_task" : live ? "unnamed_orphan_tab" : "dead_agent", ...result });
+			closed.push({ tab_id: tab.tab_id, label: tab.label || "(senza nome)", reason: terminalTask ? "terminal_task" : longIdleNeverTicketed ? "never_ticketed_idle" : live ? "unnamed_orphan_tab" : "dead_agent", ...result });
 		}
 	}
 	if (closed.length) {

@@ -50,7 +50,7 @@ fs.writeFileSync(path.join(fakeBin, "herdr"), [
 ].join("\n"));
 fs.chmodSync(path.join(fakeBin, "herdr"), 0o700);
 process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH || ""}`;
-process.env.YANO_TEST_ALIVE_PANES = "p-coder-running,p-real-coder,p-coder-retry,p-stale-old-terminal";
+process.env.YANO_TEST_ALIVE_PANES = "p-coder-running,p-real-coder,p-coder-retry,p-stale-old-terminal,p-never-ticketed-old,p-fresh-unticketed";
 
 const row = { root: "/tmp/fixture-project", name: "fixture-project" };
 
@@ -107,9 +107,17 @@ check("a mixed snapshot: planner survives, finished coder is closed, in-progress
 });
 
 check("a fresh replacement session survives an old terminal assignment", () => {
+	// Session path uses Pi's REAL naming convention — dash-separated
+	// milliseconds (.../2026-09-13T12-30-23-986Z_<uuid>.jsonl), confirmed
+	// against a real `herdr api snapshot` on 2026-09-14. An earlier version of
+	// this test used a fictional dot-separated millisecond format
+	// (...T06-20-00.000Z...) that sessionStartedAt()'s regex could parse, but
+	// which no real session path ever has — masking the fact that
+	// isFreshReplacementSession() silently never recognized ANY real fresh
+	// retry, for every project, the whole time this protection has existed.
 	const ticketFinishedAt = "2026-09-11T06:17:30.925Z";
 	const snapshot = {
-		agents: [{ name: "coder-01", cwd: row.root, tab_id: "t-coder-retry", pane_id: "p-coder-retry", agent_status: "idle", agent_session: { value: "/tmp/sessions/2026-09-11T06-20-00.000Z_retry.jsonl" } }],
+		agents: [{ name: "coder-01", cwd: row.root, tab_id: "t-coder-retry", pane_id: "p-coder-retry", agent_status: "idle", agent_session: { value: "/tmp/sessions/2026-09-11T06-20-00-000Z_retry.jsonl" } }],
 		tabs: [{ tab_id: "t-coder-retry", workspace_id: "w1", label: "coder-01" }],
 		panes: [{ pane_id: "p-coder-retry", tab_id: "t-coder-retry", workspace_id: "w1", cwd: row.root }],
 		workspaces: [{ workspace_id: "w1", label: row.name }],
@@ -163,6 +171,40 @@ check("2026-09-14 fix: cleanupStaleProjectTabs() closes a live worker too, once 
 	assert.equal(closed.length, 1, "a live worker whose only ticket finished well past the retry grace window must now be closed");
 	assert.equal(closed[0].label, "coder-09");
 	assert.equal(closed[0].reason, "terminal_task");
+});
+
+check("2026-09-14 fix: cleanupStaleProjectTabs() closes a live worker that was NEVER assigned any ticket at all, once it has been idle long enough", () => {
+	// Real incident: newMioDOC had 7 idle worker panes (docs-sync-01,
+	// frontend-reviewer-01, deployment-agent-01, e2e-simulator-01,
+	// design-redesign-specialist-01, full-stack-reviewer-01, fullstack-dev-02)
+	// whose sessions were ~4 days old with ZERO ticket ever recorded for any
+	// of them — not "just finished", never assigned anything at all. The
+	// pre-fix condition only time-bounded the "has a terminal ticket" case;
+	// "no ticket match at all" fell through to `!identity || !live` (both
+	// false here) and was protected forever, with no age check whatsoever.
+	const oldSessionPath = "/fake/sessions/2026-09-01T00-00-00-000Z_fake-uuid.jsonl";
+	const snapshot = {
+		agents: [{ name: "docs-sync-01", cwd: row.root, tab_id: "t-never-ticketed", pane_id: "p-never-ticketed-old", agent_status: "idle", agent_session: { value: oldSessionPath } }],
+		tabs: [{ tab_id: "t-never-ticketed", workspace_id: "w1", label: "docs-sync-01" }],
+		panes: [{ pane_id: "p-never-ticketed-old", tab_id: "t-never-ticketed", workspace_id: "w1", cwd: row.root, agent_session: { value: oldSessionPath } }],
+		workspaces: [{ workspace_id: "w1", label: row.name }],
+	};
+	const closed = cleanupStaleProjectTabs(snapshot, row, []);
+	assert.equal(closed.length, 1, "a live worker that was never assigned any ticket, idle well past the grace window, must now be closed");
+	assert.equal(closed[0].label, "docs-sync-01");
+	assert.equal(closed[0].reason, "never_ticketed_idle");
+});
+
+check("but a FRESH live worker with no ticket yet is protected — it may be about to receive its first assignment", () => {
+	const freshSessionPath = `/fake/sessions/${new Date().toISOString().replace(/:/g, "-")}_fake-uuid.jsonl`;
+	const snapshot = {
+		agents: [{ name: "docs-sync-02", cwd: row.root, tab_id: "t-fresh-unticketed", pane_id: "p-fresh-unticketed", agent_status: "idle", agent_session: { value: freshSessionPath } }],
+		tabs: [{ tab_id: "t-fresh-unticketed", workspace_id: "w1", label: "docs-sync-02" }],
+		panes: [{ pane_id: "p-fresh-unticketed", tab_id: "t-fresh-unticketed", workspace_id: "w1", cwd: row.root, agent_session: { value: freshSessionPath } }],
+		workspaces: [{ workspace_id: "w1", label: row.name }],
+	};
+	const closed = cleanupStaleProjectTabs(snapshot, row, []);
+	assert.deepEqual(closed, [], "a brand-new worker with no ticket yet must not be closed just because it has none — the planner may not have delegated to it yet");
 });
 
 check("an agent instance from a DIFFERENT project's cwd is never touched", () => {

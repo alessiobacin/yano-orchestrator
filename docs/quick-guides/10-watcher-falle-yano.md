@@ -524,6 +524,16 @@ pacchetto — un `yano update` aggiorna quindi la logica del digest senza dover
 rieseguire alcun bootstrap (dettaglio: `docs/diagram/10-digest-giornaliero.mmd`).
 ### Identità del planner durante avvio e ripristino
 
+Il planner permanente viene identificato per RUOLO, mai per nome esatto di
+tab/agente. Da Revisione 66 Herdr registra ogni agente con nome univoco
+(`planner-<progetto>-<hash>`), mentre l'identità Pi (`--instance`) resta
+`planner-01`: il watcher riconosce il planner dal ruolo agente, dal prefisso
+`planner` di nome/istanza o dalla label della tab, e `yano start` rifiuta un
+secondo `planner-01` quando un planner con nome univoco è già live. Quando il
+planner è sano, le tab planner duplicate senza processo Pi live vengono
+bonificate; due planner live simultanei restano segnalati come identity
+conflict, mai chiusi a forza.
+
 Il planner permanente viene identificato con la root canonica del progetto,
 la tab Herdr `planner-01` e il processo Pi vivo nel pane. Durante l'avvio di
 Herdr l'elenco `agents` può arrivare alcuni istanti dopo tab e processi; il

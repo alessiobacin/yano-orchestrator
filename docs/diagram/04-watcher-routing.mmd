@@ -11,7 +11,7 @@ flowchart TD
     DB --> FINDING["finding"]
     HEARTBEAT --> FINDING
     TRACE --> FINDING
-    SERVICES --> IDENTITY["workspace canonico: root path\nlabel case-insensitive\nplanner live reuse / no duplicate"]
+    SERVICES --> IDENTITY["workspace canonico: root path\nlabel case-insensitive\nplanner per RUOLO (mai nome esatto)\nplanner live reuse / no duplicate"]
     IDENTITY --> FINDING
     SCHEDULES --> FINDING
     FINDING --> PLANNER{"Planner live?"}

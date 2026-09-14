@@ -68,6 +68,23 @@ try {
 		} });
 		assert.deepEqual(discoverServerEndpoints(declaredRoot, {}), { frontend: { url: "http://localhost:19100", source: "capabilities" } });
 	} finally { fs.rmSync(declaredRoot, { recursive: true, force: true }); }
+	// Regression: an explicit per-project config entry must win even over a
+	// capabilities record that says the component is NOT present. That record
+	// is a point-in-time detector guess that can go stale (e.g. detected once
+	// before a frontend/backend existed, never re-run since — this project's
+	// own real capabilities.json) — it must never silently and permanently
+	// block an explicit, deliberate override with no visible error.
+	const staleAbsentRoot = fs.mkdtempSync(path.join(os.tmpdir(), "yano-server-status-stale-absent-"));
+	try {
+		const staleConfig = path.join(staleAbsentRoot, ".pi", "extensions", "yano-orchestrator", "config");
+		fs.mkdirSync(staleConfig, { recursive: true });
+		fs.writeFileSync(path.join(staleConfig, "e2e-environment.json"), JSON.stringify({ frontend_url: "http://localhost:19200" }));
+		writeCapabilities(staleAbsentRoot, { project: "stale-absent", components: {
+			frontend: { present: false, source: "detector", confidence: "unknown" },
+			backend: { present: false, source: "detector", confidence: "unknown" },
+		} });
+		assert.deepEqual(discoverServerEndpoints(staleAbsentRoot, {}), { frontend: { url: "http://localhost:19200" } }, "an explicit config entry must win over a stale capabilities.present=false record");
+	} finally { fs.rmSync(staleAbsentRoot, { recursive: true, force: true }); }
 	assert.equal(await probeServer("http://localhost:1", 20), "stopped");
 	// Regression: a dev server that is genuinely up but slow to answer its
 	// FIRST request (Vite/Next/CRA all compile-on-first-request; routinely

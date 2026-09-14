@@ -87,6 +87,24 @@ export function discoverServerEndpoints(root, env = process.env) {
 	const effectiveEnv = { ...readProjectEnv(roots[0]), ...env };
 	const result = {};
 	for (const kind of ["frontend", "backend"]) {
+		// An explicit per-project config entry (.pi/.../e2e-environment.json,
+		// written by capabilities detection or set by hand) is a deliberate,
+		// specific declaration of where THIS component actually runs. It must
+		// win even over a capabilities "not present" record: that record is a
+		// point-in-time detector guess, not immune to going stale (detected
+		// once before a frontend/backend existed, never re-run since — real
+		// case: this exact project's own capabilities.json). Without this,
+		// a stale "not present" silently blocks the light forever with no
+		// visible error, even once someone configures the real URL by hand.
+		let explicitConfigUrl = null;
+		for (const projectRoot of roots) {
+			const config = readJson(path.join(projectRoot, CONFIG_PATH)) || {};
+			const configuredUrl = validUrl(kind === "frontend" ? config.frontend_url : config.backend_url);
+			const configuredPort = kind === "frontend" ? config.frontend_port : config.backend_port;
+			explicitConfigUrl = configuredUrl || (configuredPort ? `http://localhost:${Number(configuredPort)}` : null);
+			if (explicitConfigUrl) break;
+		}
+		if (explicitConfigUrl) { result[kind] = { url: explicitConfigUrl }; continue; }
 		const capabilities = readCapabilities(roots[0]);
 		const declared = capabilities?.components?.[kind];
 		if (declared && declared.present === false) continue;
@@ -97,15 +115,16 @@ export function discoverServerEndpoints(root, env = process.env) {
 		const configuredEnvUrl = validUrl(firstValue(effectiveEnv, URL_KEYS[kind]));
 		const configuredEnvPort = firstValue(effectiveEnv, PORT_KEYS[kind]);
 		const envUrl = configuredEnvUrl || (configuredEnvPort ? `http://localhost:${Number(configuredEnvPort)}` : null);
+		// No explicit config in any root at this point (handled above) — only
+		// component-detection-gated env/inference guessing remains.
 		const componentDetected = roots.some((projectRoot) => projectComponent(projectRoot, kind));
-		for (const projectRoot of roots) {
-			const config = readJson(path.join(projectRoot, CONFIG_PATH)) || {};
-			const configuredUrl = validUrl(kind === "frontend" ? config.frontend_url : config.backend_url);
-			const configuredPort = kind === "frontend" ? config.frontend_port : config.backend_port;
-			const url = configuredUrl || (configuredPort ? `http://localhost:${Number(configuredPort)}` : null) || (componentDetected ? envUrl : null) || inferredUrl(projectRoot, kind);
-			if (url) { result[kind] = { url }; break; }
+		if (componentDetected) {
+			for (const projectRoot of roots) {
+				const url = envUrl || inferredUrl(projectRoot, kind);
+				if (url) { result[kind] = { url }; break; }
+			}
 		}
-		if (!result[kind] && envUrl && (componentDetected || configuredEnvUrl)) result[kind] = { url: envUrl };
+		if (!result[kind] && envUrl && configuredEnvUrl) result[kind] = { url: envUrl };
 	}
 	return result;
 }

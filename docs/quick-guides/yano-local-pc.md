@@ -39,6 +39,17 @@ nel runtime logico `yano-local-pc`; non viene mai usato lo scope di un progetto
 applicativo.
 Operazioni che modificano o inviano dati richiedono conferma esplicita.
 
+Memoria CodeMem persistente: il runtime `<YANO_DATA_DIR>/yano-local-pc`
+contiene lo store `memory/` (`cm init pi`, idempotente, mai bloccante, mai nel
+checkout di progetto). Ogni `yano local-pc ask` richiama prima dell'invio il
+contesto pertinente (`cm sq` su keyword, bounded 2000 caratteri, solo testo
+redatto: segreti key=value, token Bearer ed email rimossi) e salva dopo la
+risposta lo scambio redatto (`cm save --auto --role agent`); entrambi i passi
+sono best-effort e non bloccano mai la richiesta. A ogni avvio/recovery il
+supervisore riverifica che lo store sia leggibile (`cm recent`, solo conteggi
+nei log, mai contenuto memory). La conversazione sopravvive così al riavvio
+del computer.
+
 `yano-local-pc` è anche il destinatario obbligatorio degli incidenti del
 control-plane rilevati dai planner dei progetti. Riceve evidenze concise
 (progetto/root, run o ticket, fase, errore e classificazione bloccante),

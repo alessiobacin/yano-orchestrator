@@ -61,6 +61,7 @@ export { projectRuns, projectOpenHolds, runNeedsPlanner, projectNeedsPlanner } f
 import {
 	findProjectWorkspace, plannerAgentsInWorkspace, plannerHeartbeatHealthy,
 	paneHasLivePiProcess, livePlannerPanesInWorkspace, plannerLooksHealthyViaExplain,
+	isPlannerIdentity,
 } from "./watcher/planner-health.mjs";
 export { findProjectWorkspace, plannerHeartbeatHealthy } from "./watcher/planner-health.mjs";
 
@@ -259,6 +260,14 @@ export function pruneMissingWatcherProjects() {
 // ensureRegisteredPlanner stays here (below): it closes tabs (M1) and
 // writes to the registry DB, a different risk class deferred for now.
 
+// A project owns exactly one planner. When the live planner is exposed by
+// Herdr under its unique agent name (`planner-<project>-<hash>`) the legacy
+// exact-label lookup (`label === "planner-01"`) misses it and the recovery
+// path creates a duplicate `planner-01` tab. Match by role instead.
+function findPlannerTab(snapshot, workspaceId) {
+	return (snapshot?.tabs || []).find((item) => item.workspace_id === workspaceId && isPlannerIdentity(item.label));
+}
+
 export function ensureRegisteredPlanner(row, snapshot, db = null) {
 	if (!snapshot || !fs.existsSync(row.root)) return { recovery: "project_unavailable" };
 	// The planner is the permanent control-plane identity of every initialized
@@ -271,6 +280,16 @@ export function ensureRegisteredPlanner(row, snapshot, db = null) {
 	const planners = workspace ? plannerAgentsInWorkspace(snapshot, workspace.workspace_id, row.root) : [];
 	const healthy = planners.find(plannerHeartbeatHealthy);
 	if (healthy) {
+		// Bonifica: an empty duplicate planner tab (e.g. a legacy `planner-01`
+		// left over next to the live uniquely-named planner) has no live Pi
+		// process and is closed here instead of accumulating. Live processes
+		// are never force-closed — simultaneous live planners are reported as
+		// an identity conflict (findAgentIdentityConflicts) instead.
+		const leftovers = planners.filter((planner) => planner.tab_id !== healthy.tab_id && !paneHasLivePiProcess(planner.pane_id));
+		for (const leftover of leftovers) {
+			const tab = snapshot.tabs?.find((item) => item.tab_id === leftover.tab_id);
+			if (tab) closeHerdrTab(tab.tab_id);
+		}
 		if (db && row.planner_unhealthy_since) db.prepare("UPDATE watcher_projects SET planner_unhealthy_since = NULL, updated_at = ? WHERE project_key = ?").run(now(), row.project_key);
 		return { recovery: "planner_healthy", planner_status: healthy.agent_status || "unknown", planner_instance: healthy.name || null };
 	}
@@ -827,14 +846,14 @@ function recoverPlanner({ row, snapshot, run, reason }) {
 	let tab = livePlanner && current?.tabs?.find((item) => item.tab_id === livePlanner.tab_id);
 	let pane = livePlanner && current?.panes?.find((item) => item.pane_id === livePlanner.pane_id);
 	if (!pane) {
-		tab = current?.tabs?.find((item) => item.workspace_id === workspace.workspace_id && item.label === "planner-01");
+		tab = findPlannerTab(current, workspace.workspace_id);
 		pane = tab && current?.panes?.find((item) => item.tab_id === tab.tab_id);
 	}
 	if (!pane) {
 		const created = spawnSync("herdr", ["tab", "create", "--workspace", workspace.workspace_id, "--cwd", row.root, "--label", "planner-01", "--no-focus"], { encoding: "utf8" });
 		if (created.status !== 0) throw new Error((created.stderr || "tab planner non creata").trim());
 		current = herdrSnapshot() || current;
-		tab = current?.tabs?.find((item) => item.workspace_id === workspace.workspace_id && item.label === "planner-01");
+		tab = findPlannerTab(current, workspace.workspace_id);
 		pane = tab && current?.panes?.find((item) => item.tab_id === tab.tab_id);
 	}
 	if (!pane) throw new Error(`pane planner non trovato per ${row.name}`);

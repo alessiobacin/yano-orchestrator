@@ -8,6 +8,22 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { readApplicationHeartbeat } from "../yano-trace-storage.mjs";
 
+// A planner is identified by ROLE, never by its exact tab/agent name. Since
+// Revisione 66 Herdr registers every agent under a globally unique name
+// (`planner-<project>-<hash>` from herdrAgentName), while Pi's `--instance`
+// stays `planner-01`. Matching by the exact legacy name made the supervisor
+// miss the live uniquely-named planner and launch a duplicate `planner-01`.
+export const PLANNER_IDENTITY_PATTERN = /^planner(?:[-_].*)?$/i;
+export function isPlannerIdentity(value) {
+	return PLANNER_IDENTITY_PATTERN.test(String(value || "").trim());
+}
+export function agentIsPlanner(agent) {
+	if (!agent) return false;
+	if (/^planner$/i.test(String(agent.role || agent.agent_role || "").trim())) return true;
+	if (isPlannerIdentity(agent.name) || isPlannerIdentity(agent.instance)) return true;
+	return /planner/i.test(`${agent.terminal_title_stripped || ""} ${agent.terminal_title || ""}`);
+}
+
 export function findProjectWorkspace(snapshot, root, project) {
 	// Workspace labels are user-facing and are not a stable identity: Herdr
 	// preserves casing while Yano may derive a normalized project name. The
@@ -28,7 +44,7 @@ export function findProjectWorkspace(snapshot, root, project) {
 		const planners = (snapshot?.agents || []).filter((agent) =>
 			agent.workspace_id === workspace.workspace_id &&
 			path.resolve(agent.cwd || "") === expectedRoot &&
-			(plannerLabelForAgent(snapshot, agent) || /planner/i.test(`${agent.terminal_title_stripped || ""} ${agent.terminal_title || ""} ${agent.name || ""}`)),
+			(plannerLabelForAgent(snapshot, agent) || agentIsPlanner(agent)),
 		);
 		const livePlanner = planners.some((planner) => ["idle", "working"].includes(String(planner.agent_status || "").toLowerCase()));
 		const exactLabel = workspace.label === project;
@@ -43,7 +59,7 @@ export function plannerAgentsInWorkspace(snapshot, workspaceId, root) {
 	return (snapshot?.agents || []).filter((agent) =>
 		agent.workspace_id === workspaceId &&
 		path.resolve(agent.cwd || "") === path.resolve(root) &&
-		(plannerLabelForAgent(snapshot, agent) || /planner/i.test(`${agent.terminal_title_stripped || ""} ${agent.terminal_title || ""} ${agent.name || ""}`)),
+		(plannerLabelForAgent(snapshot, agent) || agentIsPlanner(agent)),
 	);
 }
 
@@ -53,7 +69,10 @@ export function plannerAgentsInWorkspace(snapshot, workspaceId, root) {
 // and caused a new recovery tab to be created on every supervisor pass.
 export function plannerLabelForAgent(snapshot, agent) {
 	const tab = snapshot?.tabs?.find((item) => item.tab_id === agent.tab_id);
-	return Boolean(tab && /^planner(?:-\d+)?$/i.test(tab.label || ""));
+	// The tab may carry either the legacy `planner-01` label or Herdr's
+	// unique agent name (`planner-<project>-<hash>`); the agent row itself
+	// may carry the Pi role. Any of them proves planner identity.
+	return Boolean((tab && isPlannerIdentity(tab.label)) || agentIsPlanner(agent));
 }
 
 // Fase 2 (heartbeat unification): every agent process (this planner included)
@@ -121,6 +140,7 @@ export function livePlannerPanesInWorkspace(snapshot, workspaceId, root) {
 	return (snapshot?.panes || []).filter((pane) => {
 		if (pane.workspace_id !== workspaceId || path.resolve(pane.cwd || "") !== expectedRoot) return false;
 		const tab = (snapshot.tabs || []).find((item) => item.tab_id === pane.tab_id);
-		return /^planner(?:-\d+)?$/i.test(tab?.label || "") && paneHasLivePiProcess(pane.pane_id);
+		const agent = (snapshot.agents || []).find((item) => item.pane_id === pane.pane_id);
+		return ((tab && isPlannerIdentity(tab.label)) || agentIsPlanner(agent)) && paneHasLivePiProcess(pane.pane_id);
 	});
 }

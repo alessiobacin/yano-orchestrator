@@ -26,6 +26,12 @@ e richiede processo, stato Herdr, heartbeat applicativo e identità esatta del
 sbagliato viene ricreata. Architect e auto-improver restano worker on-demand e
 sono riconciliati dai propri registri quando richiesto.
 
+Il runtime `<YANO_DATA_DIR>/yano-local-pc` contiene anche lo store CodeMem
+`memory/` (`cm init pi` idempotente, mai bloccante): ogni `ask` richiama il
+contesto pertinente redatto prima dell'invio e salva lo scambio redatto dopo
+la risposta (best-effort); a ogni avvio/recovery il supervisore riverifica la
+leggibilità dello store, così la conversazione sopravvive al riavvio.
+
 Architect genera capability globali con `yano architect create --type
 playbook|cli|skill|mcp-server|rest-api`. Il codice viene scritto nel catalogo persistente
 globale e resta ephemeral finché review, test, installazione, prima esecuzione

@@ -88,9 +88,22 @@ export function findAgentIdentityConflicts(snapshot) {
 	return conflicts;
 }
 
+// A planner is identified by ROLE, never by its exact instance name. Since
+// Revisione 66 Herdr registers every agent under a globally unique name
+// (`planner-<project>-<hash>`), while Pi's `--instance` stays `planner-01`.
+// A live uniquely-named planner must count as the project's planner, or a
+// second `planner-01` launch slips through the duplicate check.
+const PLANNER_IDENTITY_PATTERN = /^planner(?:[-_].*)?$/i;
+export function isPlannerIdentity(value) {
+	return PLANNER_IDENTITY_PATTERN.test(String(value || "").trim());
+}
+
 export function assertAgentIdentityAvailable({ snapshot, root, instance, role }) {
 	const canonicalRoot = canonicalAgentRoot(root);
 	const duplicate = liveAgentIdentities(snapshot).find((agent) => agent.root === canonicalRoot && agent.name === instance);
+	const rolePlanner = role === "planner" && /^planner(?:-\d{2})?$/.test(instance);
+	const plannerPresent = rolePlanner && liveAgentIdentities(snapshot).some((agent) => agent.root === canonicalRoot && agent.name !== instance && isPlannerIdentity(agent.name));
+	if (!duplicate && plannerPresent) throw new Error(`planner già attivo nel progetto ${canonicalRoot}; usa la tab esistente o attendi il watcher; non avviare un secondo planner`);
 	if (duplicate) {
 		const tab = (snapshot?.tabs || []).find((item) => item.tab_id === duplicate.tab_id);
 		const pane = (snapshot?.panes || []).find((item) => item.pane_id === duplicate.pane_id);

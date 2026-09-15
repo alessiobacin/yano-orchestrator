@@ -7,6 +7,8 @@ import os from "node:os";
 import path from "node:path";
 import { ensureComputerRuntime } from "./yano-global-services.mjs";
 
+const checkoutMemory = path.join(path.resolve(import.meta.dirname, ".."), "memory", "state.db");
+const checkoutMemoryExisted = fs.existsSync(checkoutMemory);
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "codemem-localpc-"));
 // Path with spaces: spawnSync cwd must survive it (no shell quoting needed).
 const dataDir = path.join(tmp, "yano data dir");
@@ -45,8 +47,7 @@ try {
 }
 
 console.log("\n=== TEST 3 — never touches the project checkout ===");
-const checkoutMemory = path.join(path.resolve(import.meta.dirname, ".."), "memory", "state.db");
-assert.ok(!fs.existsSync(checkoutMemory), `project checkout must not gain memory/state.db (${checkoutMemory})`);
+assert.equal(fs.existsSync(checkoutMemory), checkoutMemoryExisted, "project checkout store presence must not change");
 console.log("   OK — no memory/state.db in the project checkout");
 
 console.log("\nsmoke-test-codemem-localpc-store: ok");

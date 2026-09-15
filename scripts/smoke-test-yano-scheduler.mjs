@@ -36,7 +36,7 @@ try {
 
 	const created = await runYanoScheduler({ argv: ["add-natural", "--task", "ogni giorno alle 14 e alle 21 voglio che esegui la pulizia del progetto llmproxy", "--project-root", project, "--json"], env, now: new Date("2026-09-02T10:00:00Z"), spawn });
 	assert.equal(created.created.cron, "0 14,21 * * *");
-	assert.match(crontab, /yano-scheduler-supervisor/);
+	assert.match(crontab, /yano-watcher-supervisor/);
 	const dryRun = await runYanoScheduler({ argv: ["run", "--id", created.created.id, "--dry-run", "--json"], env, spawn });
 	assert.equal(dryRun.dry_run, true);
 	assert.equal(dryRun.valid, false, "legacy jobs are intentionally not executable through script-first dry-run");
@@ -45,9 +45,9 @@ try {
 	assert.equal(listed.length, 1);
 
 	const supervised = await runYanoScheduler({ argv: ["supervise"], env, now: new Date(2026, 8, 2, 14, 0, 0), spawn });
-	assert.equal(supervised.agent.recovered, true, "supervisor recreates the scheduler agent when Herdr has no live tab");
+	assert.equal(supervised.agent.mode, "deterministic", "scheduling does not require a Pi session");
 	assert.equal(supervised.dispatched.length, 1, "due job is dispatched exactly once in its scheduled minute");
-	assert.ok(launches.some((launch) => launch.args.includes("--role") && launch.args.includes("scheduler")), "recovery launches the persistent scheduler role");
+	assert.ok(!launches.some((launch) => launch.args.includes("--role") && launch.args.includes("scheduler")), "supervision never launches a scheduler LLM");
 	assert.ok(launches.some((launch) => launch.args.includes("local-pc") && launch.args.includes("--planner")), "a due job is sent to the persistent Local PC planner");
 	const executions = await runYanoScheduler({ argv: ["instances", "--id", created.created.id, "--limit", "1", "--json"], env, spawn });
 	assert.equal(executions.length, 1, "instances --limit limits the execution history");

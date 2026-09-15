@@ -85,14 +85,14 @@ check("a NON-planner agent with a terminal ticket IS included (the sweep still d
 	const agents = [{ name: "coder-01", cwd: row.root, tab_id: "t-coder", pane_id: "p-coder", agent_status: "idle" }];
 	const runs = [{ tickets: [{ status: "done", assigned_instance: "coder-01" }] }];
 	const removed = cleanupCompletedAgentTabs(snapshotWith(agents), row, runs);
-	// reason is "terminal_ticket" vs "dead_process" depending on whether the
+	// reason is "terminal_task" vs "dead_agent" depending on whether the
 	// real `herdr` binary is reachable in this environment (paneHasLivePiProcess
 	// falls back to "dead" without it) — this test only asserts on WHICH
 	// instance was attempted, which is what the planner exemption is actually
 	// about; the exact reason string has its own coverage elsewhere.
 	assert.equal(removed.length, 1, "a finished non-planner agent's tab is still attempted for closure");
 	assert.equal(removed[0].instance, "coder-01");
-	assert.ok(["terminal_ticket", "dead_process"].includes(removed[0].reason));
+	assert.ok(["terminal_task", "dead_agent"].includes(removed[0].reason));
 });
 
 check("a mixed snapshot: planner survives, finished coder is closed, in-progress coder survives", () => {
@@ -244,7 +244,7 @@ check("2026-09-14 fix: the SAME live real-shaped agent, once its terminal ticket
 	const removed = cleanupCompletedAgentTabs({ agents, tabs }, row, runs);
 	assert.equal(removed.length, 1, "a live agent whose only ticket finished well past the retry grace window must now be closed");
 	assert.equal(removed[0].instance, "coder-07-fixture-project");
-	assert.equal(removed[0].reason, "terminal_ticket");
+	assert.equal(removed[0].reason, "terminal_task");
 });
 
 delete process.env.YANO_TEST_ALIVE_PANES;

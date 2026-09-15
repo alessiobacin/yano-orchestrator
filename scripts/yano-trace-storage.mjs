@@ -287,13 +287,14 @@ export function readTraceRecords({ cwd, project, allProjects = false, since = nu
 	const base = path.join(root, "traces");
 	const typeFilter = normalizeTraceTypeFilter(type, types);
 	const records = [];
-	for (const file of walkJsonl(base)) {
+	for (const directory of projectKeyFilter ? [...projectKeyFilter].map((key) => path.join(base, key)) : [base]) for (const file of walkJsonl(directory)) {
 		// Events written by versions before project_key was added are still
 		// scoped safely from their canonical path: traces/<project-key>/...
 		const parent = path.basename(path.dirname(file));
 		const fileProjectKey = ["events", "terminal", "snapshots"].includes(parent)
 			? path.basename(path.dirname(path.dirname(file)))
 			: parent;
+		if (projectKeyFilter && !projectKeyFilter.has(fileProjectKey)) continue;
 		// Since-bounded reads skip files whose mtime proves they cannot hold
 		// in-window records (append-only, mtime = last write). A file with
 		// mtimeMs + SAFETY_MARGIN_MS < since has not been written since before

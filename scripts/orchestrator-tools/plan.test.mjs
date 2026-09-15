@@ -51,10 +51,16 @@ describe("plan", () => {
 	});
 
 	describe("plan_set / plan_advance / plan_get round-trip", () => {
-		it("saves a plan with phase 1 unlocked and the rest locked", async () => {
+		it("requires a scoping decision before creating a new plan", async () => {
+            const { deps } = makeDeps(worktreeDir);
+            const tool = toolByName(createPlanTools(deps), "plan_set");
+            await expect(tool.execute("c1", { slug: "demo", phases: minimalPlan })).rejects.toThrow(/scoping/);
+            await expect(tool.execute("c2", { slug: "demo", phases: minimalPlan, scoping: { status: "completed", rationale: " " } })).rejects.toThrow(/scoping/);
+        });
+        it("saves a plan with phase 1 unlocked and the rest locked", async () => {
 			const { deps } = makeDeps(worktreeDir);
 			const tools = createPlanTools(deps);
-			const result = await toolByName(tools, "plan_set").execute("c1", { slug: "demo", phases: minimalPlan });
+			const result = await toolByName(tools, "plan_set").execute("c1", { scoping: { status: "not_needed", rationale: "Fully specified regression fixture" }, slug: "demo", phases: minimalPlan });
 			expect(result.details.plan.phases[0].status).toBe("unlocked");
 			expect(result.details.plan.phases[1].status).toBe("locked");
 		});
@@ -63,7 +69,7 @@ describe("plan", () => {
 			const { deps } = makeDeps(worktreeDir);
 			const tools = createPlanTools(deps);
 			await expect(
-				toolByName(tools, "plan_set").execute("c1", { slug: "demo", phases: [{ roles: ["reviewer"] }, { roles: ["docs-sync"] }] }),
+				toolByName(tools, "plan_set").execute("c1", { scoping: { status: "not_needed", rationale: "Fully specified regression fixture" }, slug: "demo", phases: [{ roles: ["reviewer"] }, { roles: ["docs-sync"] }] }),
 			).rejects.toThrow(/phase 1 must include "coder"/);
 		});
 
@@ -71,7 +77,7 @@ describe("plan", () => {
 			const { deps } = makeDeps(worktreeDir);
 			const tools = createPlanTools(deps);
 			await expect(
-				toolByName(tools, "plan_set").execute("c1", { slug: "demo", phases: [{ roles: ["coder"] }] }),
+				toolByName(tools, "plan_set").execute("c1", { scoping: { status: "not_needed", rationale: "Fully specified regression fixture" }, slug: "demo", phases: [{ roles: ["coder"] }] }),
 			).rejects.toThrow(/LAST phase must include "docs-sync"/);
 		});
 
@@ -79,14 +85,14 @@ describe("plan", () => {
 			const { deps } = makeDeps(worktreeDir);
 			const tools = createPlanTools(deps);
 			await expect(
-				toolByName(tools, "plan_set").execute("c1", { slug: "demo", phases: [{ roles: ["coder"] }, { roles: ["coder", "docs-sync"] }] }),
+				toolByName(tools, "plan_set").execute("c1", { scoping: { status: "not_needed", rationale: "Fully specified regression fixture" }, slug: "demo", phases: [{ roles: ["coder"] }, { roles: ["coder", "docs-sync"] }] }),
 			).rejects.toThrow(/may only belong to one phase/);
 		});
 
 		it("allows the tdd-agent-alone exception for phase 1 when coder follows in phase 2", async () => {
 			const { deps } = makeDeps(worktreeDir);
 			const tools = createPlanTools(deps);
-			const result = await toolByName(tools, "plan_set").execute("c1", {
+			const result = await toolByName(tools, "plan_set").execute("c1", { scoping: { status: "not_needed", rationale: "Fully specified regression fixture" },
 				slug: "demo",
 				phases: [{ roles: ["tdd-agent"] }, { roles: ["coder"] }, { roles: ["docs-sync"] }],
 			});
@@ -96,13 +102,13 @@ describe("plan", () => {
 		it("rejects a non-planner caller", async () => {
 			const { deps } = makeDeps(worktreeDir, { getIdentity: () => ({ role: "coder", cwd: worktreeDir, project: "demo", instance: "coder-01" }) });
 			const tools = createPlanTools(deps);
-			await expect(toolByName(tools, "plan_set").execute("c1", { slug: "demo", phases: minimalPlan })).rejects.toThrow(/only the planner role/);
+			await expect(toolByName(tools, "plan_set").execute("c1", { scoping: { status: "not_needed", rationale: "Fully specified regression fixture" }, slug: "demo", phases: minimalPlan })).rejects.toThrow(/only the planner role/);
 		});
 
 		it("advances phase 1 to complete and unlocks phase 2", async () => {
 			const { deps } = makeDeps(worktreeDir);
 			const tools = createPlanTools(deps);
-			await toolByName(tools, "plan_set").execute("c1", { slug: "demo", phases: minimalPlan });
+			await toolByName(tools, "plan_set").execute("c1", { scoping: { status: "not_needed", rationale: "Fully specified regression fixture" }, slug: "demo", phases: minimalPlan });
 			const result = await toolByName(tools, "plan_advance").execute("c1", { slug: "demo", completed_phase: 1 });
 			expect(result.details.plan.phases[0].status).toBe("complete");
 			expect(result.details.plan.phases[1].status).toBe("unlocked");
@@ -111,14 +117,14 @@ describe("plan", () => {
 		it("refuses to advance a still-locked phase out of order", async () => {
 			const { deps } = makeDeps(worktreeDir);
 			const tools = createPlanTools(deps);
-			await toolByName(tools, "plan_set").execute("c1", { slug: "demo", phases: minimalPlan });
+			await toolByName(tools, "plan_set").execute("c1", { scoping: { status: "not_needed", rationale: "Fully specified regression fixture" }, slug: "demo", phases: minimalPlan });
 			await expect(toolByName(tools, "plan_advance").execute("c1", { slug: "demo", completed_phase: 2 })).rejects.toThrow(/still locked/);
 		});
 
 		it("is a no-op advancing an already-complete phase", async () => {
 			const { deps } = makeDeps(worktreeDir);
 			const tools = createPlanTools(deps);
-			await toolByName(tools, "plan_set").execute("c1", { slug: "demo", phases: minimalPlan });
+			await toolByName(tools, "plan_set").execute("c1", { scoping: { status: "not_needed", rationale: "Fully specified regression fixture" }, slug: "demo", phases: minimalPlan });
 			await toolByName(tools, "plan_advance").execute("c1", { slug: "demo", completed_phase: 1 });
 			const result = await toolByName(tools, "plan_advance").execute("c1", { slug: "demo", completed_phase: 1 });
 			expect(result.content[0].text).toMatch(/already complete/);
@@ -128,7 +134,7 @@ describe("plan", () => {
 			const { deps, tickets } = makeDeps(worktreeDir);
 			tickets.set("t1", { id: "t1", run_id: "r1", status: "in_progress" });
 			const tools = createPlanTools(deps);
-			await toolByName(tools, "plan_set").execute("c1", { slug: "demo", phases: minimalPlan });
+			await toolByName(tools, "plan_set").execute("c1", { scoping: { status: "not_needed", rationale: "Fully specified regression fixture" }, slug: "demo", phases: minimalPlan });
 			await expect(
 				toolByName(tools, "plan_advance").execute("c1", { slug: "demo", completed_phase: 1, run_id: "r1", ticket_ids: ["t1"] }),
 			).rejects.toThrow(/incomplete ticket/);

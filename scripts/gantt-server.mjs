@@ -26,6 +26,7 @@ import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import mqtt from "mqtt";
+import { projectTimeline } from "./yano-timeline.mjs";
 import { projectDbPath } from "./yano-project.mjs";
 import { projectKey } from "./yano-trace-storage.mjs";
 import { ganttRegistryPath, listGanttsWithStatus, markGanttStopped, registerGantt } from "./gantt-registry.mjs";
@@ -82,7 +83,7 @@ function listenOnAvailablePort(server, ports, host) {
 }
 
 // ── Snapshot: runs + tickets + open holds from orchestrator.db ───────────
-function buildSnapshot(cwd, explicitProject = null) {
+export function buildSnapshot(cwd, explicitProject = null) {
 	const project = explicitProject || resolveProject(cwd);
 	const dbPath = projectDbPath(cwd, project);
 	if (!existsSync(dbPath)) return { project, runs: [], ok: false, db_path: dbPath, hint: "Run `yano repair --yes --init-db`, then let Planner call orchestrator_init/run_create." };
@@ -98,10 +99,11 @@ function buildSnapshot(cwd, explicitProject = null) {
 	const enriched = runs.map((r) => {
 		const tickets = db.prepare("SELECT * FROM tickets WHERE run_id = ? ORDER BY created_at ASC").all(r.id);
 		const holds = db.prepare("SELECT * FROM decision_holds WHERE run_id = ? AND status='open'").all(r.id);
-		return { ...r, tickets, open_holds: holds };
+		const dependencies = db.prepare("SELECT d.* FROM ticket_dependencies d JOIN tickets t ON t.id=d.ticket_id WHERE t.run_id=?").all(r.id);
+		return { ...r, tickets, dependencies, open_holds: holds };
 	});
 	db.close();
-	return { project, runs: enriched, ok: true };
+	return { project, runs: enriched, ...projectTimeline(cwd), generated_at: new Date().toISOString(), ok: true };
 }
 
 function handleUpgrade(req, socket, head, wss) {
@@ -118,8 +120,9 @@ function handleUpgrade(req, socket, head, wss) {
 function wsSend(socket, obj) {
 	try {
 		const payload = Buffer.from(JSON.stringify(obj));
-		const header = Buffer.alloc(payload.length > 125 ? 4 : 2);
-		if (payload.length > 125) { header[0] = 0x81; header[1] = 126; header.writeUInt16BE(payload.length, 2); }
+		const header = Buffer.alloc(payload.length > 65535 ? 10 : payload.length > 125 ? 4 : 2);
+		if (payload.length > 65535) { header[0] = 0x81; header[1] = 127; header.writeBigUInt64BE(BigInt(payload.length), 2); }
+		else if (payload.length > 125) { header[0] = 0x81; header[1] = 126; header.writeUInt16BE(payload.length, 2); }
 		else { header[0] = 0x81; header[1] = payload.length; }
 		socket.write(Buffer.concat([header, payload]));
 	} catch { /* ignore */ }
@@ -157,42 +160,7 @@ async function showGanttLinks({ cwd, argv }) {
 }
 
 // ── Minimal SPA that renders the timeline ─────────────────────────────────
-const PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Orchestrator Gantt</title>
-<style>
-:root{--edge:#333;--txt:#e6e6e6;--bg:#1a1a1a;--card:#2a2a2a}
-*{box-sizing:border-box}body{margin:0;font:14px/1.5 ui-monospace,Menlo,monospace;background:var(--bg);color:var(--txt)}
-h1{font-size:18px;margin:12px 16px}.bar{height:22px;border-radius:3px;color:#000;padding:2px 6px;overflow:hidden;white-space:nowrap}
-.wrap{margin:0 16px 24px}.run{border:1px solid var(--edge);border-left:4px solid #4a9eff;padding:8px;margin:12px 0;background:var(--card)}
-.run h3{margin:0 0 6px;font-size:14px}.t{display:flex;gap:6px;align-items:center;margin:3px 0}
-.status-done{background:#3a9a5a}.status-running{background:#f0c040}.status-pending{background:#6a6a8a}.status-blocked{background:#c05050}.status-failed{background:#c05050}.status-cancelled{background:#555}
-legend{margin:0 16px}.legend span{display:inline-block;width:12px;height:12px;border-radius:2px;vertical-align:middle;margin:0 6px 0 14px}
-.rank{color:#999;width:24px;text-align:right;display:inline-block}
-</style></head><body>
-<h1 id="title">Orchestrator — Gantt</h1>
-<legend><span class="status-done"></span>done<span class="status-running"></span>running<span class="status-pending"></span>pending<span class="status-blocked"></span>blocked<span class="status-failed"></span>failed</legend>
-<div class="wrap" id="root"></div>
-<script>
-const colors={done:"status-done",running:"status-running",pending:"status-pending",blocked:"status-blocked",failed:"status-failed",cancelled:"status-cancelled"};
-function esc(s){return String(s??"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));}
-function render(snap){
-  document.getElementById("title").textContent="Orchestrator — "+ (snap.project||"") +" (live)";
-  const root=document.getElementById("root");
-  if(!snap.ok){ root.innerHTML="<p>orchestrator.db non presente. Esegui <code>yano repair --yes --init-db</code>, poi chiedi al Planner di inizializzare il run.</p>"; return; }
-  if(!snap.runs.length){ root.innerHTML="<p>no runs yet</p>"; return; }
-  root.innerHTML=snap.runs.map(function(r){
-    const tickets=(r.tickets||[]);
-    const holds=(r.open_holds||[]);
-    return '<div class="run"><h3>'+esc(r.id)+' <span style="color:#999">'+esc(r.status)+'</span> — '+esc(r.objective||"")+'</h3>'+
-      (holds.length?'<div style="color:#f0c040">⚠️ '+esc(holds.length)+' open hold(s): '+esc(holds.map(function(h){return h.question;}).join(" | "))+'</div>':'')+
-      tickets.map(function(t){return '<div class="t"><span class="rank">#'+(ticketOrder.get(t.id)??t.id.slice(-4))+'</span><span class="bar '+colors[t.status]+'">'+esc(t.title)+'</span><span style="color:#999">'+esc(t.status)+(t.assigned_instance?' · '+esc(t.assigned_instance):'')+'</span></div>';}).join("")+
-    '</div>';
-  }).join("");
-}
-const ticketOrder=new Map();var ticketN=0;
-async function load(){const r=await fetch("/data");const snap=await r.json();(snap.runs||[]).forEach(function(ru){(ru.tickets||[]).forEach(function(t){if(!ticketOrder.has(t.id))ticketOrder.set(t.id,++ticketN);});});render(snap);}
-try{const ws=new WebSocket((location.protocol==="https:"?"wss":"ws")+"://"+location.host+"/ws");ws.onmessage=function(e){try{const s=JSON.parse(e.data);(s.runs||[]).forEach(function(ru){(ru.tickets||[]).forEach(function(t){if(!ticketOrder.has(t.id))ticketOrder.set(t.id,++ticketN);});});render(s);}catch(_){}};}catch(_){}
-load();setInterval(load,5000);
-</script></body></html>`;
+const PAGE = readFileSync(new URL("./gantt.html", import.meta.url), "utf8");
 
 export async function runGantt({ cwd, argv, packageRoot }) {
 	if (argv.includes("--help") || argv.includes("-h")) {
@@ -224,12 +192,20 @@ export async function runGantt({ cwd, argv, packageRoot }) {
 		}
 	}
 
+	let cachedSnapshot, cachedAt = 0;
+    const currentSnapshot = () => {
+        if (!cachedSnapshot || Date.now() - cachedAt >= 5000) {
+            cachedSnapshot = buildSnapshot(useCwd, project);
+            cachedAt = Date.now();
+        }
+        return cachedSnapshot;
+    };
 	const wss = new Set();
 	const mqttClients = new Set();
 	const server = http.createServer((req, res) => {
 		const url = (req.url || "/").split("?")[0];
 		if (url === "/" || url === "/index.html") { res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }); res.end(PAGE); return; }
-		if (url === "/data") { res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" }); res.end(JSON.stringify(buildSnapshot(useCwd, project))); return; }
+		if (url === "/data") { res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" }); res.end(JSON.stringify(currentSnapshot())); return; }
 		if (url === "/healthz") { res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify({ ok: true, project, root: useCwd, port: server.address()?.port || null })); return; }
 		res.writeHead(404); res.end("not found");
 	});
@@ -242,7 +218,7 @@ export async function runGantt({ cwd, argv, packageRoot }) {
 	const client = mqtt.connect(broker, { clean: true, reconnectPeriod: 3000 });
 	mqttClients.add(client);
 	client.on("connect", () => { try { client.subscribe(`pi/${projectKey(useCwd, project)}/runs/+/events`, { qos: 0 }); } catch {} });
-	client.on("message", () => { wsBroadcast(wss, buildSnapshot(useCwd, project)); });
+	client.on("message", () => { wsBroadcast(wss, currentSnapshot()); });
 	client.on("error", () => { /* broker optional; HTTP still serves /data */ });
 
 	const host = "127.0.0.1";

@@ -312,7 +312,7 @@ async function performUpdate({ packageRoot, argv }) {
 		console.error("L'update viene considerato fallito: nessun link globale deve rimanere attivo.");
 		process.exit(1);
 	}
-	for (const script of ["install-yano-cli.mjs", "install-yano-watcher-cron.mjs", "install-yano-scheduler-cron.mjs"]) {
+	for (const script of ["install-yano-cli.mjs", "install-yano-watcher-cron.mjs"]) {
 		try {
 			execFileSync(process.execPath, [path.join(activePackageRoot, "scripts", script), "--if-global", "--quiet"], {
 				cwd: activePackageRoot,

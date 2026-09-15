@@ -11,6 +11,14 @@ import { saveLocalPcExchange } from "./yano-local-pc.mjs";
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "codemem-rehydrate-"));
 const dataDir = path.join(tmp, "yano data dir");
 fs.mkdirSync(dataDir, { recursive: true });
+// Exercise real CodeMem SQLite persistence independently of optional Ollama.
+const originalPath = process.env.PATH;
+const offlineBin = path.join(tmp, "offline-bin");
+fs.mkdirSync(offlineBin);
+fs.writeFileSync(path.join(offlineBin, "curl"), "#!/bin/sh\nexit 1\n", { mode: 0o700 });
+process.env.PATH = `${offlineBin}${path.delimiter}${originalPath || ""}`;
+const checkoutStore = path.resolve(import.meta.dirname, "..", "memory", "state.db");
+const checkoutStoreExisted = fs.existsSync(checkoutStore);
 const oldDataDir = process.env.YANO_DATA_DIR;
 process.env.YANO_DATA_DIR = dataDir;
 
@@ -67,8 +75,11 @@ try {
 }
 
 console.log("\n=== TEST 4 — project checkout untouched ===");
-assert.ok(!fs.existsSync(path.join(path.resolve(import.meta.dirname, ".."), "memory", "state.db")), "project checkout must not gain memory/state.db");
+assert.equal(fs.existsSync(checkoutStore), checkoutStoreExisted, "project checkout store presence must not change");
 console.log("   OK — no memory/state.db in the project checkout");
 
-process.env.YANO_DATA_DIR = oldDataDir;
+if (oldDataDir === undefined) delete process.env.YANO_DATA_DIR;
+else process.env.YANO_DATA_DIR = oldDataDir;
+process.env.PATH = originalPath;
+fs.rmSync(tmp, { recursive: true, force: true });
 console.log("\nsmoke-test-codemem-localpc-rehydrate: ok");

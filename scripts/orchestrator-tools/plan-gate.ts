@@ -137,6 +137,7 @@ export function createRequireWorktree(deps: PlanGateDeps) {
 // as before this revision.
 export type PlanPhaseStatus = "locked" | "unlocked" | "complete";
 export interface PlanPhase {
+	models?: Array<{ role: string; instance?: string; model: string; provider: string }>;
 	phase: number;
 	roles: string[];
 	note?: string;
@@ -144,6 +145,7 @@ export interface PlanPhase {
 }
 export interface Plan {
 	slug: string;
+	scoping?: { status: "completed" | "not_needed"; rationale: string };
 	phases: PlanPhase[];
 	created_at: string;
 	updated_at: string;
@@ -180,8 +182,10 @@ export function renderPlanMarkdown(plan: Plan): string {
 		"modificare a mano, lo stato reale è in .plan.json accanto a questo file.",
 		"",
 	];
+	if (plan.scoping) lines.push(`Scoping: ${plan.scoping.status} — ${plan.scoping.rationale}`, "");
 	for (const p of plan.phases) {
 		lines.push(`- ${icon[p.status]} Fase ${p.phase} (${label[p.status]}): ${p.roles.join(", ")}`);
+		for (const model of p.models || []) lines.push(`      Previsto: ${model.instance || model.role} — ${model.model} @ ${model.provider}`);
 		if (p.note) lines.push(`      ${p.note}`);
 	}
 	return lines.join("\n") + "\n";

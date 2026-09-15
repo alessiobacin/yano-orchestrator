@@ -469,7 +469,7 @@ disponibile viene indicata come `n/d`, mentre quella attualmente in esecuzione
 pi install npm:pi-mcp-adapter   # ripetere solo se yano doctor lo segnala
 ```
 
-`.mcp.json` dichiara `chrome-devtools`, Agentation (`npx -y agentation-mcp server`) e il server remoto GitHub. Il launcher Yano ora materializza questo file anche per i coder aperti in `.worktrees/`, dove il file del checkout principale non sarebbe visibile al `cwd` di Pi. Per GitHub non usare `auth: "oauth"`: il server remoto avvia il flusso OAuth automaticamente; in alternativa configurare un PAT con `headers.Authorization` senza committare il valore.
+Il template `.mcp.json.example` dichiara `chrome-devtools` e il server remoto GitHub; Agentation è opzionale e non viene avviato dal template predefinito. Il launcher Yano ora materializza questo file anche per i coder aperti in `.worktrees/`, dove il file del checkout principale non sarebbe visibile al `cwd` di Pi. Per GitHub non usare `auth: "oauth"`: il server remoto avvia il flusso OAuth automaticamente; in alternativa configurare un PAT con `headers.Authorization` senza committare il valore.
 
 Per aggiungere Google Stitch al progetto, inserire nel `.mcp.json` del checkout principale (non in un singolo worktree):
 
@@ -504,22 +504,19 @@ nei trace per la verifica, ma WhatsApp, Telegram ed email non vengono mai
 contattati. Le sandbox E2E sono identificate internamente come `yano-e2e-*` e
 non sono progetti utente.
 
-Dopo un task che ha coinvolto `frontend-developer` o `frontend-reviewer`, il
-planner chiede se l'utente vuole una review visuale dell'app in sviluppo. Con
-risposta affermativa esegue:
+Per la review visuale di un frontend, usa l’adapter DOM senza dipendenze:
 
 ```bash
-yano frontend-review start
+yano feedback-api start --no-open
+yano frontend-review browser --url http://localhost:8501
 ```
 
-Il comando installa `agentation` come devDependency, inferisce il comando e
-l'URL del frontend (`dev`, `start` o `serve`) e stampa l'URL raggiungibile.
-Per React il componente viene usato nel root dell'app; per Angular Yano crea
-un host adapter che monta Agentation tramite React dopo il bootstrap Angular.
-Entrambi sono caricati solo in development. L'utente può annotare la pagina;
-il planner riceve le annotazioni via MCP e le instrada nel normale ciclo
-frontend. Framework non riconosciuti restano esplicitamente browser-only finché
-non viene aggiunto un adapter dedicato.
+Il secondo comando genera un bookmarklet per selezionare elementi e inviare
+commenti, contesto e screenshot all’API Yano. Funziona sulla pagina renderizzata;
+i limiti di CSP, iframe e canvas sono descritti nella
+[guida Yano essenziale](docs/quick-guides/yano-essential.md).
+`frontend-review setup` e `start` conservano gli adapter Agentation precedenti
+come opzione di compatibilità.
 
 ## Project layout
 
@@ -554,3 +551,24 @@ Contributions are welcome — open an issue or a pull request. `docs/notes/devel
 ## License
 
 [MIT](LICENSE)
+
+## Contratto essenziale (2026-09-15)
+
+`yano status --all --explain --json` espone decisioni watcher e fingerprint;
+`yano feedback-api start` conserva API e dati senza GUI Kanban (`dash` è alias).
+Il Gantt mostra fasi previste, dipendenze e round osservati con modelli/provider.
+`yano frontend-review browser --url URL` abilita annotazioni DOM senza React.
+Watcher/scheduler sono deterministici; Local PC resta il servizio LLM persistente.
+Nuovi piani: `plan_set` richiede `scoping.status` e `scoping.rationale`.
+Dettagli, compatibilità e limiti: [Yano essenziale](docs/quick-guides/yano-essential.md).
+
+Ponytail è attivo in modalità `full` per tutti i ruoli Yano, anche con prompt
+personalizzati. `yano ponytail status` mostra la policy; `yano ponytail off`
+la disattiva nel progetto, `--global` cambia il default ereditato, `reset`
+rimuove l’override. Le preferenze persistono fra i riavvii.
+
+Le API feedback accettano bug senza credenziali E2E; le credenziali, se
+fornite, devono essere complete. La raccolta non equivale a verifica
+autenticata. Gli URL di progetto isolano anche modifica e cancellazione.
+
+Novità e verifiche: [release 1.6.0](docs/quick-guides/release-1.6.0.md).

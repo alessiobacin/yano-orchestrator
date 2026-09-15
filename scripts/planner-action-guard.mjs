@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 
 const ACTION_CLAIM_PATTERNS = [
+	/\b(?:ora|adesso)\s+(?:il|lo|la)\s+(?:reviewer|coder|revisore|revisione|ticket|prossimo passo)\b/i,
 	/\b(?:ora|adesso|subito|a questo punto)\s+(?:lancio|eseguo|avvio|controllo|verifico|provo|invio|chiamo|testo)\b/i,
 	/\b(?:lancerò|eseguirò|avvierò|controllerò|verificherò|proverò|invierò|chiamerò|testerò)\b/i,
 	/\b(?:procedo|passo)\s+(?:ora\s+)?a\s+(?:lanciare|eseguire|avviare|controllare|verificare|provare|inviare|chiamare)\b/i,
@@ -38,7 +39,18 @@ export function findUnexecutedActionClaim(branch) {
 	const text = contentText(latest.message.content).trim();
 	if (!text || EXPLICIT_GATE.test(text)) return null;
 	const match = ACTION_CLAIM_PATTERNS.map((pattern) => text.match(pattern)).find(Boolean);
-	if (!match) return null;
+	if (!match) {
+		// A ready queue with no subsequent dispatch is actionable state even
+		// when the model does not phrase its promise using a recognised verb.
+		const entries = Array.isArray(branch) ? branch : [];
+		const lastUser = entries.findLastIndex((entry) => entry?.message?.role === "user");
+		const recent = entries.slice(lastUser + 1);
+		const readyIndex = recent.findLastIndex((entry) => entry?.message?.role === "toolResult" && entry.message.toolName === "tickets_ready");
+		const ready = readyIndex >= 0 ? recent[readyIndex].message.details?.ready : null;
+		const dispatched = recent.slice(readyIndex + 1).some((entry) => entry?.message?.role === "toolResult" && ["agent_send", "decision_hold_create", "ticket_claim", "ticket_complete"].includes(entry.message.toolName));
+		if (!Array.isArray(ready) || !ready.length || dispatched) return null;
+		return { claim: "ready tickets without dispatch", fingerprint: crypto.createHash("sha256").update(JSON.stringify(ready)).digest("hex"), text };
+	}
 	return {
 		claim: match[0],
 		fingerprint: crypto.createHash("sha256").update(text).digest("hex"),

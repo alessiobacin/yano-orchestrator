@@ -12,8 +12,6 @@ const PACKAGE_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname
 const COMPUTER_INSTANCE = "yano-local-pc";
 const COMPUTER_ROLE = "yano-local-pc";
 const COMPUTER_WORKSPACE = "yano-local-pc";
-const SCHEDULER_WORKSPACE = "yano-scheduler";
-const WATCHER_WORKSPACE = "yano-watcher";
 // Herdr normalizes the first tab created by a workspace to the safe slug;
 // keeping this canonical prevents a second duplicate tab on recovery.
 const COMPUTER_TAB = "yano-local-pc";
@@ -140,12 +138,6 @@ export function ensureComputerRuntime() {
 	return root;
 }
 const SERVICES = [
-	// Herdr infers the agent kind from the tab title while starting it. A tab
-	// named exactly `yano-watcher` is classified as a legacy
-	// external kind and rejected as `--kind pi`; keep the workspace names but
-	// use neutral owned tab labels.
-	{ instance: "watcher-service", agentName: "watcher-service", role: "watcher", workspace: WATCHER_WORKSPACE, tab: "watcher-service", cwd: serviceRuntimeRoot(WATCHER_WORKSPACE), project: WATCHER_WORKSPACE },
-	{ instance: "scheduler-service", agentName: "scheduler-service", role: "scheduler", workspace: SCHEDULER_WORKSPACE, tab: "scheduler-service", cwd: serviceRuntimeRoot(SCHEDULER_WORKSPACE), project: SCHEDULER_WORKSPACE },
 	{ instance: "planner-01", agentName: "planner-01", role: "planner", workspace: COMPUTER_WORKSPACE, tab: "planner-01", cwd: computerRuntimeRoot(), project: SYSTEM_PROJECT },
 ];
 

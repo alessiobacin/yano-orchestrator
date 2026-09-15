@@ -109,13 +109,11 @@ resta `agents/roles.yaml` nella root.
 
 ## 2. Avvia il broker MQTT
 
-Per ogni task con impatto frontend, dopo la verifica E2E, il planner chiede il
-consenso dell'utente: “Vuoi fare una review visuale dell'app in sviluppo con
-Agentation?”. Se accetti, usa `yano frontend-review setup` per installare e
-verificare `agentation` e l'import/mount solo in development, poi
-`yano frontend-review start` per avviare lo script rilevato. Il planner deve
-fornire l'URL reale restituito dal comando, non inventarlo; le annotazioni
-vengono ricevute dal planner tramite il server MCP Agentation.
+Per la review visuale di una pagina già in sviluppo, `yano frontend-review browser
+--url URL` genera un bookmarklet senza installare dipendenze nell’app. Avvia
+`yano feedback-api start --no-open` per ricevere le annotazioni. Gli adapter
+Agentation `setup`/`start` restano opzionali. Vedi la
+[guida Yano essenziale](yano-essential.md) per uso e limiti del browser.
 
 Con il broker Docker incluso:
 
@@ -474,3 +472,18 @@ yano trace clear --all --yes
 Per il riferimento completo consulta [`yano-trace.md`](./yano-trace.md). Per
 il flusso di bug applicativi usa [`yano-feedback.md`](./yano-feedback.md) e la
 [guida rapida del feedback](./12-yano-feedback.md).
+
+## Contratto essenziale (2026-09-15)
+
+`yano status --all --explain --json` espone decisioni watcher e fingerprint;
+`yano feedback-api start` conserva API e dati senza GUI Kanban (`dash` è alias).
+Il Gantt mostra fasi previste, dipendenze e round osservati con modelli/provider.
+`yano frontend-review browser --url URL` abilita annotazioni DOM senza React.
+Watcher/scheduler sono deterministici; Local PC resta il servizio LLM persistente.
+Nuovi piani: `plan_set` richiede `scoping.status` e `scoping.rationale`.
+Dettagli, compatibilità e limiti: [Yano essenziale](yano-essential.md).
+
+Ponytail è attivo in modalità `full` per tutti i ruoli Yano, anche con prompt
+personalizzati. `yano ponytail status` mostra la policy; `yano ponytail off`
+la disattiva nel progetto, `--global` cambia il default ereditato, `reset`
+rimuove l’override. Le preferenze persistono fra i riavvii.

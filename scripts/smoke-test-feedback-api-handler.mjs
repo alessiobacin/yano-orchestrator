@@ -30,9 +30,9 @@ async function requestJson(port, urlPath, { method = "GET", body = null, headers
 	return { status: response.status, body: await response.json() };
 }
 
-console.log("=== requireCredentials defaults to true for bug creation ===");
+console.log("=== explicit credential requirement is enforced ===");
 {
-	const server = serve();
+	const server = serve({ requireCredentials: true });
 	const port = await listen(server);
 	const missingCreds = await requestJson(port, "/demo-project/bugs", { method: "POST", body: { message: "il pulsante non funziona" } });
 	assert.equal(missingCreds.status, 400);
@@ -41,21 +41,34 @@ console.log("=== requireCredentials defaults to true for bug creation ===");
 }
 console.log("   OK");
 
-console.log("=== requireCredentials:false lets the dashboard create a bug without credentials ===");
+console.log("=== default ingestion accepts a bug without E2E credentials ===");
 {
-	const server = serve({ requireCredentials: false });
+	const server = serve();
 	const port = await listen(server);
 	const created = await requestJson(port, "/demo-project/bugs", { method: "POST", body: { message: "il pulsante non funziona" } });
 	assert.equal(created.status, 201);
 	assert.equal(created.body.type, "bug");
 	assert.equal(created.body.project_id, "demo-project");
+	assert.equal(created.body.credentials_present, false);
+	const partial = await requestJson(port, "/demo-project/bugs", { method: "POST", body: { message: "test", credentials: { username: "test" } } });
+	assert.equal(partial.status, 400);
+	for (const method of ["PATCH", "DELETE"]) {
+		const foreign = await requestJson(port, `/another-project/bugs/${created.body.id}`, { method, body: { message: "changed", reason: "test" } });
+		assert.equal(foreign.status, 404);
+	}
+	const wrongType = await requestJson(port, `/demo-project/suggestions/${created.body.id}`, { method: "DELETE", body: { reason: "test" } });
+	assert.equal(wrongType.status, 404);
+	const wrongQuery = await requestJson(port, `/bugs/${created.body.id}?project_id=another-project`, { method: "PATCH", body: { message: "changed" } });
+	assert.equal(wrongQuery.status, 404);
+	const original = await requestJson(port, `/demo-project/bugs/${created.body.id}`);
+	assert.equal(original.body.message, "il pulsante non funziona");
 	server.close();
 }
 console.log("   OK");
 
 console.log("=== GET a single item includes the audit trail ===");
 {
-	const server = serve({ requireCredentials: false });
+	const server = serve();
 	const port = await listen(server);
 	const created = await requestJson(port, "/demo-project/suggestions", { method: "POST", body: { message: "aggiungere filtro per data" } });
 	const fetched = await requestJson(port, `/demo-project/suggestions/${created.body.id}`);

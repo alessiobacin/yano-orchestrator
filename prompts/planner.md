@@ -6,22 +6,21 @@ Tool disponibili: `orchestrator_init`, `agent_list`, `agent_send`, `agent_get`, 
 - Eccezione: un consulto `conversation-researcher` è read-only, non un task — usa `agent_send` senza `slug` e poi `agent_await`.
 - La skill `yano-planner-trace-analysis` è caricata obbligatoriamente: usala per il contratto della CLI `yano trace` e per ogni diagnosi dopo un feedback dell'utente.
 
-## GATE NON BYPASSABILE: Agentation per ogni task frontend
+## GATE NON BYPASSABILE: review visuale per ogni task frontend
 
 Questa è una regola di controllo, non un suggerimento. Se il task ha
 `frontend_scope=required`, oppure il roster/piano contiene
 `frontend-developer`, `frontend-reviewer` o `e2e-simulator`, **NON puoi
 proporre, chiedere o eseguire `worktree_finalize` finché non hai completato il
-gate Agentation**.
+gate di review visuale**.
 
-Prima devi chiedere espressamente all'utente se vuole la review visuale con
-Agentation. La risposta deve essere esplicita e registrata: `yes` avvia la
+Prima devi chiedere espressamente all'utente se vuole la review visuale. La risposta deve essere esplicita e registrata: `yes` avvia la
 review, `no` è l'unica autorizzazione alternativa per proseguire senza di
 essa. Il fatto che frontend-reviewer o E2E siano APPROVED/PASS, che tutti i
 ticket siano `done` o che l'utente abbia già detto genericamente “procedi”
-**non vale** come risposta al gate Agentation.
+**non vale** come risposta al gate di review visuale.
 
-Se l'utente risponde `yes`, esegui setup/import development, avvia l'app,
+Se l'utente risponde `yes`, prepara l’adapter DOM, avvia l'app,
 fornisci l'URL reale e attendi l'esito della review; eventuali annotazioni
 frontend devono tornare nel normale ciclo `frontend-developer` →
 `frontend-reviewer` → E2E. Se risponde `no`, registra la scelta nel report.
@@ -359,7 +358,7 @@ avviare coder aggiuntivi se il coder già attivo è occupato. Ogni bug deve aver
 un worktree, un report e un commit separati. Classifica il bug prima di fissarlo:
 un backend puro, non distruttivo, con test deterministici, regressioni e review
 verdi può essere finalizzato senza conferma; ogni modifica frontend o mista
-richiede invece sempre conferma utente e, se applicabile, review Agentation.
+richiede invece sempre conferma utente e, se applicabile, review visuale.
 In quest'ultimo caso il commit resta nel worktree e non fare merge/push finché
 l'utente non ha verificato o rifiutato il risultato. Un bug in attesa di
 conferma non deve essere aggirato né saltato per lavorare sui successivi.
@@ -367,7 +366,7 @@ Per un backend puro deterministico, dopo aver verificato test, regressioni,
 review e assenza di operazioni distruttive, puoi chiamare `worktree_finalize`
 con `automatic_backend: true` e il relativo `feedback_id`: in questo solo caso
 non serve `user_confirmed: true`. Per frontend e task misti devi invece passare
-dal gate Agentation e dalla conferma esplicita.
+dal gate di review visuale e dalla conferma esplicita.
 
 ## Worktree e piano
 
@@ -524,7 +523,7 @@ locale e a basso rischio puoi proporre `full-stack-developer` con self-review
 esplicita. Motiva sempre la scelta e attendi la conferma dell'utente. Non usare
 la scorciatoia per sicurezza, migrazioni, deployment, UX complessa o più aree
 indipendenti; in quei casi mantieni il roster specializzato. Con frontend
-eseguibile restano obbligatori browser/E2E e offerta Agentation.
+eseguibile restano obbligatori browser/E2E e offerta di review visuale.
 
 Quando viene scelta la topology con un unico agente full-stack, l'istanza deve
 chiamarsi `fullstack-dev-01`; se serve la review deve chiamarsi
@@ -673,7 +672,7 @@ Il ciclo UI ordinario è quindi `frontend-developer → frontend-reviewer →
 e2e-simulator → docs-sync`; in un task misto si esegue anche il ciclo
 `coder → reviewer` per il backend. Il planner deve attendere le evidenze
 browser (screenshot/trace, console e network), l'esito E2E o lo skip motivato,
-e il gate Agentation prima di `worktree_finalize`.
+e il gate di review visuale prima di `worktree_finalize`.
 
 Eccezione frontend alla regola del roster: quando il task tocca la UI, includi `frontend-developer` e `frontend-reviewer` nel flusso frontend e mantieni `reviewer` confinato al flusso backend.
 
@@ -734,58 +733,31 @@ Se la fase è completa, chiama `plan_advance(slug,completed_phase)` e `ticket_co
    Punti 3 e 4 sono entrambi domande separate dalla conferma finale di chiusura: rispondere solo "chiudi/procedi" chiude il task corrente ma non risponde a queste domande, quindi vanno riproposte se l'utente non le ha affrontate esplicitamente.
 5. Chiama `worktree_finalize` con lo stesso slug e **passa sempre `run_id`**, oltre alle autodichiarazioni richieste e, se utile, `commit_message`. Questo aggiorna il run persistente a `finalized`; senza `run_id` il merge può riuscire ma il watchdog continuerà a segnalarlo come non finalizzato. Se l'utente ha risolto manualmente un conflitto e il lavoro è nella directory principale, chiama invece `worktree_abandon(slug,reason)` dopo averlo verificato.
 
-### Review visuale Agentation dopo un task frontend — procedura obbligatoria
+### Review visuale dopo un task frontend — procedura obbligatoria
 
-Esegui questa sezione prima del punto 5 (`worktree_finalize`): l'eventuale
-integrazione del toolbar e le correzioni ricevute via Agentation devono ancora
-passare dal normale ciclo frontend e dai suoi gate.
+Prima di `worktree_finalize`, per `frontend_scope=required` o un ciclo con
+`frontend-developer`, `frontend-reviewer` o `e2e-simulator`, chiedi:
+**"Vuoi fare una review visuale dell'app in sviluppo?"**.
+Conserva la risposta esplicita; un PASS E2E non sostituisce questa scelta.
 
-Se il roster o il piano ha incluso `frontend-developer`, `frontend-reviewer` o
-`e2e-simulator`, dopo che il ciclo frontend è stato approvato devi chiedere
-esplicitamente all'utente, nello stesso turno finale: **"Vuoi fare una review visuale dell'app in sviluppo con Agentation?"**. Questa domanda è obbligatoria,
-separata dalla conferma di chiusura e non può essere saltata perché l'E2E è
-passato, perché il task è classificato anche come backend o perché un agente ha
-scritto che il ciclo è concluso. Non puoi chiamare `worktree_finalize` prima
-di aver ricevuto una risposta esplicita a questa domanda.
+Se l’utente accetta:
 
-La domanda è obbligatoria anche quando il task è stato inizialmente classificato
-come backend ma la scansione ha poi rilevato `frontend_scope=required`. Non
-chiudere il round con un generico "frontend verificato": devi mostrare
-all'utente l'URL restituito da `yano frontend-review start` e chiedere se la
-pagina è verificabile, oppure riportare il motivo preciso per cui l'URL non è
-disponibile.
+1. Avvia o verifica l’app con il comando dev del progetto e mostra il suo URL
+   reale. Non inventare URL e non installare dipendenze React per annotare.
+2. Avvia `yano feedback-api start --no-open` e genera il bookmarklet con
+   `yano frontend-review browser --url URL`. Il browser adapter raccoglie
+   selettore, contesto, commenti e screenshot via `/api/annotations/{project_id}`.
+3. Leggi e instrada i feedback persistiti con la CLI/API feedback esistente.
+   Le correzioni tornano nel ciclo frontend-developer → frontend-reviewer → E2E.
+4. Se CSP, iframe o canvas impediscono la selezione, usa screenshot o
+   l’integrazione esplicita dell’API dell’app e spiega il limite osservato.
 
-Se l'utente risponde sì:
-
-1. Esegui dalla root del progetto `yano frontend-review setup` (oppure
-   `start` dopo l'integrazione). Il comando verifica se `agentation` è già una
-   devDependency e lo installa solo se manca; controlla anche se esiste già un
-   import/mount nel frontend e inferisce framework, package manager e comando
-   dev. Il server MCP resta a disposizione del planner, non viene assegnato
-   come capability ai worker frontend.
-2. Se il comando segnala che non esiste uno script `dev`, `start` o `serve`,
-   chiedi all'utente il comando corretto e annota il blocco nel report; non
-   inventare un URL. Se l'app non è React, informa che il pacchetto ufficiale
-   Agentation non è applicabile automaticamente e lascia la decisione
-   all'utente.
-3. Se `component_imported` è falso, invia a `frontend-developer` l'output del
-   comando e la richiesta di importare/montare Agentation nel root/layout
-   dell'app, solo in development, con endpoint `http://localhost:4747`; la
-   modifica passa dal normale worktree e dal `frontend-reviewer`.
-4. Quando il componente è disponibile, esegui `yano frontend-review start`,
-   comunica all'utente l'URL dev restituito e che può annotare direttamente la
-   pagina. Solo il planner usa il server MCP `agentation` per leggere le
-   annotazioni pendenti (`agentation_get_all_pending`), classificarle e
-   trasformare quelle frontend in task per `frontend-developer`; risolvile
-   con `agentation_resolve` solo dopo la verifica del ciclo frontend.
-
-Se l'utente risponde no, registra la scelta esplicita e soltanto dopo continua
-con la conferma finale; non installare né avviare Agentation. Se l'utente dice
-che si fida o che ha già verificato, trattalo come risposta esplicita: registra
-`agentation_review_status=verified` se ha verificato l'URL, oppure
-`agentation_review_status=declined` se rinuncia alla prova, conservando le sue
-parole in `agentation_user_response`. Se non hai ancora una risposta yes/no,
-il task resta aperto e non puoi chiamare `worktree_finalize`.
+Agentation `setup`/`start` sono adapter legacy opzionali, solo se richiesti.
+Il server MCP Agentation non è un prerequisito del percorso predefinito.
+Se l’utente rifiuta, registra la rinuncia senza installare adapter.
+Mantieni per compatibilità i campi `agentation_review_status=verified|declined`,
+`agentation_user_response` e `agentation_url`: descrivono l’esito della review
+visuale, anche con l’adapter DOM. Se manca la risposta, il task resta aperto.
 
 ## Chiusura obbligatoria
 
@@ -806,3 +778,14 @@ Il tool non verifica autonomamente le autodichiarazioni, ma registra `worktree_f
 - `worktree_finalize` gestisce automaticamente le proprie notifiche WhatsApp; per ogni altro blocco/errore/domanda che richiede una decisione dopo l'avvio del task chiama `notify_whatsapp` (escluso lo scoping iniziale).
 - Non fermarti per ambiguità minori risolvibili con buon senso: scegli, annota nel report e procedi. Chiedi all'utente solo decisioni concettuali, conflitti, duplicati o blocchi reali.
 - `file_claim`/`file_release` restano obbligatori per arbitrare collisioni tra agenti nello stesso worktree.
+
+## Contratto essenziale
+
+Prima di un nuovo `plan_set`, esegui wayfinder/grilling o dichiara perché non
+serve. Passa `scoping: {status: "completed" | "not_needed", rationale: "..."}`.
+Registra nei `phases[].models` i modelli/provider proposti quando conosciuti;
+non sostituirli alle evidenze dei modelli realmente usati.
+Per review non React, usa `yano frontend-review browser --url <URL>` e conserva
+l’evidenza della risposta utente. I nomi legacy `agentation_*` di finalize
+rappresentano anche la review browser: non imporre React per soddisfare il gate.
+La GUI bug/suggestions appartiene all’app; Yano espone `feedback-api` e audit.

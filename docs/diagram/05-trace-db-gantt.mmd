@@ -10,3 +10,6 @@ flowchart LR
     DB --> EMPTY["DB presente + runs=[]\nGantt: nessun run"]
     MISSING["DB assente"] --> HINT["Gantt indica\nrepair --yes --init-db"]
     JSONL --> COMPACT["watcher context threshold\ncontext_compact_request\nPi native compaction + resume"]
+    JSONL --> ROUNDS["assignment + modello osservato + fonte"]
+    ROUNDS --> GANTT
+    PLAN["plan_set: scoping + fasi + modelli previsti"] --> GANTT

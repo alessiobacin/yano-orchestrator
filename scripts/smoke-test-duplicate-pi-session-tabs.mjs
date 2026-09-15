@@ -31,5 +31,7 @@ const closed = cleanupDuplicateProjectSessionTabs(snapshot, row, []);
 assert.equal(closed.length, 1);
 assert.ok(["t-keep", "t-duplicate"].includes(closed[0].tab_id));
 assert.equal(closed[0].reason, "duplicate_pi_session");
+snapshot.panes.find((pane) => pane.pane_id === "p-duplicate").agent_session.value = "/sessions/new.jsonl";
+assert.deepEqual(cleanupDuplicateProjectSessionTabs(snapshot, row, []), [], "same name with different sessions is not a duplicate session");
 fs.rmSync(fakeBin, { recursive: true, force: true });
 console.log("DUPLICATE-PI-SESSION SMOKE TEST PASSED");

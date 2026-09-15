@@ -5,6 +5,7 @@
 // yano-watcher-registry.mjs — they close tabs (M1) and write to the
 // registry DB, a different risk class deferred to a future phase.)
 import path from "node:path";
+import { canonicalAgentRoot } from "../yano-agent-identity.mjs";
 import { spawnSync } from "node:child_process";
 import { readApplicationHeartbeat } from "../yano-trace-storage.mjs";
 
@@ -32,18 +33,20 @@ export function findProjectWorkspace(snapshot, root, project) {
 	// root and contain a live planner. This prevents a stale recovery workspace
 	// from winning over the original project workspace (for example `llmproxy`
 	// versus `llmProxy`).
-	const expectedRoot = path.resolve(root || "");
+	const expectedRoot = canonicalAgentRoot(root || ".");
 	const expectedLabel = String(project || "").trim().toLocaleLowerCase();
-	const candidates = (snapshot?.workspaces || []).filter((workspace) =>
-		String(workspace.label || "").trim().toLocaleLowerCase() === expectedLabel,
-	);
+	const candidates = (snapshot?.workspaces || []).filter((workspace) => {
+		const panes = (snapshot?.panes || []).filter((pane) => pane.workspace_id === workspace.workspace_id);
+		const rooted = panes.some((pane) => pane.cwd && canonicalAgentRoot(pane.cwd) === expectedRoot);
+		return String(workspace.label || "").trim().toLocaleLowerCase() === expectedLabel && (rooted || !panes.some((pane) => pane.cwd));
+	});
 	if (!candidates.length) return null;
 	const score = (workspace) => {
 		const panes = (snapshot?.panes || []).filter((pane) => pane.workspace_id === workspace.workspace_id);
-		const hasRootPane = panes.some((pane) => path.resolve(pane.cwd || "") === expectedRoot);
+		const hasRootPane = panes.some((pane) => canonicalAgentRoot(pane.cwd || ".") === expectedRoot);
 		const planners = (snapshot?.agents || []).filter((agent) =>
 			agent.workspace_id === workspace.workspace_id &&
-			path.resolve(agent.cwd || "") === expectedRoot &&
+			canonicalAgentRoot(agent.cwd || ".") === expectedRoot &&
 			(plannerLabelForAgent(snapshot, agent) || agentIsPlanner(agent)),
 		);
 		const livePlanner = planners.some((planner) => ["idle", "working"].includes(String(planner.agent_status || "").toLowerCase()));
@@ -126,14 +129,17 @@ export function plannerHeartbeatHealthy(planner) {
 	return plannerLooksHealthyViaExplain(planner.pane_id);
 }
 
-export function paneHasLivePiProcess(paneId) {
+export function panePiProcessState(paneId) {
 	if (!paneId) return false;
 	const result = spawnSync("herdr", ["pane", "process-info", "--pane", paneId], { encoding: "utf8" });
+	if (result.error || result.status !== 0) return null;
 	try {
 		const processes = JSON.parse(result.stdout || "")?.result?.process_info?.foreground_processes || [];
 		return processes.some((item) => item?.argv0 === "pi" || item?.argv?.some((arg) => /(?:^|\/)pi(?:\.m?js)?$/.test(String(arg))));
-	} catch { return false; }
+	} catch { return null; }
 }
+
+export function paneHasLivePiProcess(paneId) { return panePiProcessState(paneId) === true; }
 
 export function livePlannerPanesInWorkspace(snapshot, workspaceId, root) {
 	const expectedRoot = path.resolve(root || "");

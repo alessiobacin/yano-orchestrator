@@ -480,3 +480,22 @@ non-finalized run, then sends a recovery prompt with trace, ticket and worktree
 context. Once all runs are finalized it closes that project's watcher tab.
 yano watcher supervise --json
 # verifica collisioni di identità e planner duplicati senza crearne altri
+
+## Contratto essenziale (2026-09-15)
+
+`yano status --all --explain --json` espone decisioni watcher e fingerprint;
+`yano feedback-api start` conserva API e dati senza GUI Kanban (`dash` è alias).
+Il Gantt mostra fasi previste, dipendenze e round osservati con modelli/provider.
+`yano frontend-review browser --url URL` abilita annotazioni DOM senza React.
+Watcher/scheduler sono deterministici; Local PC resta il servizio LLM persistente.
+Nuovi piani: `plan_set` richiede `scoping.status` e `scoping.rationale`.
+Dettagli, compatibilità e limiti: [Yano essenziale](../../../../docs/quick-guides/yano-essential.md).
+
+Ponytail è attivo in modalità `full` per tutti i ruoli Yano, anche con prompt
+personalizzati. `yano ponytail status` mostra la policy; `yano ponytail off`
+la disattiva nel progetto, `--global` cambia il default ereditato, `reset`
+rimuove l’override. Le preferenze persistono fra i riavvii.
+
+Le API feedback accettano bug senza credenziali E2E; le credenziali, se
+fornite, devono essere complete. La raccolta non equivale a verifica
+autenticata. Gli URL di progetto isolano anche modifica e cancellazione.

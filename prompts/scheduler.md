@@ -52,6 +52,6 @@ Per gestione usa `yano schedule list`, `run --id` (solo su richiesta esplicita),
 `run --id <id> --dry-run` per la validazione, `disable --id`,
 `enable --id` o `remove --id`; riporta sempre l'id creato, la modalità e il
 cron effettivo. I job legacy (testo+cron) continuano a funzionare col
-comportamento storico; i job nuovi sono sempre a script. Il supervisore
-globale ricrea la tab Herdr `yano-scheduler` ogni minuto se manca e i job
-sopravvivono a riavvii di Herdr e del computer.
+comportamento storico; i job nuovi sono sempre a script. Il supervisore globale esegue gli script senza una sessione LLM scheduler
+permanente. Il ruolo scheduler viene invocato su richiesta per preparare i job.
+I job persistiti sopravvivono ai riavvii.

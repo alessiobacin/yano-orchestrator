@@ -57,3 +57,13 @@ Un job di sistema, `yano-daily-digest` (`0 6 * * *`, fuso `Europe/Rome`
 esplicito), viene installato da solo ad ogni passata se manca — riepilogo
 cross-progetto sul canale globale ogni mattina. Vedi
 `docs/quick-guides/22-job-ricorrenti.md#job-di-default-digest-giornaliero`.
+
+## Contratto essenziale (2026-09-15)
+
+`yano status --all --explain --json` espone decisioni watcher e fingerprint;
+`yano feedback-api start` conserva API e dati senza GUI Kanban (`dash` è alias).
+Il Gantt mostra fasi previste, dipendenze e round osservati con modelli/provider.
+`yano frontend-review browser --url URL` abilita annotazioni DOM senza React.
+Watcher/scheduler sono deterministici; Local PC resta il servizio LLM persistente.
+Nuovi piani: `plan_set` richiede `scoping.status` e `scoping.rationale`.
+Dettagli, compatibilità e limiti: [Yano essenziale](../quick-guides/yano-essential.md).

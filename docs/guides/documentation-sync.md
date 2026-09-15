@@ -127,3 +127,13 @@ la selezione usa uno slot stabile più il fallback su una porta libera. Il flag
 Gantt del progetto corrente e `--links` elenca tutte le registrazioni. Il
 registro conserva anche un link fermo, ma il server resta un processo
 foreground e il suo aggiornamento live vale finché il processo è in esecuzione.
+
+## Contratto essenziale (2026-09-15)
+
+`yano status --all --explain --json` espone decisioni watcher e fingerprint;
+`yano feedback-api start` conserva API e dati senza GUI Kanban (`dash` è alias).
+Il Gantt mostra fasi previste, dipendenze e round osservati con modelli/provider.
+`yano frontend-review browser --url URL` abilita annotazioni DOM senza React.
+Watcher/scheduler sono deterministici; Local PC resta il servizio LLM persistente.
+Nuovi piani: `plan_set` richiede `scoping.status` e `scoping.rationale`.
+Dettagli, compatibilità e limiti: [Yano essenziale](../quick-guides/yano-essential.md).

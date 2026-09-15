@@ -63,3 +63,10 @@ const unrelated = findUnexecutedActionClaim([
 assert.equal(unrelated, null);
 
 console.log("smoke-test-planner-action-guard: ok (unexecuted action claim is detected and re-promptable)");
+
+assert.ok(findUnexecutedActionClaim([{ type: "message", message: { role: "assistant", content: [{ type: "text", text: "Ticket 3 chiuso — ora il reviewer per il ticket finale." }] } }]), "membox: nominal action claims must wake the planner");
+
+assert.ok(findUnexecutedActionClaim([
+ { type: 'message', message: {role:'toolResult',toolName:'tickets_ready',details:{ready:['ticket-4']}} },
+ { type: 'message', message: {role:'assistant',content:[{type:'text',text:'Il ticket precedente è completato.'}]}}
+]), 'ready work without dispatch cannot silently finish the planner');

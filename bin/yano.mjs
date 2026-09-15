@@ -102,6 +102,7 @@ import { runYanoDocsCheck } from "../scripts/yano-docs-check.mjs";
 import { runYanoQaInventory } from "../scripts/yano-qa-inventory.mjs";
 import { runYanoTestEnvironment } from "../scripts/yano-test-environment.mjs";
 import { runYanoAgentMcp } from "../scripts/yano-agent-mcp.mjs";
+import { runPonytail } from "../scripts/yano-ponytail.mjs";
 import { runFrontendReview } from "../scripts/yano-frontend-review.mjs";
 import { runYanoMemory } from "../scripts/yano-memory-cli.mjs";
 import { runYanoApi } from "../scripts/yano-api-registry.mjs";
@@ -135,7 +136,8 @@ function printTopUsage() {
 			'  end [opzioni]    Chiude i run "active" del progetto nella directory corrente — `yano end --help`',
 			'  leave [--project-root <dir>] --yes Rimuove definitivamente il progetto corrente dal registro watcher',
 			"  copy-prompts     Copia prompts/ dal pacchetto installato nel progetto corrente, per personalizzarli",
-			"  frontend-review setup|start  Prepara Agentation e avvia il frontend dev con URL inferito",
+			"  frontend-review browser|setup|start  Review DOM e adapter frontend",
+            "  ponytail on|off|status [--global]  Skill predefinita per tutti gli agenti",
 			"  memory agents|list|show|create|update|delete  Consulta e gestisce le memorie Yano",
 			"  status|logs|fleet|mcp          Viste read-only del progetto e della flotta",
 			"  projects [--json]             Conta i progetti Yano con agenti live in Herdr",
@@ -150,7 +152,7 @@ function printTopUsage() {
 			"  trace [opzioni]  Attiva/disattiva, cerca e cancella il tracing globale — `yano trace --help`",
 			"  auto-improve [opzioni] Audit periodici read-only e report al planner — `yano auto-improve --help`",
 			"  feedback serve|create|list|get|update|delete  CRUD bug e suggestions — API su porta 20002",
-			"  dash start|stop           Kanban bug+suggestions unificato, sempre attivo (11000, fallback 11000-11999)",
+			"  feedback-api start|stop   API bug/suggestions per le app (alias compatibile: dash)",
 			"  frontend-dash start|stop|list  Reverse proxy development + Agentation (10000-10999)",
 			"  model-advisor [opzioni] Propone un provider:model pinnato da llmProxy per role-class — `yano model-advisor --help`",
 			"  architect [opzioni]  Progetta/provisiona playbook e ruoli globali — `yano architect --help`",
@@ -355,7 +357,7 @@ async function main() {
 		await runYanoFeedback({ argv: sub === "feedback" ? rest : [rest[0] || "list", ...(type ? ["--type", type] : []), ...rest.slice(1)] });
 		return;
 	}
-	if (sub === "dash") {
+	if (sub === "dash" || sub === "feedback-api") {
 		if (rest.includes("--help") || rest.includes("-h")) {
 			console.log("Uso: yano dash start|stop [--no-open] [--project-id ID] [--port N]");
 			return;
@@ -420,6 +422,7 @@ async function main() {
 		await runYanoCatalog({ kind: sub, argv: rest });
 		return;
 	}
+	if (sub === "ponytail") return runPonytail({ cwd, argv: rest });
 	if (sub === "config") {
 		await runYanoConfig({ argv: rest });
 		return;

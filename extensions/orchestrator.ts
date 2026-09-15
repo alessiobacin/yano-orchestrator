@@ -53,6 +53,7 @@ import { ensureTraceProject, getTraceConfig, projectKey, setTraceMode, traceEnab
 import { loadYanoRules } from "../scripts/yano-rules.mjs";
 import { loadAgentMemory, updateAgentMemory } from "../scripts/yano-agent-memory.mjs";
 import { ensureProjectSummary, projectBootstrapPrompt, scanProject } from "../scripts/yano-project-context.mjs";
+import { ponytailPrompt, ponytailPolicy } from "../scripts/yano-ponytail.mjs";
 import { collectCodeMemContext } from "../scripts/yano-code-mem-context.mjs";
 import { getProjectApi, listProjectApis, resolveApiSecret } from "../scripts/yano-api-registry.mjs";
 import { llmProxyAutoModel, switchImageTurnToAuto } from "../scripts/yano-vision-routing.mjs";
@@ -2349,6 +2350,7 @@ export default function (pi: ExtensionAPI) {
 		const globalPromptsDir = resolveGlobalPromptsDir();
 		const localPromptsDirRaw = flags.promptsDir || path.join(".pi", "extensions", "yano-orchestrator", "prompts");
 		const localPromptsDir = path.isAbsolute(localPromptsDirRaw) ? localPromptsDirRaw : path.join(identity.cwd, localPromptsDirRaw);
+		const ponytail = ponytailPolicy(identity.cwd);
 		const primaryDir = flags.customPrompts ? localPromptsDir : globalPromptsDir;
 		const fallbackDir = flags.customPrompts ? globalPromptsDir : null;
 		const template = loadRolePrompt(primaryDir, fallbackDir, identity.role, roleCfg);
@@ -2358,6 +2360,7 @@ export default function (pi: ExtensionAPI) {
 			: "";
 		logEvent("role_prompt_resolved", {
 			custom_prompts: !!flags.customPrompts,
+			ponytail_mode: ponytail.mode,
 			primary_dir: primaryDir,
 			fallback_dir: fallbackDir,
 			rules_global: rules?.global.length || 0,
@@ -2368,14 +2371,14 @@ export default function (pi: ExtensionAPI) {
 			.replaceAll("{{ROLE}}", identity.role)
 			.replaceAll("{{ROLE_LABEL}}", roleCfg?.label || identity.role)
 			.replaceAll("{{BRIEF}}", roleCfg?.brief || "")
-			.replaceAll("{{CAPABILITIES}}", roleCapabilitiesPrompt(roleCfg))
+			.replaceAll("{{CAPABILITIES}}", roleCapabilitiesPrompt(ponytail.enabled ? { ...roleCfg, skills: [...(roleCfg?.skills || []), "ponytail"] } : roleCfg))
 			.replaceAll("{{PROJECT}}", identity.project)
 			.replaceAll("{{TEAM}}", identity.team.join(", "))
 			.replaceAll("{{SLUG_REMINDER}}", SLUG_REMINDER)
 			.replaceAll("{{WORKER_TOOLS_INTRO}}", WORKER_TOOLS_INTRO)
 			.replaceAll("{{DIAGRAM_TIP}}", DIAGRAM_TIP)
 			.replaceAll("{{TURN_CLOSE_NOTE}}", TURN_CLOSE_NOTE)
-			.replaceAll("{{TICKET_CLAIM_STEP0}}", TICKET_CLAIM_STEP0) + rulesPrompt + MANDATORY_CAPABILITIES_SYNC + CONTEXT_EFFICIENCY_PROTOCOL + REPORT_ARTIFACT_PROTOCOL + apiRegistryPrompt(identity.cwd) + (codeMem.context ? `\n\n## Orientamento code-mem (consultazione bounded)\nUsa questi risultati per scegliere quali file approfondire. Sono orientamento, non prova definitiva: verifica ogni informazione critica nel codice, nei test e nel runtime. Non riversare l'intero repository nel contesto.\n${codeMem.context}` : "") + loadAgentMemory({ root: identity.cwd, role: identity.role, instance: identity.instance }) +
+			.replaceAll("{{TICKET_CLAIM_STEP0}}", TICKET_CLAIM_STEP0) + rulesPrompt + ponytailPrompt(identity.cwd, ponytail) + MANDATORY_CAPABILITIES_SYNC + CONTEXT_EFFICIENCY_PROTOCOL + REPORT_ARTIFACT_PROTOCOL + apiRegistryPrompt(identity.cwd) + (codeMem.context ? `\n\n## Orientamento code-mem (consultazione bounded)\nUsa questi risultati per scegliere quali file approfondire. Sono orientamento, non prova definitiva: verifica ogni informazione critica nel codice, nei test e nel runtime. Non riversare l'intero repository nel contesto.\n${codeMem.context}` : "") + loadAgentMemory({ root: identity.cwd, role: identity.role, instance: identity.instance }) +
 			(identity.role === "planner" && !projectBootstrapDelivered && projectBootstrap ? projectBootstrap : "");
 		if (identity.role === "planner" && projectBootstrap) {
 			projectBootstrapDelivered = true;
@@ -2977,6 +2980,14 @@ export default function (pi: ExtensionAPI) {
 				}
 			}
 		}
+		const lastModelMessage = [...ctx.sessionManager.getBranch()].reverse().find((entry: any) => entry?.message?.role === "assistant") as any;
+		const reported = lastAssistantText.match(/\[llmp\]\s*provider:\s*([^|\n]+)\|\s*model:\s*([^\n]+)/);
+		logEvent("model_observed", {
+			assignment_id: inbound?.assignment_id ?? null,
+			observed_provider: reported?.[1]?.trim() || lastModelMessage?.message?.provider || null,
+			observed_model: reported?.[2]?.trim() || lastModelMessage?.message?.model || null,
+			model_source: reported ? "provider_reported_header" : "message_metadata",
+		});
 		tracePayload("assistant_response", {
 			assignment_id: inbound?.assignment_id ?? null,
 			text: lastAssistantText,
@@ -3062,6 +3073,7 @@ export default function (pi: ExtensionAPI) {
 			inboundQueue.delete(inbound.assignment_id);
 			if (currentInbound === inbound) currentInbound = null;
 			pi.appendEntry("orchestrator-log", { event: "response_sent", assignment_id: inbound.assignment_id });
+			logEvent("assignment_completed", { assignment_id: inbound.assignment_id, ok: !env.error });
 			void publishPresence(computeSelfStatus());
 			if (identity.role === "planner") wakeNextQueuedFeedback("planner_turn_end");
 		} catch (err) {

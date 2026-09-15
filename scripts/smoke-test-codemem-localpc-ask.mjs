@@ -11,6 +11,7 @@ import { askLocalPc, recallLocalPcContext, redactLocalPcText, saveLocalPcExchang
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "codemem-ask-"));
 const dataDir = path.join(tmp, "yano data dir");
 fs.mkdirSync(dataDir, { recursive: true });
+const checkoutMemoryExisted = fs.existsSync(path.join(path.resolve(import.meta.dirname, ".."), "memory", "state.db"));
 const oldDataDir = process.env.YANO_DATA_DIR;
 process.env.YANO_DATA_DIR = dataDir;
 const runtimeRoot = path.join(dataDir, "yano-local-pc");
@@ -107,7 +108,7 @@ try {
 
 console.log("\n=== TEST 4 — pending/ untouched, project checkout untouched ===");
 assert.deepEqual(fs.existsSync(path.join(runtimeRoot, "pending")) ? fs.readdirSync(path.join(runtimeRoot, "pending")) : [], [], "pending/ must be empty after answered asks");
-assert.ok(!fs.existsSync(path.join(path.resolve(import.meta.dirname, ".."), "memory", "state.db")), "project checkout must not gain memory/state.db");
+assert.equal(fs.existsSync(path.join(path.resolve(import.meta.dirname, ".."), "memory", "state.db")), checkoutMemoryExisted, "project checkout memory presence must stay unchanged");
 console.log("   OK — pending/ drained, checkout clean");
 
 process.env.YANO_DATA_DIR = oldDataDir;

@@ -45,6 +45,7 @@ if (!process.env.YANO_CONFIG_FILE) process.env.YANO_CONFIG_FILE = `${process.env
 
 const execFileP = promisify(execFile);
 const PROJECT_ROOT = path.resolve(new URL(".", import.meta.url).pathname, "..");
+const { runPonytail } = await import("./yano-ponytail.mjs");
 const BROKER_URL = process.env.PI_ORCH_BROKER_URL || "mqtt://127.0.0.1:1883";
 const REAL_AGENTS_DIR = path.join(PROJECT_ROOT, "agents");
 const REAL_PROMPTS_DIR = path.join(PROJECT_ROOT, "prompts");
@@ -178,7 +179,12 @@ async function main() {
 	const promptNoLocalDir = await getSystemPrompt({ cwd: projectNoLocal, instance: "planner-e2e-01", role: "planner", customPrompts: true });
 	ok(promptNoLocalDir.includes("Sei l'agente **planner**, istanza `planner-e2e-01`") && promptNoLocalDir.includes("plan_set"), "with no local prompts/ directory at all, --custom-prompts falls back fully to the package's planner.md — no crash, no missing instructions");
 
-	console.log(`\n${PASS} assertions passed.`);
+	for (const prompt of [promptDefault, promptCustomHit, promptCustomMiss, promptNoLocalDir]) ok(prompt.includes("## Yano shared skill: Ponytail (full)"), "Ponytail is active for coder/reviewer/planner even with custom prompts");
+    runPonytail({ cwd: projectWithLocal, argv: ["off"] });
+    const disabled = await getSystemPrompt({ cwd: projectWithLocal, instance: "coder-e2e-03", role: "coder", customPrompts: true });
+    ok(!disabled.includes("## Yano shared skill: Ponytail"), "project opt-out removes the automatic skill from the actual system prompt");
+    ok(disabled.includes("automatic Ponytail is disabled"), "opt-out is explicit in the runtime prompt");
+    console.log(`\n${PASS} assertions passed.`);
 	console.log("CUSTOM-PROMPTS E2E TEST PASSED");
 	process.exit(0);
 }

@@ -130,7 +130,7 @@ await runner.check("schedule add registers a script job and installs the cron", 
 	assert.equal(parsed.created.mode, "self");
 	assert.equal(parsed.created.expected_consequence, "test-echo.js eseguito");
 	assert.equal(parsed.created.script_path, path.join(scriptsDir, "test-echo.js"));
-	assert.match(fs.readFileSync(crontabFile, "utf8"), /yano-scheduler-supervisor/);
+	assert.match(fs.readFileSync(crontabFile, "utf8"), /yano-watcher-supervisor/);
 });
 await runner.check("schedule add rejects a missing script", async () => {
 	let threw = false;

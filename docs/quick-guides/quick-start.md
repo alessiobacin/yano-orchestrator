@@ -487,3 +487,6 @@ Ponytail è attivo in modalità `full` per tutti i ruoli Yano, anche con prompt
 personalizzati. `yano ponytail status` mostra la policy; `yano ponytail off`
 la disattiva nel progetto, `--global` cambia il default ereditato, `reset`
 rimuove l’override. Le preferenze persistono fra i riavvii.
+
+Il reload controllato assegna la motivazione di ripresa automaticamente e
+rilancia le istanze MQTT `offline`; un lancio fallito conserva il checkpoint.

@@ -24,7 +24,7 @@ yano qa-inventory scan [--project-root <dir>] [--yano-self-audit] [--json]
 yano gantt [options]
 yano watch [options]
 yano schedule add --name <nome> --project-root <dir> --script <path> --mode <self|planner:<progetto>|yano-local-pc> [--cron '...'] [--once] [--timeout-ms N] [--expected-consequence <testo>] [--json]
-yano schedule run <id>|list [--json]|remove|enable|disable --id <id>  # script-first recurring jobs; run = esegui lo script subito (test)
+yano schedule run --id <id>|list [--json]|remove|enable|disable --id <id>  # script-first recurring jobs; run = esegui lo script subito (test)
 yano invoke --role <planner[:<scope>]|yano-local-pc> --prompt "..." [--project-root <dir>] [--timeout-ms N]  # bridge deterministico dagli script
 yano trace [subcommand] [options]
 yano pause|resume|recovery [subcommand] [options]
@@ -185,7 +185,7 @@ rule requires its ID from `--list --json`.
 # Esecuzione = runtime Node sul file; fallback loggato + enabled:false se lo script manca.
 # Folder script persistente: <data>/scheduler/scripts/ (un upgrade non lo cancella).
 yano schedule add --name <nome> --project-root <dir> --script <path> --mode <self|planner:<progetto>|yano-local-pc> [--cron '0 14,21 * * *'] [--once] [--timeout-ms N] [--expected-consequence <testo>] [--json]
-yano schedule run <id> [--json]        # esegue lo script registrato SUBITO (test prima di renderlo ricorrente)
+yano schedule run --id <id> [--json]        # esegue lo script registrato SUBITO (test prima di renderlo ricorrente)
 yano schedule instances --id <job-id> [--limit N] [--json] # cronologia esecuzioni e status
 yano schedule retry --id <instance-id> [--json]            # retry manuale collegato all'istanza originale
 yano schedule list [--json]            # job con script_path, mode, expected_consequence, enabled, last_status
@@ -499,3 +499,6 @@ rimuove l’override. Le preferenze persistono fra i riavvii.
 Le API feedback accettano bug senza credenziali E2E; le credenziali, se
 fornite, devono essere complete. La raccolta non equivale a verifica
 autenticata. Gli URL di progetto isolano anche modifica e cancellazione.
+
+Il reload controllato assegna la motivazione di ripresa automaticamente e
+rilancia le istanze MQTT `offline`; un lancio fallito conserva il checkpoint.

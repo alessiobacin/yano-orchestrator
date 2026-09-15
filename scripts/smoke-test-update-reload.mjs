@@ -7,7 +7,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { runControlledReload } from "./yano-recovery.mjs";
+import { runControlledReload, reloadResumeArgs, liveRecoveryInstances } from "./yano-recovery.mjs";
+
+assert.deepEqual([...liveRecoveryInstances([{ instance: "planner-01", status: "offline" }, { instance: "coder-01", status: "idle" }])], ["coder-01"], "retained offline cards must not suppress relaunch");
+const resumeArgs = reloadResumeArgs(["--reload", "--yes", "--timeout", "45"]);
+assert.ok(resumeArgs[resumeArgs.indexOf("--reason") + 1].trim(), "reload supplies the mandatory resume reason");
+assert.ok(!resumeArgs.includes("--reload"));
+assert.equal(reloadResumeArgs(["--reason", "user reason"])[1], "user reason");
+assert.ok(reloadResumeArgs(["--reason", " "]).includes("Ripresa dopo aggiornamento controllato Yano"));
 
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require("node:sqlite");

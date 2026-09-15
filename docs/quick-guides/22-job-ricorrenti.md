@@ -16,7 +16,7 @@ script registrato**; l'LLM entra solo se lo script lo decide (routing).
   solo al chiamante (utente nella chat dello scheduler, o un planner che chiede
   "schedula X una volta / in modo ricorrente").
 - **Audit locale alla creazione**: ogni script è scritto e validato prima di
-  essere registrato, e l'agente lo testa con `yano schedule run <id>` prima di
+  essere registrato, e l'agente lo testa con `yano schedule run --id <id>` prima di
   renderlo ricorrente.
 - È **read-only di default**: non modifica il progetto né committa; scrive
   solo nel folder script persistente. Azioni distruttive o che modificano il

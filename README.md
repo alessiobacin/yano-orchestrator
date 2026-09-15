@@ -228,7 +228,7 @@ yano leave --yes                            # dalla root: rimuove definitivament
 yano watcher projects --all --json          # tutti i progetti registrati, anche senza task attivi
 yano watcher resume --project-root /path/progetto  # riattiva esplicitamente un progetto idle
 yano schedule add --name <nome> --project-root "$PWD" --script <path> --mode self --cron '0 14,21 * * *' --expected-consequence "riepilogo inviato"  # script-first: al trigger esegue LO SCRIPT registrato
-yano schedule run <id>                              # testa lo script subito, prima di renderlo ricorrente
+yano schedule run --id <id>                              # testa lo script subito, prima di renderlo ricorrente
 yano schedule list                                  # inventario compatto con ID, nome, cron, stato, modalità
 yano schedule list --json --pretty                 # stesso inventario JSON, indentato per lettura
 yano invoke --role planner:<progetto> --prompt "riepiloga lo stato" --project-root "$PWD"   # bridge deterministico dagli script (wake planner)
@@ -571,4 +571,4 @@ Le API feedback accettano bug senza credenziali E2E; le credenziali, se
 fornite, devono essere complete. La raccolta non equivale a verifica
 autenticata. Gli URL di progetto isolano anche modifica e cancellazione.
 
-Novità e verifiche: [release 1.6.0](docs/quick-guides/release-1.6.0.md).
+Novità e verifiche: [release 1.6.1](docs/quick-guides/release-1.6.1.md) e [ristrutturazione 1.6.0](docs/quick-guides/release-1.6.0.md).

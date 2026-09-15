@@ -168,3 +168,7 @@ Se la destinazione configurata non è scrivibile o il volume macOS non è
 montato, la retention restituisce `deferred: true`, `backup_unavailable` e
 conserva gli originali. Non registra un completamento giornaliero: ritenta
 al passaggio successivo. Non sostituisce il backup remoto con una cancellazione.
+
+`yano update --reload --yes` include la motivazione della ripresa e ignora
+le presenze MQTT `offline` nel controllo degli agenti già avviati. Un lancio
+fallito conserva il checkpoint e impedisce di dichiarare la ripresa completata.

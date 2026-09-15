@@ -38,7 +38,7 @@ Lo scheduler è **script-first**: `yano schedule add --name <nome> --project-roo
 <dir> --script <path> --mode <self|planner:<progetto>|yano-local-pc>
 [--cron '...'] [--once] [--timeout-ms N] [--expected-consequence <testo>]`
 registra un job che al trigger esegue LO SCRIPT registrato (mai shell; folder
-persistente utente `<data>/scheduler/scripts/`). `yano schedule run <id>` testa
+persistente utente `<data>/scheduler/scripts/`). `yano schedule run --id <id>` testa
 lo script subito (obbligatorio prima di renderlo ricorrente); `yano schedule
 list` mostra un inventario compatto del job (id, nome, cron, stato, modalità); con
 `--json --pretty` il JSON è indentato per la lettura manuale. La cronologia e i

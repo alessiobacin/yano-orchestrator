@@ -572,3 +572,9 @@ fornite, devono essere complete. La raccolta non equivale a verifica
 autenticata. Gli URL di progetto isolano anche modifica e cancellazione.
 
 Novità e verifiche: [release 1.6.1](docs/quick-guides/release-1.6.1.md) e [ristrutturazione 1.6.0](docs/quick-guides/release-1.6.0.md).
+
+Il Gantt espone progetto e descrizione per lavoro, filtri assignment/periodo/stato,
+viste Ora/Prossimi passi/Conclusi e attività strumenti. Solo un turno corrente
+con heartbeat busy sano anima la barra. Le risposte mancanti storiche non
+sono attività live. Modello/provider derivano dai metadata o dagli header
+registrati; il routing configurato resta distinto dal modello effettivo.

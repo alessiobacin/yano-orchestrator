@@ -479,3 +479,9 @@ Ponytail è attivo in modalità `full` per tutti i ruoli Yano, anche con prompt
 personalizzati. `yano ponytail status` mostra la policy; `yano ponytail off`
 la disattiva nel progetto, `--global` cambia il default ereditato, `reset`
 rimuove l’override. Le preferenze persistono fra i riavvii.
+
+Il Gantt espone progetto e descrizione per lavoro, filtri assignment/periodo/stato,
+viste Ora/Prossimi passi/Conclusi e attività strumenti. Solo un turno corrente
+con heartbeat busy sano anima la barra. Le risposte mancanti storiche non
+sono attività live. Modello/provider derivano dai metadata o dagli header
+registrati; il routing configurato resta distinto dal modello effettivo.

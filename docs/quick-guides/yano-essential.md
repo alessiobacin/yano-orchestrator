@@ -172,3 +172,19 @@ al passaggio successivo. Non sostituisce il backup remoto con una cancellazione.
 `yano update --reload --yes` include la motivazione della ripresa e ignora
 le presenze MQTT `offline` nel controllo degli agenti già avviati. Un lancio
 fallito conserva il checkpoint e impedisce di dichiarare la ripresa completata.
+
+## Lettura umana della timeline
+
+Progetto e root sono sempre visibili; ogni riga riporta descrizione, agente,
+mittente, modello e provider. Filtri per assignment, periodo, stato e ricerca
+testuale. Selezionare un assignment ignora il periodo per ritrovare anche
+lavori storici. UUID e fonte della descrizione restano nei dettagli.
+Per turni diretti storici senza richiesta registrata si mostra la prima riga
+della risposta, indicandone la provenienza; non si inventa la richiesta.
+
+Ora richiede un turno corrente e heartbeat busy sano. I tool osservati sono
+visibili nei dettagli; non si espone il ragionamento interno del modello.
+I turni diretti appaiono nella sola vista Gantt e non diventano assignment
+pending per il watcher o lo scheduler. Le barre senza conclusione si fermano
+all’ultima evidenza. La sequenza futura rappresenta dipendenze, non durate.
+Le anteprime sono limitate e oscurano i comuni formati di credenziali.

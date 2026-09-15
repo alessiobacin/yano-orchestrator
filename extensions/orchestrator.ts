@@ -1,3 +1,4 @@
+import { observedModelFromMessage } from "../scripts/yano-timeline.mjs";
 /**
  * orchestrator — MQTT-based agent bus for Pi, replacing coms.ts's socket
  * transport and flat peer-to-peer paradigm with the role/instance/capability
@@ -1455,6 +1456,7 @@ export default function (pi: ExtensionAPI) {
 	// review-log.mjs un aggancio per riconoscere e correggere il caso
 	// specifico invio→risveglio via `assignment_id` (vedi lì).
 	let logSeq = 0;
+	let timelineTurnId: string | null = null;
 
 	function logEvent(type: string, data: Record<string, unknown> = {}): void {
 		if (!identity) return;
@@ -1467,7 +1469,7 @@ export default function (pi: ExtensionAPI) {
 			const model_provider = separator > 0 ? identity.model.slice(0, separator) : null;
 			const model_id = separator > 0 ? identity.model.slice(separator + 1) : identity.model || null;
 			const scope = currentInbound ? { campaign_id: currentInbound.campaign_id ?? null, chapter_id: currentInbound.chapter_id ?? null, phase_id: currentInbound.phase_id ?? null } : { campaign_id: null, chapter_id: null, phase_id: null };
-			const line = `${JSON.stringify({ ts: nowIso(), event_id: `${identity.instance}:${seq}`, seq, instance: identity.instance, role: identity.role, project: identity.project, project_key: paths.projectKey, model_provider, model_id, ...scope, trace_mode: config.mode, type, ...redactRuntimeProjection(data) })}\n`;
+			const line = `${JSON.stringify({ ts: nowIso(), event_id: `${identity.instance}:${seq}`, seq, instance: identity.instance, role: identity.role, project: identity.project, project_key: paths.projectKey, model_provider, model_id, assignment_id: currentInbound?.assignment_id ?? null, turn_id: timelineTurnId, ...scope, trace_mode: config.mode, type, ...redactRuntimeProjection(data) })}\n`;
 			fs.appendFileSync(paths.instanceLog!, line, { mode: 0o600 });
 		} catch {
 			// best-effort — tracing non deve mai rompere l'orchestrazione reale
@@ -1485,7 +1487,7 @@ export default function (pi: ExtensionAPI) {
 			const model_provider = separator > 0 ? identity.model.slice(0, separator) : null;
 			const model_id = separator > 0 ? identity.model.slice(separator + 1) : identity.model || null;
 			const scope = currentInbound ? { campaign_id: currentInbound.campaign_id ?? null, chapter_id: currentInbound.chapter_id ?? null, phase_id: currentInbound.phase_id ?? null } : { campaign_id: null, chapter_id: null, phase_id: null };
-			const line = `${JSON.stringify({ ts: nowIso(), event_id: `${identity.instance}:${seq}`, seq, instance: identity.instance, role: identity.role, project: identity.project, project_key: paths.projectKey, model_provider, model_id, ...scope, trace_mode: config.mode, type, ...redactRuntimeProjection(data) })}\n`;
+			const line = `${JSON.stringify({ ts: nowIso(), event_id: `${identity.instance}:${seq}`, seq, instance: identity.instance, role: identity.role, project: identity.project, project_key: paths.projectKey, model_provider, model_id, assignment_id: currentInbound?.assignment_id ?? null, turn_id: timelineTurnId, ...scope, trace_mode: config.mode, type, ...redactRuntimeProjection(data) })}\n`;
 			fs.appendFileSync(paths.instanceLog!, line, { mode: 0o600 });
 		} catch {
 			// best-effort
@@ -2390,7 +2392,8 @@ export default function (pi: ExtensionAPI) {
 		// SENZA nessun comando in coda mai ricevuto via MQTT — vedi
 		// scripts/review-log.mjs, che lo segnala esplicitamente.
 		turnStartedAt = Date.now();
-		logEvent("turn_start", { had_pending_inbound: [...inboundQueue.values()].some((i) => !i.fulfilled), agent_turn: null });
+		timelineTurnId = `turn:${identity.instance}:${crypto.randomUUID()}`;
+		logEvent("turn_start", { prompt_preview: String(_event?.prompt || "").slice(0, 240), had_pending_inbound: [...inboundQueue.values()].some((i) => !i.fulfilled), agent_turn: null });
 		return { systemPrompt };
 	});
 
@@ -2409,6 +2412,7 @@ export default function (pi: ExtensionAPI) {
 	// errors are intentionally not handled here.
 	pi.on("message_end", async (event: any, ctx: any) => {
 		const message = event?.message;
+		if (message?.role === "assistant") logEvent("model_observed", observedModelFromMessage(message));
 		if (message?.role !== "assistant" || !message?.errorMessage) return;
 		await switchPinnedModelToAuto({
 			message,
@@ -2981,12 +2985,9 @@ export default function (pi: ExtensionAPI) {
 			}
 		}
 		const lastModelMessage = [...ctx.sessionManager.getBranch()].reverse().find((entry: any) => entry?.message?.role === "assistant") as any;
-		const reported = lastAssistantText.match(/\[llmp\]\s*provider:\s*([^|\n]+)\|\s*model:\s*([^\n]+)/);
 		logEvent("model_observed", {
 			assignment_id: inbound?.assignment_id ?? null,
-			observed_provider: reported?.[1]?.trim() || lastModelMessage?.message?.provider || null,
-			observed_model: reported?.[2]?.trim() || lastModelMessage?.message?.model || null,
-			model_source: reported ? "provider_reported_header" : "message_metadata",
+			...observedModelFromMessage(lastModelMessage?.message),
 		});
 		tracePayload("assistant_response", {
 			assignment_id: inbound?.assignment_id ?? null,

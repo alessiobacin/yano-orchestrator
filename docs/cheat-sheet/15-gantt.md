@@ -24,3 +24,9 @@ Il Gantt mostra fasi previste, dipendenze e round osservati con modelli/provider
 Watcher/scheduler sono deterministici; Local PC resta il servizio LLM persistente.
 Nuovi piani: `plan_set` richiede `scoping.status` e `scoping.rationale`.
 Dettagli, compatibilità e limiti: [Yano essenziale](../quick-guides/yano-essential.md).
+
+Il Gantt espone progetto e descrizione per lavoro, filtri assignment/periodo/stato,
+viste Ora/Prossimi passi/Conclusi e attività strumenti. Solo un turno corrente
+con heartbeat busy sano anima la barra. Le risposte mancanti storiche non
+sono attività live. Modello/provider derivano dai metadata o dagli header
+registrati; il routing configurato resta distinto dal modello effettivo.

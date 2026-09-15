@@ -103,7 +103,7 @@ export function buildSnapshot(cwd, explicitProject = null) {
 		return { ...r, tickets, dependencies, open_holds: holds };
 	});
 	db.close();
-	return { project, runs: enriched, ...projectTimeline(cwd), generated_at: new Date().toISOString(), ok: true };
+	return { project, runs: enriched, root: cwd, project_key: projectKey(cwd, project), ...projectTimeline(cwd, { runs: enriched, includeTurns: true }), generated_at: new Date().toISOString(), ok: true };
 }
 
 function handleUpgrade(req, socket, head, wss) {

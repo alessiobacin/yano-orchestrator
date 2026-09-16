@@ -26,7 +26,7 @@ yano cron --add "ogni giorno alle 14 e alle 21 esegui la pulizia del progetto" -
 yano cron --list --json
 yano cron --disable <job-id> | --enable <job-id> | --run <job-id> | --remove <job-id>
 
-# Supervisore persistente: controlla cron di sistema e tab Herdr yano-local-pc
+# Supervisore persistente: cron di sistema + garanzia planner-01 di yano-local-pc
 yano schedule cron status|install|remove
 ```
 
@@ -35,8 +35,10 @@ validato nel folder persistente `<data>/scheduler/scripts/`). Se lo script
 manca o fallisce: `enabled:false` + fallback loggato, mai testo libero a un
 planner. Token/credenziali solo da `.env` dentro lo script, mai incorporati.
 Azioni distruttive o che modificano il progetto: sempre planner + gate umani.
-Il supervisore gira ogni minuto e ricrea `yano-local-pc` se manca; i job
-sopravvivono a riavvii di Herdr e del computer.
+Il supervisore gira ogni minuto dal cron di sistema e garantisce `planner-01`
+nel workspace `yano-local-pc` (unico processo LLM persistente del control
+plane); le schedulazioni le esegue il processo cron stesso, i job sopravvivono
+a riavvii di Herdr e del computer.
 
 Ad ogni passata controlla DNS Google (`8.8.8.8`/`8.8.4.4`), MQTT, Herdr e
 registra l'esecuzione del cron in `checks.cron`.
@@ -57,6 +59,12 @@ Un job di sistema, `yano-daily-digest` (`0 6 * * *`, fuso `Europe/Rome`
 esplicito), viene installato da solo ad ogni passata se manca — riepilogo
 cross-progetto sul canale globale ogni mattina. Vedi
 `docs/quick-guides/22-job-ricorrenti.md#job-di-default-digest-giornaliero`.
+
+Il triage della posta schedulata gira in `mode: self` (motore
+`scripts/yano-mail-triage.mjs`: MCP apple-mail via stdio + llmProxy via
+HTTP, solo Cestino, cap 200/run) — yano-local-pc resta per i soli one-off
+interattivi non schedulati. Migrazione post-merge:
+`docs/quick-guides/28-migrazione-posta-self.md`.
 
 ## Contratto essenziale (2026-09-15)
 

@@ -43,7 +43,8 @@ Flag chiave:
   - `planner:<progetto>` — lo script (o il job) sveglia il planner del
     progetto target con il task, via `yano invoke --role planner:<progetto>`;
   - `yano-local-pc` — lo script delega a yano-local-pc (promemoria,
-    calendario, note, contatti, mappe, posta, messaggi, memo vocali);
+    calendario, note, contatti, mappe, messaggi, memo vocali — mai la posta
+    schedulata, che gira in mode self);
 - `--once` — one-shot: il job si auto-disabilita dopo la prima esecuzione;
 - `--timeout-ms N` — timeout massimo di esecuzione dello script
   (default 120000 ms);
@@ -103,13 +104,27 @@ delega all'esistente `yano local-pc ask` (broker-aware, timeout, mai hang).
 
 ## Supervisore e cron di sistema
 
-Il supervisore globale gira ogni minuto: ricrea la tab `scheduler-service` nel
-workspace persistente `yano-scheduler` se manca. Il runtime `yano-local-pc`
-contiene invece il solo `planner-01` persistente del control plane (evitando l'errore Herdr
-`agent_kind_mismatch`) e fa tick dei job in scadenza. Lo stato della riga cron
+Il supervisore globale gira ogni minuto dal cron di sistema: fa tick dei job in
+scadenza, garantisce il runtime `yano-local-pc` (ricrea `planner-01` se manca —
+il solo processo LLM persistente del control plane, evitando l'errore Herdr
+`agent_kind_mismatch`) e reinstalla il digest di default se manca. Non esiste
+una tab Herdr `scheduler-service`: lo scheduler è il processo cron stesso e il
+suo stato è il registro `jobs.json`. Lo stato della riga cron
 marcata si controlla con `yano schedule cron status`; `yano schedule cron
 install|remove` gestiscono la riga di sistema (su Windows `schtasks`), mentre
 `yano uninstall` pulisce automaticamente i cron posseduti da Yano.
+
+## Triage posta in mode self (scheduler autonomo)
+
+Lo scheduler-service esegue MATERIALMENTE le schedulazioni: il motore
+`scripts/yano-mail-triage.mjs` implementa l'intero flusso "leggi INBOX →
+classifica → sposta nel Cestino" in `mode: self`, senza passare da
+yano-local-pc (che resta per i soli one-off interattivi non schedulati).
+Accesso a Mail.app via server MCP apple-mail su stdio (puro wrapper
+osascript, zero credenziali); classificazione via llmProxy su loopback
+(stessa convenzione degli agenti Pi). Dubbio → NON cancellare; solo Cestino
+(mai definitiva); cap 200/run; idempotenza via `mail-triage-seen.json`.
+Procedura di migrazione post-merge: [28-migrazione-posta-self](./28-migrazione-posta-self.md).
 
 ## Sicurezza
 

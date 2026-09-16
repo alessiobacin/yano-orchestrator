@@ -316,8 +316,8 @@ quando rileva run/task attivi, ma rispetta una pausa o un `leave` esplicito. I
 progetti senza task restano visibili in `yano watcher projects --all --json` e
 possono essere riattivati con `yano watcher resume --project-root ...`.
 Architect, feedback e auto-improver
-restano invece servizi on-demand; scheduler è globale e viene ricreato dal
-cron ogni minuto.
+restano invece servizi on-demand; lo scheduler è globale e gira dal cron di
+sistema ogni minuto (nessuna tab Herdr da ricreare: il suo stato è il registro `jobs.json`).
 
 ```bash
 yano model-advisor catalog --json                                   # catalogo llmProxy normalizzato, così com'è ora

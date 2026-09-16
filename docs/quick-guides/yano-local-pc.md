@@ -34,9 +34,10 @@ yano local-pc status
 yano local-pc ask --prompt "Controlla oggi promemoria e calendario e indicami conflitti"
 ```
 
-Lo scheduler e `yano local-pc ask` inviano al planner persistente `planner-01`
+I job legacy testo+cron e `yano local-pc ask` inviano al planner persistente `planner-01`
 nel runtime logico `yano-local-pc`; non viene mai usato lo scope di un progetto
-applicativo.
+applicativo. I job script-first eseguono invece lo script registrato (i flussi
+deterministici girano in `mode: self` senza alcun agente).
 Operazioni che modificano o inviano dati richiedono conferma esplicita.
 
 Memoria CodeMem persistente: il runtime `<YANO_DATA_DIR>/yano-local-pc`

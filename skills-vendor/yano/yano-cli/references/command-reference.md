@@ -191,7 +191,7 @@ yano schedule retry --id <instance-id> [--json]            # retry manuale colle
 yano schedule list [--json]            # job con script_path, mode, expected_consequence, enabled, last_status
 yano schedule remove --id <id>|enable --id <id>|disable --id <id>
 yano schedule tick [--json]            # dispatcher one-minute (cron di sistema -> `yano schedule tick`)
-yano schedule supervise [--json]       # supervisor + tick (ricrea la tab Herdr scheduler se manca)
+yano schedule supervise [--json]       # supervisor + tick (tick dei job, garanzia planner-01 di yano-local-pc, reinstalla il digest se manca — nessun agent Herdr scheduler)
 yano schedule cron <install|status|remove>
 
 # Bridge deterministico chiamabile DENTRO gli script (e da CLI fuori da un agente):

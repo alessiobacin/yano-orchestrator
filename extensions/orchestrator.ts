@@ -806,7 +806,7 @@ documentale autonomo deve invece essere salvato nel progetto in
 \`docs/reports/<tipo>-<gg-mm-HH_MM>.md\`, usando data e ora locali italiane
 (giorno-mese-ora_minuti), con un tipo descrittivo e senza nomi generici.
 Eccezione audit-campaign: manifest + capitoli + sintesi vanno in
-`docs/reports/audit-<variant>-<gg-mm-aa_HH-MM>/` (variant = deep/standard/medium/...,
+\`docs/reports/audit-<variant>-<gg-mm-aa_HH-MM>/\` (variant = deep/standard/medium/...,
 data-ora italiane gg-mm-aa_HH-MM dal timestamp del manifest).
 Prima di crearne uno controlla se esiste già una relazione dello stesso tipo
 nella stessa finestra temporale e aggiornala invece di duplicarla. Riporta

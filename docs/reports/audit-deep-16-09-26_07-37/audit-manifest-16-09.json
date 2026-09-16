@@ -1,0 +1,759 @@
+{
+ "audit": "audit-campaign deep yano-orchestrator DISCOVERY",
+ "campaign": "audit-campaign",
+ "created_utc": "2026-09-16",
+ "manifest_path": "docs/reports/audit-deep-16-09-26_07-37/audit-manifest-16-09.json",
+ "run_id": "01M2MB2JEWW0DF9F9GS5SVQ4RW",
+ "target": "/Users/alessiobacin/Development/testCode/yano-orchestrator",
+ "target_version": "1.6.2",
+ "ticket_id": "01M2MB6B8VFP1XW1994J1W1BAD",
+ "variant": "deep",
+ "boundary_capability_index": {
+  "evidence_confidence": 0.9,
+  "judgment_confidence": 0.85,
+  "judgment_motivation": "Boundary distinti per file letti e help reale; parte broker/Herdr marcata unknown senza esecuzione live.",
+  "read_only_verifiable": [
+   "repo structure (ls, file reads)",
+   "package.json scripts + version",
+   "yano --help command inventory",
+   "scripts/watcher/orchestrator-tools file lists",
+   "playbooks list + descriptions",
+   "roles.yaml ids/labels/briefs/playbooks",
+   "prompts list (38 .md)",
+   "skills-vendor tree",
+   ".mcp.json.example declared MCP",
+   "mqtt/*.conf + compose.yaml (static)",
+   "capabilities.yaml cli+mcp catalog",
+   "lint/test file presence (test-all.mjs head, vitest dep, smoke-test-*.mjs names)",
+   "git log/HEAD (faed4ad)"
+  ],
+  "requires_broker_herdr_credentials": [
+   "MQTT live presence/routing (needs broker 127.0.0.1:1883 via mqtt/compose.yaml + docker)",
+   "Herdr tab lifecycle (needs herdr CLI + macOS harness)",
+   "yano start/launch-planner live agent spawn (needs pi + llmproxy creds)",
+   "trace semantic index query (needs ollama embeddings at query time)",
+   "auto-improve web sources (needs network)",
+   "feedback API serve (port 20002)",
+   "frontend-dash proxy (ports 10000-10999)",
+   "evolution-api/WhatsApp notify (needs .env creds)",
+   "github/stitch/mongodb MCP reachability (needs oauth/tokens/gcloud)",
+   "full test-all.mjs + e2e-full-flow.mjs (needs broker+docker+creds)"
+  ],
+  "resource_record": {
+   "commands": [
+    "ls -R <target> | head -n 300",
+    "ls -la <target>",
+    "cat <target>/package.json",
+    "node <target>/bin/yano.mjs --help",
+    "ls <target>/scripts | wc -l",
+    "ls <target>/playbooks | wc -l",
+    "ls <target>/prompts | wc -l",
+    "ls -R <target>/skills-vendor",
+    "cat <target>/agents/roles.yaml",
+    "cat <target>/agents/agents.yaml",
+    "head <target>/agents/capabilities.yaml",
+    "head <target>/scripts/test-all.mjs",
+    "head <target>/scripts/watch-stalls.mjs|yano-trace*.mjs|yano-invoke.mjs|launch-planner.mjs",
+    "cat <target>/mqtt/mosquitto.conf + compose.yaml",
+    "git -C <target> log --oneline -3 + rev-parse HEAD",
+    "node --version"
+   ],
+   "measurements": {
+    "PI_MODEL": "llmproxy",
+    "PI_PROVIDER": "llmproxy",
+    "PI_REASONING_LEVEL": "off",
+    "git_HEAD": "faed4ad529a3f938535b9100e9f378b9836916b3",
+    "model": "unknown (llmproxy pinned name not exposed in session env)",
+    "node": "v26.5.0"
+   },
+   "model_used": "llmproxy (PI_MODEL/PI_PROVIDER env; exact pinned provider:model name unknown from env)"
+  }
+ },
+ "command_inventory": {
+  "evidence_confidence": 0.95,
+  "help_exit_code": 0,
+  "help_source": "node $T/bin/yano.mjs --help (absolute target path; cwd-relative call fails with MODULE_NOT_FOUND)",
+  "judgment_confidence": 0.9,
+  "judgment_motivation": "Help reale eseguito con exit 0; scopi da help+commenti header bin/yano.mjs, non da esecuzione mutante.",
+  "main_commands": [
+   {
+    "cmd": "init",
+    "purpose": "scaffold yano-orchestrator in current dir -> scripts/create-project.mjs"
+   },
+   {
+    "cmd": "start",
+    "purpose": "launch any role (default planner); --herdr verified workspace tab -> scripts/launch-planner.mjs"
+   },
+   {
+    "cmd": "doctor [--json]",
+    "purpose": "prereq check git/pi/broker -> scripts/doctor.mjs"
+   },
+   {
+    "cmd": "update [--check|--reload]",
+    "purpose": "update global install; reload pauses/saves/restarts Herdr -> scripts/update.mjs"
+   },
+   {
+    "cmd": "uninstall [--yes]",
+    "purpose": "remove global install -> scripts/uninstall.mjs"
+   },
+   {
+    "cmd": "end",
+    "purpose": "close active ticket/DAG runs in cwd -> scripts/end-project.mjs"
+   },
+   {
+    "cmd": "leave --yes",
+    "purpose": "remove current project from watcher registry"
+   },
+   {
+    "cmd": "copy-prompts",
+    "purpose": "copy prompts/ into project for customization -> scripts/copy-prompts.mjs"
+   },
+   {
+    "cmd": "frontend-review browser|setup|start",
+    "purpose": "DOM + frontend adapter review"
+   },
+   {
+    "cmd": "ponytail on|off|status",
+    "purpose": "default skill for all agents"
+   },
+   {
+    "cmd": "memory ...",
+    "purpose": "query/manage Yano memories"
+   },
+   {
+    "cmd": "status|logs|fleet|mcp",
+    "purpose": "read-only project/fleet views"
+   },
+   {
+    "cmd": "projects [--json]",
+    "purpose": "count Yano projects with live Herdr agents"
+   },
+   {
+    "cmd": "skills install|status",
+    "purpose": "install/verify yano-cli in global harnesses"
+   },
+   {
+    "cmd": "deps",
+    "purpose": "CLI/credential/auth capability preflight per task"
+   },
+   {
+    "cmd": "docs-check",
+    "purpose": "scripted check of 8 canonical docs/ categories"
+   },
+   {
+    "cmd": "qa-inventory scan",
+    "purpose": "raw command/feature inventory draft for QA audit"
+   },
+   {
+    "cmd": "gantt",
+    "purpose": "local live web dashboard of runs/tickets"
+   },
+   {
+    "cmd": "watch",
+    "purpose": "zero-token stall watcher (-> scripts/watch-stalls.mjs)"
+   },
+   {
+    "cmd": "architect ...",
+    "purpose": "list active external-worker projects"
+   },
+   {
+    "cmd": "trace",
+    "purpose": "global tracing on/off/search/clear (-> yano-trace*.mjs)"
+   },
+   {
+    "cmd": "auto-improve",
+    "purpose": "periodic read-only audits + report to planner"
+   },
+   {
+    "cmd": "feedback serve|create|list|get|update|delete",
+    "purpose": "bug/suggestion CRUD, API port 20002"
+   },
+   {
+    "cmd": "feedback-api start|stop",
+    "purpose": "bug/suggestion API for apps (alias dash)"
+   },
+   {
+    "cmd": "frontend-dash start|stop|list",
+    "purpose": "dev reverse proxy + Agentation (10000-10999)"
+   },
+   {
+    "cmd": "model-advisor",
+    "purpose": "pinned provider:model per role-class from llmProxy data"
+   },
+   {
+    "cmd": "architect",
+    "purpose": "design/provision global playbooks+roles"
+   },
+   {
+    "cmd": "playbook|agent",
+    "purpose": "read-only global playbook/role/capability catalog"
+   },
+   {
+    "cmd": "config",
+    "purpose": "global user config"
+   },
+   {
+    "cmd": "rule",
+    "purpose": "global + per-project rules"
+   },
+   {
+    "cmd": "schedule",
+    "purpose": "recurring script jobs, persistent cleanable cron"
+   },
+   {
+    "cmd": "cron",
+    "purpose": "natural-language recurring-job CRUD + yano-scheduler supervisor"
+   },
+   {
+    "cmd": "local-pc start|status|ask",
+    "purpose": "developer-PC agent via MCP/CLI"
+   },
+   {
+    "cmd": "services",
+    "purpose": "external service registry (docker/pm2/cmd) + healthcheck/restart"
+   },
+   {
+    "cmd": "api discover|list|show|add|verify|refresh|update|delete",
+    "purpose": "REST APIs from Postman/OpenAPI"
+   },
+   {
+    "cmd": "test-env allocate|show|release",
+    "purpose": "isolated ports for E2E/review in worktree"
+   },
+   {
+    "cmd": "capabilities show|detect|set",
+    "purpose": "declared frontend/backend topology"
+   },
+   {
+    "cmd": "data path|usage|migrate",
+    "purpose": "measure/migrate global data-root"
+   },
+   {
+    "cmd": "pause",
+    "purpose": "non-destructive snapshot + pause runs"
+   },
+   {
+    "cmd": "resume",
+    "purpose": "restore snapshot + reopen missing agents"
+   },
+   {
+    "cmd": "recovery",
+    "purpose": "inspect snapshots + restore state"
+   },
+   {
+    "cmd": "repair",
+    "purpose": "reconcile project/all projects, Herdr/MQTT agents, Yano version"
+   }
+  ],
+  "resource_record": {
+   "commands": [
+    "node /Users/alessiobacin/Development/testCode/yano-orchestrator/bin/yano.mjs --help",
+    "node /Users/alessiobacin/Development/testCode/yano-orchestrator/bin/yano.mjs --version (not separately captured; version from package.json 1.6.2)",
+    "head -n 80 bin/yano.mjs (43-line header mapping each command to its script)"
+   ],
+   "measurements": {
+    "help_lines": "~150 head-captured, full list above",
+    "help_subcommand_rows_grep": "42"
+   },
+   "model_used": "llmproxy (PI_MODEL/PI_PROVIDER env; exact pinned provider:model name unknown from env)"
+  }
+ },
+ "entrypoints": {
+  "bin_yano_mjs_lines": 450,
+  "extensions_orchestrator_ts_lines": 3182,
+  "notes": [
+   "bin/yano.mjs maps every subcommand to a script runner (runCreateProject/runLaunchPlanner/runDoctor/...)",
+   "extensions/orchestrator.ts = MQTT transport + identity + presence + pub/sub only; explicitly NOT scheduler/DAG/router/budget/TLS (see header)"
+  ]
+ },
+ "limitations": [
+  "No live execution: broker/Herdr/pi spawn never started (read-only mandate)",
+  "Exact pinned LLM provider:model name not exposed via PI_* env (recorded unknown)",
+  "Role briefs only where roles.yaml defines brief:; planner/coder/reviewer/tdd-agent etc. fall back to playbook id",
+  "Playbook descriptions truncated to first description lines; full phase content not inventoried (chapter work)",
+  "Test counts are file-presence counts, not pass/fail results"
+ ],
+ "playbook_role_skill_mcp_inventory": {
+  "evidence_confidence": 0.95,
+  "judgment_confidence": 0.9,
+  "judgment_motivation": "Conteggi da ls/wc + grep su file reali; brief copiati verbatim dove presenti, playbook id come fallback.",
+  "mcp_capabilities_catalog": [
+   "chrome-devtools (browser inspection, optional)",
+   "agentation (visual annotation intake, optional)",
+   "github (repo+issue evidence, optional)",
+   "stitch (UI design exploration, optional)",
+   "mongodb (database inspection, optional)"
+  ],
+  "mcp_declared_example": [
+   "chrome-devtools (npx chrome-devtools-mcp)",
+   "github (https://api.githubcopilot.com/mcp/, oauth)",
+   "stitch (https://stitch.googleapis.com/mcp, bearer via gcloud)"
+  ],
+  "playbooks_count": 31,
+  "playbooks_list": [
+   "ai-application-optimization.yaml",
+   "ai-delegation-audit.yaml",
+   "architect-provisioning.yaml",
+   "architecture-health-audit.yaml",
+   "audit-campaign.yaml",
+   "auto-improvement-360.yaml",
+   "automation-control-audit.yaml",
+   "backend-change.yaml",
+   "clean-repo.yaml",
+   "conversation.yaml",
+   "data-api-contract.yaml",
+   "debate.yaml",
+   "default.yaml",
+   "deployment-delivery.yaml",
+   "design-redesign.yaml",
+   "documentation-release.yaml",
+   "frontend-browser.yaml",
+   "full-stack-developer.yaml",
+   "get-the-best-from.yaml",
+   "knowledge-authoring.yaml",
+   "local-pc-operations.yaml",
+   "observer-audit.yaml",
+   "performance-observability.yaml",
+   "performance-optimization-loop.yaml",
+   "platform-delivery.yaml",
+   "qa-full-audit.yaml",
+   "qa-hardening.yaml",
+   "refactor.yaml",
+   "security-review.yaml",
+   "test-adequacy-audit.yaml",
+   "toolchain-readiness-audit.yaml"
+  ],
+  "resource_record": {
+   "commands": [
+    "ls <target>/playbooks | wc -l",
+    "for f in <target>/playbooks/*.yaml: head description lines",
+    "grep -E '^  [a-z0-9-]+:' <target>/agents/roles.yaml | wc -l + full id list",
+    "grep -E 'brief:|label:|playbook:' <target>/agents/roles.yaml",
+    "ls -R <target>/skills-vendor",
+    "cat <target>/.mcp.json.example",
+    "grep mcp_capabilities <target>/agents/capabilities.yaml"
+   ],
+   "measurements": {
+    "playbooks": 31,
+    "prompts": 38,
+    "roles": 57,
+    "yano_skills": 11
+   },
+   "model_used": "llmproxy (PI_MODEL/PI_PROVIDER env; exact pinned provider:model name unknown from env)"
+  },
+  "roles_count": 57,
+  "roles": [
+   {
+    "brief": "(no brief; default deterministic planner cycle)",
+    "id": "planner"
+   },
+   {
+    "brief": "(no brief; backend-change flow)",
+    "id": "coder"
+   },
+   {
+    "brief": "(no brief; backend-change flow)",
+    "id": "reviewer"
+   },
+   {
+    "brief": "Esegui audit periodici read-only del progetto: correlando codice, test, documentazione, trace, bug e feedback produci raccomandazioni prioritizzate e inviale al planner. Non modificare mai il progetto, non creare ticket operativi autonomamente e non eseguire deploy.",
+    "id": "auto-improver"
+   },
+   {
+    "brief": "Osserva un progetto e il round di validazione di un playbook in modo esclusivamente read-only. Usa yano watch e il trace per rilevare stall, target offline, errori di routing o capability non rispettate; comunica evidenze al planner e non modificare mai codice, test, configurazioni, dati, ticket operativi o deployment del progetto osservato.",
+    "id": "watcher"
+   },
+   {
+    "brief": "Esegui il percorso controllato development \u2192 staging \u2192 production: verifica lo stack reale, assegna e conserva la matrice di porte Yano, lascia development sul codice sorgente, dockerizza staging e production, valida healthcheck/smoke test, conserva digest e rollback checkpoint e non promuove production senza approvazione esplicita.",
+    "id": "deployment-agent"
+   },
+   {
+    "brief": "Progetta e prepara playbook e ruoli specialistici nel catalogo globale Yano. Verifica e, quando autorizzato, provvisiona skill, CLI e MCP; non modificare mai il progetto di riferimento. Un playbook resta non operativo finch\u00e9 tutte le capability richieste non risultano verificate. Gestisci revisioni ephemeral e promozione persistente solo dopo validazione del watcher e feedback positivo del planner/utente.",
+    "id": "architect"
+   },
+   {
+    "brief": "Misura e ottimizza applicazioni AI per contesto, token, granularit\u00e0 dei task, routing dei modelli, latenza, qualit\u00e0, affidabilit\u00e0 e costi. Produce evidenze e raccomandazioni; implementa solo modifiche assegnate dal planner.",
+    "id": "ai-optimizer"
+   },
+   {
+    "brief": "Ricerca mercato, audience, competitor e fonti per un playbook globale di knowledge authoring. Produce solo report intermedi e non modifica i documenti finali.",
+    "id": "market-researcher"
+   },
+   {
+    "brief": "Fornisci al planner un consulto read-only, circoscritto e verificabile durante una conversazione. Non creare worktree, run, ticket o artefatti di sviluppo e non modificare il progetto.",
+    "id": "conversation-researcher"
+   },
+   {
+    "brief": "Definisci search intent, keyword, opportunit\u00e0 SEO e information architecture. Scrivi solo gli artefatti SEO intermedi assegnati.",
+    "id": "seo-strategist"
+   },
+   {
+    "brief": "Trasforma ricerca e SEO in posizionamento, messaging, struttura del sito e content brief senza scrivere il deliverable finale.",
+    "id": "website-content-strategist"
+   },
+   {
+    "brief": "Sintetizza gli input approvati in documenti Markdown business completi e strutturati. \u00c8 l'unico ruolo autorizzato a scrivere i documenti finali in docs/.",
+    "id": "business-docs-author"
+   },
+   {
+    "brief": "Revisiona tracciabilit\u00e0 delle fonti, coerenza, duplicazioni, completezza e rispetto del template senza modificare direttamente i deliverable finali.",
+    "id": "business-docs-reviewer"
+   },
+   {
+    "brief": "Scrivi i test (unit e integration) PRIMA che il coder implementi, basandoti sulla specifica nel file di report - poi lavora a stretto contatto col coder finch\u00e9 la copertura dei casi che hai previsto non \u00e8 soddisfatta.",
+    "id": "tdd-agent"
+   },
+   {
+    "brief": "Mutation testing/fuzzing: verifica che i test siano robusti e non diano falso senso di sicurezza.",
+    "id": "mutation-tester"
+   },
+   {
+    "brief": "Costruisci la matrice canonica di funzionalit\u00e0/comandi/endpoint/opzioni e il risultato atteso prima di qualunque test - non esegui tu i comandi, scrivi il contratto verificabile.",
+    "id": "qa-inventory-analyst"
+   },
+   {
+    "brief": "Esegui davvero ogni voce della matrice in worktree/sandbox isolata, classifica PASS/FAIL/BLOCKED con evidenza riproducibile, riesegui l'intera matrice dopo ogni remediation.",
+    "id": "qa-functional-verifier"
+   },
+   {
+    "brief": "Costruisci una sola mappa deterministica e riusabile del progetto: file, moduli, comandi, test, playbook, ruoli, MCP, skill, GUI, log e punti di stato. Produci manifesto e capability index senza giudizi o modifiche al progetto osservato.",
+    "id": "repo-cartographer"
+   },
+   {
+    "brief": "Verifica con probe sicuri CLI, MCP, skill, script e playbook: distinguendo dichiarazione, disponibilit\u00e0, documentazione, suitability e fallback senza installare o stampare segreti.",
+    "id": "toolchain-evaluator"
+   },
+   {
+    "brief": "Classifica ogni fase D0/D1/AI e propone migrazioni verso script deterministici solo con pre/post-condizioni, fallback e piano di misura; non dichiara risparmi senza baseline.",
+    "id": "delegation-efficiency-auditor"
+   },
+   {
+    "brief": "Mappa use case, comportamento atteso, test esistenti, percorsi negativi, persistenza e effetti cross-command; distingue copertura reale da semplice presenza di test e propone gap prioritizzati.",
+    "id": "test-adequacy-analyst"
+   },
+   {
+    "brief": "Valuta boundary, dipendenze, coupling/cohesion, complessit\u00e0, file enormi, error path, stato, concorrenza e refactor seam usando evidenze statiche e senza modificare codice.",
+    "id": "architecture-health-reviewer"
+   },
+   {
+    "brief": "Cerca duplicazioni semantiche, dead-code candidates, funzioni/file sproporzionati e semplificazioni meccaniche, collegando ogni proposta ai test di comportamento necessari.",
+    "id": "maintainability-reviewer"
+   },
+   {
+    "brief": "Ricostruisci trigger, code, deleghe, retry, timeout, idempotenza, state propagation e recovery; identifica failure mode e opportunit\u00e0 script-first con postcondition verificabili.",
+    "id": "automation-control-auditor"
+   },
+   {
+    "brief": "Verifica log e trace per correlazione, modelli, round, durate, token, retry, privacy e redazione; distingue misurato, stimato e unknown e definisce la telemetria mancante.",
+    "id": "observability-reviewer"
+   },
+   {
+    "brief": "Valuta comandi dal punto di vista umano, opzioni mancanti, GUI, visualizzazioni, feature gap, concorrenti e opportunit\u00e0 di mercato separando fatti, inferenze e ipotesi.",
+    "id": "product-ux-analyst"
+   },
+   {
+    "brief": "Trasforma findings architetturali gi\u00e0 verificati in task piccoli, ordinati e parallelizzabili con test, dipendenze, rollback e criteri di done; non implementa e non finalizza.",
+    "id": "refactor-planner"
+   },
+   {
+    "brief": "Incrocia capitoli specialistici senza rifare discovery, deduplica findings, mantiene contraddizioni esplicite e costruisce la implementation DAG separata dalla DAG dell'audit.",
+    "id": "audit-synthesizer"
+   },
+   {
+    "brief": "Argomenta la stance assegnata in apertura senza vedere gli altri debater; in replica rispondi nel merito con onest\u00e0 intellettuale.",
+    "id": "debater"
+   },
+   {
+    "brief": "Scrivi e mantieni test E2E (Playwright/Cypress) del flusso utente reale; usa yano test-env allocate per porte isolate.",
+    "id": "e2e-simulator"
+   },
+   {
+    "brief": "Implementa in un unico worktree task bounded frontend+backend; esegue test backend e verifiche browser; consegna al full-stack-reviewer salvo topology single-developer approvata.",
+    "id": "full-stack-developer"
+   },
+   {
+    "brief": "Revisiona indipendentemente cambi cross-layer (API, persistenza, UI, test, browser/E2E, regressioni, docs); respinge con evidenze o approva.",
+    "id": "full-stack-reviewer"
+   },
+   {
+    "brief": "Scrivi/aggiorna Dockerfile e docker-compose (multi-stage, layer caching, minima immagine).",
+    "id": "dockerizer"
+   },
+   {
+    "brief": "Scrivi/aggiorna manifest Kubernetes e chart Helm da quanto preparato da dockerizer.",
+    "id": "k8s-orchestrator"
+   },
+   {
+    "brief": "Crea/aggiorna pipeline CI (GitHub Actions/GitLab CI/Jenkins): branch test, build caching, rollout strategy.",
+    "id": "cicd-architect"
+   },
+   {
+    "brief": "Stima/ottimizzazione costi cloud consultiva (CPU/RAM, spot); documenta nel report, non applica cambi infra da solo.",
+    "id": "cost-optimizer"
+   },
+   {
+    "brief": "Gestisci migrazioni DB e ottimizzazione query (indici, N+1).",
+    "id": "schema-migrator"
+   },
+   {
+    "brief": "Popola DB di sviluppo nel worktree con dati fittizi realistici (no PII).",
+    "id": "data-seeder"
+   },
+   {
+    "brief": "Mantieni sincronizzato openapi.json/swagger.yaml (o AsyncAPI) con gli endpoint reali; genera docs interattive/SDK dove previsto.",
+    "id": "openapi-writer"
+   },
+   {
+    "brief": "Genera/aggiorna diagrammi architettura Mermaid (C4) in markdown + .pi/.../diagrams/architecture.mmd come sorgente pura corrente.",
+    "id": "architecture-diagrammer"
+   },
+   {
+    "brief": "Confronta commit tra release e scrivi changelog cliente (features/fix/breaking).",
+    "id": "release-notes-writer"
+   },
+   {
+    "brief": "Ultima fase di ogni piano: sincronizza README/docs/architecture/guides/quick-guides/adr/notes/postman/cheat-sheet/diagram al codice reale; migra percorsi legacy; mai placeholder/TODO.",
+    "id": "docs-sync"
+   },
+   {
+    "brief": "Agente minimale deterministico script-first per job ricorrenti via yano schedule add --script; testa sempre con schedule run prima di rendere ricorrente; routing LLM dentro lo script via yano invoke.",
+    "id": "scheduler"
+   },
+   {
+    "brief": "Agente globale per interazione diretta col PC sviluppatore via MCP/CLI; conferma prima di azioni distruttive o comunicazioni esterne.",
+    "id": "yano-local-pc"
+   },
+   {
+    "brief": "Verifica dipendenze per versioni obsolete/vulnerabili + breaking-changelog con modifiche codice suggerite.",
+    "id": "dependency-health"
+   },
+   {
+    "brief": "Lavora solo su codice gi\u00e0 approvato dal reviewer: refactoring senza alterare comportamento osservabile n\u00e9 rompere test.",
+    "id": "refactoring-specialist"
+   },
+   {
+    "brief": "Propone (mai applica senza approvazione) rimozioni/spostamenti file con verifica riferimenti; audit documentale categorie canoniche + Postman se backend.",
+    "id": "repo-curator"
+   },
+   {
+    "brief": "Benchmark indipendente a scatola chiusa del repo assegnato: punti di forza reali con file/riga; sola lettura, mai push/fork.",
+    "id": "repo-benchmarker"
+   },
+   {
+    "brief": "Inietta logging strutturato JSON e metriche chiave senza cambiare logica applicativa.",
+    "id": "observability-agent"
+   },
+   {
+    "brief": "Analizza codice/dipendenze per vulnerabilit\u00e0 (SAST, CVE, secrets, input validation, auth); segnala a coder con file/riga.",
+    "id": "security-evaluator"
+   },
+   {
+    "brief": "Implementa/aggiorna componenti UI nel worktree integrandosi con API esposte dal coder backend.",
+    "id": "frontend-developer"
+   },
+   {
+    "brief": "Review esclusiva UI di frontend-developer via playwright-cli + chrome-devtools; porte isolate via yano test-env; rimanda fix a frontend-developer.",
+    "id": "frontend-reviewer"
+   },
+   {
+    "brief": "Testa viewport multiple, contrasti, ARIA, tastiera; segnala a frontend-developer con dettagli concreti.",
+    "id": "a11y-tester"
+   },
+   {
+    "brief": "Converte design di riferimento (es. Figma) in codice visuale per frontend-developer; non implementa logica applicativa.",
+    "id": "design-to-code"
+   },
+   {
+    "brief": "Audita interfaccia e progetti Stitch; produce design system, alternative UX, prototipo navigabile, mapping design-to-code; non implementa codice applicativo non assegnato.",
+    "id": "design-redesign-specialist"
+   },
+   {
+    "brief": "Benchmark performance reali (latency/throughput) su funzioni/endpoint del task; segnala regressioni concrete vs round precedente.",
+    "id": "speed-benchmarker"
+   }
+  ],
+  "skills_vendor": {
+   "awesome-copilot": [
+    "chrome-devtools"
+   ],
+   "mattpocock": [
+    "code-review",
+    "domain-modeling",
+    "grilling",
+    "setup-matt-pocock-skills",
+    "to-spec",
+    "to-tickets",
+    "wayfinder"
+   ],
+   "ponytail": [
+    "ponytail/ponytail"
+   ],
+   "yano": [
+    "stitch-design-redesign",
+    "yano-ai-optimization",
+    "yano-architect",
+    "yano-auto-improvement",
+    "yano-cli",
+    "yano-code-mem",
+    "yano-code-review",
+    "yano-deployment",
+    "yano-observer",
+    "yano-observer-dry-run",
+    "yano-planner-trace-analysis"
+   ]
+  }
+ },
+ "repo_structure": {
+  "directories": {
+   "agents": "agents.yaml (instances) + roles.yaml (57 roles) + capabilities.yaml (cli+mcp catalog)",
+   "bin": "yano.mjs (450 lines, CLI dispatcher)",
+   "docs": "adr(6) architecture cheat-sheet(35) diagram(14 .mmd) guides notes postman quick-guides(41) reports(5 pre-existing) superpowers",
+   "extensions": "orchestrator.ts (3182 lines, MQTT transport+identity+presence+pubsub)",
+   "memory": "graph.json MEMORY.md USER.md state.db",
+   "mqtt": "compose.yaml + mosquitto.conf (docker 0.0.0.0 in-namespace) + mosquitto.native.conf (host 127.0.0.1)",
+   "playbooks": "31 x .yaml",
+   "prompts": "38 x .md",
+   "scripts": "250 entries (248 code files + watcher/ + orchestrator-tools/)",
+   "skills-vendor": "awesome-copilot + mattpocock(7) + ponytail + yano(11)"
+  },
+  "evidence_confidence": 0.98,
+  "judgment_confidence": 0.95,
+  "judgment_motivation": "Elenchi da ls/wc grezzi + header commenti che mappano comandi a script; nessuna inferenza su contenuto non letto.",
+  "resource_record": {
+   "commands": [
+    "ls -R <target> | head -n 300",
+    "ls -la <target>",
+    "cat <target>/package.json",
+    "ls <target>/scripts | wc -l",
+    "ls <target>/playbooks | wc -l",
+    "ls <target>/prompts | wc -l",
+    "ls -R <target>/skills-vendor",
+    "cat <target>/mqtt/mosquitto.conf + compose.yaml + mosquitto.native.conf",
+    "wc -l <target>/extensions/orchestrator.ts <target>/bin/yano.mjs"
+   ],
+   "measurements": {
+    "bin_yano_mjs_lines": 450,
+    "cheat_sheet_md": 35,
+    "diagrams_mmd": 14,
+    "extensions_orchestrator_ts_lines": 3182,
+    "orchestrator_tools_entries": 33,
+    "playbooks": 31,
+    "prompts": 38,
+    "quick_guides_md": 41,
+    "roles": 57,
+    "scripts_entries": 250,
+    "smoke_tests": 149,
+    "watcher_entries": 18
+   },
+   "model_used": "llmproxy (PI_MODEL/PI_PROVIDER env; exact pinned provider:model name unknown from env)"
+  }
+ },
+ "script_inventory": {
+  "evidence_confidence": 0.9,
+  "judgment_confidence": 0.85,
+  "judgment_motivation": "Scopi da header commenti letti per i 8 chiave; resto classificato per nome/file senza esecuzione.",
+  "key_scripts": [
+   {
+    "file": "scripts/watch-stalls.mjs",
+    "purpose": "yano watch: zero-token stall detector; reads orchestrator.db, publishes ticket_stalled on MQTT, appends JSONL marker, optional WhatsApp tripwire; never judges/acts"
+   },
+   {
+    "file": "scripts/watcher/detect-stalled-tickets.mjs",
+    "purpose": "shared stall-detection core used by watcher flows"
+   },
+   {
+    "file": "scripts/watcher/watchdog-sweep.ts",
+    "purpose": "in-process watchdog sweep complement (planner wake path)"
+   },
+   {
+    "file": "scripts/watcher/heartbeat.mjs",
+    "purpose": "presence/liveness heartbeat handling"
+   },
+   {
+    "file": "scripts/watcher/planner-health.mjs",
+    "purpose": "planner health probing for escalation paths"
+   },
+   {
+    "file": "scripts/yano-orchestrator-storage.ts",
+    "purpose": "SQLite ticket/DAG storage layer extracted mechanically from orchestrator.ts (OrchestratorStorage interface)"
+   },
+   {
+    "file": "scripts/yano-trace.mjs + yano-trace-storage.mjs + yano-trace-index.mjs",
+    "purpose": "global trace CLI + JSONL/SQLite storage + semantic index (Ollama at query time; raw JSONL source of truth)"
+   },
+   {
+    "file": "scripts/yano-invoke.mjs",
+    "purpose": "deterministic bridge composing launch argv for scheduler scripts; planner path prints yano start --herdr --print-only --json, yano-local-pc path delegates to MQTT-aware client"
+   },
+   {
+    "file": "scripts/launch-planner.mjs",
+    "purpose": "spawn any-role pi instance; auto-attaches mattpocock --skill flags for planner, chrome-devtools --skill for reviewer/frontend-developer"
+   }
+  ],
+  "resource_record": {
+   "commands": [
+    "ls <target>/scripts",
+    "ls -R <target>/scripts/watcher",
+    "ls <target>/scripts/orchestrator-tools",
+    "head -n 25 scripts/watch-stalls.mjs|yano-orchestrator-storage.ts|yano-trace.mjs|yano-trace-storage.mjs|yano-trace-index.mjs|yano-invoke.mjs|launch-planner.mjs"
+   ],
+   "measurements": {
+    "orchestrator_tools_entries": 33,
+    "scripts_entries": 250,
+    "watcher_entries": 18
+   },
+   "model_used": "llmproxy (PI_MODEL/PI_PROVIDER env; exact pinned provider:model name unknown from env)"
+  }
+ },
+ "test_inventory": {
+  "evidence_confidence": 0.92,
+  "how_to_run": {
+   "e2e": "node --experimental-strip-types scripts/e2e-full-flow.mjs (needs broker+docker+creds)",
+   "full_suite": "node scripts/test-all.mjs = check:package-version + check-syntax(orchestrator.ts) + check:docs + lint:capabilities + lint:playbooks + check-skill-isolation + test:unit(vitest) + all smoke-test-*.mjs + e2e-full-flow.mjs; auto-starts mqtt/compose.yaml broker if 127.0.0.1:1883 unreachable",
+   "lint": "npm run lint:capabilities, npm run lint:playbooks, npm run check:docs, npm run check:package-version, npm run check-skill-isolation, npm run check-syntax",
+   "unit": "npm run test:unit (vitest run; no vitest.config in root)"
+  },
+  "judgment_confidence": 0.85,
+  "judgment_motivation": "Conteggi file reali + runner letto (head 80 righe); nessun test eseguito per mandato read-only.",
+  "key_smoke_tests_agent_watchdog_presence_routing": [
+   "smoke-test-agent-memory(.mjs|-accumulation|-lessons)",
+   "smoke-test-agent-routing-fallback.mjs",
+   "smoke-test-agent-send-presence-warning.mjs",
+   "smoke-test-presence-refresh.mjs",
+   "smoke-test-watchdog.mjs",
+   "smoke-test-watch-stalls.mjs",
+   "smoke-test-watch-agent-await.mjs",
+   "smoke-test-coordination.mjs",
+   "smoke-test-pipeline.mjs",
+   "smoke-test-ticket-engine.mjs",
+   "smoke-test-vision-routing.mjs",
+   "smoke-test-audit-routing.mjs",
+   "smoke-test-watcher-user-wait.mjs (+ untracked scripts/smoke-test-watcher-user-wait.mjs seen in git status)",
+   "smoke-test-yano-watcher-e2e.mjs + yano-watcher-registry/cron/recovery-cooldown/planner-unhealthy-escalation/findings-comments-gate",
+   "smoke-test-plan-gate.mjs + smoke-test-planner-action-guard.mjs + smoke-test-planner-tab-never-closed.mjs"
+  ],
+  "resource_record": {
+   "commands": [
+    "ls <target>/scripts/*.test.*",
+    "ls <target>/scripts/smoke-test-*.mjs | wc -l",
+    "ls <target>/scripts/watcher/*.test.mjs | wc -l",
+    "ls <target>/scripts/orchestrator-tools/*.test.mjs | wc -l",
+    "head -n 80 <target>/scripts/test-all.mjs",
+    "cat <target>/package.json scripts block"
+   ],
+   "measurements": {
+    "orchestrator_tools_tests": 16,
+    "root_script_tests": 4,
+    "smoke_tests": 149,
+    "watcher_tests": 8
+   },
+   "model_used": "llmproxy (PI_MODEL/PI_PROVIDER env; exact pinned provider:model name unknown from env)"
+  },
+  "test_counts_by_dir": {
+   "scripts/*.test.mjs (root)": 4,
+   "scripts/orchestrator-tools/*.test.mjs": 16,
+   "scripts/smoke-test-*.mjs": 149,
+   "scripts/watcher/*.test.mjs": 8
+  }
+ }
+}

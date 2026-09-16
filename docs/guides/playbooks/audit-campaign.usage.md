@@ -32,6 +32,22 @@ la campagna intera.
    refactor meccanici, poi cambi prodotto/UX; decide quali nodi possono correre
    in parallelo e quali devono attendere.
 
+## Dove salvare il dossier
+
+Manifest + capitoli + sintesi vanno in una cartella dedicata (non file
+piatti in `docs/reports/`):
+
+```text
+docs/reports/audit-<variant>-<gg-mm-aa_HH-MM>/
+```
+
+`variant` è `deep`/`standard`/`medium`/… e la data-ora italiana
+giorno-mese-anno_ora-minuti deriva dal timestamp del manifest. Esempio:
+`docs/reports/audit-deep-16-09-26_07-37/`. Il pattern piatto
+`docs/reports/<tipo>-<gg-mm-HH_MM>.md` resta valido solo per i report
+generici non-audit (vedi `REPORT_ARTIFACT_PROTOCOL` in
+`extensions/orchestrator.ts`).
+
 ## Script deterministici e ledger
 
 ```text

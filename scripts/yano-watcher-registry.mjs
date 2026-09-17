@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { projectUserWait } from "./watcher/user-wait.mjs";
 
 // Persistent registry + Herdr-tab supervision for the continuous, zero-token
 // `yano watch` loop.
@@ -50,13 +51,13 @@ if (!String(process.env.PATH || "").split(path.delimiter).includes(herdrBinDir))
 import { agentTabIdentityAudit, findAgentIdentityConflicts, formatAgentIdentityConflicts } from "./yano-agent-identity.mjs";
 import { superviseScheduler } from "./yano-scheduler.mjs";
 import { closeTerminalArchitectSessions } from "./yano-architect.mjs";
-import { closeTerminalAutoImproverSessions } from "./yano-auto-improver.mjs";
+import { closeTerminalAutoImproverSessions, superviseAutoImproverService } from "./yano-auto-improver.mjs";
 import mqtt from "mqtt";
 import { claimFeedback, listFeedback, openDatabase as openFeedbackDatabase, updateFeedback } from "./yano-feedback.mjs";
 import { cronInstall, cronStatus, cronRemove } from "./watcher/cron-schedule.mjs";
 import {
 	renameHerdrTab, closeHerdrTab, watcherProcessMatches, repairAgentTabIdentities,
-	closeUnusedInitialTab, findOrCreateWatcherWorkspace, pruneOrphanWatcherTabs,
+	closeUnusedInitialTab, findOrCreateWatcherWorkspace, pruneOrphanWatcherTabs, pruneOrphanMaintenanceTabs,
 } from "./watcher/herdr-tab-lifecycle.mjs";
 import { projectRuns, runNeedsPlanner } from "./watcher/project-runs.mjs";
 export { projectRuns, projectOpenHolds, runNeedsPlanner, projectNeedsPlanner } from "./watcher/project-runs.mjs";
@@ -65,6 +66,7 @@ import {
 	paneHasLivePiProcess, panePiProcessState, livePlannerPanesInWorkspace, plannerLooksHealthyViaExplain,
 	isPlannerIdentity,
 } from "./watcher/planner-health.mjs";
+import { relocatedProjectVerdict } from "./watcher/moved-project.mjs";
 export { findProjectWorkspace, plannerHeartbeatHealthy } from "./watcher/planner-health.mjs";
 
 const require = createRequire(import.meta.url);
@@ -251,13 +253,25 @@ function findPlannerTab(snapshot, workspaceId) {
 }
 
 export function ensureRegisteredPlanner(row, snapshot, db = null) {
-	if (!snapshot || !fs.existsSync(row.root)) return { recovery: "project_unavailable" };
+	if (!snapshot) return { recovery: "project_unavailable" };
+	// A registered root that no longer exists is either a moved project
+	// (same marker found elsewhere → propose the update) or a deleted one
+	// (explicit re-add hint, never silent). Never recover a planner into a
+	// dead path; surface the verdict instead of planner_missing noise.
+	if (!fs.existsSync(row.root)) {
+		const moved = relocatedProjectVerdict(row);
+		try { appendRawTraceRecord({ cwd: row.root, project: row.name, record: { type: "watcher_project_root_gone", record_type: "event", source: "yano-watcher-registry", instance: "yano-watcher", ...moved } }); } catch { /* best effort */ }
+		return { recovery: moved.status === "relocated" ? "project_relocated" : "project_root_missing", moved, planner_status: "not_required" };
+	}
 	// The planner is the permanent control-plane identity of every initialized
 	// Yano project. It must remain ready even when every run is terminal, the
 	// project is idle, or its watcher polling loop is explicitly paused. The old
 	// projectNeedsPlanner() gate made completed projects look healthy while
 	// silently allowing their planner tab/process to disappear.
-	if (!projectRuns(row.root).available) return { recovery: "project_not_initialized", planner_status: "not_required" };
+	const projectState = projectRuns(row.root);
+	if (!projectState.available) return { recovery: "project_not_initialized", planner_status: "not_required" };
+	const userWait = projectUserWait(row.root, projectState.runs);
+	if (userWait.waiting) return { recovery: "waiting_for_user", planner_status: "waiting", user_wait: userWait };
 	const workspace = findProjectWorkspace(snapshot, row.root, row.name);
 	const planners = workspace ? plannerAgentsInWorkspace(snapshot, workspace.workspace_id, row.root) : [];
 	const healthy = planners.find(plannerHeartbeatHealthy);
@@ -769,7 +783,7 @@ function recoverPlanner({ row, snapshot, run, reason }) {
 	return { recovered: true, workspace_id: workspace.workspace_id, planner_tab_id: tab.tab_id, planner_pane_id: pane.pane_id, run_id: run.id, recovery_reason: reason };
 }
 
-async function reconcileProjectRun(db, row, snapshot, mqttClientProvider = null) {
+export async function reconcileProjectRun(db, row, snapshot, mqttClientProvider = null) {
 	const identityConflicts = snapshot ? findAgentIdentityConflicts(snapshot).filter((conflict) => path.resolve(conflict.root) === path.resolve(row.root)) : [];
 	if (identityConflicts.length) {
 		return { recovery: "identity_conflict", watcher_kept: true, identity_conflicts: identityConflicts, recovery_error: formatAgentIdentityConflicts(identityConflicts).join("; ") };
@@ -782,6 +796,8 @@ async function reconcileProjectRun(db, row, snapshot, mqttClientProvider = null)
 	// reserved for initialized projects with no active runs or explicit leave.
 	if (!available) return { recovery: "waiting_for_initialization", watcher_kept: true };
 	if (!runs.length) return { recovery: "project_idle", watcher_kept: true };
+	const userWait = projectUserWait(row.root, runs);
+	if (userWait.waiting) return { recovery: "waiting_for_user", user_wait: userWait, watcher_kept: true };
 	const incomplete = runs.filter(runNeedsPlanner);
 	const flowViolations = runs.flatMap((run) => (run.playbook_flow?.violations || []).map((violation) => ({ run_id: run.id, ...violation })));
 	if (flowViolations.length) {
@@ -790,8 +806,9 @@ async function reconcileProjectRun(db, row, snapshot, mqttClientProvider = null)
 	if (incomplete.length) {
 		const workspace = findProjectWorkspace(snapshot, row.root, row.name);
 		const planners = workspace ? plannerAgentsInWorkspace(snapshot, workspace.workspace_id, row.root) : [];
-		const orphaned = incomplete.flatMap((run) => orphanedRunningTickets(run, snapshot, row.root).map((ticket) => ({ run, ticket })));
-		const ready = incomplete.flatMap((run) => readyPendingTickets(run).map((ticketId) => ({ run, ticket_id: ticketId })));
+		const actionable = incomplete.filter((run) => Number(run.open_holds || 0) === 0);
+		const orphaned = actionable.flatMap((run) => orphanedRunningTickets(run, snapshot, row.root).map((ticket) => ({ run, ticket })));
+		const ready = actionable.flatMap((run) => readyPendingTickets(run).map((ticketId) => ({ run, ticket_id: ticketId })));
 		const plannersIdle = planners.length > 0 && planners.every((planner) => String(planner.agent_status || "unknown").toLowerCase() === "idle");
 		const held = incomplete.filter((run) => Number(run.open_holds || 0) > 0);
 		const stalled = incomplete.filter((run) => Number(run.open_holds || 0) === 0 && (plannerStalled(run) || orphaned.some((item) => item.run.id === run.id) || (plannersIdle && ready.some((item) => item.run.id === run.id))));
@@ -817,7 +834,7 @@ async function reconcileProjectRun(db, row, snapshot, mqttClientProvider = null)
 		if (planners.length && !stalled.length) return { recovery: held.length ? "waiting_for_user" : "planner_present", incomplete_runs: incomplete.map((run) => run.id), planner_statuses: planners.map((planner) => planner.agent_status || "unknown"), playbook_flow: flowViolations.length ? "violation" : "ordered", playbook_flow_violations: flowViolations };
 		if (recoveryCoolingDown(row, reason)) return { recovery: "recovery_cooldown", incomplete_runs: incomplete.map((run) => run.id), recovery_reason: reason, last_recovery_at: row.last_recovery_at };
 		try {
-			const recovered = recoverPlanner({ row, snapshot, run: (stalled[0] || incomplete[0]), reason });
+			const recovered = recoverPlanner({ row, snapshot, run: (stalled[0] || actionable[0] || incomplete[0]), reason });
 			db.prepare("UPDATE watcher_projects SET last_recovery_at = ?, last_recovery_reason = ?, updated_at = ? WHERE project_key = ?").run(now(), reason, now(), row.project_key);
 			try { appendRawTraceRecord({ cwd: row.root, project: row.name, record: { type: "watcher_planner_recovered", record_type: "event", source: "yano-watcher-registry", instance: "yano-watcher", run_ids: incomplete.map((run) => run.id), ...recovered } }); } catch { /* best effort */ }
 			if (recovered.deferred) return { recovery: "planner_recovery_deferred", incomplete_runs: incomplete.map((run) => run.id), ...recovered };
@@ -1273,6 +1290,7 @@ async function runSupervisePass(db, rows, mqttClientProvider) {
 		const snapshot = herdrSnapshot();
 		const herdr_reachability = trackHerdrReachability(Boolean(snapshot));
 		const orphan_tabs_removed = pruneOrphanWatcherTabs(snapshot, rows);
+		const orphan_maintenance_tabs_removed = pruneOrphanMaintenanceTabs(snapshot);
 		const agent_identity_repaired = snapshot ? repairAgentTabIdentities(snapshot) : [];
 		const repairedSnapshot = agent_identity_repaired.length ? herdrSnapshot() : snapshot;
 		const identityConflicts = repairedSnapshot ? [...findAgentIdentityConflicts(repairedSnapshot), ...agentTabIdentityAudit(repairedSnapshot)] : [];
@@ -1298,7 +1316,7 @@ async function runSupervisePass(db, rows, mqttClientProvider) {
 		// checked as an always-on service, but before this neither was ever
 		// torn down either, so their sessions lingered forever.
 		let maintenance_sessions_closed;
-		try { maintenance_sessions_closed = { architect: closeTerminalArchitectSessions(), auto_improver: closeTerminalAutoImproverSessions() }; }
+		try { maintenance_sessions_closed = { architect: closeTerminalArchitectSessions(), auto_improver: closeTerminalAutoImproverSessions(), auto_improver_scheduler: superviseAutoImproverService() }; }
 		catch (error) { maintenance_sessions_closed = { error: error instanceof Error ? error.message : String(error) }; }
 		let project_log_sizes;
 		try { project_log_sizes = checkProjectLogSizes(rows); } catch (error) { project_log_sizes = { error: error instanceof Error ? error.message : String(error) }; }
@@ -1336,6 +1354,7 @@ async function runSupervisePass(db, rows, mqttClientProvider) {
 			external_services,
 			external_workers: [],
 			orphan_tabs_removed,
+			orphan_maintenance_tabs_removed,
 			agent_identity_repaired,
 			identity_conflicts: identityConflicts,
 			errors: formatAgentIdentityConflicts(identityConflicts),

@@ -154,7 +154,7 @@ export function closeTerminalAutoImproverSessions({ spawn = spawnSync } = {}) {
 		for (const row of rows) {
 			const result = spawn("herdr", ["tab", "close", row.worker_tab_id], { encoding: "utf8" });
 			const outcome = result.status === 0 ? { closed: true, tab_id: row.worker_tab_id } : { closed: false, tab_id: row.worker_tab_id, error: (result.stderr || result.stdout || "Herdr non ha chiuso la tab").trim() };
-			db.prepare("UPDATE auto_projects SET workspace_id = NULL, worker_tab_id = NULL, worker_pane_id = NULL, worker_instance = NULL, updated_at = ? WHERE project_key = ?").run(now(), row.project_key);
+			if (outcome.closed) db.prepare("UPDATE auto_projects SET workspace_id = NULL, worker_tab_id = NULL, worker_pane_id = NULL, worker_instance = NULL, updated_at = ? WHERE project_key = ?").run(now(), row.project_key);
 			closed.push({ project_key: row.project_key, ...outcome });
 		}
 	} finally { db.close(); }
@@ -762,30 +762,22 @@ async function doRunOrStart(db, info, row, opts = {}) {
 	return { ...result, once: opts.once, scheduler };
 }
 
-function doRestoreIdleWorker(db, info, row, { dryRun = false } = {}) {
-	const launched = launchWorker(info, row, null, null, null, dryRun);
-	if (!dryRun) db.prepare("UPDATE auto_projects SET workspace_id = ?, worker_tab_id = ?, worker_pane_id = ?, worker_instance = ?, worker_status = 'idle', updated_at = ? WHERE project_key = ?")
-		.run(launched.workspace_id, launched.tab_id, launched.pane_id, launched.instance, now(), info.key);
-	return { project: info.name, worker_status: "idle", restored: !dryRun, ...launched };
-}
-
-function liveWorker(snapshot, instance) {
-	return Boolean(instance && snapshot?.agents?.some((agent) => agent.agent === "pi" && agent.name === instance && !["done", "offline", "unknown"].includes(agent.agent_status)));
-}
-
-function superviseAutoImprover(db, { dryRun = false } = {}) {
+export function superviseAutoImprover(db, { dryRun = false, startScheduler = startDaemon } = {}) {
 	const rows = db.prepare("SELECT * FROM auto_projects WHERE worker_status NOT IN ('paused','stopped') ORDER BY updated_at DESC").all();
-	const snapshot = herdrSnapshot();
 	const restored = [];
 	for (const row of rows) {
 		const laterCompletion = db.prepare("SELECT completed_at FROM auto_audits WHERE project_key = ? AND status = 'completed' ORDER BY completed_at DESC LIMIT 1").get(row.project_key);
 		if (!dryRun && laterCompletion?.completed_at) db.prepare("UPDATE auto_audits SET status = 'superseded', completed_at = COALESCE(completed_at, ?) WHERE project_key = ? AND status IN ('awaiting_agent','running') AND started_at < ?")
 			.run(laterCompletion.completed_at, row.project_key, laterCompletion.completed_at);
-		if (row.worker_status !== "idle" || liveWorker(snapshot, row.worker_instance)) continue;
-		try { restored.push(doRestoreIdleWorker(db, infoFromRow(row), row, { dryRun })); }
-		catch (error) { restored.push({ project: row.name, restored: false, error: error instanceof Error ? error.message : String(error) }); }
+		// Workers are on demand: only a due audit launches an LLM, never idle state.
+		if (!fs.existsSync(row.root)) restored.push({ project: row.name, restored: false, reason: "project_root_missing", root: row.root });
 	}
-	return { projects: rows.length, scheduler: rows.length ? startDaemon() : { running: false, skipped: true, reason: "no_enabled_projects" }, restored, db_path: dbPath() };
+	return { projects: rows.length, scheduler: dryRun ? { running: false, skipped: true, reason: "dry_run" } : rows.some(row => fs.existsSync(row.root)) ? startScheduler() : { running: false, skipped: true, reason: "no_enabled_projects" }, restored, db_path: dbPath() };
+}
+
+export function superviseAutoImproverService(options = {}) {
+	const db = openDatabase();
+	try { return superviseAutoImprover(db, options); } finally { db.close(); }
 }
 
 // --- REST API (`yano auto-improve serve`) ---

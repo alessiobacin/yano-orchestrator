@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { projectUserWait } from "./watcher/user-wait.mjs";
+import { projectRuns } from "./watcher/project-runs.mjs";
 // `yano watch` — zero-token stall watcher (Ticket 04).
 //
 // A standalone detector that runs OUTSIDE any `pi` session (no LLM context at
@@ -818,6 +820,12 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 	}
 
 	const dbPath = projectDbPath(watchCwd, project);
+	const userWait = projectUserWait(watchCwd, projectRuns(watchCwd).runs);
+	if (userWait.waiting) {
+		appendWatcherScan({ cwd: watchCwd, project, opts, startedAt, status: "waiting", reason: "waiting_for_user", liveAgents: 0, livePlanners: 0 });
+		if (!opts.once && opts.intervalMs > 0) scheduleNextPass({ cwd, argv, packageRoot });
+		return { status: "waiting", reason: "waiting_for_user", user_wait: userWait, llm_wakeups: 0 };
+	}
 	const brokerUrl = config.PI_ORCH_BROKER_URL || process.env.PI_ORCH_BROKER_URL || "mqtt://127.0.0.1:1883";
 	const persistent = !opts.once && opts.intervalMs > 0;
 	const runtimeKey = watcherRuntimeKey(watchCwd, project);

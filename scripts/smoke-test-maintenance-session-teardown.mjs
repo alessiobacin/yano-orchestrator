@@ -135,6 +135,16 @@ check("re-running auto-improver teardown is also a safe no-op once closed", () =
 	assert.deepEqual(closeTerminalAutoImproverSessions(), [], "nothing left to close on a second pass");
 });
 
+// A failed close must retain the coordinates so the next sweep can retry.
+{
+	const db = new (requireSqlite().DatabaseSync)(autoImproverDb);
+	db.prepare("UPDATE auto_projects SET worker_tab_id = 'retry-tab' WHERE project_key = 'proj-just-finished'").run();
+	const failed = closeTerminalAutoImproverSessions({ spawn: () => ({ status: 1, stderr: 'temporary failure' }) });
+	assert.equal(failed[0].closed, false);
+	assert.equal(db.prepare("SELECT worker_tab_id FROM auto_projects WHERE project_key = 'proj-just-finished'").get().worker_tab_id, 'retry-tab');
+	db.close();
+}
+
 fs.rmSync(root, { recursive: true, force: true });
 fs.rmSync(fakeBin, { recursive: true, force: true });
 console.log(`\nsmoke-test-maintenance-session-teardown: ${passed} passed`);

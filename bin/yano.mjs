@@ -94,7 +94,9 @@ import { applyGlobalConfig, runYanoConfig } from "../scripts/yano-config.mjs";
 import { runYanoHarnessSkills } from "../scripts/install-yano-cli.mjs";
 import { runYanoProjects } from "../scripts/yano-projects.mjs";
 import { runYanoRules } from "../scripts/yano-rules.mjs";
+import { runYanoSchedulerRules } from "../scripts/yano-scheduler-rules.mjs";
 import { runYanoScheduler } from "../scripts/yano-scheduler.mjs";
+import { confirmMailTriageGate, runMailTriage } from "../scripts/yano-mail-triage.mjs";
 import { runYanoInvoke } from "../scripts/yano-invoke.mjs";
 import { runYanoLocalPc } from "../scripts/yano-local-pc.mjs";
 import { runYanoServices } from "../scripts/yano-services.mjs";
@@ -160,6 +162,8 @@ function printTopUsage() {
 			"  config [opzioni] Gestisce la configurazione globale utente — `yano config --help`",
 			"  rule [opzioni]   Gestisce regole globali e per-progetto — `yano rule --help`",
 			"  schedule [opzioni] Crea job ricorrenti a script; cron persistente e ripulibile — `yano schedule --help`",
+			"  schedule-rules [opzioni] Regole persistenti dello scheduler (query/modifica semantica) — `yano schedule-rules --help`",
+			"  mail-triage [--dry-run|--confirm]  Triage posta dello scheduler (solo Cestino) — primo giro con gate di conferma",
 			"  cron [opzioni]  CRUD naturale dei job ricorrenti e supervisore yano-scheduler — `yano cron --help`",
 			"  local-pc start|status|ask  Agente del PC sviluppatore — `yano local-pc --help`",
 			"  services [opzioni] Registro servizi esterni (Docker/pm2/comando) con health-check e restart deterministico — `yano services --help`",
@@ -266,6 +270,25 @@ async function main() {
 	}
 	if (sub === "rule" || sub === "rules") {
 		runYanoRules({ argv: rest });
+		return;
+	}
+	if (sub === "mail-triage") {
+		if (rest.includes("--help") || rest.includes("-h") || (!rest.length && process.argv.includes("--help"))) {
+			console.log(["Uso: yano mail-triage [--dry-run|--confirm|--no-notify]", "  Triage posta dello scheduler (solo Cestino, mai definitiva). Primo giro con gate di conferma.", "  --dry-run    classifica soltanto, nessuna delete", "  --confirm    registra la conferma del primo giro (i prossimi giri eseguono davvero)", "  --no-notify  salta la notifica globale"].join("\n"));
+			return;
+		}
+		if (rest.includes("--confirm")) {
+			console.log(JSON.stringify(confirmMailTriageGate(), null, 2));
+			return;
+		}
+		if (rest.includes("--dry-run")) process.argv.push("--dry-run");
+		const report = await runMailTriage({ notify: !rest.includes("--no-notify") });
+		console.log(JSON.stringify(report, null, 2));
+		process.exitCode = report.ok ? 0 : 1;
+		return;
+	}
+	if (sub === "schedule-rules" || sub === "scheduler-rules") {
+		runYanoSchedulerRules({ argv: rest });
 		return;
 	}
 	if (sub === "schedule") {

@@ -232,7 +232,10 @@ yano schedule run --id <id>                              # testa lo script subit
 yano schedule list                                  # inventario compatto con ID, nome, cron, stato, modalità
 yano schedule list --json --pretty                 # stesso inventario JSON, indentato per lettura
 yano invoke --role planner:<progetto> --prompt "riepiloga lo stato" --project-root "$PWD"   # bridge deterministico dagli script (wake planner)
-yano invoke --role yano-local-pc --prompt "promemoria tra 10 minuti"                      # delega a yano-local-pc
+yano invoke --role yano-local-pc --prompt "promemoria tra 10 minuti"                      # delega a yano-local-pc (mai schedule: solo one-off)
+yano invoke --role scheduler --prompt "ogni giorno alle 8 riepilogami la posta"            # return-hop ESECUTORE (max 1 hop, mai loop)
+yano schedule-rules query "quali regole cancellazione sono attive?"                        # regole persistenti (query semantica)
+yano mail-triage --dry-run  # triage posta scheduler (solo Cestino; --confirm dopo il primo giro)
 yano cron --add "ogni giorno alle 14 e alle 21 esegui la pulizia del progetto" --project-root "$PWD"  # legacy testo+cron (dispatch planner col testo)
 yano cron --list --json                     # legacy; il supervisore controlla yano-local-pc ogni minuto
 

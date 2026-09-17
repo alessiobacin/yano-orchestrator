@@ -20,6 +20,19 @@ yano schedule remove --id <job-id>
 # Bridge deterministico chiamabile DENTRO gli script
 yano invoke --role planner:<progetto> --prompt "riepiloga lo stato" --project-root "$PWD"
 yano invoke --role yano-local-pc --prompt "promemoria tra 10 minuti: pausa caffè"
+yano invoke --role scheduler --prompt "ogni giorno alle 8 riepilogami la posta"  # return-hop ESECUTORE (max 1 hop, YANO_DELEGATION_HOPS/ORIGIN: il secondo rimbalzo è rifiutato)
+
+# Regole persistenti scheduler (sopravvivono al reset chat; solo Cestino, mai definitiva)
+yano schedule-rules seed                                    # installa le regole email iniziali (idempotente)
+yano schedule-rules query "quali regole cancellazione sono attive?"  # ricerca semantica
+yano schedule-rules add --pattern "promo@" --kind unsubscribe --action unsubscribe_then_trash
+yano schedule-rules update --id <id> --disable | --enable  # modifica semantica
+yano schedule-rules remove --id <id>                        # cancellazione singola regola
+
+# Triage posta scheduler (mode self; primo giro sempre dry-run + gate di conferma)
+yano mail-triage --dry-run    # classifica soltanto, nessuna delete
+YANO_MAIL_DRY_RUN=1 yano mail-triage   # idem via env
+yano mail-triage --confirm    # registra la conferma: i prossimi giri eseguono davvero (solo Cestino)
 
 # Sintassi storica in linguaggio naturale (job legacy, dispatch planner col testo)
 yano cron --add "ogni giorno alle 14 e alle 21 esegui la pulizia del progetto" --project-root "$PWD"
@@ -65,6 +78,20 @@ Il triage della posta schedulata gira in `mode: self` (motore
 HTTP, solo Cestino, cap 200/run) — yano-local-pc resta per i soli one-off
 interattivi non schedulati. Migrazione post-merge:
 `docs/quick-guides/28-migrazione-posta-self.md`.
+
+Lo scheduler-service è ESECUTORE: imposta ED esegue. Quando l'utente chiede
+uno schedule, lo esegue SUBITO in chat come primo giro (posta: sempre
+dry-run + `yano mail-triage --confirm` prima dei giri reali), poi salva lo
+script e registra lo schedule; al tick esegue lui stesso lo script.
+Le regole utente vivono in `<data>/scheduler/scheduler-rules.json`
+(CRUD semantico `yano schedule-rules add|list|query|update|remove|seed`);
+regole email: (a) `support@mail.xtb.com` → sempre Cestino (senza LLM),
+(b) pubblicità con unsubscribe → tentativo disiscrizione (GET diretto, poi
+browser se serve), altrimenti Cestino. Solo Cestino via `delete_message`,
+mai definitiva; report per-run in `<data>/scheduler/mail-triage-reports/`.
+Delega bidirezionale scheduler↔local-pc max 1 hop
+(`YANO_DELEGATION_HOPS`/`YANO_DELEGATION_ORIGIN`): i local-pc generici non
+creano MAI schedule — delegano allo scheduler in un hop e si fermano.
 
 ## Contratto essenziale (2026-09-15)
 

@@ -25,7 +25,9 @@ yano gantt [options]
 yano watch [options]
 yano schedule add --name <nome> --project-root <dir> --script <path> --mode <self|planner:<progetto>|yano-local-pc> [--cron '...'] [--once] [--timeout-ms N] [--expected-consequence <testo>] [--json]
 yano schedule run --id <id>|list [--json]|remove|enable|disable --id <id>  # script-first recurring jobs; run = esegui lo script subito (test)
-yano invoke --role <planner[:<scope>]|yano-local-pc> --prompt "..." [--project-root <dir>] [--timeout-ms N]  # bridge deterministico dagli script
+yano schedule-rules <add|list|query|update|remove|seed> [opzioni]  # regole persistenti scheduler (query semantica, mai delete definitiva)
+yano mail-triage [--dry-run|--confirm|--no-notify]  # triage posta scheduler (solo Cestino; primo giro con gate di conferma)
+yano invoke --role <planner[:<scope>]|yano-local-pc|scheduler> --prompt "..." [--project-root <dir>] [--timeout-ms N]  # bridge deterministico dagli script; scheduler = return-hop esecutore, anti-loop max 1 hop via YANO_DELEGATION_HOPS/ORIGIN
 yano trace [subcommand] [options]
 yano pause|resume|recovery [subcommand] [options]
 yano repair [options]
@@ -196,8 +198,21 @@ yano schedule cron <install|status|remove>
 
 # Bridge deterministico chiamabile DENTRO gli script (e da CLI fuori da un agente):
 #   planner[:<scope>]  -> compone `yano start --herdr --role planner --project <scope> --print-only` (wake del planner di progetto)
-#   yano-local-pc    -> delega a `yano local-pc ask` (broker-aware, timeout, mai hang)
-yano invoke --role <planner[:<scope>]|yano-local-pc> --prompt "..." [--project <scope>|--project-root <dir>] [--timeout-ms N]
+#   yano-local-pc    -> delega a `yano local-pc ask` (broker-aware, timeout, mai hang); MAI schedule — se gli chiedono una schedulazione, delega 1 hop allo scheduler e si ferma
+#   scheduler        -> compone `yano start --herdr --role scheduler` (scheduler-service ESECUTORE: imposta ed esegue); return-hop per la delega bidirezionale scheduler<->local-pc, max 1 hop (YANO_DELEGATION_HOPS/YANO_DELEGATION_ORIGIN, il secondo rimbalzo è rifiutato)
+yano invoke --role <planner[:<scope>]|yano-local-pc|scheduler> --prompt "..." [--project <scope>|--project-root <dir>] [--timeout-ms N]
+
+# Regole persistenti scheduler (<data>/scheduler/scheduler-rules.json, sopravvivono al reset chat):
+# query semantica ("quali regole cancellazione sono attive?"), update/remove semantici; seed idempotente (a) support@mail.xtb.com -> Cestino (b) pubblicità con unsubscribe -> disiscrizione poi Cestino
+yano schedule-rules add --pattern <testo> [--kind blocklist|unsubscribe|keep|generic] [--action trash|unsubscribe_then_trash|review|keep] [--schedule-id <id>] [--note <testo>] [--json]
+yano schedule-rules list [--schedule-id <id>] [--all] [--json]
+yano schedule-rules query <testo> [--schedule-id <id>] [--json]
+yano schedule-rules update --id <id> [--pattern ...] [--kind ...] [--action ...] [--note ...] [--enable|--disable] [--json]
+yano schedule-rules remove --id <id> [--json]
+yano schedule-rules seed [--json]
+
+# Triage posta scheduler (mode self, scripts/yano-mail-triage.mjs): regole prima dell'LLM (blocklist -> Cestino senza LLM), unsubscribe via GET diretto + fallback browser, SOLO Cestino via delete_message (mai definitiva), gate primo giro (dry-run + yano mail-triage --confirm), report per-run in <data>/scheduler/mail-triage-reports/ (keep 50)
+yano mail-triage [--dry-run|--confirm|--no-notify]
 
 # Legacy (job testo+cron già esistenti, dispatch planner col testo come in passato):
 yano cron --add <natural request> [--project-root <dir>]

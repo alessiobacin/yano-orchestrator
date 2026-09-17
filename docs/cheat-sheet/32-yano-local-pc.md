@@ -17,6 +17,14 @@ Il self-heal globale ricrea workspace e tab `Local PC` dopo una
 chiusura o un riavvio. La chiave AssemblyAI per Voice Memos va salvata nella
 configurazione globale con il nome `YANO_COMPUTER_LOCAL_ASSEMBLYAI_API_KEY`.
 
+MAI creare schedule o job ricorrenti: i local-pc generici non schedulano.
+Se ti chiedono una schedulazione ("ogni giorno...", "ricordami ogni..."),
+delega in un solo hop allo scheduler-service ESECUTORE con
+`yano invoke --role scheduler --prompt "..."` e fermati lì — lo scheduler
+imposta ed esegue. Se arrivi già dallo scheduler (env
+`YANO_DELEGATION_HOPS=1`), esegui e basta senza rimbalzare indietro (il
+bridge rifiuta il secondo hop: max 1 hop, mai loop).
+
 Memoria CodeMem (`<YANO_DATA_DIR>/yano-local-pc/memory`, mai nel checkout):
 `ask` richiama prima dell'invio il contesto pertinente redatto (segreti, token
 ed email rimossi) e salva lo scambio dopo la risposta — entrambi best-effort,

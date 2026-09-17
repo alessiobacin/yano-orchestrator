@@ -18,6 +18,10 @@
 //   MAI cancellazione definitiva, MAI svuotare il Cestino;
 // - il dubbio prevale sempre la NON cancellazione; cap 200 delete/run;
 // - solo messaggi recenti (default ultime 48h, come il job storico).
+// - regole utente persistenti (<data>/scheduler/scheduler-rules.json):
+//   blocklist → Cestino senza LLM; unsubscribe → tenta disiscrizione poi Cestino;
+// - primo giro reale con gate di conferma (marker mail-triage-confirmed):
+//   senza conferma il giro è dry-run + report; ogni run salva un report JSON.
 //
 // Uso dallo stub registrato in <data>/scheduler/scripts/ (pattern digest):
 //   import { runMailTriage } from "file://<package>/scripts/yano-mail-triage.mjs";
@@ -35,12 +39,17 @@
 //   YANO_LLMPROXY_API_KEY      default "proxy-local" (placeholder loopback Pi)
 //   YANO_APPLE_MAIL_MCP_BIN    override path diretto al server MCP
 //   YANO_DATA_DIR              data-root (per lo stato seen)
+//   YANO_MAIL_CONFIRM_GATE=0   salta il gate di conferma del primo giro (test/smoke)
+//   YANO_MAIL_UNSUBSCRIBE=0    niente tentativo HTTP di disiscrizione (solo Cestino)
+//   YANO_MAIL_RULES=0          ignora le regole persistenti scheduler-rules
+//   YANO_JOB_ID                id dello schedule chiamante (se eseguito da job)
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { sendGlobalNotification } from "./yano-notify.mjs";
+import { ensureDefaultEmailRules, matchRules } from "./yano-scheduler-rules.mjs";
 
 const DEFAULT_LLM_URL = "http://127.0.0.1:7045";
 const DEFAULT_MAX_DELETE = 200;
@@ -108,6 +117,127 @@ export function saveSeen(seen, env = process.env) {
 
 export function seenKey(account, mailbox, id) {
 	return `${account}|||${mailbox}|||${id}`;
+}
+
+// ── Gate di conferma primo giro ────────────────────────────────────────────
+// Il primo giro REALE è sempre dry-run + report; solo dopo la conferma
+// esplicita (`yano mail-triage --confirm`, marker persistente nel data-root)
+// i giri successivi eseguono davvero. Opt-out: YANO_MAIL_CONFIRM_GATE=0.
+export function mailTriageGateFile(env = process.env) {
+	const root = env.YANO_DATA_DIR
+		? path.resolve(env.YANO_DATA_DIR)
+		: path.join(os.homedir(), "Library", "Application Support", "yano", "data");
+	return path.join(root, "scheduler", "mail-triage-confirmed");
+}
+
+export function isMailTriageConfirmed(env = process.env) {
+	try { return existsSync(mailTriageGateFile(env)); } catch { return false; }
+}
+
+export function confirmMailTriageGate(env = process.env) {
+	const file = mailTriageGateFile(env);
+	mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+	writeFileSync(file, `${new Date().toISOString()}\n`, { mode: 0o600 });
+	return { confirmed: true, file };
+}
+
+// ── Regole utente persistenti ──────────────────────────────────────────────
+// Seed idempotente + match sul testo (mittente+oggetto, poi corpo). Mai throw:
+// senza regole lo store è vuoto e il flusso resta quello storico.
+function matchUserRules(text, env) {
+	try {
+		ensureDefaultEmailRules(env);
+		return matchRules(text, { schedule_id: env.YANO_JOB_ID || null }, env);
+	} catch { return []; }
+}
+
+// ── Tentativo di disiscrizione diretta ─────────────────────────────────────
+// Regola (b): prima il link http diretto nel corpo (GET con timeout breve),
+// poi — se serve — il browser (chrome-devtools via agente, fuori dallo script
+// self); altrimenti Cestino. I link mailto: richiedono un client di posta e
+// vengono solo registrati. Mai in dry-run (sarebbe un effetto reale).
+export function extractUnsubscribeLinks(body = "") {
+	const text = String(body);
+	const urls = [...text.matchAll(/https?:\/\/[^\s"'<>)]+/gi)]
+		.map((match) => match[0].replace(/[.,;!?]+$/, ""));
+	const mailtos = [...text.matchAll(/mailto:[^\s"'<>)]+/gi)].map((match) => match[0]);
+	const scored = urls.map((url) => {
+		const index = text.indexOf(url);
+		const window = text.slice(Math.max(0, index - 300), index + 300);
+		return { url, near: UNSUBSCRIBE_RE.test(window) };
+	});
+	scored.sort((a, b) => Number(b.near) - Number(a.near));
+	return { http: scored.map((entry) => entry.url).slice(0, 5), mailto: mailtos.slice(0, 3) };
+}
+
+export async function attemptUnsubscribe({ body = "" } = {}, { env = process.env, fetchImpl = globalThis.fetch, timeoutMs = 10000 } = {}) {
+	if (env.YANO_MAIL_UNSUBSCRIBE === "0") return { attempted: false, ok: false, reason: "disabilitato (YANO_MAIL_UNSUBSCRIBE=0)" };
+	const { http, mailto } = extractUnsubscribeLinks(body);
+	if (!http.length) return { attempted: false, ok: false, reason: mailto.length ? "solo link mailto: richiede client di posta (aprire nel browser se serve)" : "nessun link http nel corpo" };
+	let last = "";
+	for (const url of http) {
+		const controller = new AbortController();
+		const timer = setTimeout(() => controller.abort(), timeoutMs);
+		try {
+			const res = await fetchImpl(url, { method: "GET", redirect: "follow", signal: controller.signal });
+			if (res.ok) return { attempted: true, ok: true, url, detail: `GET ${res.status}` };
+			last = `GET ${res.status} su ${url}`;
+		} catch (error) {
+			last = `${error instanceof Error ? error.message : String(error)} (${url})`;
+		} finally {
+			clearTimeout(timer);
+		}
+	}
+	return { attempted: true, ok: false, url: http[0], detail: last || "tutti i link falliti — cestinato comunque, aprire nel browser se serve" };
+}
+
+// ── Cestino (unico esito distruttivo, sempre recuperabile) ─────────────────
+async function applyTrashDecision({ bridge, entry, key, report, seen, dryRun, maxDelete, counter }) {
+	if (dryRun) {
+		report.deleted.push({ ...entry, dry_run: true });
+		report.verdicts += 1;
+		// NON in seen in dry-run: la decisione va riverificata dal vivo
+		return;
+	}
+	if (counter.deleted >= maxDelete) {
+		report.errors.push(`cap ${maxDelete} cancellazioni raggiunto; resto rimandato alla prossima ora`);
+		seen[key] = { verdict: "REVIEW", reason: "cap raggiunto", at: report.at };
+		report.review.push({ ...entry, note: "cap raggiunto, da riverificare" });
+		report.verdicts += 1;
+		return;
+	}
+	try {
+		await bridge.call("delete_message", { message_id: entry.id, mailbox: entry.mailbox, account: entry.account });
+		counter.deleted += 1;
+		report.deleted.push(entry);
+		seen[key] = { verdict: "DELETE", reason: entry.reason, at: report.at };
+		report.verdicts += 1;
+	} catch (error) {
+		report.errors.push(`delete_message ${entry.id}: ${error.message}`);
+	}
+}
+
+// ── Report per-run persistente ─────────────────────────────────────────────
+// Ogni giro salva il suo report JSON (ultimi 50) oltre alla notifica: il
+// primo giro con gate + ogni giro dopo sono verificabili a posteriori.
+export function saveTriageRunReport(report, env = process.env) {
+	try {
+		const root = env.YANO_DATA_DIR
+			? path.resolve(env.YANO_DATA_DIR)
+			: path.join(os.homedir(), "Library", "Application Support", "yano", "data");
+		const dir = path.join(root, "scheduler", "mail-triage-reports");
+		mkdirSync(dir, { recursive: true, mode: 0o700 });
+		const stamp = new Date().toISOString().replace(/[^0-9]/g, "").slice(0, 14);
+		const file = path.join(dir, `${stamp}-${Math.random().toString(36).slice(2, 8)}.json`);
+		const { notification, ...rest } = report;
+		void notification;
+		writeFileSync(file, `${JSON.stringify(rest, null, 2)}\n`, { mode: 0o600 });
+		const files = readdirSync(dir).filter((name) => name.endsWith(".json")).sort();
+		while (files.length > 50) {
+			try { unlinkSync(path.join(dir, files.shift())); } catch { break; }
+		}
+		return file;
+	} catch { return null; }
 }
 
 export function hasUnsubscribeSignal({ subject = "", sender = "", body = "" } = {}) {
@@ -300,7 +430,7 @@ function toolJson(result) {
 
 function formatSummary(report) {
 	const lines = [
-		`Triage posta ${report.dry_run ? "(dry-run) " : ""}— esaminate: ${report.examined}, tenute: ${report.kept}, spostate nel Cestino: ${report.deleted.length}, da verificare: ${report.review.length}.`,
+		`Triage posta ${report.gate_pending ? "(primo giro: gate conferma) " : report.dry_run ? "(dry-run) " : ""}— esaminate: ${report.examined}, tenute: ${report.kept}, spostate nel Cestino: ${report.deleted.length}, da verificare: ${report.review.length}, regole applicate: ${report.rules_applied || 0}.`,
 	];
 	for (const item of report.deleted.slice(0, 20)) lines.push(`  🗑 [${item.account}] ${item.sender} — ${item.subject}`);
 	if (report.deleted.length > 20) lines.push(`  … +${report.deleted.length - 20} altre`);
@@ -315,16 +445,23 @@ export async function runMailTriage({ env = process.env, fetchImpl = globalThis.
 	if (process.platform !== "darwin" && !env.YANO_MAIL_ALLOW_NON_DARWIN) {
 		return { ok: false, at: new Date().toISOString(), examined: 0, kept: 0, deleted: [], review: [], errors: ["piattaforma non-macOS: Mail.app assente, triage impossibile"] };
 	}
-	const dryRun = env.YANO_MAIL_DRY_RUN === "1" || process.argv.includes("--dry-run");
+	const requestedDryRun = env.YANO_MAIL_DRY_RUN === "1" || process.argv.includes("--dry-run");
+	// Gate di conferma primo giro: senza marker di conferma, il primo giro
+	// reale diventa dry-run + report (opt-out: YANO_MAIL_CONFIRM_GATE=0).
+	// YANO_TEST_MODE=1 salta il gate: i test controllano il dry-run in modo
+	// esplicito via YANO_MAIL_DRY_RUN (stessa convenzione delle notifiche).
+	const gatePending = env.YANO_MAIL_CONFIRM_GATE !== "0" && env.YANO_TEST_MODE !== "1" && !requestedDryRun && !isMailTriageConfirmed(env);
+	const dryRun = requestedDryRun || gatePending;
 	const maxDelete = Math.max(0, Number(env.YANO_MAIL_MAX_DELETE || DEFAULT_MAX_DELETE));
 	const perBox = Math.max(1, Number(env.YANO_MAIL_PER_BOX || DEFAULT_PER_BOX));
 	const maxExamine = Math.max(1, Number(env.YANO_MAIL_MAX_EXAMINE || DEFAULT_MAX_EXAMINE));
 	const sinceHours = Math.max(0, Number(env.YANO_MAIL_SINCE_HOURS ?? DEFAULT_SINCE_HOURS));
 	const cutoff = Date.now() - sinceHours * 3600 * 1000;
 	const report = {
-		ok: false, dry_run: dryRun, at: new Date().toISOString(),
+		ok: false, dry_run: dryRun, gate_pending: gatePending, at: new Date().toISOString(),
 		examined: 0, skipped_seen: 0, skipped_old: 0, skipped_excluded: 0,
-		verdicts: 0, deleted: [], review: [], kept: 0, errors: [],
+		verdicts: 0, rules_applied: 0, deleted: [], review: [], kept: 0,
+		unsubscribe_attempts: [], report_file: null, errors: [],
 	};
 	const seen = loadSeen(env);
 	const owned = !bridge;
@@ -342,7 +479,7 @@ export async function runMailTriage({ env = process.env, fetchImpl = globalThis.
 		catch (error) { report.errors.push(`list_mailboxes: ${error.message}`); return report; }
 		if (!Array.isArray(boxes)) { report.errors.push("list_mailboxes: risposta non lista"); return report; }
 		const inboxes = boxes.filter((box) => /^inbox$/i.test(box?.name || ""));
-		let deleted = 0;
+		const counter = { deleted: 0 };
 		for (const box of inboxes) {
 			if (report.examined >= maxExamine) break;
 			let messages;
@@ -370,34 +507,40 @@ export async function runMailTriage({ env = process.env, fetchImpl = globalThis.
 					seen[key] = { verdict: "KEEP", reason: "esclusione deterministica (corpo)", at: report.at };
 					continue;
 				}
+				// Regole utente persistenti PRIMA dell'LLM: una blocklist che matcha
+				// (es. support@mail.xtb.com) va dritta al Cestino senza chiamata LLM.
+				const ruleText = `${full.sender}\n${full.subject}\n${body}`;
+				const ruleHits = env.YANO_MAIL_RULES === "0" ? [] : matchUserRules(ruleText, env);
+				const blockHit = ruleHits.find((rule) => rule.kind === "blocklist");
+				if (blockHit) {
+					report.rules_applied += 1;
+					const entry = { id: summary.id, account: box.account, mailbox: box.name, sender: full.sender, subject: full.subject, reason: `regola blocklist: ${blockHit.pattern}`, rule_id: blockHit.id };
+					await applyTrashDecision({ bridge, entry, key, report, seen, dryRun, maxDelete, counter });
+					continue;
+				}
 				const classified = await classifyPromo({ subject: full.subject, sender: full.sender, body }, { env, fetchImpl });
 				if (!classified.ok) {
 					report.errors.push(`classificazione ${summary.id}: ${classified.error}`);
 					continue; // NON in seen: riprova alla prossima ora
 				}
-				const unsub = hasUnsubscribeSignal({ subject: full.subject, sender: full.sender, body });
+				const unsub = hasUnsubscribeSignal({ subject: full.subject, sender: full.sender, body })
+					|| ruleHits.some((rule) => rule.kind === "unsubscribe");
 				const entry = { id: summary.id, account: box.account, mailbox: box.name, sender: full.sender, subject: full.subject, reason: classified.reason };
 				if (classified.promo && unsub) {
-					if (dryRun) {
-						report.deleted.push({ ...entry, dry_run: true });
-						report.verdicts += 1;
-						// NON in seen in dry-run: la decisione va riverificata dal vivo
-					} else if (deleted >= maxDelete) {
-						report.errors.push(`cap ${maxDelete} cancellazioni raggiunto; resto rimandato alla prossima ora`);
-						seen[key] = { verdict: "REVIEW", reason: "cap raggiunto", at: report.at };
-						report.review.push({ ...entry, note: "cap raggiunto, da riverificare" });
-						report.verdicts += 1;
+					if (ruleHits.length) { report.rules_applied += 1; entry.rule_id = ruleHits[0].id; }
+					// Regola (b): prima tenta la disiscrizione diretta (link http nel
+					// corpo; il browser via chrome-devtools solo se serve, fuori dallo
+					// script self), poi Cestino comunque. Mai in dry-run.
+					if (!dryRun) {
+						const attempt = await attemptUnsubscribe({ body }, { env, fetchImpl });
+						report.unsubscribe_attempts.push({ id: summary.id, sender: full.sender, ...attempt });
+						entry.unsubscribe = attempt.ok
+							? `disiscritto (${attempt.url})`
+							: `disiscrizione diretta fallita (${attempt.detail || attempt.reason}) — cestinato comunque, aprire nel browser se serve`;
 					} else {
-						try {
-							await bridge.call("delete_message", { message_id: summary.id, mailbox: box.name, account: box.account });
-							deleted += 1;
-							report.deleted.push(entry);
-							seen[key] = { verdict: "DELETE", reason: classified.reason, at: report.at };
-							report.verdicts += 1;
-						} catch (error) {
-							report.errors.push(`delete_message ${summary.id}: ${error.message}`);
-						}
+						report.unsubscribe_attempts.push({ id: summary.id, sender: full.sender, attempted: false, ok: false, reason: "dry-run: nessun effetto reale" });
 					}
+					await applyTrashDecision({ bridge, entry, key, report, seen, dryRun, maxDelete, counter });
 				} else if (classified.promo && !unsub) {
 					seen[key] = { verdict: "REVIEW", reason: "promozionale ma senza unsubscribe", at: report.at };
 					report.review.push({ ...entry, note: "sembra promozionale ma senza unsubscribe: lasciata intatta" });
@@ -412,6 +555,10 @@ export async function runMailTriage({ env = process.env, fetchImpl = globalThis.
 		// ok = pipeline girata con almeno un verdetto, oppure niente di nuovo
 		// da esaminare e nessun errore. Errori puri (LLM/MCP giù) → exit 1.
 		report.ok = report.verdicts > 0 || (report.examined === 0 && report.errors.length === 0);
+		if (gatePending) {
+			report.errors.push("primo giro: gate di conferma attivo — rieseguito in dry-run. Conferma con `yano mail-triage --confirm`, poi i prossimi giri eseguiranno davvero (solo Cestino, mai definitiva).");
+		}
+		report.report_file = saveTriageRunReport(report, env);
 	} finally {
 		try { saveSeen(seen, env); } catch { /* stato best-effort */ }
 		if (owned) bridge.stop();

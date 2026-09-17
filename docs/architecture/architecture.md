@@ -504,6 +504,22 @@ matching against the server's own local clock exactly as before, so "06:00 di
 Roma" is not silently reinterpreted as wherever the host machine's system
 timezone happens to be set.
 
+### Scheduler executor + regole persistenti
+
+Dallo scheduler script-first allo scheduler ESECUTORE: quando l'utente
+chiede uno schedule, lo scheduler-service lo esegue SUBITO in chat come
+primo giro (posta: sempre dry-run + gate di conferma via
+`yano mail-triage --confirm`), poi salva lo script registrato e al tick lo
+esegue lui stesso. La delega bidirezionale scheduler↔yano-local-pc è
+limitata a max 1 hop (`YANO_DELEGATION_HOPS`/`YANO_DELEGATION_ORIGIN` in
+`scripts/yano-invoke.mjs`; il secondo rimbalzo è rifiutato): i local-pc
+generici non creano mai schedule. Le regole utente persistono in
+`<data>/scheduler/scheduler-rules.json` (CRUD + query semantica via
+`scripts/yano-scheduler-rules.mjs`, comandi `yano schedule-rules` e
+`yano mail-triage`); il triage posta (`scripts/yano-mail-triage.mjs`)
+applica le regole prima dell'LLM, scrive solo nel Cestino (mai definitiva)
+e produce report per-run in `<data>/scheduler/mail-triage-reports/`.
+
 ### Notification channel resolution
 
 A "self"-mode scheduler job (a bare Node script, no live Pi agent) cannot

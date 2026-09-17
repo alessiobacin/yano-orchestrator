@@ -9,6 +9,7 @@
 //   yano invoke --role yano-local-pc --prompt "..." [--timeout-ms N]
 //   yano invoke --role planner --project <scope> [--project-root <dir>] --prompt "..." [--timeout-ms N]
 //   yano invoke --role planner:<scope> --project-root <dir> --prompt "..."   (alias)
+//   yano invoke --role scheduler --prompt "..." [--project-root <dir>] [--timeout-ms N]
 //
 // Role handling:
 //   - planner / planner:<scope> — composes `yano start --herdr --role planner
@@ -19,6 +20,14 @@
 //   - yano-local-pc — delegates to the existing MQTT-aware client
 //     (`yano local-pc ask`), so the broker handshake stays inside the
 //     broker-aware yano-local-pc service.
+//   - scheduler — composes `yano start --herdr --role scheduler` (the
+//     scheduler-service executor). This is the single allowed return hop for
+//     the bidirectional scheduler<->local-pc delegation: yano-local-pc NEVER
+//     creates schedules itself; when asked to schedule, it invokes the
+//     scheduler once and stops. Anti-loop: the envelope carries
+//     YANO_DELEGATION_HOPS; scheduler scripts set it to 1 when delegating to
+//     local-pc, and any invoke with hops>=1 to the origin role refuses to
+//     bounce back (executes locally instead).
 
 import path from "node:path";
 import { existsSync } from "node:fs";
@@ -30,10 +39,10 @@ const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
 function value(argv, flag) { const i = argv.indexOf(flag); return i < 0 ? null : argv[i + 1] || null; }
 function fail(message) { throw new Error(`yano invoke: ${message}`); }
 
-export function composePlannerInvoke({ projectScope, projectRoot }) {
+export function composePlannerInvoke({ projectScope, projectRoot, role = "planner", instance = "scheduled-invoke-planner" }) {
 	const cwd = projectRoot || process.cwd();
 	if (!existsSync(cwd)) fail(`project root inesistente: ${cwd}`);
-	const child = spawn(process.execPath, [path.join(PACKAGE_ROOT, "bin", "yano.mjs"), "start", "--herdr", "--instance", "scheduled-invoke-planner", "--role", "planner", "--project", projectScope, "--json", "--print-only"], { cwd, encoding: "utf8", env: process.env });
+	const child = spawn(process.execPath, [path.join(PACKAGE_ROOT, "bin", "yano.mjs"), "start", "--herdr", "--instance", instance, "--role", role, "--project", projectScope, "--json", "--print-only"], { cwd, encoding: "utf8", env: process.env });
 	return new Promise((resolve, reject) => {
 		let stdout = ""; let stderr = "";
 		child.stdout.on("data", (chunk) => { stdout += chunk; });
@@ -52,11 +61,21 @@ export async function runYanoInvoke({ argv = [] } = {}) {
 	const json = argv.includes("--json");
 
 	if (!role || !prompt) {
-		console.log("Uso: yano invoke --role <planner[:<scope>]|yano-local-pc> --prompt \"...\" [--project <scope>|--project-root <dir>] [--timeout-ms N]");
+		console.log("Uso: yano invoke --role <planner[:<scope>]|yano-local-pc|scheduler> --prompt \"...\" [--project <scope>|--project-root <dir>] [--timeout-ms N]");
 		if (process.argv[1]?.endsWith("yano-invoke.mjs")) process.exitCode = 1;
 		return;
 	}
-	if (!["planner", "yano-local-pc"].includes(role) && !/^planner:/.test(role)) fail(`ruolo non supportato: ${role} (usare planner[:<progetto>] o yano-local-pc)`);
+	if (!["planner", "yano-local-pc", "scheduler"].includes(role) && !/^planner:/.test(role)) fail(`ruolo non supportato: ${role} (usare planner[:<progetto>], yano-local-pc o scheduler)`);
+
+	// Anti-loop per la delega bidirezionale scheduler<->yano-local-pc (max 1 hop
+	// di rimbalzo, mai loop): lo script scheduler che delega a local-pc imposta
+	// YANO_DELEGATION_HOPS=1; un invoke che tornerebbe al mittente con hop
+	// esaurito viene rifiutato e il chiamante deve eseguire localmente.
+	const hops = Math.max(0, Number(process.env.YANO_DELEGATION_HOPS || 0));
+	const origin = process.env.YANO_DELEGATION_ORIGIN || "";
+	if (hops >= 1 && origin && (role === origin || (origin === "scheduler" && role === "scheduler"))) {
+		fail(`delega rifiutata: hop esaurito (origine ${origin}, hop ${hops}). Esegui localmente invece di rimbalzare.`);
+	}
 
 	if (role === "yano-local-pc") {
 		// Delegate to the existing MQTT-aware yano-local-pc client. The bridge
@@ -70,6 +89,19 @@ export async function runYanoInvoke({ argv = [] } = {}) {
 			output = { error: error instanceof Error ? error.message : String(error) };
 		}
 		const result = { role: "yano-local-pc", prompt, status: output?.running === false || output?.error ? 1 : 0, timeout_ms: timeoutMs, output };
+		if (json) console.log(JSON.stringify(result)); else console.log(JSON.stringify(result));
+		return result;
+	}
+
+	// scheduler (executor): composizione del lancio dello scheduler-service.
+	// yano-local-pc usa questo ramo per delegare le richieste di schedule
+	// (un solo hop, mai loop: vedi YANO_DELEGATION_HOPS sopra).
+	if (role === "scheduler") {
+		const composed = await composePlannerInvoke({ projectScope: project || "yano-local-pc", projectRoot, role: "scheduler", instance: "scheduled-invoke-scheduler" });
+		const parsed = JSON.parse(composed.stdout || "{}");
+		const args = parsed.args || [];
+		if (!args.length) fail(`composizione comando scheduler fallita (${composed.stderr || "risposta vuota"}).`);
+		const result = { role: "scheduler", prompt, status: 0, timeout_ms: timeoutMs, hops: hops + 1, command: `pi ${args.map((a) => (a.includes(" ") ? `"${a}"` : a)).join(" ")}` };
 		if (json) console.log(JSON.stringify(result)); else console.log(JSON.stringify(result));
 		return result;
 	}

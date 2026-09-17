@@ -1,3 +1,4 @@
+import { unansweredUserQuestion, saveUserWait, hasUserWaitState } from "../scripts/watcher/user-wait.mjs";
 import { observedModelFromMessage } from "../scripts/yano-timeline.mjs";
 /**
  * orchestrator — MQTT-based agent bus for Pi, replacing coms.ts's socket
@@ -2161,6 +2162,9 @@ export default function (pi: ExtensionAPI) {
 		paseoDetectAndLog({ logEvent });
 
 		const brokerUrl = flags.brokerUrl || DEFAULT_BROKER_URL;
+		if (identity.role === "planner" && !hasUserWaitState(identity.cwd, identity.instance)) {
+			try { saveUserWait(identity.cwd, identity.instance, unansweredUserQuestion(ctx.sessionManager.getBranch())); } catch {}
+		}
 		logEvent("session_start", {
 			project,
 			team: resolved.teams,
@@ -2434,6 +2438,9 @@ export default function (pi: ExtensionAPI) {
 	// the attachment with "image omitted" before the model selection changes.
 	pi.on("input", async (event: any) => {
 		if (!identity) return;
+		if (identity.role === "planner" && ["interactive", "rpc"].includes(event.source)) {
+			try { saveUserWait(identity.cwd, identity.instance, null); logEvent("user_wait_cleared", { source: event.source }); } catch {}
+		}
 		currentInputScreenshots = inputScreenshotReferences(event);
 		// Anti-hijack 2026-09-17: traccia l'ultimo testo utente per il gate di
 		// parcheggio (ordine "ignora la coda") in wakeNextQueuedFeedback.
@@ -3044,6 +3051,9 @@ export default function (pi: ExtensionAPI) {
 					branch: ctx.sessionManager.getBranch(),
 				}, "full");
 			}
+		}
+		if (identity.role === "planner" && !inbound) {
+			try { const wait = saveUserWait(identity.cwd, identity.instance, unansweredUserQuestion(ctx.sessionManager.getBranch())); logEvent("user_wait_state", wait); } catch {}
 		}
 		const actionClaim = identity.role === "planner" ? findUnexecutedActionClaim(ctx.sessionManager.getBranch()) : null;
 		if (actionClaim) {

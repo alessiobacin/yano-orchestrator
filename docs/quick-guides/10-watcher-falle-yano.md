@@ -214,6 +214,50 @@ ticket. Le nuove sessioni Herdr vengono inoltre protette dalla storia terminale
 di un vecchio ticket: il watcher confronta l'orario della sessione con l'ultimo
 aggiornamento terminale del ticket.
 
+## Progetto in attesa dell'utente: nessuno sveglia, nessun LLM
+
+Il watcher riconosce l'attesa-utente dallo stato SQLite persistito, senza
+svegliare il planner e senza chiamare alcun modello. Quando
+`projectUserWait()` è vero — una domanda esplicita persistita (gate
+conservativo IT/EN in `scripts/watcher/user-wait.mjs`, i `decision_hold`
+strutturati coprono le altre formulazioni) oppure tutti i run attivi con
+hold aperti — ogni livello restituisce `waiting_for_user` con
+`llm_wakeups: 0`: la scansione zero-token (`runWatch`), la riconciliazione
+(`ensureRegisteredPlanner`/`reconcileProjectRun`) e `yano status --json`
+(campo `user_wait`). La risposta dell'utente o la chiusura dell'hold
+rilasciano lo stato da soli alla passata successiva; un solo run con hold
+non sospende mai gli altri run del progetto. I ticket assegnati ad agenti
+assenti mentre il progetto attende riportano azione `wait`, mai
+`recover_via_planner`.
+
+## Progetto spostato: verdetto, mai rewrite automatico
+
+Se la root registrata non esiste più su disco, il watcher cerca il progetto
+in un insieme limitato di posizioni (parent della vecchia root + checkout
+convenzionali, match sul marker `config/project.json`) e restituisce un
+verdetto invece di recuperare nel percorso morto:
+
+- `project_relocated` — stesso progetto trovato altrove: nessuna riscrittura
+  silenziosa della root registrata (l'identità trace/MQTT deriva dal cwd, un
+  rewrite automatico la biforcherebbe). Il caller apre un `decision_hold`
+  user-owned che propone l'aggiornamento; re-add manuale con
+  `yano watcher init --project-root <nuovo-percorso>`.
+- `project_root_missing` — non trovato da nessuna parte: stop esplicito con
+  hint di re-add, mai cancellazione silenziosa della riga.
+
+L'evento trace è `watcher_project_root_gone`.
+
+## Sweep delle tab di manutenzione orfane
+
+Ogni passata chiude le tab morte nei workspace on-demand
+`yano-auto-improver`/`yano-architect`: solo tab con pane osservabili, senza
+agenti live e con assenza certa del processo `pi` (nel dubbio, mai chiudere).
+Le label `human*` e `planner` non vengono mai toccate. Il conteggio è
+`orphan_maintenance_tabs_removed`. L'auto-improver resta on-demand: la
+supervisione non ripristina mai worker idle (solo audit scaduti avviano un
+LLM; root sparite → `project_root_missing`) e la chiusura delle sessioni
+terminali trattiene le coordinate in caso di fallimento per il retry.
+
 Ogni passata lascia nel trace un evento `yano_watcher_scan`, con data e ora di
 inizio (`started_at`), fine (`completed_at`), durata, esito, numero di finding e
 stall. Per controllare la ricorrenza:

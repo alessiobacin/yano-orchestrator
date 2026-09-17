@@ -11,6 +11,7 @@ import { spawnSync } from "node:child_process";
 import { agentTabIdentityAudit } from "../yano-agent-identity.mjs";
 import { herdrSnapshot } from "../yano-herdr-client.mjs";
 import { traceRoot } from "../yano-trace-storage.mjs";
+import { paneHasLivePiProcess } from "./planner-health.mjs";
 
 const WORKSPACE_LABEL = "yano-watcher";
 
@@ -107,6 +108,46 @@ export function pruneOrphanWatcherTabs(snapshot, rows) {
 			const closed = closeHerdrTab(tab.tab_id);
 			removed.push({ tab_id: tab.tab_id, label: tab.label, root, ...closed });
 		}
+	}
+	return removed;
+}
+
+// Orphan maintenance-workspace sweep (code-mem/auto-improver evidence,
+// 2026-09-15): the yano-auto-improver Herdr workspace held two agent-less
+// tabs (an initial "1" shell and a finished audit tab) long after the DB
+// row had been nulled — closeTerminalAutoImproverSessions() only covers
+// rows with worker_tab_id set, and pruneOrphanWatcherTabs() above only
+// covers watcher-/debugger-/suggester- labels. This closes exactly that
+// hole for on-demand maintenance workspaces: a tab with NO live agent and
+// NO live `pi` process is dead clutter and is closed; anything with a live
+// agent, a live pi process, or a human/planner label is never touched.
+// `hasLivePi` is injectable so the smoke test runs without Herdr.
+const MAINTENANCE_WORKSPACE_LABELS = new Set(["yano-auto-improver", "yano-architect"]);
+function isProtectedMaintenanceLabel(label) {
+	const text = String(label || "").trim().toLowerCase();
+	return /^human(?:-|$)/.test(text) || /planner/i.test(text);
+}
+export function pruneOrphanMaintenanceTabs(snapshot, { hasLivePi = null } = {}) {
+	if (!snapshot) return [];
+	const workspaceIds = new Set((snapshot.workspaces || [])
+		.filter((workspace) => MAINTENANCE_WORKSPACE_LABELS.has(String(workspace.label || "")))
+		.map((workspace) => workspace.workspace_id));
+	if (!workspaceIds.size) return [];
+	const removed = [];
+	for (const tab of snapshot.tabs || []) {
+		if (!workspaceIds.has(tab.workspace_id)) continue;
+		if (isProtectedMaintenanceLabel(tab.label)) continue;
+		const panes = (snapshot.panes || []).filter((pane) => pane.tab_id === tab.tab_id);
+		if (!panes.length) continue; // no pane observable — absence of evidence, never close
+		const liveAgent = (snapshot.agents || []).some((agent) => panes.some((pane) => pane.pane_id === agent.pane_id)
+			&& !["done", "offline", "unknown", "stopped"].includes(String(agent.agent_status || "unknown").toLowerCase()));
+		if (liveAgent) continue;
+		let livePi = null;
+		try { livePi = hasLivePi ? hasLivePi(panes.map((pane) => pane.pane_id)) : panes.some((pane) => paneHasLivePiProcess(pane.pane_id)); }
+		catch { livePi = null; }
+		if (livePi !== false) continue; // unknown or live — never close on doubt
+		const closed = closeHerdrTab(tab.tab_id);
+		removed.push({ tab_id: tab.tab_id, label: tab.label, workspace_id: tab.workspace_id, reason: "orphan_maintenance_tab", ...closed });
 	}
 	return removed;
 }

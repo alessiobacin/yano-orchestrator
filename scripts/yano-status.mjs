@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { projectUserWait } from "./watcher/user-wait.mjs";
 import { ponytailPolicy } from "./yano-ponytail.mjs";
 // `yano status` / `yano logs` / `yano fleet` / `yano mcp` / `yano skills` /
 // `yano doctor --network` — informazioni di sola lettura sul progetto e
@@ -153,13 +154,14 @@ async function explainStatus(cwd, argv) {
 	const projects = roots.map((root) => {
 		const row = catalog.get(root) || { root, name: resolveProject(root) };
 		const state = projectRuns(root);
+		const user_wait = projectUserWait(root, state.runs);
 		const tabs = snapshot ? projectTabDecisions(snapshot, row, state.runs, { evidenceAvailable: state.available }) : [];
 		for (const tab of tabs) {
 			try { tab.heartbeat = readApplicationHeartbeat(root, tab.logical_instance || tab.instance); } catch { tab.heartbeat = null; }
 		}
 		const watcher_events = readTraceRecords({ cwd: root, types: ["watcher_completed_agent_tabs_closed", "watcher_stale_project_tabs_closed", "watcher_planner_recovered", "yano_watcher_scan"], limit: 5 }).map((event) => ({ type: event.type, at: event.ts, status: event.status, closed: event.closed?.map((item) => ({ tab_id: item.tab_id, closed: item.closed, reason: item.reason })) }));
-		const missing = state.runs.flatMap((run) => (run.tickets || []).filter((ticket) => ['pending','running'].includes(ticket.status) && ticket.assigned_instance && !tabs.some((tab) => sameAgentIdentity(tab.instance, ticket.assigned_instance) && tab.live)).map((ticket) => ({ instance: ticket.assigned_instance, ticket_id: ticket.id, run_id: run.id, action: !snapshot ? 'inspect' : run.paused || run.open_holds ? 'wait' : 'recover_via_planner', reason: snapshot ? 'assigned_agent_absent' : 'herdr_unreachable' })));
-		return { root, name: row.name, ponytail: ponytailPolicy(root), watcher_status: row.worker_status || 'not_registered', available: state.available, runs: state.runs, tabs, missing, watcher_events };
+		const missing = state.runs.flatMap((run) => (run.tickets || []).filter((ticket) => ['pending','running'].includes(ticket.status) && ticket.assigned_instance && !tabs.some((tab) => sameAgentIdentity(tab.instance, ticket.assigned_instance) && tab.live)).map((ticket) => ({ instance: ticket.assigned_instance, ticket_id: ticket.id, run_id: run.id, action: !snapshot ? 'inspect' : user_wait.waiting || run.paused || run.open_holds ? 'wait' : 'recover_via_planner', reason: snapshot ? 'assigned_agent_absent' : 'herdr_unreachable' })));
+		return { root, name: row.name, user_wait, ponytail: ponytailPolicy(root), watcher_status: row.worker_status || 'not_registered', available: state.available, runs: state.runs, tabs, missing, watcher_events };
 	});
 	const result = { generated_at: new Date().toISOString(), herdr_reachable: Boolean(snapshot), build: buildFingerprint(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')), projects };
 	if (argv.includes("--json")) console.log(JSON.stringify(result, null, 2));

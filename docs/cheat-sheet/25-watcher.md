@@ -48,3 +48,21 @@ Se una nuova sessione viene rilanciata dopo un ticket terminale precedente, il
 watcher la riconosce come sostituzione e non la chiude. Se un ticket pronto
 resta non assegnato, invia inoltre al planner vivo il comando deduplicato
 `watcher_ready_queue_retry` per ritentare l'apertura del worker.
+
+Quando il progetto attende l'utente, la scansione non sveglia nessuno:
+`waiting_for_user` con `llm_wakeups: 0`, senza comandi MQTT né recovery. Lo
+stato è deterministico (domanda esplicita persistita oppure tutti i run
+attivi con hold aperti) e si rilascia da solo alla risposta. `yano status`
+espone `user_wait` e i ticket assegnati ad agenti assenti riportano azione
+`wait`.
+
+Se la root registrata non esiste più, il watcher non recupera nel percorso
+morto: restituisce `project_relocated` (stesso progetto trovato altrove →
+proposta via hold, mai rewrite automatico; re-add con
+`yano watcher init --project-root <nuovo>`) oppure `project_root_missing`
+(stop esplicito, mai cancellazione silenziosa). Ogni passata chiude anche le
+tab di manutenzione orfane (workspace `yano-auto-improver`/`yano-architect`
+senza agenti live né processo `pi`; label `human*`/`planner` mai toccate) e
+conta `orphan_maintenance_tabs_removed`. I run con hold aperti sono esclusi
+da orfani/ready/stalled. Dettaglio:
+`docs/quick-guides/10-watcher-falle-yano.md`.

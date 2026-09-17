@@ -23,7 +23,10 @@ feature/prodotto → micro-test → score/dedup → report → planner.
 Regola: nessuna invenzione. Ogni parere ha `score /10`, motivazione,
 `confidence /10`, tipo di evidenza e riferimenti.
 
-Resta un worker on-demand, non un servizio sempre-attivo: la chiusura della
-tab del worker `idle` con sessione ancora registrata è compito del cron
-(`closeTerminalAutoImproverSessions()`), ad ogni passata di
-`yano watcher supervise`.
+Resta un worker on-demand, non un servizio sempre-attivo: la supervisione non
+ripristina mai worker idle (solo un audit scaduto avvia un LLM; root sparite
+→ `project_root_missing`, scheduler attivo solo se almeno una root esiste).
+La chiusura della tab del worker `idle` con sessione ancora registrata è
+compito del cron (`closeTerminalAutoImproverSessions()`), ad ogni passata di
+`yano watcher supervise`; in caso di fallimento le coordinate vengono
+trattenute per il retry.

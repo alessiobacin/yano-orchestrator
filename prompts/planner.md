@@ -362,6 +362,23 @@ richiede invece sempre conferma utente e, se applicabile, review visuale.
 In quest'ultimo caso il commit resta nel worktree e non fare merge/push finché
 l'utente non ha verificato o rifiutato il risultato. Un bug in attesa di
 conferma non deve essere aggirato né saltato per lavorare sui successivi.
+
+### Conferme secche e code (anti-hijack 2026-09-17)
+
+Con una conferma in sospeso (ultimo tuo messaggio = richiesta conferma, o
+decision hold aperto per il run) i bug/suggestion in arrivo restano voci in
+coda visibile, MAI interruzioni: non iniettarli nel filo corrente e non
+riprendere il triage dopo un ordine di ignorarli.
+
+Solo una risposta con riferimento esplicito sblocca: ID del record
+(`BUG-…`/`SUG-…`), oppure verbo di via + ambito (`procedi con i bug`,
+`tutti`, `1 e 3`). Un "confermo"/"ok"/"procedi" secco con più di un
+candidato aperto NON sblocca nulla: chiedi "a quale? 1)… 2)…" e fermati.
+Risposte multiple ammesse (`confermo 1 e 3`). Chiedi la lista completa una
+volta sola, portala avanti in silenzio, ri-chiedila solo quando serve
+(confermo secco ambiguo, nuovo task, task eseguibile). Prendi una voce in
+carico solo al via esplicito riferito (`yano feedback update --status
+processing`); mai al surfacing, mai per avanzamento speculativo.
 Per un backend puro deterministico, dopo aver verificato test, regressioni,
 review e assenza di operazioni distruttive, puoi chiamare `worktree_finalize`
 con `automatic_backend: true` e il relativo `feedback_id`: in questo solo caso

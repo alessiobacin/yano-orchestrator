@@ -75,6 +75,11 @@ eseguito dentro Herdr, evita di aprire un client annidato. È in-place e non
 accetta `--target`: evita che il workspace Herdr e la root reale del progetto
 puntino a directory diverse.
 
+Per avviare un ruolo in una tab dedicata usa `yano start --herdr --instance
+<id> --role <ruolo>`. Se Herdr restituisce durante l'handshake
+`agent_kind_mismatch`, Yano attende una verifica bounded dello stesso pane:
+l'avvio viene accettato solo se la snapshot lo mostra come agente `pi` live.
+
 `yano init` prepara configurazione, ruoli e workspace del progetto senza
 copiarvi il codice dell'estensione; il database SQLite operativo viene creato
 quando il primo planner inizializza l'orchestratore.
@@ -105,14 +110,17 @@ resta `agents/roles.yaml` nella root.
 ## 2. Avvia il broker MQTT
 
 Per ogni task con impatto frontend, dopo la verifica E2E, il planner chiede il
-consenso dell'utente: “Vuoi fare una review visuale dell'app in sviluppo con
-Agentation?”. Se accetti, usa `yano frontend-review setup` per installare e
-verificare `agentation` e l'import/mount solo in development (per React e
+consenso dell'utente: “Vuoi fare una review visuale dell'app in sviluppo?”. Per una pagina già in sviluppo, `yano frontend-review browser
+--url URL` genera un bookmarklet senza installare dipendenze nell’app (avvia
+`yano feedback-api start --no-open` per ricevere le annotazioni). In alternativa, `yano frontend-review setup` installa e
+verifica `agentation` e l'import/mount solo in development (per React e
 Angular; per Streamlit, app Python o siti statici il setup non installa nulla
 e non tocca il sorgente — review browser-only via wrapper Yano), poi
-`yano frontend-review start` per avviare lo script rilevato. Il planner deve
+`yano frontend-review start` avvia lo script rilevato. Gli adapter
+Agentation `setup`/`start` restano opzionali. Il planner deve
 fornire l'URL reale restituito dal comando, non inventarlo; le annotazioni
-vengono ricevute dal planner tramite il server MCP Agentation.
+vengono ricevute dal planner tramite il server MCP Agentation. Vedi la
+[guida Yano essenziale](yano-essential.md) per uso e limiti del browser.
 
 Con il broker Docker incluso:
 
@@ -196,6 +204,12 @@ nel `.mcp.json` del progetto e le chiamate di gestione richiedono OAuth2.
 Per ogni task di sviluppo il planner passa dalla skill `/to-tickets` dopo la
 spec: propone slice verticali, criteri di accettazione e dipendenze, chiede se
 la granularità è corretta e solo dopo importa i ticket approvati in SQLite/DAG.
+
+Se il planner annuncia un controllo operativo (per esempio “ora lancio il
+test”) senza chiamare un tool nello stesso turno, l'estensione registra
+`planner_action_claim_without_tool`, non pubblica il completamento e invia un
+follow-up correttivo. L'esito del controllo deve quindi comparire nel turno
+successivo, non restare una promessa.
 
 ## 5. Controlla il lavoro
 
@@ -301,6 +315,15 @@ yano status --project mio-progetto
 yano fleet --project mio-progetto
 yano logs --project mio-progetto
 yano trace events --project mio-progetto --follow
+```
+
+Per controllare questo caso specifico:
+
+```bash
+yano trace events --project mio-progetto --instance planner-01 \
+  --type planner_action_claim_without_tool --limit 20 --json
+yano trace events --project mio-progetto --instance planner-01 \
+  --type planner_action_guard_wakeup --limit 20 --json
 ```
 
 SQLite mantiene run, ticket, dipendenze, evidenze e stato di recupero; il trace
@@ -456,3 +479,27 @@ yano trace clear --all --yes
 Per il riferimento completo consulta [`yano-trace.md`](./yano-trace.md). Per
 il flusso di bug applicativi usa [`yano-feedback.md`](./yano-feedback.md) e la
 [guida rapida del feedback](./12-yano-feedback.md).
+
+## Contratto essenziale (2026-09-15)
+
+`yano status --all --explain --json` espone decisioni watcher e fingerprint;
+`yano feedback-api start` conserva API e dati senza GUI Kanban (`dash` è alias).
+Il Gantt mostra fasi previste, dipendenze e round osservati con modelli/provider.
+`yano frontend-review browser --url URL` abilita annotazioni DOM senza React.
+Watcher/scheduler sono deterministici; Local PC resta il servizio LLM persistente.
+Nuovi piani: `plan_set` richiede `scoping.status` e `scoping.rationale`.
+Dettagli, compatibilità e limiti: [Yano essenziale](yano-essential.md).
+
+Ponytail è attivo in modalità `full` per tutti i ruoli Yano, anche con prompt
+personalizzati. `yano ponytail status` mostra la policy; `yano ponytail off`
+la disattiva nel progetto, `--global` cambia il default ereditato, `reset`
+rimuove l’override. Le preferenze persistono fra i riavvii.
+
+Il reload controllato assegna la motivazione di ripresa automaticamente e
+rilancia le istanze MQTT `offline`; un lancio fallito conserva il checkpoint.
+
+Il Gantt espone progetto e descrizione per lavoro, filtri assignment/periodo/stato,
+viste Ora/Prossimi passi/Conclusi e attività strumenti. Solo un turno corrente
+con heartbeat busy sano anima la barra. Le risposte mancanti storiche non
+sono attività live. Modello/provider derivano dai metadata o dagli header
+registrati; il routing configurato resta distinto dal modello effettivo.

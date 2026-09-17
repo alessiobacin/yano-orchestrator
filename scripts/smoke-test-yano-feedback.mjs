@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "yano-feedback-"));
 process.env.YANO_DATA_DIR = dataDir;
@@ -41,5 +42,10 @@ db.prepare("UPDATE feedback SET status='processed' WHERE id=?").run(suggestion.i
 assert.equal(db.prepare("SELECT status FROM feedback WHERE id=?").get(suggestion.id).status, "processed");
 db.prepare("DELETE FROM feedback WHERE id=?").run(suggestion.id);
 assert.equal(db.prepare("SELECT count(*) AS n FROM feedback WHERE id=?").get(suggestion.id).n, 0);
+const cli = JSON.parse(execFileSync(process.execPath, ["bin/yano.mjs", "feedback", "create", "--type", "bug", "--project-id", "cli-import", "--message", "imported", "--title", "Import title", "--route", "/settings", "--severity", "high"], { encoding: "utf8", env: { ...process.env, YANO_CONFIG_FILE: path.join(dataDir, "absent.env") } }));
+assert.equal(cli.credentials_present, false);
+assert.equal(cli.title, "Import title");
+assert.equal(cli.route, "/settings");
+assert.equal(cli.severity, "high");
 db.close();
 console.log("YANO FEEDBACK SMOKE TEST PASSED");

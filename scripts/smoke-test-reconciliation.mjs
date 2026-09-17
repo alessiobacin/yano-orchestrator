@@ -201,7 +201,7 @@ invariants: []
 	const reconA = (await planner.call("ticket_create", { run_id: reconRun.id, spec_id: reconSpec.id, title: "fase iniziale", required_capabilities: ["coder"], depends_on: [] })).details.ticket;
 	const reconB = (await planner.call("ticket_create", { run_id: reconRun.id, spec_id: reconSpec.id, title: "fase finale", required_capabilities: ["docs-sync"], depends_on: [reconA.id] })).details.ticket;
 	const reconWorktree = await planner.call("worktree_create", { slug: "reconcile-playbook" });
-	await planner.call("plan_set", { slug: "reconcile-playbook", phases: [{ roles: ["coder"] }, { roles: ["docs-sync"] }] });
+	await planner.call("plan_set", { scoping: { status: "not_needed", rationale: "Fully specified regression fixture" }, slug: "reconcile-playbook", phases: [{ roles: ["coder"] }, { roles: ["docs-sync"] }] });
 	const commitEvidence = await planner.call("finalize_evidence_collect", { run_id: reconRun.id, slug: "reconcile-playbook", kind: "commit", source: "git:rev-parse", idempotency_key: "finalize-commit-v1" });
 	ok(commitEvidence.details.evidence.status === "verified" && commitEvidence.details.evidence.commit_hash, "finalize commit evidence is verified and commit-bound");
 	const testEvidence = await planner.call("finalize_evidence_collect", { run_id: reconRun.id, slug: "reconcile-playbook", kind: "test", source: "smoke-test-reconciliation", observed_value: "10 assertions passed", idempotency_key: "finalize-test-v1" });

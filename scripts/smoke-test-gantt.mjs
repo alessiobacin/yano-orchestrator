@@ -126,7 +126,7 @@ async function main() {
 
 	console.log("\n=== PART 3 — the HTML page is served ===");
 	const html = await httpGetText(`http://127.0.0.1:${port}/`);
-	ok(/Orchestrator/.test(html) && /WebSocket/.test(html) && /status-done/.test(html), "page HTML includes the timeline/renderer + websocket client");
+	ok(/Timeline del lavoro/.test(html) && /id="assignment"/.test(html) && /Prossimi passi/.test(html), "page serves assignment filtering, timeline and upcoming work");
 
 	console.log("\n=== PART 4 — server is read-only ===");
 	const after = (await planner.call("run_status", { run_id: run.id })).details;

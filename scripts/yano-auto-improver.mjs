@@ -331,7 +331,12 @@ function initialRecommendations(evidence) {
 	else if (checks.has_build && !checks.has_build_script) result.push({ category: "delivery", title: "Esporre un comando build standard", priority: "low", confidence: "medium", evidence: [`marker build rilevati senza script: ${(checks.project_surfaces?.build_files || []).slice(0, 5).join(", ")}`] });
 	if (evidence.trace.failures.length) result.push({ category: "reliability", title: "Analizzare i failure signal ricorrenti del trace", priority: "high", confidence: "medium", evidence: evidence.trace.failures.slice(0, 5).map((item) => item.type || "trace failure") });
 	if (evidence.trace.feedback.some((item) => /rejected|partial|negative/i.test(String(item.status || "")))) result.push({ category: "product", title: "Rivedere i round respinti dall'utente", priority: "high", confidence: "medium", evidence: ["feedback con esito rejected/partial"] });
-	return result;
+	return result.map((recommendation) => ({
+		...recommendation,
+		evidence_confidence: recommendation.confidence === "high" ? 8 : 6,
+		judgment_confidence: 0,
+		judgment_confidence_rationale: "UNKNOWN: raccomandazione preliminare generata da controlli deterministici; il giudizio dell'LLM deve ancora essere espresso nel report finale.",
+	}));
 }
 
 function writeReportSkeleton(info, auditId, evidence, recommendations) {
@@ -353,7 +358,7 @@ function writeReportSkeleton(info, auditId, evidence, recommendations) {
 		"",
 		"## Raccomandazioni preliminari",
 		"",
-		...(recommendations.length ? recommendations.map((item, index) => `${index + 1}. **[${item.priority}] ${item.title}** — ${item.category}; confidenza ${item.confidence}. Evidenza: ${item.evidence.join("; ")}`) : ["Nessuna raccomandazione deterministica preliminare; completare l'analisi LLM."]),
+		...(recommendations.length ? recommendations.map((item, index) => `${index + 1}. **[${item.priority}] ${item.title}** — ${item.category}; evidence_confidence ${item.evidence_confidence}/10; judgment_confidence ${item.judgment_confidence}/10 (${item.judgment_confidence_rationale}). Evidenza: ${item.evidence.join("; ")}`) : ["Nessuna raccomandazione deterministica preliminare; completare l'analisi LLM."]),
 		"",
 		"## Evidenze da analizzare",
 		"",
@@ -367,11 +372,15 @@ function writeReportSkeleton(info, auditId, evidence, recommendations) {
 		"",
 		"Non limitarti alla qualità del codice. Ricostruisci la capability principale del progetto e confrontala con almeno tre alternative comparabili, usando fonti ufficiali HTTPS verificate. Copri feature, performance, sicurezza/privacy, UX, UX per LLM/agent, tool/API, MCP, connettori, plugin/estensioni, deployment, test, maturità e licenza.",
 		"",
-		"Il report finale deve contenere una matrice `attuale vs alternativa`, URL delle fonti consultate, gap verificati e proposte concrete classificate come bug, miglioramento tecnico, feature prodotto, tool, connettore, plugin o UX. Ogni proposta deve indicare valore, complessità, rischio, confidenza e `requires_human_decision`. Se la ricerca online fallisce, riportare query, fonti non raggiungibili e limite senza inventare risultati.",
+		"Il report finale deve contenere una matrice `attuale vs alternativa`, URL delle fonti consultate, gap verificati e proposte concrete classificate come bug, miglioramento tecnico, feature prodotto, tool, connettore, plugin o UX. Ogni proposta deve indicare valore, complessità, rischio, `evidence_confidence`, `judgment_confidence`, `judgment_confidence_rationale` e `requires_human_decision`. Se la ricerca online fallisce, riportare query, fonti non raggiungibili e limite senza inventare risultati.",
+		"",
+		"## Contratto di confidenza",
+		"",
+		"Per ogni finding e proposta il report finale deve riportare `evidence_confidence: 0-10`, `judgment_confidence: 0-10` e `judgment_confidence_rationale`. Le raccomandazioni preliminari di questa sezione sono deterministiche: il loro `judgment_confidence: 0` è UNKNOWN e deve essere rivalutato dall'LLM. Non includere chain-of-thought.",
 		"",
 		"## Handoff planner",
 		"",
-		"L'agente deve completare questo report, indicare confidenza e decisione umana richiesta, poi inviare il risultato al planner. Nessuna modifica è autorizzata.",
+		"L'agente deve completare questo report, indicare entrambe le confidenze e la decisione umana richiesta, poi inviare il risultato al planner. Nessuna modifica è autorizzata.",
 		"",
 	];
 	fs.writeFileSync(reportPath, `${lines.join("\n")}\n`, { mode: 0o600 });
@@ -434,7 +443,7 @@ function launchWorker(info, row, auditId, evidencePath, reportPath, dryRun = fal
 	const serviceOnly = !auditId;
 	const prompt = serviceOnly
 		? `Il servizio auto-improver per ${info.name} è stato ripristinato dopo una perdita di Herdr. Non avviare un audit: l'ultimo audit è completato e il prossimo è pianificato per ${row.next_run_at || "la prossima scadenza"}. Rimani inattivo e read-only; non modificare il progetto. Se ricevi un audit esplicito, usa esclusivamente gli strumenti consentiti e completa soltanto il report globale.`
-		: `Esegui l'audit auto-improve ${auditId} in modo esclusivamente read-only e con valutazione a 360 gradi. Leggi evidence pack ${evidencePath} e analizza direttamente ${info.root} senza modificarlo. Oltre a codice, test, performance, sicurezza, documentazione e UX, identifica la missione/capability principale del progetto e confrontala con almeno 3 software o servizi comparabili. Usa auto_improve_web_search per trovare candidati e auto_improve_web_fetch per verificare solo fonti ufficiali HTTPS: repository, documentazione o package registry. Per ogni confronto valuta feature, qualità del retrieval/risultato, esperienza utente, esperienza LLM/agent, tool/API, MCP, connettori, plugin/estensioni, integrazioni, privacy, deployment, performance, test, maturità e licenza. Produci una gap matrix tra progetto attuale e alternative e proposte concrete di feature, correzioni, tool, connettori e plugin mancanti, ciascuna con valore, complessità, rischio, confidenza e requires_human_decision. Distingui sempre evidenza verificata, inferenza e limite non verificabile; non inventare fonti o feature. Se il web non è disponibile, documenta le query e il limite invece di fingere il confronto. Completa il report ${reportPath} usando il tool auto_improve_complete; è l'unica scrittura autorizzata e riguarda esclusivamente il report in docs/reports del progetto. Non usare bash, edit, write, git, build, worktree o comandi equivalenti. Invia il risultato al planner.`;
+		: `Esegui l'audit auto-improve ${auditId} in modo esclusivamente read-only e con valutazione a 360 gradi. Leggi evidence pack ${evidencePath} e analizza direttamente ${info.root} senza modificarlo. Oltre a codice, test, performance, sicurezza, documentazione e UX, identifica la missione/capability principale del progetto e confrontala con almeno 3 software o servizi comparabili. Usa auto_improve_web_search per trovare candidati e auto_improve_web_fetch per verificare solo fonti ufficiali HTTPS: repository, documentazione o package registry. Per ogni confronto valuta feature, qualità del retrieval/risultato, esperienza utente, esperienza LLM/agent, tool/API, MCP, connettori, plugin/estensioni, integrazioni, privacy, deployment, performance, test, maturità e licenza. Produci una gap matrix tra progetto attuale e alternative e proposte concrete di feature, correzioni, tool, connettori e plugin mancanti, ciascuna con valore, complessità, rischio, evidence_confidence 0-10, judgment_confidence 0-10, judgment_confidence_rationale e requires_human_decision. Distingui sempre evidenza verificata, inferenza e limite non verificabile; non inventare fonti o feature. Se il web non è disponibile, documenta le query e il limite invece di fingere il confronto. Completa il report ${reportPath} usando il tool auto_improve_complete; è l'unica scrittura autorizzata e riguarda esclusivamente il report in docs/reports del progetto. Non usare bash, edit, write, git, build, worktree o comandi equivalenti. Invia il risultato al planner.`;
 	// Never resume an old Pi transcript: an auto-improve audit is a fresh,
 	// bounded read-only inspection. The Herdr tab/instance may be reused, but
 	// `--continue` could resurrect stale implementation context and commands.
@@ -628,6 +637,10 @@ async function completeAudit(db, opts) {
 	if (!audit) throw new Error(`yano auto-improve: audit non trovato: ${opts.auditId}`);
 	const reportPath = assertTempPath(opts.reportFile || audit.report_path, audit.root);
 	if (!fs.existsSync(reportPath)) throw new Error(`yano auto-improve: report non trovato: ${reportPath}`);
+	const reportText = fs.readFileSync(reportPath, "utf8");
+	const requiredConfidenceFields = ["evidence_confidence", "judgment_confidence", "judgment_confidence_rationale"];
+	const missingConfidenceFields = requiredConfidenceFields.filter((field) => !reportText.includes(field));
+	if (missingConfidenceFields.length) throw new Error(`yano auto-improve: report non conforme al contratto di confidenza; campi mancanti: ${missingConfidenceFields.join(", ")}`);
 	let summary = opts.summary || "Report auto-improve completato; consultare il report completo.";
 	if (opts.summaryFile && fs.existsSync(assertTempPath(opts.summaryFile, audit.root))) {
 		const summaryText = fs.readFileSync(assertTempPath(opts.summaryFile, audit.root), "utf8").slice(0, 4000);

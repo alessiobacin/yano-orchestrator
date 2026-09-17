@@ -80,7 +80,10 @@ Eccezione importante: `yano-local-pc` è il control-plane permanente. Se Herdr
 vede ancora il processo Pi vivo e nello stato `idle` o `working`, un heartbeat
 applicativo vecchio o temporaneamente assente non provoca la chiusura e il
 riavvio della tab. Il cron può ricrearlo solo quando mancano davvero pane o
-processo, oppure Herdr espone uno stato non sano.
+processo, oppure Herdr espone uno stato non sano. Nello stesso tick di
+avvio/recovery il supervisore riverifica anche che lo store CodeMem
+`<YANO_DATA_DIR>/yano-local-pc/memory` sia leggibile (`cm recent`, solo
+conteggi nei log): la conversazione `ask` sopravvive al riavvio.
 
 `yano-dash` è un secondo builtin sempre attivo, ma di natura diversa da
 `llmproxy`/`mqtt`: non viene scoperto da un container/processo esterno, è

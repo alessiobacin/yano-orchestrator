@@ -344,7 +344,7 @@ async function test1FullFlow(cwd, project, evo) {
 
 	// 3. plan_set with the TDD-exception NOT used here — plain coder+reviewer
 	// phase 1, then a parallel final phase security-evaluator+docs-sync.
-	const planSet = await planner.call("plan_set", {
+	const planSet = await planner.call("plan_set", { scoping: { status: "not_needed", rationale: "Fully specified regression fixture" },
 		slug,
 		phases: [
 			{ roles: ["coder"], note: "implementazione" },
@@ -500,7 +500,7 @@ async function test2TddException(cwd, project) {
 	// Missing docs-sync in the last phase must be rejected by the REAL code.
 	let rejectedNoDocs = false;
 	try {
-		await planner.call("plan_set", { slug, phases: [{ roles: ["tdd-agent"] }, { roles: ["coder"] }] });
+		await planner.call("plan_set", { scoping: { status: "not_needed", rationale: "Fully specified regression fixture" }, slug, phases: [{ roles: ["tdd-agent"] }, { roles: ["coder"] }] });
 	} catch (err) {
 		rejectedNoDocs = err.message.includes("docs-sync");
 	}
@@ -509,14 +509,14 @@ async function test2TddException(cwd, project) {
 	// tdd-agent alone in phase 1, without coder in phase 2, must also be rejected.
 	let rejectedNoCoderPhase2 = false;
 	try {
-		await planner.call("plan_set", { slug, phases: [{ roles: ["tdd-agent"] }, { roles: ["docs-sync"] }] });
+		await planner.call("plan_set", { scoping: { status: "not_needed", rationale: "Fully specified regression fixture" }, slug, phases: [{ roles: ["tdd-agent"] }, { roles: ["docs-sync"] }] });
 	} catch (err) {
 		rejectedNoCoderPhase2 = err.message.includes('"coder" must then be in phase 2');
 	}
 	ok(rejectedNoCoderPhase2, "plan_set (real code): rejects tdd-agent-alone phase 1 without coder in phase 2");
 
 	// Now a genuinely valid TDD-exception plan.
-	const plan = await planner.call("plan_set", { slug, phases: [{ roles: ["tdd-agent"] }, { roles: ["coder"] }, { roles: ["docs-sync"] }] });
+	const plan = await planner.call("plan_set", { scoping: { status: "not_needed", rationale: "Fully specified regression fixture" }, slug, phases: [{ roles: ["tdd-agent"] }, { roles: ["coder"] }, { roles: ["docs-sync"] }] });
 	ok(plan.details.plan.phases.length === 3, "plan_set (real code): valid TDD-exception plan (tdd-agent / coder / docs-sync) accepted");
 	ok(plan.details.plan.phases[0].status === "unlocked" && plan.details.plan.phases[1].status === "locked", "plan_set (real code): only phase 1 (tdd-agent) starts unlocked");
 

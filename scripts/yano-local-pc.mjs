@@ -4,6 +4,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import mqtt from "mqtt";
 import { ensureComputerLocalService } from "./yano-global-services.mjs";
 import { globalDataPath } from "./yano-config.mjs";
@@ -23,9 +24,59 @@ function removePending(id) { try { fs.unlinkSync(path.join(pendingRoot(), `${id}
 function pendingRequests() { try { return fs.readdirSync(pendingRoot()).filter((name) => name.endsWith(".json")).map((name) => JSON.parse(fs.readFileSync(path.join(pendingRoot(), name), "utf8"))); } catch { return []; } }
 function usage() { console.log("Uso: yano local-pc <start|status|ask|pending> [--planner] [--no-wait] [--prompt \"...\"] [--timeout-ms N]"); }
 
-export async function askLocalPc(prompt, { timeoutMs = 120000, broker = brokerUrl(), ensure = ensureComputerLocalService, planner = false, waitForResponse = true } = {}) {
+function localPcRuntimeRoot() { return path.join(globalDataPath(), "yano-local-pc"); }
+
+// Redact secrets/tokens/PII before anything is persisted to CodeMem.
+// Minimal by design: key=value secrets, Bearer tokens, emails.
+export function redactLocalPcText(value) {
+	return String(value || "")
+		.replace(/(api[_-]?key|token|secret|password|passwd|pwd|authorization|private[_-]?key|credential)\s*[:=]\s*['"]?\S+['"]?/gi, "$1=[REDACTED]")
+		.replace(/Bearer\s+[A-Za-z0-9\-._~+/=]{8,}/g, "Bearer [REDACTED]")
+		.replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, "[REDACTED-EMAIL]");
+}
+
+// Best-effort bounded recall of past Local PC conversations.
+// Runs `cm sq` with cwd=runtimeRoot (never the project checkout);
+// any failure returns "" and never blocks ask.
+// Derive a keyword query from a natural-language prompt: `cm sq` uses
+// AND keyword semantics, so a raw sentence rarely matches anything.
+export function localPcRecallQuery(prompt) {
+	const words = String(prompt || "").toLowerCase().split(/[^a-zà-ÿ0-9]+/i).filter((w) => w.length >= 5);
+	const unique = [...new Set(words)].slice(0, 6);
+	return (unique.join(" ") || String(prompt || "").trim().slice(0, 200)).slice(0, 200);
+}
+
+export function recallLocalPcContext(prompt, { root = localPcRuntimeRoot(), limit = 5, maxChars = 2000 } = {}) {
+	try {
+		const query = localPcRecallQuery(prompt);
+		if (!query) return "";
+		const result = spawnSync("cm", ["sq", query, String(limit)], { cwd: root, encoding: "utf8", timeout: 8000 });
+		if (result?.error || result?.status !== 0) return "";
+		const text = String(result.stdout || "").trim();
+		if (!text || /^no results\.?$/i.test(text)) return "";
+		return text.slice(0, maxChars);
+	} catch { return ""; }
+}
+
+// Best-effort capture of a prompt/response exchange via `cm save --auto`.
+// The redacted text is persisted; failures return false, never throw.
+export function saveLocalPcExchange(prompt, response, { root = localPcRuntimeRoot() } = {}) {
+	try {
+		const answer = typeof response === "string" ? response : JSON.stringify(response ?? "");
+		const text = redactLocalPcText(`Q: ${String(prompt || "").trim().slice(0, 1000)}\nA: ${String(answer || "").slice(0, 1000)}`);
+		if (!text.trim()) return false;
+		const result = spawnSync("cm", ["save", "--auto", "--role", "agent", text], { cwd: root, encoding: "utf8", timeout: 10_000 });
+		if (result?.error || result?.status !== 0) return false;
+		return true;
+	} catch { return false; }
+}
+
+export async function askLocalPc(prompt, { timeoutMs = 120000, broker = brokerUrl(), ensure = ensureComputerLocalService, planner = false, waitForResponse = true, mqttConnect = mqtt.connectAsync } = {}) {
 	if (!prompt?.trim()) throw new Error("--prompt è obbligatorio.");
 	const service = ensure();
+	const runtimeRoot = localPcRuntimeRoot();
+	const memContext = recallLocalPcContext(prompt, { root: runtimeRoot });
+	const enrichedPrompt = memContext ? `${prompt.trim()}\n\n[CodeMem locale — contesto pertinente]\n${memContext}` : prompt.trim();
 	// The planner is the durable scheduler target. The Local PC shell/agent
 	// tab may be recovering independently; do not drop a scheduled request
 	// when planner-01 is already healthy and able to receive MQTT.
@@ -37,9 +88,9 @@ export async function askLocalPc(prompt, { timeoutMs = 120000, broker = brokerUr
 	const requestId = `${planner ? "planner" : "computer"}-${crypto.randomUUID()}`;
 	const replyTopic = `pi/${SCOPE}/cli/${requestId}/response`;
 	const commandTopic = `pi/${SCOPE}/agents/${targetInstance}/commands`;
-	const request = { type: "command", assignment_id: requestId, sender_instance: "yano-cli", sender_role: "user", target_instance: targetInstance, target_role: planner ? "planner" : INSTANCE, project: PROJECT, prompt: prompt.trim(), reply_to: replyTopic, hops: 0, timestamp: new Date().toISOString(), response_schema: null };
+	const request = { type: "command", assignment_id: requestId, sender_instance: "yano-cli", sender_role: "user", target_instance: targetInstance, target_role: planner ? "planner" : INSTANCE, project: PROJECT, prompt: enrichedPrompt, reply_to: replyTopic, hops: 0, timestamp: new Date().toISOString(), response_schema: null };
 	savePending(request);
-	const client = await mqtt.connectAsync(broker, { reconnectPeriod: 0, connectTimeout: 3000 });
+	const client = await mqttConnect(broker, { reconnectPeriod: 0, connectTimeout: 3000 });
 	try {
 		await client.subscribeAsync(replyTopic, { qos: 1 });
 		const result = await new Promise((resolve, reject) => {
@@ -57,6 +108,7 @@ export async function askLocalPc(prompt, { timeoutMs = 120000, broker = brokerUr
 			}).catch(reject);
 		});
 		removePending(requestId);
+		saveLocalPcExchange(prompt, result, { root: runtimeRoot });
 		return result;
 	} finally { await client.endAsync(); }
 }

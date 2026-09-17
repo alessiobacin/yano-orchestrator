@@ -59,15 +59,17 @@ export function createPlanTools(deps: PlanToolsDeps) {
 				"progress on phases already underway.",
 			parameters: Type.Object({
 				slug: Type.String({ description: "Task slug — same one used for worktree_create." }),
+				scoping: Type.Optional(Type.Object({ status: Type.Union([Type.Literal("completed"), Type.Literal("not_needed")]), rationale: Type.String({ minLength: 1, description: "Resolved questions/requirements, or explicit reason this task needs no grilling." }) })),
 				phases: Type.Array(
 					Type.Object({
 						roles: Type.Array(Type.String(), { description: "Roles that work together in this phase, e.g. [\"coder\", \"reviewer\"] or [\"security-evaluator\", \"openapi-writer\"]." }),
 						note: Type.Optional(Type.String({ description: "One line explaining why these roles are in this phase / this position." })),
+						models: Type.Optional(Type.Array(Type.Object({ role: Type.String(), instance: Type.Optional(Type.String()), model: Type.String(), provider: Type.String() }))),
 					}),
 					{ description: "Ordered phases, phase 1 first. Phase numbers are implied by array position (1-indexed)." },
 				),
 			}),
-			async execute(_callId: string, params: { slug: string; phases: Array<{ roles: string[]; note?: string }> }) {
+			async execute(_callId: string, params: { slug: string; scoping?: { status: "completed" | "not_needed"; rationale: string }; phases: Array<{ roles: string[]; note?: string; models?: Array<{ role: string; instance?: string; model: string; provider: string }> }> }) {
 				const identity = getIdentity();
 				if (!identity) throw new Error("orchestrator not initialised");
 				if (identity.role !== "planner") {
@@ -147,14 +149,16 @@ export function createPlanTools(deps: PlanToolsDeps) {
 
 				const wt = requireWorktree(params.slug);
 				const existing = readPlan(wt.path, params.slug);
+				const scoping = params.scoping || existing?.scoping;
+				if (!existing && (!scoping || !["completed", "not_needed"].includes(scoping.status) || !scoping.rationale?.trim())) throw new Error("plan_set: scoping required — run wayfinder/grilling, or explicitly record not_needed with its rationale before planning execution.");
 				const now = nowIso();
 				const phases: PlanPhase[] = params.phases.map((p, i) => {
 					const phaseNum = i + 1;
 					const rolesKey = [...p.roles].map((r) => r.trim().toLowerCase()).sort().join(",");
 					const prior = existing?.phases.find((op) => op.phase === phaseNum && [...op.roles].map((r) => r.trim().toLowerCase()).sort().join(",") === rolesKey);
-					if (prior && prior.status === "complete") return { phase: phaseNum, roles: p.roles, note: p.note, status: "complete" };
-					if (phaseNum === 1) return { phase: phaseNum, roles: p.roles, note: p.note, status: "unlocked" };
-					return { phase: phaseNum, roles: p.roles, note: p.note, status: "locked" as PlanPhaseStatus };
+					if (prior && prior.status === "complete") return { phase: phaseNum, roles: p.roles, note: p.note, models: p.models, status: "complete" };
+					if (phaseNum === 1) return { phase: phaseNum, roles: p.roles, note: p.note, models: p.models, status: "unlocked" };
+					return { phase: phaseNum, roles: p.roles, note: p.note, models: p.models, status: "locked" as PlanPhaseStatus };
 				});
 				// Second pass: a phase unlocks if the one right before it is complete
 				// (covers the case where an earlier phase was already complete before
@@ -162,9 +166,9 @@ export function createPlanTools(deps: PlanToolsDeps) {
 				for (let i = 1; i < phases.length; i++) {
 					if (phases[i].status === "locked" && phases[i - 1].status === "complete") phases[i].status = "unlocked";
 				}
-				const plan: Plan = { slug: params.slug, phases, created_at: existing?.created_at || now, updated_at: now };
+				const plan: Plan = { slug: params.slug, phases, scoping, created_at: existing?.created_at || now, updated_at: now };
 				writePlan(wt.path, params.slug, plan);
-				logEvent("plan_set", { slug: params.slug, phases: phases.map((p) => ({ phase: p.phase, roles: p.roles, status: p.status })) });
+				logEvent("plan_set", { slug: params.slug, scoping, phases: phases.map((p) => ({ phase: p.phase, roles: p.roles, models: p.models, status: p.status })) });
 				appendPlanAudit(
 					wt.path,
 					params.slug,

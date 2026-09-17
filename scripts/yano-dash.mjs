@@ -1,24 +1,17 @@
 #!/usr/bin/env node
 
-// Single always-on process serving both the unified bug/suggestion Kanban UI
-// and the feedback REST API it talks to. Replaces the old, separately-ported
-// bug-dash (11000-11999) and suggest-dash (12000-12999) processes with one
-// process on one port range.
-// See docs/superpowers/specs/2026-09-07-yano-dash-design.md.
+// Local feedback REST API. Applications own the bug/suggestion interface.
+// The historical dash command and state path remain compatible.
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
 import { openDatabase, handleFeedbackApi, listFeedback, getFeedback, listFeedbackAudit, repairFeedbackScreenshots, createAgentationFeedback, dbPath } from "./yano-feedback.mjs";
 import { projectKey, resolveTraceProject, readTraceRecords, traceRoot } from "./yano-trace-storage.mjs";
 import { listWatcherProjectRows, pruneMissingWatcherProjects, projectRuns } from "./yano-watcher-registry.mjs";
 import { deriveCoderActivity, executionForFeedback } from "./yano-feedback-activity.mjs";
 import { DASH_PORT, readDashState, writeDashState, processAlive } from "./yano-dash-state.mjs";
 import { sendGlobalNotification } from "./yano-notify.mjs";
-
-const UI_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "dash-ui");
-const MIME = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8" };
 
 function value(argv, flag) {
 	const index = argv.indexOf(flag);
@@ -97,17 +90,6 @@ function send(res, status, data, type = "application/json; charset=utf-8") {
 	res.end(type.startsWith("application/json") ? JSON.stringify(data) : data);
 }
 
-function serveStatic(res, relativePath) {
-	const filePath = path.join(UI_ROOT, relativePath);
-	if (!filePath.startsWith(UI_ROOT)) return send(res, 403, { error: "forbidden" });
-	try {
-		const content = fs.readFileSync(filePath);
-		send(res, 200, content, MIME[path.extname(filePath)] || "application/octet-stream");
-	} catch {
-		send(res, 404, { error: "not found" });
-	}
-}
-
 // Kept out of handleFeedbackApi on purpose: a raw-file fallback for a
 // screenshot whose base64 preview was never hydrated. decodeRow() in
 // yano-feedback.mjs already inlines local files as data: URLs on every read,
@@ -159,6 +141,7 @@ async function handler(db, clients, req, res) {
 	const url = new URL(req.url, "http://localhost");
 	const parts = url.pathname.split("/").filter(Boolean);
 	if (url.pathname === "/healthz") return send(res, 200, { ok: true, service: "yano-dash" });
+	if (url.pathname === "/review.js") return send(res, 200, fs.readFileSync(new URL("./browser-review.js", import.meta.url)), "text/javascript; charset=utf-8");
 	if (req.method === "OPTIONS") return send(res, 204, null);
 	if (url.pathname === "/api/stream") {
 		res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache", connection: "keep-alive" });
@@ -170,7 +153,7 @@ async function handler(db, clients, req, res) {
 	if (url.pathname === "/api/projects") {
 		return send(res, 200, projectCatalog());
 	}
-	if (req.method === "POST" && parts[0] === "api" && parts[1] === "agentation" && parts[2]) {
+	if (req.method === "POST" && parts[0] === "api" && ["agentation", "annotations"].includes(parts[1]) && parts[2]) {
 		const body = await new Promise((resolve, reject) => { let raw = ""; req.on("data", (chunk) => { raw += chunk; }); req.on("end", () => { try { resolve(raw ? JSON.parse(raw) : {}); } catch (error) { reject(error); } }); req.on("error", reject); });
 		const result = await createAgentationFeedback(db, decodeURIComponent(parts[2]), body);
 		return send(withChangeBroadcast(res, req, clients), result.duplicate ? 200 : 201, { ...result.item, duplicate: result.duplicate });
@@ -180,11 +163,7 @@ async function handler(db, clients, req, res) {
 		if (!file) return send(res, 404, { error: "screenshot non trovato" });
 		return send(res, 200, fs.readFileSync(file), mimeForAttachment(file));
 	}
-	if (url.pathname === "/" || url.pathname === "/index.html") return serveStatic(res, "index.html");
-	if (url.pathname === "/app.js") return serveStatic(res, "app.js");
-	if (url.pathname === "/api.js") return serveStatic(res, "api.js");
-	if (url.pathname === "/columns.js") return serveStatic(res, "columns.js");
-	if (parts[0] === "components" && parts.length === 2) return serveStatic(res, path.join("components", parts[1]));
+	if (url.pathname === "/" || url.pathname === "/index.html") return send(res, 200, { service: "yano-feedback-api", projects: "/api/projects", events: "/api/stream", feedback: "/{project_id}/bugs|suggestions", ui: "provided_by_application" });
 	// GET reads are served here directly (not via handleFeedbackApi) so every
 	// board load also opportunistically repairs remote screenshot URLs — the
 	// interactive dashboard cares about visual quality on every view, unlike
@@ -230,11 +209,6 @@ function listen(server, requestedPort = null) {
 	});
 }
 
-function openBrowser(url) {
-	const opener = process.platform === "darwin" ? ["open", url] : process.platform === "win32" ? ["cmd", "/c", "start", "", url] : ["xdg-open", url];
-	spawnSync(opener[0], opener.slice(1), { stdio: "ignore" });
-}
-
 export function stopYanoDash() {
 	const state = readDashState();
 	if (!state?.pid || !processAlive(state.pid)) return { stopped: false, reason: "not_running" };
@@ -261,7 +235,6 @@ export async function runYanoDash({ argv = [], cwd = process.cwd() } = {}) {
 	const existing = readDashState();
 	if (existing?.pid && processAlive(existing.pid)) {
 		console.log(`yano dash: già attivo su ${existing.url}`);
-		if (!argv.includes("--no-open")) openBrowser(existing.url);
 		return;
 	}
 	const root = projectRootFrom(cwd);
@@ -275,10 +248,6 @@ export async function runYanoDash({ argv = [], cwd = process.cwd() } = {}) {
 	const state = { pid: process.pid, port, url, project_id: defaultProjectId, project_root: root, started_at: new Date().toISOString() };
 	writeDashState(state);
 	console.log(`yano dash: ${url}`);
-	if (port !== DASH_PORT.default) {
-		await sendGlobalNotification(`yano dash: la porta ${DASH_PORT.default} era occupata, dashboard avviata su ${url}`, { role: "system", task: "yano-dash-fallback-port" }).catch(() => {});
-	}
-	if (!argv.includes("--no-open")) openBrowser(url);
 	const shutdown = () => {
 		// An open SSE connection (/api/stream) is a live socket that keeps
 		// Node's event loop alive on its own; server.close() only stops NEW
@@ -300,4 +269,8 @@ export async function runYanoDash({ argv = [], cwd = process.cwd() } = {}) {
 	};
 	process.once("SIGTERM", shutdown);
 	process.once("SIGINT", shutdown);
+	if (port !== DASH_PORT.default) {
+		await sendGlobalNotification(`yano dash: la porta ${DASH_PORT.default} era occupata, dashboard avviata su ${url}`, { role: "system", task: "yano-dash-fallback-port" }).catch(() => {});
+	}
+
 }

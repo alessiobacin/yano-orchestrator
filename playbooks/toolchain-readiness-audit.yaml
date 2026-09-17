@@ -1,0 +1,60 @@
+schema_version: 1
+id: toolchain-readiness-audit
+label: Tool, CLI, MCP, skill and playbook readiness audit
+description: >-
+  Builds a capability matrix for the work itself: which CLI tools, MCP servers,
+  skills, scripts and playbooks exist, are reachable, are documented and are
+  appropriate for each audit chapter. It prevents agents from rediscovering or
+  guessing the available toolchain.
+catalog:
+  scope: global
+  reusable: true
+  intents: [toolchain audit, CLI audit, MCP audit, skill audit, playbook readiness, capability preflight]
+  exclusions: [secret disclosure, installation without approval, claiming MCP readiness from config alone]
+  parameters: [project_root, variant, input_manifest, campaign_id, chapter_id]
+requirements:
+  cli: [node, git, yano]
+  skills: [yano-cli]
+team:
+  strategy: deterministic capability inventory and probes, followed by suitability review
+  default_variant: medium
+  roles:
+    - {id: repo-cartographer, purpose: Produce the shared inventory of declared and observed capabilities., outputs: [manifest], write_scope: [audit-artifacts-only], capabilities: [node, git]}
+    - {id: toolchain-evaluator, purpose: Probe capability availability, version, scope and documentation quality., outputs: [readiness-matrix], write_scope: [chapter-report-only], capabilities: [node, git, yano]}
+    - {id: delegation-efficiency-auditor, purpose: Judge whether each work item should use a script, CLI, MCP or agent., outputs: [tool-choice-matrix], write_scope: [chapter-report-only], capabilities: [node, git, yano]}
+  variants:
+    - {id: standard, roles: [repo-cartographer, toolchain-evaluator], parallel_groups: [[toolchain-evaluator]]}
+    - {id: medium, roles: [repo-cartographer, toolchain-evaluator, delegation-efficiency-auditor], parallel_groups: [[toolchain-evaluator, delegation-efficiency-auditor]]}
+    - {id: deep, roles: [repo-cartographer, toolchain-evaluator, delegation-efficiency-auditor], parallel_groups: [[toolchain-evaluator, delegation-efficiency-auditor]]}
+contract:
+  execution: manifest_then_safe_probes_then_suitability_review
+  checkpoint: every_capability_family
+  evidence: [capability_kind, declared_source, probe, exit_code, version, scope, documentation_reference, readiness, fallback, confidence, evidence_confidence, judgment_confidence, judgment_confidence_rationale, resource_record]
+  report_sections: [scope, capability_inventory, cli_matrix, mcp_matrix, skill_matrix, playbook_matrix, tool_choice_rules, gaps, resource_accounting]
+  budgets: {max_commands: 180, max_files: 500, max_minutes: 80, max_tokens: 22000}
+  verification: {mode: deterministic_probe_with_suitability_review, required: true}
+  recovery: [resume_from_capability_family, preserve_probe_results, use_safe_fallback, planner_handoff]
+states:
+  - {id: received, owner: planner, terminal: false}
+  - {id: inventoried, owner: repo-cartographer, terminal: false}
+  - {id: probed, owner: toolchain-evaluator, terminal: false}
+  - {id: assessed, owner: delegation-efficiency-auditor, terminal: false}
+  - {id: completed, owner: planner, terminal: true}
+  - {id: blocked, owner: planner_and_human, terminal: true}
+transitions:
+  - {id: inventory, from: received, to: inventoried, actor: repo-cartographer, requires: [scope_confirmed]}
+  - {id: probe, from: inventoried, to: probed, actor: toolchain-evaluator, requires: [manifest_persisted]}
+  - {id: assess, from: probed, to: assessed, actor: delegation-efficiency-auditor, requires: [probe_matrix_persisted]}
+  - {id: complete, from: assessed, to: completed, actor: planner, requires: [fallbacks_recorded, resource_ledger_persisted]}
+  - {id: block, from: [inventoried, probed, assessed], to: blocked, actor: planner_and_human, requires: [blocker_recorded]}
+failure_routes:
+  - {condition: capability_not_installed, action: record_install_option_without_installing, terminal: false}
+  - {condition: MCP_configured_but_unreachable, action: mark_unready_and_document_local_probe, terminal: false}
+  - {condition: skill_source_missing, action: record_missing_skill_and_use_prompt_fallback, terminal: false}
+invariants:
+  - {id: declaration_is_not_readiness, description: A config entry is not proof that a CLI, MCP or skill is callable.}
+  - {id: no_secret_values, description: Probes and reports never print credential values.}
+  - {id: every_chapter_has_fallback, description: Each unavailable capability has a safe alternate or an explicit blocker.}
+  - {id: tool_choice_is_evidence_based, description: Tool suitability includes cost, determinism, latency, permissions and output quality.}
+  - {id: resource_accounting, description: Probe cost and inference cost are distinguished.}
+  - {id: dual_confidence, description: Probe evidence confidence is separated from confidence in the readiness/suitability judgment.}

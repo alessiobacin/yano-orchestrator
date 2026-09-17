@@ -47,6 +47,24 @@ Se l'istanza è realmente scomparsa, il planner deve rilanciarla con 'yano
 start' nella tab Herdr corretta. Non aprire una seconda istanza con lo stesso
 nome.
 
+## Il planner annuncia un test ma non lo esegue
+
+Controlla se l'ultimo messaggio del planner contiene una promessa operativa
+senza una `tool_call`:
+
+~~~
+yano trace events --project yano-orchestrator --instance planner-01 \
+  --type planner_action_claim_without_tool --limit 20 --json
+yano trace events --project yano-orchestrator --instance planner-01 \
+  --type planner_action_guard_wakeup --limit 20 --json
+~~~
+
+Yano mantiene il task non completato e riattiva il planner con un follow-up
+correttivo (al massimo due tentativi per lo stesso messaggio). Se compare
+`planner_action_guard_exhausted`, controlla anche `yano doctor --network` e
+`yano fleet --project-root "$PWD" --json`: indica che il modello ha continuato
+a non chiamare il tool, non un risultato positivo del test.
+
 ## yano init rifiuta una directory non vuota
 
 Per una repository applicativa esistente esegui il comando dalla sua root:
@@ -69,6 +87,24 @@ yano doctor
 
 Poi ripeti 'yano init --herdr' dalla root del progetto. Se il workspace esiste
 già, Yano lo riusa solo quando è associato alla stessa directory.
+
+## `yano start --herdr` segnala `agent_kind_mismatch`
+
+Durante l'avvio Herdr può rispondere con `agent_kind_mismatch` mentre il
+lifecycle hook di Pi sta ancora registrando l'identità del processo. Yano
+verifica automaticamente lo stesso pane per una finestra bounded, sufficiente
+anche a un avvio a freddo, e recupera
+il caso solo quando Herdr mostra `agent: pi` in uno stato live. Non rilanciare
+manualmente il planner prima di questa verifica: si rischia di creare un
+secondo pane. Se l'errore resta, raccogli:
+
+~~~bash
+herdr agent explain <pane-id> --json
+yano fleet --project-root "$PWD" --json
+~~~
+
+Un'identità diversa da `pi`, oppure uno stato `done`/`offline`/`unknown`, resta
+un errore reale da diagnosticare.
 
 ## Il reload resta in attesa del safe point
 

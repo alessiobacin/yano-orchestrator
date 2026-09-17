@@ -36,17 +36,15 @@ schema di autenticazione non consente il provisioning automatico, il coder
 deve documentare il comando/fixture riproducibile e il planner deve bloccare
 l'E2E con una motivazione esplicita, senza inventare credenziali.
 
-## Gate Agentation
+## Gate di review visuale
 
-Dopo l'approvazione frontend/E2E e prima della chiusura, il planner chiede:
-
-> Vuoi fare una review visuale dell'app in sviluppo con Agentation?
-
-Se l'utente accetta, il planner esegue dalla root del progetto:
+Dopo l’approvazione frontend/E2E e prima della chiusura, il planner offre la
+review visuale all’utente e registra la risposta esplicita. Se accetta, verifica
+l’URL dev reale e usa l’adapter DOM:
 
 ```bash
-yano frontend-review setup
-yano frontend-review start
+yano feedback-api start --no-open
+yano frontend-review browser --url http://localhost:8501
 ```
 
 `setup` installa `agentation` come devDependency se manca e verifica
@@ -62,7 +60,9 @@ restituito da `setup`). Per i frontend browser-only la pagina wrapper è
 servita da `yano frontend-dash start` sulla route `/<project-id>/__yano-review`.
 Il planner non deve inventare l'URL: se l'avvio
 fallisce, riporta il blocco preciso.
-
-Il server MCP Agentation è a disposizione del planner. Le annotazioni vengono
-classificate dal planner; quelle di frontend vengono affidate al
-`frontend-developer` e rientrano nel normale ciclo di review e test.
+Il bookmarklet raccoglie annotazioni e screenshot tramite l’API Yano. Non
+richiede dipendenze React. Le correzioni rientrano nel ciclo frontend e nei test.
+Agentation `setup`/`start` resta opzionale per integrazioni legacy.
+I campi di finalize `agentation_*` mantengono i nomi per compatibilità e
+registrano l’esito anche della review DOM. Uso, opt-out e limiti browser nella
+[guida Yano essenziale](../../quick-guides/yano-essential.md).

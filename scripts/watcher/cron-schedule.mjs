@@ -45,9 +45,9 @@ export function cronInstall() {
 	const windows = installOneMinuteWindowsJob({ marker: CRON_MARKER, command: cronCommand() });
 	if (windows) return windows;
 	const line = `* * * * * ${cronCommand()}`;
-	const existing = readCrontab().split("\n").filter((item) => item.trim() && !item.includes(CRON_MARKER));
+	const existing = readCrontab().split("\n").filter((item) => item.trim() && !item.includes(CRON_MARKER) && !item.includes("# yano-scheduler-supervisor"));
 	const content = [...existing, line].join("\n") + "\n";
-	const result = spawnSync("crontab", ["-"], { input: content, encoding: "utf8", maxBuffer: 1_000_000 });
+	const result = spawnSync("crontab", ["-"], { timeout: 10_000, input: content, encoding: "utf8", maxBuffer: 1_000_000 });
 	if (result.status !== 0) throw new Error(`yano watcher: impossibile installare il crontab${result.stderr ? `: ${result.stderr.trim()}` : ""}`);
 	return { installed: true, schedule: "* * * * *", command: line, marker: CRON_MARKER, backend: "crontab" };
 }
@@ -67,9 +67,9 @@ export function cronStatus() {
 export function cronRemove() {
 	const windows = removeOneMinuteWindowsJob({ marker: CRON_MARKER });
 	if (windows) return windows;
-	const existing = readCrontab().split("\n").filter((item) => item.trim() && !item.includes(CRON_MARKER));
+	const existing = readCrontab().split("\n").filter((item) => item.trim() && !item.includes(CRON_MARKER) && !item.includes("# yano-scheduler-supervisor"));
 	const content = existing.length ? `${existing.join("\n")}\n` : "";
-	const result = spawnSync("crontab", ["-"], { input: content, encoding: "utf8", maxBuffer: 1_000_000 });
+	const result = spawnSync("crontab", ["-"], { timeout: 10_000, input: content, encoding: "utf8", maxBuffer: 1_000_000 });
 	if (result.status !== 0) throw new Error(`yano watcher: impossibile rimuovere il crontab${result.stderr ? `: ${result.stderr.trim()}` : ""}`);
 	return { installed: false, removed: true, marker: CRON_MARKER, backend: "crontab" };
 }

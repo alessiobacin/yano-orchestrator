@@ -14,6 +14,10 @@ Per i worker esterni usare i comandi dedicati (yano watcher, yano feedback,
 yano auto-improve, yano feedback). Il titolo della tab Herdr coincide con
 l’istanza.
 
+Se l'handshake Herdr restituisce transitoriamente `agent_kind_mismatch`, Yano
+controlla lo stesso pane e conclude l'avvio solo quando la snapshot conferma
+`agent: pi` in stato live.
+
 Per preparare una review visuale approvata dall'utente:
 
 ```bash

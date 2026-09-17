@@ -1,0 +1,63 @@
+schema_version: 1
+id: test-adequacy-audit
+label: Use-case and test adequacy audit
+description: >-
+  Maps documented and inferred use cases, command state transitions, error
+  paths and cross-command effects to the existing test suite. It distinguishes
+  test existence from meaningful coverage and proposes the smallest high-value
+  additions for standard, medium and deep QA.
+catalog:
+  scope: global
+  reusable: true
+  intents: [test coverage audit, use case coverage, test adequacy, missing regression tests, cross-command QA review]
+  exclusions: [test deletion to hide failures, production data, unbounded fuzzing]
+  parameters: [project_root, variant, input_manifest, input_qa_report, campaign_id, chapter_id]
+requirements:
+  cli: [node, npm, npx, git]
+  skills: [yano-cli, yano-planner-trace-analysis]
+team:
+  strategy: use-case catalogue, test mapping, targeted execution, gap analysis
+  default_variant: medium
+  roles:
+    - {id: repo-cartographer, purpose: Provide command, source, documentation and test inventory., outputs: [capability-index], write_scope: [chapter-report-only], capabilities: [node, git]}
+    - {id: test-adequacy-analyst, purpose: Map use cases and state transitions to tests and evidence., outputs: [coverage-map, gaps], write_scope: [chapter-report-only], capabilities: [node, npm, npx]}
+    - {id: qa-functional-verifier, purpose: Execute bounded happy, negative and cross-command checks., outputs: [execution-evidence], write_scope: [isolated-test-artifacts-only], capabilities: [node, npm]}
+    - {id: mutation-tester, purpose: Assess whether tests detect representative behavior mutations when tooling is available., outputs: [mutation-signal], write_scope: [isolated-test-artifacts-only], capabilities: [node, npm]}
+  variants:
+    - {id: standard, roles: [repo-cartographer, test-adequacy-analyst, qa-functional-verifier], parallel_groups: [[test-adequacy-analyst]]}
+    - {id: medium, roles: [repo-cartographer, test-adequacy-analyst, qa-functional-verifier, mutation-tester], parallel_groups: [[test-adequacy-analyst, qa-functional-verifier]]}
+    - {id: deep, roles: [repo-cartographer, test-adequacy-analyst, qa-functional-verifier, mutation-tester], parallel_groups: [[test-adequacy-analyst, qa-functional-verifier, mutation-tester]]}
+contract:
+  execution: inventory_then_use_case_mapping_then_bounded_execution_then_gap_review
+  checkpoint: every_use_case_batch_and_full_rerun
+  evidence: [use_case, expected_behavior, test_reference, command, exit_code, observed_behavior, cross_command_effect, coverage_signal, mutation_signal, confidence, evidence_confidence, judgment_confidence, judgment_confidence_rationale, limitation, resource_record]
+  report_sections: [scope, use_case_catalog, test_mapping, executed_matrix, cross_command_effects, negative_paths, mutation_or_substitute, gaps, recommended_tests, resource_accounting]
+  budgets: {max_commands: 350, max_files: 800, max_minutes: 150, max_tokens: 42000}
+  verification: {mode: use_case_matrix_with_regression_and_cross_command_checks, required: true}
+  recovery: [resume_from_use_case_checkpoint, rerun_failed_case, preserve_raw_output, full_rerun_after_changes]
+states:
+  - {id: received, owner: planner, terminal: false}
+  - {id: mapped, owner: test-adequacy-analyst, terminal: false}
+  - {id: executing, owner: qa-functional-verifier, terminal: false}
+  - {id: mutation_review, owner: mutation-tester, terminal: false}
+  - {id: gaps, owner: test-adequacy-analyst, terminal: false}
+  - {id: completed, owner: planner, terminal: true}
+  - {id: blocked, owner: planner_and_human, terminal: true}
+transitions:
+  - {id: map, from: received, to: mapped, actor: test-adequacy-analyst, requires: [manifest_or_inventory_available, documented_capabilities_indexed]}
+  - {id: execute, from: mapped, to: executing, actor: qa-functional-verifier, requires: [use_case_matrix_persisted, isolated_boundary_confirmed]}
+  - {id: mutation, from: executing, to: mutation_review, actor: mutation-tester, requires: [baseline_suite_recorded]}
+  - {id: analyse, from: mutation_review, to: gaps, actor: test-adequacy-analyst, requires: [execution_results_persisted, mutation_signal_or_limitation_recorded]}
+  - {id: complete, from: gaps, to: completed, actor: planner, requires: [every_use_case_verdict, gaps_prioritized, resource_ledger_persisted]}
+  - {id: block, from: [mapped, executing, mutation_review, gaps], to: blocked, actor: planner_and_human, requires: [blocker_recorded]}
+failure_routes:
+  - {condition: test_command_missing, action: record_unavailable_and_continue_static_mapping, terminal: false}
+  - {condition: flaky_test, action: rerun_bounded_and_classify_flake, terminal: false}
+  - {condition: destructive_fixture, action: stop_and_isolate_or_block, terminal: false}
+invariants:
+  - {id: coverage_is_use_case_based, description: A line or file percentage never substitutes for mapping user-visible and stateful use cases.}
+  - {id: expected_human_behavior, description: Every functional case states what a human would reasonably expect before comparing actual output.}
+  - {id: cross_command_effects, description: Mutating commands are checked against all declared downstream views and queries.}
+  - {id: no_false_green, description: A passing smoke command cannot close an untested negative, retry, restart or persistence path.}
+  - {id: resource_accounting, description: Execution and inference cost are recorded separately.}
+  - {id: dual_confidence, description: Coverage evidence confidence is separate from the analyst's confidence in the adequacy judgment, with a short rationale.}

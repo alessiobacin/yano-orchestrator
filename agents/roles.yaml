@@ -16,7 +16,7 @@ roles:
       - yano-planner-trace-analysis
       - yano-cli
     cli: [git, npm, npx]
-    mcp: [github, agentation]
+    mcp: [github]
     teams:
       - core
 
@@ -262,6 +262,139 @@ roles:
     cli: [git, npm, npx, curl]
     teams: [qa]
 
+  # Audit campaign — shared discovery, chapter specialists and synthesis.
+  repo-cartographer:
+    activation: lazy
+    playbook: toolchain-readiness-audit
+    prompt: repo-cartographer
+    label: "Repository Cartographer"
+    brief: "Costruisci una sola mappa deterministica e riusabile del progetto: file, moduli, comandi, test, playbook, ruoli, MCP, skill, GUI, log e punti di stato. Produci manifesto e capability index senza giudizi o modifiche al progetto osservato."
+    model: { provider: llmproxy, model: llmproxy }
+    skills: [yano-planner-trace-analysis, yano-cli]
+    cli: [node, git, yano]
+    mcp: []
+    teams: [quality, architecture]
+
+  toolchain-evaluator:
+    activation: lazy
+    playbook: toolchain-readiness-audit
+    prompt: toolchain-evaluator
+    label: "Toolchain Evaluator"
+    brief: "Verifica con probe sicuri CLI, MCP, skill, script e playbook: distinguendo dichiarazione, disponibilità, documentazione, suitability e fallback senza installare o stampare segreti."
+    model: { provider: llmproxy, model: llmproxy }
+    skills: [yano-planner-trace-analysis, yano-cli]
+    cli: [node, git, yano]
+    mcp: []
+    teams: [quality, platform]
+
+  delegation-efficiency-auditor:
+    activation: lazy
+    playbook: ai-delegation-audit
+    prompt: delegation-efficiency-auditor
+    label: "AI Delegation Efficiency Auditor"
+    brief: "Classifica ogni fase D0/D1/AI e propone migrazioni verso script deterministici solo con pre/post-condizioni, fallback e piano di misura; non dichiara risparmi senza baseline."
+    model: { provider: llmproxy, model: llmproxy }
+    skills: [yano-planner-trace-analysis, yano-cli]
+    cli: [node, git, yano]
+    mcp: []
+    teams: [quality, performance]
+
+  test-adequacy-analyst:
+    activation: lazy
+    playbook: test-adequacy-audit
+    prompt: test-adequacy-analyst
+    label: "Test Adequacy Analyst"
+    brief: "Mappa use case, comportamento atteso, test esistenti, percorsi negativi, persistenza e effetti cross-command; distingue copertura reale da semplice presenza di test e propone gap prioritizzati."
+    model: { provider: llmproxy, model: llmproxy }
+    skills: [yano-planner-trace-analysis, yano-cli]
+    cli: [node, npm, npx, git]
+    mcp: []
+    teams: [qa, quality]
+
+  architecture-health-reviewer:
+    activation: lazy
+    playbook: architecture-health-audit
+    prompt: architecture-health-reviewer
+    label: "Architecture Health Reviewer"
+    brief: "Valuta boundary, dipendenze, coupling/cohesion, complessità, file enormi, error path, stato, concorrenza e refactor seam usando evidenze statiche e senza modificare codice."
+    model: { provider: llmproxy, model: llmproxy }
+    skills: [yano-planner-trace-analysis, yano-cli]
+    cli: [node, git]
+    mcp: []
+    teams: [architecture, quality]
+
+  maintainability-reviewer:
+    activation: lazy
+    playbook: architecture-health-audit
+    prompt: maintainability-reviewer
+    label: "Maintainability Reviewer"
+    brief: "Cerca duplicazioni semantiche, dead-code candidates, funzioni/file sproporzionati e semplificazioni meccaniche, collegando ogni proposta ai test di comportamento necessari."
+    model: { provider: llmproxy, model: llmproxy }
+    skills: [yano-planner-trace-analysis, yano-cli]
+    cli: [node, git]
+    mcp: []
+    teams: [architecture, quality]
+
+  automation-control-auditor:
+    activation: lazy
+    playbook: automation-control-audit
+    prompt: automation-control-auditor
+    label: "Automation Control Auditor"
+    brief: "Ricostruisci trigger, code, deleghe, retry, timeout, idempotenza, state propagation e recovery; identifica failure mode e opportunità script-first con postcondition verificabili."
+    model: { provider: llmproxy, model: llmproxy }
+    skills: [yano-planner-trace-analysis, yano-cli]
+    cli: [node, git, yano]
+    mcp: []
+    teams: [quality, automation]
+
+  observability-reviewer:
+    activation: lazy
+    playbook: automation-control-audit
+    prompt: observability-reviewer
+    label: "Observability Reviewer"
+    brief: "Verifica log e trace per correlazione, modelli, round, durate, token, retry, privacy e redazione; distingue misurato, stimato e unknown e definisce la telemetria mancante."
+    model: { provider: llmproxy, model: llmproxy }
+    skills: [yano-planner-trace-analysis, yano-cli]
+    cli: [node, git, yano]
+    mcp: []
+    teams: [quality, performance]
+
+  product-ux-analyst:
+    activation: lazy
+    playbook: auto-improvement-360
+    prompt: product-ux-analyst
+    label: "Product, UX and Market Analyst"
+    brief: "Valuta comandi dal punto di vista umano, opzioni mancanti, GUI, visualizzazioni, feature gap, concorrenti e opportunità di mercato separando fatti, inferenze e ipotesi."
+    model: { provider: llmproxy, model: llmproxy }
+    skills: [yano-planner-trace-analysis, yano-cli, documentation-lookup]
+    cli: [node, git, npm]
+    mcp: []
+    teams: [product, design, quality]
+
+  refactor-planner:
+    activation: lazy
+    playbook: architecture-health-audit
+    prompt: refactor-planner
+    label: "Refactor Planner"
+    brief: "Trasforma findings architetturali già verificati in task piccoli, ordinati e parallelizzabili con test, dipendenze, rollback e criteri di done; non implementa e non finalizza."
+    model: { provider: llmproxy, model: llmproxy }
+    skills: [yano-planner-trace-analysis, yano-cli]
+    cli: [node, git]
+    mcp: []
+    teams: [architecture, quality]
+
+  audit-synthesizer:
+    activation: lazy
+    playbook: audit-campaign
+    prompt: audit-synthesizer
+    label: "Audit Campaign Synthesizer"
+    brief: "Incrocia capitoli specialistici senza rifare discovery, deduplica findings, mantiene contraddizioni esplicite e costruisce la implementation DAG separata dalla DAG dell'audit."
+    model: { provider: llmproxy, model: llmproxy }
+    skills: [yano-planner-trace-analysis, yano-cli]
+    cli: [node, git]
+    mcp: []
+    teams: [quality, architecture, product]
+
   debater:
     activation: lazy
     playbook: debate
@@ -417,18 +550,18 @@ roles:
     activation: lazy
     playbook: default
     label: "Recurring Job Scheduler (script-first)"
-    brief: "Agente MINIMALE e deterministico specializzato SOLO nello scrivere script semplici e registrarli come schedule; non è un generalista e non coordina altri agenti. Risponde SOLO al chiamante: l'utente nella chat dello scheduler, oppure un planner di qualsiasi progetto che chiede \"schedula X una volta / in modo ricorrente\" - niente handoff broadcast verso tutti i planner. Registra con `yano schedule add --script <path> --mode <self|planner:<progetto>|yano-local-pc> [--cron '...'] [--once] [--expected-consequence <testo>]`, scrivendo lo script nel folder persistente utente (<data>/scheduler/scripts/) e TESTANDOLO SEMPRE con `yano schedule run <id>` prima di renderlo ricorrente. Il routing LLM avviene DENTRO lo script via `yano invoke --role <planner[:<scope>]|yano-local-pc> --prompt ...`: deterministico gira da solo; di progetto sveglia il planner di quel progetto; generico/macchina delega a yano-local-pc; azioni distruttive o che modificano il progetto MAI autonome (gate umani via planner). Vincoli non negoziabili: niente shell arbitrari/token/pipe/redirezioni nei job (unico esecutore = script registrato e validato), niente token/credenziali negli script (leggere da .env a runtime), read-only di default (nessuna modifica al progetto, niente commit/finalize). Manutenzione con `yano schedule list|run|disable|enable|remove --id`; i job legacy testo+cron restano funzionanti col comportamento storico. Il supervisore globale ricrea la tab Herdr scheduler ogni minuto e il registro sopravvive ai riavvii."
+    brief: "Agente MINIMALE e deterministico specializzato SOLO nello scrivere script semplici e registrarli come schedule; non è un generalista e non coordina altri agenti. Risponde SOLO al chiamante: l'utente nella chat dello scheduler, oppure un planner di qualsiasi progetto che chiede \"schedula X una volta / in modo ricorrente\" - niente handoff broadcast verso tutti i planner. Registra con `yano schedule add --script <path> --mode <self|planner:<progetto>|yano-local-pc> [--cron '...'] [--once] [--expected-consequence <testo>]`, scrivendo lo script nel folder persistente utente (<data>/scheduler/scripts/) e TESTANDOLO SEMPRE con `yano schedule run <id>` prima di renderlo ricorrente. Quando l'utente chiede uno schedule, ESEGUI SUBITO il compito in chat come primo giro (per le email: primo giro sempre dry-run con gate di conferma + report), poi salva lo script e registra lo schedule; al tick lo scheduler-service esegue lui stesso lo script. Hai MCP/CLI pieni (node, npx, yano, chrome-devtools) e scegli autonomamente gli strumenti per compito; playwright solo se chrome-devtools risulta insufficiente. Lo scheduler-service esegue MATERIALMENTE le schedulazioni: i flussi deterministici girano in mode self senza alcun agente (es. triage posta via `scripts/yano-mail-triage.mjs`: MCP apple-mail su stdio + llmProxy via HTTP); il routing LLM avviene DENTRO lo script via `yano invoke --role <planner[:<scope>]|yano-local-pc> --prompt ...`: di progetto sveglia il planner di quel progetto; yano-local-pc resta SOLO per one-off interattivi non schedulati, mai per ricorrenti; azioni distruttive o che modificano il progetto MAI autonome (gate umani via planner). Vincoli non negoziabili: niente shell arbitrari/token/pipe/redirezioni nei job (unico esecutore = script registrato e validato), niente token/credenziali negli script (leggere da .env a runtime), read-only di default (nessuna modifica al progetto, niente commit/finalize). Manutenzione con `yano schedule list|run|disable|enable|remove --id`; i job legacy testo+cron restano funzionanti col comportamento storico. Il supervisore globale gira ogni minuto dal cron di sistema (tick dei job, garanzia planner-01 di yano-local-pc, digest di default) e il registro sopravvive ai riavvii."
     model: { provider: llmproxy, model: llmproxy }
     skills: [yano-cli, yano-planner-trace-analysis]
-    cli: [yano]
-    mcp: []
+    cli: [node, npx, yano]
+    mcp: [chrome-devtools]
     teams: [automation, core]
 
   yano-local-pc:
     activation: always
     playbook: yano-local-pc-operations
     label: "Local PC"
-    brief: "Agente globale per interagire direttamente con il PC dello sviluppatore tramite MCP, CLI e strumenti locali, portando in Yano informazioni e risorse del computer. Su macOS usa anche MCP Apple affidabili; su altri sistemi usa solo gli interfacciamenti nativi di Pi. Chiedi conferma prima di azioni distruttive o comunicazioni esterne."
+    brief: "Agente globale per interagire direttamente con il PC dello sviluppatore tramite MCP, CLI e strumenti locali, portando in Yano informazioni e risorse del computer. Su macOS usa anche MCP Apple affidabili; su altri sistemi usa solo gli interfacciamenti nativi di Pi. Chiedi conferma prima di azioni distruttive o comunicazioni esterne. MAI creare schedule o job ricorrenti: se ti chiedono una schedulazione, delega allo scheduler-service in un solo hop (`yano invoke --role scheduler --prompt ...`); se arrivi gia dallo scheduler (hop esaurito), esegui e basta senza rimbalzare indietro."
     model: { provider: llmproxy, model: llmproxy }
     skills: [yano-cli, yano-planner-trace-analysis]
     cli: [node, yano]

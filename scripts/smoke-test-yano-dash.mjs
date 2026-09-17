@@ -19,7 +19,7 @@ import { createRequire } from "node:module";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "yano-dash-"));
-const env = { ...process.env, YANO_DATA_DIR: dataDir, YANO_FEEDBACK_SKIP_NOTIFY: "1" };
+const env = { ...process.env, YANO_DATA_DIR: dataDir, YANO_FEEDBACK_SKIP_NOTIFY: "1", YANO_TEST_MODE: "1" };
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const require = createRequire(import.meta.url);
 
@@ -59,11 +59,6 @@ function seedWatcherRegistry() {
 
 function dashStatePath() {
 	return path.join(dataDir, "dashboards", "dash.json");
-}
-
-function assertValidModule(source, label) {
-	const result = spawnSync(process.execPath, ["--input-type=module", "--check"], { input: source, encoding: "utf8" });
-	assert.equal(result.status, 0, `${label}: non è un modulo ES valido — ${result.stderr}`);
 }
 
 async function fetchJson(url, options) {
@@ -106,31 +101,27 @@ try {
 	}
 	console.log("   OK");
 
-	console.log("=== GET / serves HTML referencing app.js as a module ===");
+	console.log("=== API discovery replaces the removed GUI ===");
 	{
-		const response = await fetch(`http://127.0.0.1:${dash.port}/`);
-		const htmlSource = await response.text();
-		assert.equal(response.status, 200);
-		assert.match(htmlSource, /<script[^>]*type="module"[^>]*src="\/app\.js"/);
+		const { status, body } = await fetchJson(`http://127.0.0.1:${dash.port}/`);
+		assert.equal(status, 200);
+		assert.equal(body.ui, "provided_by_application");
+		assert.equal((await fetch(`http://127.0.0.1:${dash.port}/app.js`)).status, 404);
 	}
-	console.log("   OK");
-
-	console.log("=== every served UI module is valid JavaScript ===");
-	{
-		for (const file of ["app.js", "api.js", "columns.js", "components/Header.js", "components/Board.js", "components/Card.js", "components/Drawer.js", "components/Toasts.js"]) {
-			const response = await fetch(`http://127.0.0.1:${dash.port}/${file}`);
-			assert.equal(response.status, 200, `${file} deve essere servito`);
-			const source = await response.text();
-			assertValidModule(source, file);
-			if (file === "components/Card.js") {
-				assert.match(source, /class="w-full min-w-0 max-w-full/);
-				assert.match(source, /shrink-0 whitespace-nowrap/);
-				assert.doesNotMatch(source, /w-\[70%\]/);
-			}
-		}
-	}
-	console.log("   OK");
-
+	console.log("=== generic browser annotations preserve context and screenshot ===");
+    {
+        const script = await fetch(`http://127.0.0.1:${dash.port}/review.js`);
+        assert.equal(script.status, 200);
+        assert.match(await script.text(), /yano-review-overlay/);
+        const payload = { annotation: { id: "browser-fixture", comment: "Il bottone è fuori posto", elementPath: "#save", element: "button" }, page_url: "http://localhost:8501", browser_context: { viewport: { width: 390, height: 844 } }, screenshots: [{name:"pixel.png",data:"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aG1sAAAAASUVORK5CYII="}] };
+        const {status,body} = await fetchJson(`http://127.0.0.1:${dash.port}/api/annotations/demo`, {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload)});
+        assert.equal(status,201);
+        assert.equal(JSON.parse(body.browser_context).viewport.width,390);
+        assert.equal(body.screenshots.length,1);
+        const duplicate = await fetchJson(`http://127.0.0.1:${dash.port}/api/annotations/demo`, {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload)});
+        assert.equal(duplicate.status,200);
+        assert.equal(duplicate.body.id,body.id);
+    }
 	console.log("=== dashboard can create a bug without credentials ===");
 	let bugId;
 	{
@@ -192,8 +183,8 @@ try {
 		const stopResult = spawnSync("node", [path.join(root, "bin", "yano.mjs"), "dash", "stop"], { cwd: root, env, encoding: "utf8" });
 		assert.equal(stopResult.status, 0, `yano dash stop è uscito con codice diverso da zero: ${stopResult.stderr}`);
 		const deadline = Date.now() + 5_000;
-		while (Date.now() < deadline && dash.child.exitCode === null) await sleep(50);
-		assert.notEqual(dash.child.exitCode, null, "il processo OS di yano dash deve terminare davvero dopo 'stop', anche con una connessione SSE ancora aperta");
+		while (Date.now() < deadline && dash.child.exitCode === null && dash.child.signalCode === null) await sleep(50);
+		assert.ok(dash.child.exitCode !== null || dash.child.signalCode !== null, "il processo OS di yano dash deve terminare davvero dopo 'stop', anche con una connessione SSE ancora aperta");
 		const stopped = JSON.parse(fs.readFileSync(dashStatePath(), "utf8"));
 		assert.equal(stopped.pid, null);
 	}
@@ -202,7 +193,7 @@ try {
 
 	console.log("\nAll yano-dash tests passed.");
 } finally {
-	if (dash?.child && dash.child.exitCode === null) {
+	if (dash?.child && dash.child.exitCode === null && dash.child.signalCode === null) {
 		try {
 			dash.child.kill("SIGKILL");
 		} catch { /* already gone */ }

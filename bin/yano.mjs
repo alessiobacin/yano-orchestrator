@@ -94,7 +94,9 @@ import { applyGlobalConfig, runYanoConfig } from "../scripts/yano-config.mjs";
 import { runYanoHarnessSkills } from "../scripts/install-yano-cli.mjs";
 import { runYanoProjects } from "../scripts/yano-projects.mjs";
 import { runYanoRules } from "../scripts/yano-rules.mjs";
+import { runYanoSchedulerRules } from "../scripts/yano-scheduler-rules.mjs";
 import { runYanoScheduler } from "../scripts/yano-scheduler.mjs";
+import { confirmMailTriageGate, runMailTriage } from "../scripts/yano-mail-triage.mjs";
 import { runYanoInvoke } from "../scripts/yano-invoke.mjs";
 import { runYanoLocalPc } from "../scripts/yano-local-pc.mjs";
 import { runYanoServices } from "../scripts/yano-services.mjs";
@@ -102,9 +104,11 @@ import { runYanoDocsCheck } from "../scripts/yano-docs-check.mjs";
 import { runYanoQaInventory } from "../scripts/yano-qa-inventory.mjs";
 import { runYanoTestEnvironment } from "../scripts/yano-test-environment.mjs";
 import { runYanoAgentMcp } from "../scripts/yano-agent-mcp.mjs";
+import { runPonytail } from "../scripts/yano-ponytail.mjs";
 import { runFrontendReview } from "../scripts/yano-frontend-review.mjs";
 import { runYanoMemory } from "../scripts/yano-memory-cli.mjs";
 import { runYanoApi } from "../scripts/yano-api-registry.mjs";
+import { capabilitiesPath, detectCapabilities, readCapabilities, syncCapabilities, writeCapabilities } from "../scripts/yano-capabilities.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, "..");
@@ -134,7 +138,8 @@ function printTopUsage() {
 			'  end [opzioni]    Chiude i run "active" del progetto nella directory corrente — `yano end --help`',
 			'  leave [--project-root <dir>] --yes Rimuove definitivamente il progetto corrente dal registro watcher',
 			"  copy-prompts     Copia prompts/ dal pacchetto installato nel progetto corrente, per personalizzarli",
-			"  frontend-review setup|start|url  Prepara Agentation e avvia il frontend dev con URL inferito (React/Angular/Streamlit/Python/statico)",
+			"  frontend-review browser|setup|start|url  Review DOM e adapter frontend (React/Angular/Streamlit/Python/statico)",
+            "  ponytail on|off|status [--global]  Skill predefinita per tutti gli agenti",
 			"  memory agents|list|show|create|update|delete  Consulta e gestisce le memorie Yano",
 			"  status|logs|fleet|mcp          Viste read-only del progetto e della flotta",
 			"  projects [--json]             Conta i progetti Yano con agenti live in Herdr",
@@ -149,7 +154,7 @@ function printTopUsage() {
 			"  trace [opzioni]  Attiva/disattiva, cerca e cancella il tracing globale — `yano trace --help`",
 			"  auto-improve [opzioni] Audit periodici read-only e report al planner — `yano auto-improve --help`",
 			"  feedback serve|create|list|get|update|delete  CRUD bug e suggestions — API su porta 20002",
-			"  dash start|stop           Kanban bug+suggestions unificato, sempre attivo (11000, fallback 11000-11999)",
+			"  feedback-api start|stop   API bug/suggestions per le app (alias compatibile: dash)",
 			"  frontend-dash start|stop|list  Reverse proxy development + Agentation (10000-10999)",
 			"  model-advisor [opzioni] Propone un provider:model pinnato da llmProxy per role-class — `yano model-advisor --help`",
 			"  architect [opzioni]  Progetta/provisiona playbook e ruoli globali — `yano architect --help`",
@@ -157,11 +162,14 @@ function printTopUsage() {
 			"  config [opzioni] Gestisce la configurazione globale utente — `yano config --help`",
 			"  rule [opzioni]   Gestisce regole globali e per-progetto — `yano rule --help`",
 			"  schedule [opzioni] Crea job ricorrenti a script; cron persistente e ripulibile — `yano schedule --help`",
+			"  schedule-rules [opzioni] Regole persistenti dello scheduler (query/modifica semantica) — `yano schedule-rules --help`",
+			"  mail-triage [--dry-run|--confirm]  Triage posta dello scheduler (solo Cestino) — primo giro con gate di conferma",
 			"  cron [opzioni]  CRUD naturale dei job ricorrenti e supervisore yano-scheduler — `yano cron --help`",
 			"  local-pc start|status|ask  Agente del PC sviluppatore — `yano local-pc --help`",
 			"  services [opzioni] Registro servizi esterni (Docker/pm2/comando) con health-check e restart deterministico — `yano services --help`",
 			"  api discover|list|show|add|verify|refresh|update|delete  REST API da Postman/OpenAPI — `yano api --help`",
 			"  test-env allocate|show|release  Alloca porte isolate per E2E/review in un worktree",
+			"  capabilities show|detect|set  Gestisce la topologia frontend/backend dichiarata del progetto",
 			"  data path|usage|migrate  Misura o migra il data-root globale — `yano data --help`",
 			"  pause [opzioni]  Salva uno snapshot non distruttivo e mette in pausa i run",
 			"  resume [opzioni] Ripristina uno snapshot e riapre gli agenti mancanti",
@@ -193,6 +201,32 @@ async function main() {
 	if (sub === "init") {
 		await runCreateProject({ packageRoot, cwd, argv: rest });
 		return;
+	}
+	if (sub === "capabilities") {
+		const action = rest[0] || "show";
+		if (action === "show") {
+			console.log(JSON.stringify(readCapabilities(cwd) || { path: capabilitiesPath(cwd), status: "missing" }, null, 2));
+			return;
+		}
+		if (action === "detect" && rest.includes("--write")) {
+			console.log(JSON.stringify(syncCapabilities(cwd), null, 2));
+			return;
+		}
+		if (action === "detect") {
+			console.log(JSON.stringify(detectCapabilities(cwd), null, 2));
+			return;
+		}
+		if (action === "set" && ["frontend", "backend"].includes(rest[1])) {
+			const kind = rest[1];
+			const existing = readCapabilities(cwd) || detectCapabilities(cwd);
+			const absent = rest.includes("--absent");
+			const urlIndex = rest.indexOf("--url");
+			const url = urlIndex >= 0 ? rest[urlIndex + 1] : null;
+			const component = absent ? { present: false, source: "planner", confidence: "confirmed" } : { ...(existing.components?.[kind] || {}), present: true, ...(url ? { url } : {}), source: "planner", confidence: "confirmed" };
+			console.log(JSON.stringify(writeCapabilities(cwd, { ...existing, components: { ...existing.components, [kind]: component } }), null, 2));
+			return;
+		}
+		throw new Error("Uso: yano capabilities show|detect [--write]|set <frontend|backend> [--url URL|--absent]");
 	}
 	if (sub === "start") {
 		runLaunchPlanner({ packageRoot, cwd, argv: rest });
@@ -236,6 +270,25 @@ async function main() {
 	}
 	if (sub === "rule" || sub === "rules") {
 		runYanoRules({ argv: rest });
+		return;
+	}
+	if (sub === "mail-triage") {
+		if (rest.includes("--help") || rest.includes("-h") || (!rest.length && process.argv.includes("--help"))) {
+			console.log(["Uso: yano mail-triage [--dry-run|--confirm|--no-notify]", "  Triage posta dello scheduler (solo Cestino, mai definitiva). Primo giro con gate di conferma.", "  --dry-run    classifica soltanto, nessuna delete", "  --confirm    registra la conferma del primo giro (i prossimi giri eseguono davvero)", "  --no-notify  salta la notifica globale"].join("\n"));
+			return;
+		}
+		if (rest.includes("--confirm")) {
+			console.log(JSON.stringify(confirmMailTriageGate(), null, 2));
+			return;
+		}
+		if (rest.includes("--dry-run")) process.argv.push("--dry-run");
+		const report = await runMailTriage({ notify: !rest.includes("--no-notify") });
+		console.log(JSON.stringify(report, null, 2));
+		process.exitCode = report.ok ? 0 : 1;
+		return;
+	}
+	if (sub === "schedule-rules" || sub === "scheduler-rules") {
+		runYanoSchedulerRules({ argv: rest });
 		return;
 	}
 	if (sub === "schedule") {
@@ -327,7 +380,7 @@ async function main() {
 		await runYanoFeedback({ argv: sub === "feedback" ? rest : [rest[0] || "list", ...(type ? ["--type", type] : []), ...rest.slice(1)] });
 		return;
 	}
-	if (sub === "dash") {
+	if (sub === "dash" || sub === "feedback-api") {
 		if (rest.includes("--help") || rest.includes("-h")) {
 			console.log("Uso: yano dash start|stop [--no-open] [--project-id ID] [--port N]");
 			return;
@@ -392,6 +445,7 @@ async function main() {
 		await runYanoCatalog({ kind: sub, argv: rest });
 		return;
 	}
+	if (sub === "ponytail") return runPonytail({ cwd, argv: rest });
 	if (sub === "config") {
 		await runYanoConfig({ argv: rest });
 		return;

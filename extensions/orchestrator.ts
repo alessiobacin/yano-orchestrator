@@ -1,3 +1,4 @@
+import { observedModelFromMessage } from "../scripts/yano-timeline.mjs";
 /**
  * orchestrator — MQTT-based agent bus for Pi, replacing coms.ts's socket
  * transport and flat peer-to-peer paradigm with the role/instance/capability
@@ -53,12 +54,14 @@ import { ensureTraceProject, getTraceConfig, projectKey, setTraceMode, traceEnab
 import { loadYanoRules } from "../scripts/yano-rules.mjs";
 import { loadAgentMemory, updateAgentMemory } from "../scripts/yano-agent-memory.mjs";
 import { ensureProjectSummary, projectBootstrapPrompt, scanProject } from "../scripts/yano-project-context.mjs";
+import { ponytailPrompt, ponytailPolicy } from "../scripts/yano-ponytail.mjs";
 import { collectCodeMemContext } from "../scripts/yano-code-mem-context.mjs";
 import { getProjectApi, listProjectApis, resolveApiSecret } from "../scripts/yano-api-registry.mjs";
 import { llmProxyAutoModel, switchImageTurnToAuto } from "../scripts/yano-vision-routing.mjs";
 import { recoverUnavailableRestoredModel, switchPinnedModelToAuto } from "../scripts/yano-model-fallback.mjs";
+import { buildPlannerActionGuardPrompt, findUnexecutedActionClaim } from "../scripts/planner-action-guard.mjs";
 import { recommend as recommendModel } from "../scripts/yano-model-advisor.mjs";
-import { openDatabase as openFeedbackDatabase, createFeedback as createFeedbackRecord, claimFeedback, claimNextQueuedFeedback, listFeedback, buildQueuedFeedbackWakeMessage, terminalStatusForFeedbackId } from "../scripts/yano-feedback.mjs";
+import { openDatabase as openFeedbackDatabase, createFeedback as createFeedbackRecord, claimFeedback, claimNextQueuedFeedback, peekNextQueuedFeedback, shouldParkFeedbackWake, looksLikeConfirmationRequest, looksLikeQueueIgnoreOrder, listFeedback, buildQueuedFeedbackWakeMessage, terminalStatusForFeedbackId } from "../scripts/yano-feedback.mjs";
 import { detectStalledTickets } from "../scripts/watcher/detect-stalled-tickets.mjs";
 import { writeWatchdogHeartbeat } from "../scripts/watcher/heartbeat.mjs";
 import {
@@ -219,6 +222,9 @@ type CommandEnvelope = {
 	hops: number;
 	timestamp: string;
 	response_schema?: object | null;
+	campaign_id?: string | null;
+	chapter_id?: string | null;
+	phase_id?: string | null;
 };
 
 type ResponseEnvelope = {
@@ -228,6 +234,9 @@ type ResponseEnvelope = {
 	response: any;
 	error?: string | null;
 	timestamp: string;
+	campaign_id?: string | null;
+	chapter_id?: string | null;
+	phase_id?: string | null;
 };
 
 // Revisione 42 — a forced-shutdown control message, published on the SAME
@@ -298,6 +307,10 @@ interface PresenceCard {
 	reload_requested?: boolean;
 	reload_ready?: boolean;
 	yano_runtime_version?: string | null;
+	servers?: {
+		frontend?: { url: string; running: boolean; state?: "running" | "stopped" | "error" };
+		backend?: { url: string; running: boolean; state?: "running" | "stopped" | "error" };
+	};
 }
 
 interface ActivityEvent {
@@ -336,6 +349,9 @@ interface InboundContext {
 	response_schema?: object | null;
 	prompt_preview: string;
 	fulfilled: boolean;
+	campaign_id?: string | null;
+	chapter_id?: string | null;
+	phase_id?: string | null;
 }
 
 // ━━ Config: agents.yaml / roles.yaml (architecture.md §2-4) ━━━━━━━━━━━━━━━━
@@ -705,6 +721,18 @@ const SLUG_REMINDER =
 	"evento al report con orario e stato di tutti gli agenti in quel momento —\n" +
 	"non serve che tu scriva nulla per questo, ma serve che tu passi `slug`.";
 
+const MANDATORY_CAPABILITIES_SYNC = `
+
+## Topologia frontend/backend — regola obbligatoria
+
+Se la tua modifica aggiunge, rimuove, rinomina o cambia il comportamento di
+avvio di un frontend o backend, prima dell'handoff o del completamento devi
+eseguire \`yano capabilities detect --write\` dalla directory del worktree.
+Il comando aggiorna il manifest nella root canonica del progetto in modo
+atomico. Non scrivere manualmente lo stato runtime: online/offline/errore è
+controllato dal supervisor Yano. Se la rilevazione è ambigua, non inventare
+un'assenza: segnala il caso al planner.`;
+
 // Only for roles that normally EDIT files themselves (coder, generic
 // specialist, docs-sync, frontend-developer). reviewer.md and
 // security-evaluator.md keep their own distinct tool paragraph inline
@@ -777,6 +805,9 @@ coordinamento dei round. Ogni relazione, valutazione, audit o deliverable
 documentale autonomo deve invece essere salvato nel progetto in
 \`docs/reports/<tipo>-<gg-mm-HH_MM>.md\`, usando data e ora locali italiane
 (giorno-mese-ora_minuti), con un tipo descrittivo e senza nomi generici.
+Eccezione audit-campaign: manifest + capitoli + sintesi vanno in
+\`docs/reports/audit-<variant>-<gg-mm-aa_HH-MM>/\` (variant = deep/standard/medium/...,
+data-ora italiane gg-mm-aa_HH-MM dal timestamp del manifest).
 Prima di crearne uno controlla se esiste già una relazione dello stesso tipo
 nella stessa finestra temporale e aggiornala invece di duplicarla. Riporta
 sempre fonti, evidenze, score/confidenza, limiti e stato; non inventare dati.`;
@@ -1253,6 +1284,7 @@ export default function (pi: ExtensionAPI) {
 	const activeOperations = new Map<string, { kind: string; label: string; started_at: number }>();
 	let heartbeatTimer: NodeJS.Timeout | null = null;
 	let staleSweepTimer: NodeJS.Timeout | null = null;
+	let serverStatusTimer: NodeJS.Timeout | null = null;
 	let watchdogTimer: NodeJS.Timeout | null = null;
 	// Opened lazily by the ticket tools. Presence may still use it on each
 	// heartbeat to reconcile ownership changes made by another instance (most
@@ -1335,6 +1367,8 @@ export default function (pi: ExtensionAPI) {
 	let projectBootstrap = "";
 	let projectBootstrapDelivered = false;
 	let currentInbound: InboundContext | null = null;
+	const plannerActionGuardAttempts = new Map<string, number>();
+	let turnStartedAt: number | null = null;
 	let contextCompactionInFlight = false;
 	let reloadRequested = false;
 	function reloadReady(): boolean {
@@ -1347,6 +1381,26 @@ export default function (pi: ExtensionAPI) {
 	}
 	let mqttConnected = false;
 	let everConnected = false; // distinguishes "connecting…" (first attempt) from "reconnecting…" (dropped after being up) in the widget
+	let serverStatus: { frontend?: { url: string; running: boolean; state?: "running" | "stopped" | "error" }; backend?: { url: string; running: boolean; state?: "running" | "stopped" | "error" } } = {};
+	let discoverServers: ((root: string) => Promise<typeof serverStatus>) | null = null;
+	async function refreshServerStatus(): Promise<void> {
+		if (!identity) return;
+		try {
+			// Pi's /reload can re-evaluate this extension while retaining Node's
+			// ESM module cache. Use a process-scoped query string so the discovery
+			// implementation is refreshed together with the widget.
+			if (!discoverServers) {
+				discoverServers = (await import("../scripts/yano-server-status-v2.mjs")).discoverAndProbeServers;
+			}
+			const next = await discoverServers(identity.cwd);
+			const changed = JSON.stringify(next) !== JSON.stringify(serverStatus);
+			serverStatus = next;
+			if (changed) {
+				if (mqttConnected) void publishPresence(computeSelfStatus());
+				requestPoolRedraw();
+			}
+		} catch { /* footer diagnostics are advisory */ }
+	}
 
 	function pushActivity(ev: ActivityEvent) {
 		activityLog.push(ev);
@@ -1364,7 +1418,7 @@ export default function (pi: ExtensionAPI) {
 		const name = mcpDetail || String(raw || "tool");
 		if (name === "agent_send" || name === "agent_await" || name === "agent_get" || name === "agent_list") return { kind: "AGENT", label: name };
 		if (/^(mcp__|mcp[-_:]|[A-Za-z0-9_-]+\.)/.test(name) || name.includes("mcp")) return { kind: "MCP", label: name.replace(/^mcp__/, "") };
-		if (["bash", "read", "write", "edit", "grep", "find", "ls", "command", "shell"].includes(name)) return { kind: "CLI", label: name };
+		if (["bash", "read", "write", "edit", "grep", "find", "ls", "command", "shell", "node", "npm", "npx", "git", "yano", "rg"].includes(name)) return { kind: "CLI", label: name };
 		if (/playbook|plan_/i.test(name)) return { kind: "PLAYBOOK", label: name };
 		return { kind: "TOOL", label: name };
 	}
@@ -1373,14 +1427,20 @@ export default function (pi: ExtensionAPI) {
 		activeOperations.set(operationId(event), { ...operation, started_at: Date.now() });
 		requestPoolRedraw();
 	}
-	function endOperation(event: any): void {
+	function endOperation(event: any): { duration_ms: number | null; kind: string | null } {
 		const id = operationId(event);
-		if (activeOperations.has(id)) activeOperations.delete(id);
+		const now = Date.now();
+		const operation = activeOperations.get(id);
+		if (operation) activeOperations.delete(id);
 		else {
 			const tool = String(event?.toolName ?? event?.tool_name ?? event?.name ?? "");
-			for (const [key, operation] of activeOperations) if (operation.label === tool) activeOperations.delete(key);
+			for (const [key, candidate] of activeOperations) if (candidate.label === tool) {
+				activeOperations.delete(key);
+				return { duration_ms: now - candidate.started_at, kind: candidate.kind };
+			}
 		}
 		requestPoolRedraw();
+		return { duration_ms: operation ? now - operation.started_at : null, kind: operation?.kind ?? null };
 	}
 
 	// ━━ Global trace store ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1399,6 +1459,7 @@ export default function (pi: ExtensionAPI) {
 	// review-log.mjs un aggancio per riconoscere e correggere il caso
 	// specifico invio→risveglio via `assignment_id` (vedi lì).
 	let logSeq = 0;
+	let timelineTurnId: string | null = null;
 
 	function logEvent(type: string, data: Record<string, unknown> = {}): void {
 		if (!identity) return;
@@ -1406,7 +1467,12 @@ export default function (pi: ExtensionAPI) {
 			const config = getTraceConfig({ cwd: identity.cwd, project: identity.project });
 			if (!traceEnabled(config.mode, "events")) return;
 			const paths = ensureTraceProject({ cwd: identity.cwd, project: identity.project, instance: identity.instance });
-			const line = `${JSON.stringify({ ts: nowIso(), seq: ++logSeq, instance: identity.instance, role: identity.role, project: identity.project, project_key: paths.projectKey, trace_mode: config.mode, type, ...redactRuntimeProjection(data) })}\n`;
+			const seq = ++logSeq;
+			const separator = identity.model.indexOf(":");
+			const model_provider = separator > 0 ? identity.model.slice(0, separator) : null;
+			const model_id = separator > 0 ? identity.model.slice(separator + 1) : identity.model || null;
+			const scope = currentInbound ? { campaign_id: currentInbound.campaign_id ?? null, chapter_id: currentInbound.chapter_id ?? null, phase_id: currentInbound.phase_id ?? null } : { campaign_id: null, chapter_id: null, phase_id: null };
+			const line = `${JSON.stringify({ ts: nowIso(), event_id: `${identity.instance}:${seq}`, seq, instance: identity.instance, role: identity.role, project: identity.project, project_key: paths.projectKey, model_provider, model_id, assignment_id: currentInbound?.assignment_id ?? null, turn_id: timelineTurnId, ...scope, trace_mode: config.mode, type, ...redactRuntimeProjection(data) })}\n`;
 			fs.appendFileSync(paths.instanceLog!, line, { mode: 0o600 });
 		} catch {
 			// best-effort — tracing non deve mai rompere l'orchestrazione reale
@@ -1419,7 +1485,12 @@ export default function (pi: ExtensionAPI) {
 			const config = getTraceConfig({ cwd: identity.cwd, project: identity.project });
 			if (!traceEnabled(config.mode, minimum)) return;
 			const paths = ensureTraceProject({ cwd: identity.cwd, project: identity.project, instance: identity.instance });
-			const line = `${JSON.stringify({ ts: nowIso(), seq: ++logSeq, instance: identity.instance, role: identity.role, project: identity.project, project_key: paths.projectKey, trace_mode: config.mode, type, ...redactRuntimeProjection(data) })}\n`;
+			const seq = ++logSeq;
+			const separator = identity.model.indexOf(":");
+			const model_provider = separator > 0 ? identity.model.slice(0, separator) : null;
+			const model_id = separator > 0 ? identity.model.slice(separator + 1) : identity.model || null;
+			const scope = currentInbound ? { campaign_id: currentInbound.campaign_id ?? null, chapter_id: currentInbound.chapter_id ?? null, phase_id: currentInbound.phase_id ?? null } : { campaign_id: null, chapter_id: null, phase_id: null };
+			const line = `${JSON.stringify({ ts: nowIso(), event_id: `${identity.instance}:${seq}`, seq, instance: identity.instance, role: identity.role, project: identity.project, project_key: paths.projectKey, model_provider, model_id, assignment_id: currentInbound?.assignment_id ?? null, turn_id: timelineTurnId, ...scope, trace_mode: config.mode, type, ...redactRuntimeProjection(data) })}\n`;
 			fs.appendFileSync(paths.instanceLog!, line, { mode: 0o600 });
 		} catch {
 			// best-effort
@@ -1459,6 +1530,18 @@ export default function (pi: ExtensionAPI) {
 
 	function logContextUsage(ctx: any, point: string, extra: Record<string, unknown> = {}): void {
 		logEvent("context_usage", { point, ...contextUsageSnapshot(ctx), ...extra });
+	}
+	function providerUsageSnapshot(event: any): Record<string, unknown> {
+		const usage = event?.usage ?? event?.message?.usage ?? event?.response?.usage ?? event?.result?.usage ?? null;
+		if (!usage || typeof usage !== "object") return { input_tokens: null, output_tokens: null, total_tokens: null, token_source: "unknown" };
+		const firstNumber = (...values: unknown[]) => {
+			for (const value of values) if (typeof value === "number" && Number.isFinite(value)) return value;
+			return null;
+		};
+		const input_tokens = firstNumber(usage.input_tokens, usage.inputTokens, usage.prompt_tokens, usage.promptTokens);
+		const output_tokens = firstNumber(usage.output_tokens, usage.outputTokens, usage.completion_tokens, usage.completionTokens);
+		const total_tokens = firstNumber(usage.total_tokens, usage.totalTokens, input_tokens !== null && output_tokens !== null ? input_tokens + output_tokens : null);
+		return { input_tokens, output_tokens, total_tokens, token_source: input_tokens !== null || output_tokens !== null ? "provider_event" : "unknown" };
 	}
 
 	// ━━ Agent status snapshot for the report (Revisione 19) ━━━━━━━━━━━━━━━
@@ -1514,11 +1597,39 @@ export default function (pi: ExtensionAPI) {
 	// silently stuck forever. preferredType lets a live feedback_received
 	// notification check the queue matching what just arrived first, while
 	// still respecting that queue's own FIFO order (see the smoke test).
+	//
+	// Anti-hijack 2026-09-17 (ticket feedback-hijack-fix, incidente newMioDOC:
+	// 5 bug FIFO iniettati con triggerTurn in mezzo al filo HACCP; un
+	// "confermo, procedi" secco fu agganciato all'ultima proposta invece che
+	// all'HACCP): con conferma in sospeso la voce viene PARCHEGGIATA in coda
+	// visibile, MAI iniettata con triggerTurn. Il claim resta differito al
+	// via esplicito riferito dell'utente — qui si usa peekNextQueuedFeedback
+	// (nessun cambio di stato al surfacing, niente avanzamento speculativo).
+	// Il prompt del planner ("### Conferme secche e code") definisce cosa
+	// sblocca: solo risposte con riferimento esplicito.
+	function plannerHasOpenDecisionHold(): boolean {
+		try {
+			const storage = ensureYanoStorage();
+			return storage.listRuns(identity!.project)
+				.filter((r) => r.status === "active")
+				.some((r) => storage.listDecisionHolds(r.id, "open").length > 0);
+		} catch { return false; }
+	}
 	function wakeNextQueuedFeedback(reason: string, preferredType?: "bug" | "suggestion"): void {
 		if (!identity || identity.role !== "planner" || computeSelfStatus() !== "idle") return;
 		let db: any = null;
 		try {
 			db = openFeedbackDatabase();
+			const parked = shouldParkFeedbackWake({
+				confirmationPending: plannerHasOpenDecisionHold() || looksLikeConfirmationRequest((globalThis as any).__yanoLastPlannerText),
+				queueIgnored: looksLikeQueueIgnoreOrder((globalThis as any).__yanoLastUserText),
+			});
+			const peeked = peekNextQueuedFeedback(db, identity.project, { preferredType });
+			if (!peeked) return;
+			if (parked) {
+				logEvent("feedback_queue_parked", { feedback_id: peeked.item.id, reason, feedback_type: peeked.type });
+				return;
+			}
 			const result = claimNextQueuedFeedback(db, identity.project, { preferredType });
 			if (!result) return;
 			const imageBlocks = (result.claimed.screenshots || []).flatMap((shot: any) => {
@@ -1576,6 +1687,7 @@ export default function (pi: ExtensionAPI) {
 					reload_requested: reloadRequested,
 					reload_ready: reloadReady(),
 					yano_runtime_version: YANO_RUNTIME_PACKAGE_VERSION,
+					servers: Object.keys(serverStatus).length ? serverStatus : undefined,
 				};
 				// Application-level liveness. A PID and an MQTT connection can remain
 				// alive while the event loop is wedged; the watcher consumes this
@@ -1618,6 +1730,9 @@ export default function (pi: ExtensionAPI) {
 			response_schema: env.response_schema ?? null,
 			prompt_preview: String(env.prompt || "").slice(0, 800),
 			fulfilled: false,
+			campaign_id: env.campaign_id ?? null,
+			chapter_id: env.chapter_id ?? null,
+			phase_id: env.phase_id ?? null,
 		};
 		inboundQueue.set(env.assignment_id, inbound);
 		currentInbound = inbound;
@@ -1647,6 +1762,9 @@ export default function (pi: ExtensionAPI) {
 			target_role: env.target_role ?? null,
 			hops: env.hops,
 			prompt_preview: env.prompt.slice(0, 200),
+			campaign_id: env.campaign_id ?? null,
+			chapter_id: env.chapter_id ?? null,
+			phase_id: env.phase_id ?? null,
 		});
 		void publishPresence("busy");
 	}
@@ -1743,6 +1861,14 @@ export default function (pi: ExtensionAPI) {
 		if (entry.timer) clearTimeout(entry.timer);
 		entry.resolve(entry.result);
 		scheduleEviction(env.assignment_id);
+		logEvent("agent_response_in", {
+			assignment_id: env.assignment_id,
+			responder_instance: env.responder_instance,
+			campaign_id: env.campaign_id ?? null,
+			chapter_id: env.chapter_id ?? null,
+			phase_id: env.phase_id ?? null,
+			ok: !env.error,
+		});
 		if (reloadRequested) void publishPresence(computeSelfStatus());
 
 		// Revisione 30: a real incident showed this reply landing while the
@@ -2196,6 +2322,9 @@ export default function (pi: ExtensionAPI) {
 			if (mqttConnected) void publishPresence(computeSelfStatus());
 		}, HEARTBEAT_MS);
 		try { (heartbeatTimer as any).unref?.(); } catch { /* ignore */ }
+		void refreshServerStatus();
+		serverStatusTimer = setInterval(() => { void refreshServerStatus(); }, 5_000);
+		try { (serverStatusTimer as any).unref?.(); } catch { /* ignore */ }
 
 		staleSweepTimer = setInterval(() => {
 			const now = Date.now();
@@ -2254,6 +2383,7 @@ export default function (pi: ExtensionAPI) {
 		const globalPromptsDir = resolveGlobalPromptsDir();
 		const localPromptsDirRaw = flags.promptsDir || path.join(".pi", "extensions", "yano-orchestrator", "prompts");
 		const localPromptsDir = path.isAbsolute(localPromptsDirRaw) ? localPromptsDirRaw : path.join(identity.cwd, localPromptsDirRaw);
+		const ponytail = ponytailPolicy(identity.cwd);
 		const primaryDir = flags.customPrompts ? localPromptsDir : globalPromptsDir;
 		const fallbackDir = flags.customPrompts ? globalPromptsDir : null;
 		const template = loadRolePrompt(primaryDir, fallbackDir, identity.role, roleCfg);
@@ -2263,6 +2393,7 @@ export default function (pi: ExtensionAPI) {
 			: "";
 		logEvent("role_prompt_resolved", {
 			custom_prompts: !!flags.customPrompts,
+			ponytail_mode: ponytail.mode,
 			primary_dir: primaryDir,
 			fallback_dir: fallbackDir,
 			rules_global: rules?.global.length || 0,
@@ -2273,14 +2404,14 @@ export default function (pi: ExtensionAPI) {
 			.replaceAll("{{ROLE}}", identity.role)
 			.replaceAll("{{ROLE_LABEL}}", roleCfg?.label || identity.role)
 			.replaceAll("{{BRIEF}}", roleCfg?.brief || "")
-			.replaceAll("{{CAPABILITIES}}", roleCapabilitiesPrompt(roleCfg))
+			.replaceAll("{{CAPABILITIES}}", roleCapabilitiesPrompt(ponytail.enabled ? { ...roleCfg, skills: [...(roleCfg?.skills || []), "ponytail"] } : roleCfg))
 			.replaceAll("{{PROJECT}}", identity.project)
 			.replaceAll("{{TEAM}}", identity.team.join(", "))
 			.replaceAll("{{SLUG_REMINDER}}", SLUG_REMINDER)
 			.replaceAll("{{WORKER_TOOLS_INTRO}}", WORKER_TOOLS_INTRO)
 			.replaceAll("{{DIAGRAM_TIP}}", DIAGRAM_TIP)
 			.replaceAll("{{TURN_CLOSE_NOTE}}", TURN_CLOSE_NOTE)
-			.replaceAll("{{TICKET_CLAIM_STEP0}}", TICKET_CLAIM_STEP0) + rulesPrompt + CONTEXT_EFFICIENCY_PROTOCOL + REPORT_ARTIFACT_PROTOCOL + apiRegistryPrompt(identity.cwd) + (codeMem.context ? `\n\n## Orientamento code-mem (consultazione bounded)\nUsa questi risultati per scegliere quali file approfondire. Sono orientamento, non prova definitiva: verifica ogni informazione critica nel codice, nei test e nel runtime. Non riversare l'intero repository nel contesto.\n${codeMem.context}` : "") + loadAgentMemory({ root: identity.cwd, role: identity.role, instance: identity.instance }) +
+			.replaceAll("{{TICKET_CLAIM_STEP0}}", TICKET_CLAIM_STEP0) + rulesPrompt + ponytailPrompt(identity.cwd, ponytail) + MANDATORY_CAPABILITIES_SYNC + CONTEXT_EFFICIENCY_PROTOCOL + REPORT_ARTIFACT_PROTOCOL + apiRegistryPrompt(identity.cwd) + (codeMem.context ? `\n\n## Orientamento code-mem (consultazione bounded)\nUsa questi risultati per scegliere quali file approfondire. Sono orientamento, non prova definitiva: verifica ogni informazione critica nel codice, nei test e nel runtime. Non riversare l'intero repository nel contesto.\n${codeMem.context}` : "") + loadAgentMemory({ root: identity.cwd, role: identity.role, instance: identity.instance }) +
 			(identity.role === "planner" && !projectBootstrapDelivered && projectBootstrap ? projectBootstrap : "");
 		if (identity.role === "planner" && projectBootstrap) {
 			projectBootstrapDelivered = true;
@@ -2291,7 +2422,9 @@ export default function (pi: ExtensionAPI) {
 		// agente è partito da solo": significa che questo turno sta iniziando
 		// SENZA nessun comando in coda mai ricevuto via MQTT — vedi
 		// scripts/review-log.mjs, che lo segnala esplicitamente.
-		logEvent("turn_start", { had_pending_inbound: [...inboundQueue.values()].some((i) => !i.fulfilled) });
+		turnStartedAt = Date.now();
+		timelineTurnId = `turn:${identity.instance}:${crypto.randomUUID()}`;
+		logEvent("turn_start", { prompt_preview: String(_event?.prompt || "").slice(0, 240), had_pending_inbound: [...inboundQueue.values()].some((i) => !i.fulfilled), agent_turn: null });
 		return { systemPrompt };
 	});
 
@@ -2302,6 +2435,15 @@ export default function (pi: ExtensionAPI) {
 	pi.on("input", async (event: any) => {
 		if (!identity) return;
 		currentInputScreenshots = inputScreenshotReferences(event);
+		// Anti-hijack 2026-09-17: traccia l'ultimo testo utente per il gate di
+		// parcheggio (ordine "ignora la coda") in wakeNextQueuedFeedback.
+		try {
+			const content = (event as any)?.message?.content ?? (event as any)?.content ?? "";
+			const text = typeof content === "string" ? content : Array.isArray(content)
+				? content.map((part: any) => part?.text || part?.content || "").join(" ")
+				: "";
+			if (text.trim()) (globalThis as any).__yanoLastUserText = text;
+		} catch { /* best effort */ }
 		await switchImageTurnToAuto({ event, ctx: currentCtx, setModel: (model) => pi.setModel(model), log: logEvent });
 	});
 
@@ -2310,6 +2452,7 @@ export default function (pi: ExtensionAPI) {
 	// errors are intentionally not handled here.
 	pi.on("message_end", async (event: any, ctx: any) => {
 		const message = event?.message;
+		if (message?.role === "assistant") logEvent("model_observed", observedModelFromMessage(message));
 		if (message?.role !== "assistant" || !message?.errorMessage) return;
 		await switchPinnedModelToAuto({
 			message,
@@ -2329,7 +2472,10 @@ export default function (pi: ExtensionAPI) {
 	// point used by the external watcher: the agent is at a safe point and Pi's
 	// usage estimate reflects the latest provider response.
 	pi.on("turn_end", async (_event: any, ctx: any) => {
-		logContextUsage(ctx, "turn_end", { turn_index: _event?.turnIndex ?? null });
+		const turn_index = _event?.turnIndex ?? null;
+		const duration_ms = turnStartedAt === null ? null : Date.now() - turnStartedAt;
+		turnStartedAt = null;
+		logContextUsage(ctx, "turn_end", { turn_index, agent_turn: turn_index, duration_ms, ...providerUsageSnapshot(_event) });
 		// Snapshot-then-reset regardless of outcome below: a failure while
 		// writing memory must not leak this turn's failures into the NEXT
 		// turn's update (which would misattribute them to the wrong round).
@@ -2393,19 +2539,25 @@ export default function (pi: ExtensionAPI) {
 		} catch {
 			// Progress telemetry is advisory and must never break the tool call.
 		}
+		const operation = operationLabel(event);
 		logEvent("tool_execution_start", {
 			tool_call_id: event?.toolCallId ?? event?.tool_call_id ?? null,
 			tool: event?.toolName ?? event?.tool_name ?? event?.name ?? null,
+			operation_kind: operation.kind,
+			deterministic: operation.kind === "CLI",
 		});
 		tracePayload("tool_execution_start_payload", { tool_call_id: event?.toolCallId ?? event?.tool_call_id ?? null, args: event?.args ?? null }, "standard");
 	});
 	pi.on("tool_execution_end", async (event: any) => {
-		endOperation(event);
+		const operation = endOperation(event);
 		const ok = event?.isError === true ? false : event?.error ? false : true;
 		logEvent("tool_execution_end", {
 			tool_call_id: event?.toolCallId ?? event?.tool_call_id ?? null,
 			tool: event?.toolName ?? event?.tool_name ?? event?.name ?? null,
 			ok,
+			duration_ms: operation.duration_ms,
+			operation_kind: operation.kind,
+			deterministic: operation.kind === "CLI",
 		});
 		tracePayload("tool_execution_end_payload", { tool_call_id: event?.toolCallId ?? event?.tool_call_id ?? null, error: event?.error ?? null, result: event?.result ?? event?.output ?? null }, "standard");
 		if (!ok) {
@@ -2449,6 +2601,15 @@ export default function (pi: ExtensionAPI) {
 	const SAFETY_MARGIN = 1;
 
 	function renderPool(width: number, theme: Theme): string[] {
+		function truncatePool(value: string, maxWidth: number): string {
+			const hyperlink = value.match(/\x1b\]8;;([^\x07]*)\x07([^\x1b]*)\x1b\]8;;\x07/);
+			if (!hyperlink) return truncateToWidth(value, maxWidth);
+			const plain = value.replace(hyperlink[0], hyperlink[2]);
+			const clipped = truncateToWidth(plain, maxWidth);
+			return clipped.includes(hyperlink[2])
+				? clipped.replace(hyperlink[2], `\x1b]8;;${hyperlink[1]}\x07${hyperlink[2]}\x1b]8;;\x07`)
+				: clipped;
+		}
 		const w = Math.max(0, width - SAFETY_MARGIN);
 		if (!identity) return [truncateToWidth(theme.fg("dim", "orchestrator: not connected"), w)];
 
@@ -2477,27 +2638,36 @@ export default function (pi: ExtensionAPI) {
 		if (mqttConnected && presenceRows.length === 0) {
 			presenceRows.push(truncateToWidth(theme.fg("dim", "  (nessun altro agente online per ora)"), w));
 		}
+		const serverRows = (["frontend", "backend"] as const).map((kind) => {
+			const server = serverStatus[kind];
+			const color = !server ? "dim" : server.state === "error" ? "error" : server.running ? "success" : "muted";
+			const label = kind === "frontend" ? "Frontend:" : "Backend:";
+			if (!server) return theme.fg("dim", "  ×") + " " + theme.fg("dim", label);
+			// OSC 8 is understood by modern terminals and makes only the frontend
+			// URL clickable; the backend deliberately remains plain text.
+			const link = kind === "frontend" ? `\x1b]8;;${server.url}\x07${server.url}\x1b]8;;\x07` : server.url;
+			return theme.fg(color, "  ●") + " " + theme.fg("dim", label) + " " + theme.fg(color, link);
+		});
 
 		// The widget itself spans the bottom area exposed by Pi. Reserve a
 		// right-hand column inside it for transient operations while retaining
 		// the peer roster on the left. Every rendered line is truncated to the
 		// safety-budgeted width to keep Pi's TUI crash guard satisfied.
 		const operations = [...activeOperations.values()].slice(-8);
-		if (operations.length === 0) return [header, ...presenceRows];
 		const rightWidth = Math.min(52, Math.max(30, Math.floor(w * 0.42)));
 		const leftWidth = Math.max(0, w - rightWidth - 3);
-		const rightRows = operations.map((operation) => {
+		const rightRows = [...serverRows, ...operations.map((operation) => {
 			const playbook = identity.playbook ? ` · ${identity.playbook}` : "";
 			const text = `${operation.kind} ${operation.label}${operation.kind !== "PLAYBOOK" ? playbook : ""}`;
 			return theme.fg(operation.kind === "MCP" ? "accent" : operation.kind === "AGENT" ? "warning" : "muted", text);
-		});
+		})];
 		const rows = [];
 		const count = Math.max(presenceRows.length, rightRows.length);
 		for (let index = 0; index < count; index++) {
 			const left = truncateToWidth(presenceRows[index] || "", leftWidth);
-			const right = rightRows[index] ? truncateToWidth(rightRows[index], rightWidth) : "";
+			const right = rightRows[index] ? truncatePool(rightRows[index], rightWidth) : "";
 			const gap = " ".repeat(Math.max(1, w - visibleWidth(left) - visibleWidth(right)));
-			rows.push(truncateToWidth(`${left}${gap}${right}`, w));
+			rows.push(truncatePool(`${left}${gap}${right}`, w));
 		}
 		return [header, ...rows];
 	}
@@ -2854,6 +3024,14 @@ export default function (pi: ExtensionAPI) {
 				}
 			}
 		}
+		// Anti-hijack 2026-09-17: traccia l'ultimo testo planner per il gate di
+		// parcheggio (richiesta conferma in sospeso) in wakeNextQueuedFeedback.
+		if (lastAssistantText.trim()) (globalThis as any).__yanoLastPlannerText = lastAssistantText;
+		const lastModelMessage = [...ctx.sessionManager.getBranch()].reverse().find((entry: any) => entry?.message?.role === "assistant") as any;
+		logEvent("model_observed", {
+			assignment_id: inbound?.assignment_id ?? null,
+			...observedModelFromMessage(lastModelMessage?.message),
+		});
 		tracePayload("assistant_response", {
 			assignment_id: inbound?.assignment_id ?? null,
 			text: lastAssistantText,
@@ -2867,6 +3045,47 @@ export default function (pi: ExtensionAPI) {
 				}, "full");
 			}
 		}
+		const actionClaim = identity.role === "planner" ? findUnexecutedActionClaim(ctx.sessionManager.getBranch()) : null;
+		if (actionClaim) {
+			// Bound the recovery per assignment/interactive turn, not per exact
+			// sentence: a model can rephrase the same unexecuted promise on each
+			// retry, and must not evade the two-follow-up ceiling by changing words.
+			const guardKey = inbound?.assignment_id ?? "__interactive__";
+			const attempts = plannerActionGuardAttempts.get(guardKey) ?? 0;
+			logEvent("planner_action_claim_without_tool", {
+				fingerprint: actionClaim.fingerprint,
+				claim: actionClaim.claim,
+				attempts,
+				assignment_id: inbound?.assignment_id ?? null,
+			});
+			if (attempts < 2) {
+				plannerActionGuardAttempts.set(guardKey, attempts + 1);
+				if (plannerActionGuardAttempts.size > 64) plannerActionGuardAttempts.delete(plannerActionGuardAttempts.keys().next().value as string);
+				try {
+					pi.sendMessage({
+						customType: "yano-action-guard",
+						content: buildPlannerActionGuardPrompt(actionClaim.claim),
+						display: true,
+						details: { fingerprint: actionClaim.fingerprint, assignment_id: inbound?.assignment_id ?? null },
+					} as any, { deliverAs: "followUp", triggerTurn: true });
+					logEvent("planner_action_guard_wakeup", { fingerprint: actionClaim.fingerprint, attempt: attempts + 1, assignment_id: inbound?.assignment_id ?? null });
+				} catch (error) {
+					logEvent("planner_action_guard_wakeup_failed", {
+						fingerprint: actionClaim.fingerprint,
+						assignment_id: inbound?.assignment_id ?? null,
+						error: error instanceof Error ? error.message : String(error),
+					});
+				}
+			} else {
+				logEvent("planner_action_guard_exhausted", { fingerprint: actionClaim.fingerprint, attempts, assignment_id: inbound?.assignment_id ?? null });
+			}
+			// Do not acknowledge an inbound assignment or publish
+			// planner_task_completed: the promised operation has not happened yet.
+			// The follow-up turn will re-enter this hook and can complete normally
+			// once it contains the real tool call/result.
+			return;
+		}
+		plannerActionGuardAttempts.delete(inbound?.assignment_id ?? "__interactive__");
 		if (identity.role === "planner") {
 			await yanoPublishAgentEvent("planner_task_completed", { assignment_id: inbound?.assignment_id ?? null });
 		}
@@ -2888,6 +3107,9 @@ export default function (pi: ExtensionAPI) {
 			response,
 			error,
 			timestamp: nowIso(),
+			campaign_id: inbound.campaign_id ?? null,
+			chapter_id: inbound.chapter_id ?? null,
+			phase_id: inbound.phase_id ?? null,
 		};
 		try {
 			await client.publishAsync(inbound.reply_to, JSON.stringify(env), { qos: 1 });
@@ -2895,6 +3117,7 @@ export default function (pi: ExtensionAPI) {
 			inboundQueue.delete(inbound.assignment_id);
 			if (currentInbound === inbound) currentInbound = null;
 			pi.appendEntry("orchestrator-log", { event: "response_sent", assignment_id: inbound.assignment_id });
+			logEvent("assignment_completed", { assignment_id: inbound.assignment_id, ok: !env.error });
 			void publishPresence(computeSelfStatus());
 			if (identity.role === "planner") wakeNextQueuedFeedback("planner_turn_end");
 		} catch (err) {
@@ -2944,6 +3167,7 @@ export default function (pi: ExtensionAPI) {
 		shuttingDown = true;
 		if (heartbeatTimer) { try { clearInterval(heartbeatTimer); } catch { /* ignore */ } heartbeatTimer = null; }
 		if (staleSweepTimer) { try { clearInterval(staleSweepTimer); } catch { /* ignore */ } staleSweepTimer = null; }
+		if (serverStatusTimer) { try { clearInterval(serverStatusTimer); } catch { /* ignore */ } serverStatusTimer = null; }
 		if (watchdogTimer) { try { clearInterval(watchdogTimer); } catch { /* ignore */ } watchdogTimer = null; }
 		if (client && identity && T) {
 			try {

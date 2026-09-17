@@ -399,6 +399,20 @@ function launchAgent({ cwd, project, instance, role, configDir, continuePlanner,
 	return { role, ...herdrLaunch({ cwd, project, instance, args }) };
 }
 
+export function liveRecoveryInstances(cards) {
+	return new Set(cards.filter((card) => card.status !== "offline").map((card) => card.instance));
+}
+
+export function reloadResumeArgs(argv) {
+	const result = argv.filter((arg) => !["--dry-run", "--force", "--reload"].includes(arg));
+	if (!value(result, "--reason")?.trim()) {
+		const index = result.indexOf("--reason");
+		if (index !== -1) result.splice(index, 2);
+		result.push("--reason", "Ripresa dopo aggiornamento controllato Yano");
+	}
+	return [...result, "--yes"];
+}
+
 async function resumeRuns({ cwd, project, dbPath, runs, argv }) {
 	const dryRun = has(argv, "--dry-run");
 	const yes = has(argv, "--yes");
@@ -414,7 +428,7 @@ async function resumeRuns({ cwd, project, dbPath, runs, argv }) {
 	try {
 		const discovered = await discoverPresence(project, value(argv, "--broker") || BROKER_URL, cwd);
 		presenceClient = discovered.client;
-		for (const card of discovered.cards) live.add(card.instance);
+		for (const instance of liveRecoveryInstances(discovered.cards)) live.add(instance);
 	} catch { /* offline broker: launch plan is still useful */ }
 	const rosterConfig = path.join(cwd, ".pi", "agents");
 	const configDir = fs.existsSync(path.join(rosterConfig, "roles.yaml")) ? rosterConfig : (fs.existsSync(path.join(cwd, "agents", "roles.yaml")) ? path.join(cwd, "agents") : null);
@@ -431,6 +445,7 @@ async function resumeRuns({ cwd, project, dbPath, runs, argv }) {
 		launched.push(launchAgent({ cwd, project, instance: agent.instance, role: agent.role, configDir, continuePlanner: isPlanner && snapshots.length > 0, prompt, background: !dryRun && yes && background }));
 	}
 	if (presenceClient) await presenceClient.endAsync();
+	if (!dryRun && yes && launched.some((item) => !item.launched)) { db.close(); throw new Error("Ripresa incompleta: uno o più agenti non sono stati avviati; checkpoint preservato"); }
 	if (!dryRun && yes) {
 		for (const run of runs) db.prepare("UPDATE yano_recovery_pauses SET resumed_at = ?, status = 'resumed' WHERE run_id = ? AND status = 'paused'").run(new Date().toISOString(), run.id);
 		for (const run of runs) if (dbColumns(db, "events").includes("run_id")) db.prepare("INSERT INTO events (run_id, ticket_id, type, payload, created_at) VALUES (?, NULL, 'run_resumed', ?, ?)").run(run.id, JSON.stringify({ agents: launched, reason: reason.trim() }), new Date().toISOString());
@@ -626,7 +641,7 @@ export async function runControlledReload({ cwd, packageRoot, argv, update }) {
 		console.error(`yano update --reload: aggiornamento fallito; gli agenti restano in pausa e lo snapshot è disponibile in ${snapshotResults[0]?.directory || "<YANO_DATA_DIR>/recovery"}.`);
 		throw error;
 	}
-	const resumeArgv = [...argv.filter((arg) => !["--dry-run", "--force", "--reload"].includes(arg)), "--yes"];
+	const resumeArgv = reloadResumeArgs(argv);
 	const resumed = await resumeRuns({ cwd, project, dbPath, runs, argv: resumeArgv });
 	traceReloadEvent({ cwd, project, stage: "resumed", payload: { agents: resumed.launched } });
 	const expectedVersion = updateResult?.newVersion || updateResult?.currentVersion || null;

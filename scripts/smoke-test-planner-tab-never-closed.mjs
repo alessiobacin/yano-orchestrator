@@ -50,7 +50,7 @@ fs.writeFileSync(path.join(fakeBin, "herdr"), [
 ].join("\n"));
 fs.chmodSync(path.join(fakeBin, "herdr"), 0o700);
 process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH || ""}`;
-process.env.YANO_TEST_ALIVE_PANES = "p-coder-running,p-real-coder,p-coder-retry";
+process.env.YANO_TEST_ALIVE_PANES = "p-coder-running,p-real-coder,p-coder-retry,p-stale-old-terminal,p-never-ticketed-old,p-fresh-unticketed";
 
 const row = { root: "/tmp/fixture-project", name: "fixture-project" };
 
@@ -85,14 +85,14 @@ check("a NON-planner agent with a terminal ticket IS included (the sweep still d
 	const agents = [{ name: "coder-01", cwd: row.root, tab_id: "t-coder", pane_id: "p-coder", agent_status: "idle" }];
 	const runs = [{ tickets: [{ status: "done", assigned_instance: "coder-01" }] }];
 	const removed = cleanupCompletedAgentTabs(snapshotWith(agents), row, runs);
-	// reason is "terminal_ticket" vs "dead_process" depending on whether the
+	// reason is "terminal_task" vs "dead_agent" depending on whether the
 	// real `herdr` binary is reachable in this environment (paneHasLivePiProcess
 	// falls back to "dead" without it) — this test only asserts on WHICH
 	// instance was attempted, which is what the planner exemption is actually
 	// about; the exact reason string has its own coverage elsewhere.
 	assert.equal(removed.length, 1, "a finished non-planner agent's tab is still attempted for closure");
 	assert.equal(removed[0].instance, "coder-01");
-	assert.ok(["terminal_ticket", "dead_process"].includes(removed[0].reason));
+	assert.ok(["terminal_task", "dead_agent"].includes(removed[0].reason));
 });
 
 check("a mixed snapshot: planner survives, finished coder is closed, in-progress coder survives", () => {
@@ -107,9 +107,17 @@ check("a mixed snapshot: planner survives, finished coder is closed, in-progress
 });
 
 check("a fresh replacement session survives an old terminal assignment", () => {
+	// Session path uses Pi's REAL naming convention — dash-separated
+	// milliseconds (.../2026-09-13T12-30-23-986Z_<uuid>.jsonl), confirmed
+	// against a real `herdr api snapshot` on 2026-09-14. An earlier version of
+	// this test used a fictional dot-separated millisecond format
+	// (...T06-20-00.000Z...) that sessionStartedAt()'s regex could parse, but
+	// which no real session path ever has — masking the fact that
+	// isFreshReplacementSession() silently never recognized ANY real fresh
+	// retry, for every project, the whole time this protection has existed.
 	const ticketFinishedAt = "2026-09-11T06:17:30.925Z";
 	const snapshot = {
-		agents: [{ name: "coder-01", cwd: row.root, tab_id: "t-coder-retry", pane_id: "p-coder-retry", agent_status: "idle", agent_session: { value: "/tmp/sessions/2026-09-11T06-20-00.000Z_retry.jsonl" } }],
+		agents: [{ name: "coder-01", cwd: row.root, tab_id: "t-coder-retry", pane_id: "p-coder-retry", agent_status: "idle", agent_session: { value: "/tmp/sessions/2026-09-11T06-20-00-000Z_retry.jsonl" } }],
 		tabs: [{ tab_id: "t-coder-retry", workspace_id: "w1", label: "coder-01" }],
 		panes: [{ pane_id: "p-coder-retry", tab_id: "t-coder-retry", workspace_id: "w1", cwd: row.root }],
 		workspaces: [{ workspace_id: "w1", label: row.name }],
@@ -145,6 +153,60 @@ check("a worker reused by a NEW active run is never closed because of an OLD ter
 	assert.deepEqual(staleSweep, [], "the live worker is protected from the stale-tab sweep");
 });
 
+check("2026-09-14 fix: cleanupStaleProjectTabs() closes a live worker too, once its only terminal ticket is old enough", () => {
+	// Same bug, same fix, the OTHER sweep function: `!identity || (!live &&
+	// terminalTask) || !live` reduces to `!identity || !live` for the same
+	// reason — the `terminalTask` branch is unreachable whenever the process
+	// is alive, so a live worker with only ancient terminal tickets never got
+	// closed by this sweep either.
+	const snapshot = {
+		agents: [{ name: "coder-09", cwd: row.root, tab_id: "t-stale", pane_id: "p-stale-old-terminal", agent_status: "idle" }],
+		tabs: [{ tab_id: "t-stale", workspace_id: "w1", label: "coder-09" }],
+		panes: [{ pane_id: "p-stale-old-terminal", tab_id: "t-stale", workspace_id: "w1", cwd: row.root }],
+		workspaces: [{ workspace_id: "w1", label: row.name }],
+	};
+	const oldEnough = new Date(Date.now() - 31 * 60_000).toISOString();
+	const runs = [{ tickets: [{ status: "done", assigned_instance: "coder-09", updated_at: oldEnough }] }];
+	const closed = cleanupStaleProjectTabs(snapshot, row, runs);
+	assert.equal(closed.length, 1, "a live worker whose only ticket finished well past the retry grace window must now be closed");
+	assert.equal(closed[0].label, "coder-09");
+	assert.equal(closed[0].reason, "terminal_task");
+});
+
+check("2026-09-14 fix: cleanupStaleProjectTabs() closes a live worker that was NEVER assigned any ticket at all, once it has been idle long enough", () => {
+	// Real incident: newMioDOC had 7 idle worker panes (docs-sync-01,
+	// frontend-reviewer-01, deployment-agent-01, e2e-simulator-01,
+	// design-redesign-specialist-01, full-stack-reviewer-01, fullstack-dev-02)
+	// whose sessions were ~4 days old with ZERO ticket ever recorded for any
+	// of them — not "just finished", never assigned anything at all. The
+	// pre-fix condition only time-bounded the "has a terminal ticket" case;
+	// "no ticket match at all" fell through to `!identity || !live` (both
+	// false here) and was protected forever, with no age check whatsoever.
+	const oldSessionPath = "/fake/sessions/2026-09-01T00-00-00-000Z_fake-uuid.jsonl";
+	const snapshot = {
+		agents: [{ name: "docs-sync-01", cwd: row.root, tab_id: "t-never-ticketed", pane_id: "p-never-ticketed-old", agent_status: "idle", agent_session: { value: oldSessionPath } }],
+		tabs: [{ tab_id: "t-never-ticketed", workspace_id: "w1", label: "docs-sync-01" }],
+		panes: [{ pane_id: "p-never-ticketed-old", tab_id: "t-never-ticketed", workspace_id: "w1", cwd: row.root, agent_session: { value: oldSessionPath } }],
+		workspaces: [{ workspace_id: "w1", label: row.name }],
+	};
+	const closed = cleanupStaleProjectTabs(snapshot, row, []);
+	assert.equal(closed.length, 1, "a live worker that was never assigned any ticket, idle well past the grace window, must now be closed");
+	assert.equal(closed[0].label, "docs-sync-01");
+	assert.equal(closed[0].reason, "never_ticketed_idle");
+});
+
+check("but a FRESH live worker with no ticket yet is protected — it may be about to receive its first assignment", () => {
+	const freshSessionPath = `/fake/sessions/${new Date().toISOString().replace(/:/g, "-")}_fake-uuid.jsonl`;
+	const snapshot = {
+		agents: [{ name: "docs-sync-02", cwd: row.root, tab_id: "t-fresh-unticketed", pane_id: "p-fresh-unticketed", agent_status: "idle", agent_session: { value: freshSessionPath } }],
+		tabs: [{ tab_id: "t-fresh-unticketed", workspace_id: "w1", label: "docs-sync-02" }],
+		panes: [{ pane_id: "p-fresh-unticketed", tab_id: "t-fresh-unticketed", workspace_id: "w1", cwd: row.root, agent_session: { value: freshSessionPath } }],
+		workspaces: [{ workspace_id: "w1", label: row.name }],
+	};
+	const closed = cleanupStaleProjectTabs(snapshot, row, []);
+	assert.deepEqual(closed, [], "a brand-new worker with no ticket yet must not be closed just because it has none — the planner may not have delegated to it yet");
+});
+
 check("an agent instance from a DIFFERENT project's cwd is never touched", () => {
 	const agents = [{ name: "coder-01", cwd: "/tmp/other-project", tab_id: "t-other", pane_id: "p-other", agent_status: "idle" }];
 	const runs = [{ tickets: [{ status: "done", assigned_instance: "coder-01" }] }];
@@ -152,7 +214,7 @@ check("an agent instance from a DIFFERENT project's cwd is never touched", () =>
 	assert.deepEqual(removed, [], "cwd scoping prevents cross-project tab closure");
 });
 
-check("REAL Herdr shape (2026-09-05 audit): a live process wins over terminal ticket history", () => {
+check("REAL Herdr shape (2026-09-05 audit): a live process wins over a JUST-finished terminal ticket", () => {
 	// This is not a hypothetical: it is what herdr api snapshot actually
 	// returns in production. agent.name/agent.instance are simply absent, and
 	// agent.terminal_title_stripped is Pi's own generic pane title ("π -
@@ -162,9 +224,27 @@ check("REAL Herdr shape (2026-09-05 audit): a live process wins over terminal ti
 	// instead, which already read the tab's label).
 	const agents = [{ cwd: row.root, tab_id: "t-real-coder", pane_id: "p-real-coder", agent_status: "idle", terminal_title_stripped: "π - fixture-project" }];
 	const tabs = [{ tab_id: "t-real-coder", workspace_id: "w1", label: "coder-07-fixture-project" }];
-	const runs = [{ tickets: [{ status: "done", assigned_instance: "coder-07" }] }];
+	const runs = [{ tickets: [{ status: "done", assigned_instance: "coder-07", updated_at: new Date().toISOString() }] }];
 	const removed = cleanupCompletedAgentTabs({ agents, tabs }, row, runs);
-	assert.deepEqual(removed, [], "a live real-shaped agent must not be closed solely because its old ticket is done");
+	assert.deepEqual(removed, [], "a live real-shaped agent must not be closed solely because its ticket JUST finished — a retry may still reuse the same session");
+});
+
+check("2026-09-14 fix: the SAME live real-shaped agent, once its terminal ticket is old enough, IS closed — it used to stay open forever", () => {
+	// Real incident: sql-explorer had 8 idle worker panes whose last ticket
+	// completed on 2026-09-11 — three days earlier — still open on
+	// 2026-09-14, because the pre-fix condition (`if (!terminalTask && !dead)
+	// continue; if (terminalTask && !dead) continue;`) closed a tab ONLY when
+	// the process had actually exited, regardless of terminalTask's value:
+	// the two branches together reduce to "continue whenever alive", making
+	// the terminal-ticket check dead code for any live process.
+	const agents = [{ cwd: row.root, tab_id: "t-real-coder", pane_id: "p-real-coder", agent_status: "idle", terminal_title_stripped: "π - fixture-project" }];
+	const tabs = [{ tab_id: "t-real-coder", workspace_id: "w1", label: "coder-07-fixture-project" }];
+	const oldEnough = new Date(Date.now() - 31 * 60_000).toISOString();
+	const runs = [{ tickets: [{ status: "done", assigned_instance: "coder-07", updated_at: oldEnough }] }];
+	const removed = cleanupCompletedAgentTabs({ agents, tabs }, row, runs);
+	assert.equal(removed.length, 1, "a live agent whose only ticket finished well past the retry grace window must now be closed");
+	assert.equal(removed[0].instance, "coder-07-fixture-project");
+	assert.equal(removed[0].reason, "terminal_task");
 });
 
 delete process.env.YANO_TEST_ALIVE_PANES;

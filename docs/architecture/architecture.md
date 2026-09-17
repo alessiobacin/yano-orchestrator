@@ -26,6 +26,12 @@ e richiede processo, stato Herdr, heartbeat applicativo e identità esatta del
 sbagliato viene ricreata. Architect e auto-improver restano worker on-demand e
 sono riconciliati dai propri registri quando richiesto.
 
+Il runtime `<YANO_DATA_DIR>/yano-local-pc` contiene anche lo store CodeMem
+`memory/` (`cm init pi` idempotente, mai bloccante): ogni `ask` richiama il
+contesto pertinente redatto prima dell'invio e salva lo scambio redatto dopo
+la risposta (best-effort); a ogni avvio/recovery il supervisore riverifica la
+leggibilità dello store, così la conversazione sopravvive al riavvio.
+
 Architect genera capability globali con `yano architect create --type
 playbook|cli|skill|mcp-server|rest-api`. Il codice viene scritto nel catalogo persistente
 globale e resta ephemeral finché review, test, installazione, prima esecuzione
@@ -39,6 +45,34 @@ registro.
 ## Purpose
 
 Yano Orchestrator coordinates independent `pi` processes working on one project. The planner owns decomposition, phase progression and final integration. Workers operate in isolated Git worktrees and communicate through a project-scoped MQTT 5 namespace.
+
+## Chaptered audit campaigns
+
+La campagna `audit-campaign` aggiunge un flusso di analisi separato dal normale
+flusso di delivery. Il Planner conferma variante e budget, poi invoca una sola
+discovery deterministica (`audit-manifest.mjs`). I capitoli specialistici
+consumano quel manifesto invece di rileggere tutto il repository: QA/test
+adequacy, architecture/maintainability, toolchain, automation/observability,
+product/UX/market e AI-vs-deterministic delegation. I capitoli indipendenti
+possono essere parallelizzati solo dopo collision check e approvazione; quelli
+dipendenti aspettano evidenze persistite.
+
+La sintesi produce due grafi distinti: audit DAG (cosa analizzare e in quale
+ordine) e implementation DAG (cosa sviluppare, cosa può procedere in parallelo
+e quali prerequisiti attendere). La remediation è quindi esplicitamente fuori
+dal perimetro read-only dei capitoli e richiede worktree, test e riverifica.
+
+Ogni capitolo e finding conserva due valori distinti: `evidence_confidence`
+misura la solidità/riproducibilità delle prove, mentre `judgment_confidence`
+misura l'autovalutazione dell'LLM sul proprio giudizio e richiede una breve
+motivazione (`judgment_confidence_rationale`). `confidence` resta l'alias
+retrocompatibile della prima; l'incertezza non viene trasformata in un fatto.
+
+Ogni evento osservabile di delega/turno/tool può portare `campaign_id`,
+`chapter_id`, `phase_id`, `model_provider`, `model_id`, `duration_ms`,
+`input_tokens`, `output_tokens`, `total_tokens` e `deterministic`. Il
+`audit-resource-ledger.mjs` raggruppa queste evidenze per capitolo e lascia
+unknown i dati non esposti dal provider.
 
 ## Runtime boundaries
 
@@ -95,7 +129,10 @@ documentazione.
    trace-analysis skill are attached to every worker, so every Pi agent can
    interpret and report the complete Yano CLI consistently. Planner-only vendor
    skills remain restricted to the planner, and browser/design skills remain
-   restricted to frontend-capable roles. The CLI skill is packaged at the repository
+   restricted to frontend-capable roles. If Herdr's synchronous start handshake
+   briefly reports `agent_kind_mismatch`, the launcher verifies the same pane
+   in a snapshot and recovers only when it is registered as live `pi`; other
+   launch errors remain fatal. The CLI skill is packaged at the repository
    root and included in the global npm package; it is not copied into managed
    application repositories.
 3. After `to-spec`, the planner invokes the vendored `to-tickets` skill for
@@ -111,6 +148,23 @@ documentazione.
 10. Bugs and suggestions are persisted in the shared feedback control plane. A single always-on dashboard (`yano dash`, port 11000, supervised as a builtin service by `yano watcher supervise`) uses project paths, audits every manual mutation, encrypts E2E credentials at rest, and leaves classification/resolution to the planner. The deterministic watcher supervises queued feedback and orphaned specialist tickets without waking a planner that is waiting on a user hold.
 
 ### Project repair and reconciliation
+
+#### Project capability topology
+
+La presenza di frontend e backend è una proprietà persistente del progetto,
+non un effetto collaterale del render del footer. `yano capabilities
+detect --write` salva atomicamente `.pi/extensions/yano-orchestrator/config/
+capabilities.json` nella root Git canonica. Il manifest è la fonte autorevole
+quando esiste; il detector euristico resta solo un fallback per la migrazione
+dei progetti legacy. Gli agenti devono sincronizzarlo quando cambiano la
+struttura o il comando di avvio di un componente, come specificato in
+`AGENTS.md`.
+
+La salute runtime è separata: il supervisor Yano controlla gli URL dichiarati
+e pubblica lo stato retained MQTT. Il footer combina quindi presenza dichiarata
+e salute osservata: assente (`×`), presente ma fermo (grigio), running
+(verde), errore (rosso). Un componente non confermato non deve essere
+interpretato come assente.
 
 `yano update --reload` is intentionally narrow: it needs the project-local
 `orchestrator.db` and an active run. A project can still be inconsistent before
@@ -372,14 +426,13 @@ confirmation.
 
 ### Application heartbeat (unified liveness)
 
-Every Yano agent process — a global service (`watcher-service`,
-`scheduler-service`, `planner-01`/yano-local-pc) or a per-project
+Every Yano agent process — the Local PC `planner-01` or a per-project
 planner/coder/reviewer/specialist — writes the same bounded JSON heartbeat
 file on each presence publish: `<YANO_DATA_DIR>/heartbeats/<projectKey>/<instance>.json`,
 containing `observed_at` and the agent's own status. `yano-trace-storage.mjs`
 exposes the one canonical pair, `applicationHeartbeatPath()`/
 `readApplicationHeartbeat(cwd, instance, { maxAgeMs })`, used by both readers:
-`yano-global-services.mjs`'s `probeService()` (the 3 global services) and
+`yano-global-services.mjs`'s `probeService()` (Local PC) and
 `yano-watcher-registry.mjs`'s `plannerHeartbeatHealthy()` (per-project
 planners). Per il control-plane permanente `yano-local-pc`, invece, il
 controllo non richiede un heartbeat recente quando processo Pi e stato Herdr
@@ -450,6 +503,22 @@ optional per-job `timezone`; every pre-existing job omits it and keeps
 matching against the server's own local clock exactly as before, so "06:00 di
 Roma" is not silently reinterpreted as wherever the host machine's system
 timezone happens to be set.
+
+### Scheduler executor + regole persistenti
+
+Dallo scheduler script-first allo scheduler ESECUTORE: quando l'utente
+chiede uno schedule, lo scheduler-service lo esegue SUBITO in chat come
+primo giro (posta: sempre dry-run + gate di conferma via
+`yano mail-triage --confirm`), poi salva lo script registrato e al tick lo
+esegue lui stesso. La delega bidirezionale scheduler↔yano-local-pc è
+limitata a max 1 hop (`YANO_DELEGATION_HOPS`/`YANO_DELEGATION_ORIGIN` in
+`scripts/yano-invoke.mjs`; il secondo rimbalzo è rifiutato): i local-pc
+generici non creano mai schedule. Le regole utente persistono in
+`<data>/scheduler/scheduler-rules.json` (CRUD + query semantica via
+`scripts/yano-scheduler-rules.mjs`, comandi `yano schedule-rules` e
+`yano mail-triage`); il triage posta (`scripts/yano-mail-triage.mjs`)
+applica le regole prima dell'LLM, scrive solo nel Cestino (mai definitiva)
+e produce report per-run in `<data>/scheduler/mail-triage-reports/`.
 
 ### Notification channel resolution
 
@@ -610,6 +679,15 @@ The persistent watcher also subscribes to planner and run completion events.
 `planner_task_completed` and `run_completed` enqueue one immediate final scan,
 recorded as `yano_watcher_final_scan_requested` plus a `once: true` scan; the
 configured polling cadence remains active after that pass.
+
+The planner extension applies a deterministic action-integrity guard at
+`agent_end`: it compares the latest visible planner response with its
+observable `toolCall` parts. A response that claims an operation is starting
+without a tool call is recorded as `planner_action_claim_without_tool`, receives
+at most two `yano-action-guard` follow-up turns, and does not publish
+`planner_task_completed` or acknowledge an inbound assignment until the guard
+passes. This detects the gap between a model's promise and an executed action
+without relying on private chain-of-thought.
 
 Every Pi session also emits bounded `context_usage` telemetry to its per-agent
 trace log. The external watcher uses the latest `context_ratio` for each live
@@ -969,3 +1047,18 @@ progetti attivi; la transizione inversa riprende soltanto i run registrati come
 `auto_paused_projects`. Stato, progetti tracciati e audit sono persistenti nel
 registro scheduler e nel log JSONL globale, così il comportamento resta
 idempotente anche dopo standby o riavvio.
+
+## Contratto essenziale (2026-09-15)
+
+`yano status --all --explain --json` espone decisioni watcher e fingerprint;
+`yano feedback-api start` conserva API e dati senza GUI Kanban (`dash` è alias).
+Il Gantt mostra fasi previste, dipendenze e round osservati con modelli/provider.
+`yano frontend-review browser --url URL` abilita annotazioni DOM senza React.
+Watcher/scheduler sono deterministici; Local PC resta il servizio LLM persistente.
+Nuovi piani: `plan_set` richiede `scoping.status` e `scoping.rationale`.
+Dettagli, compatibilità e limiti: [Yano essenziale](../quick-guides/yano-essential.md).
+
+Ponytail è attivo in modalità `full` per tutti i ruoli Yano, anche con prompt
+personalizzati. `yano ponytail status` mostra la policy; `yano ponytail off`
+la disattiva nel progetto, `--global` cambia il default ereditato, `reset`
+rimuove l’override. Le preferenze persistono fra i riavvii.

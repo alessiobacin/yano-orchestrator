@@ -9,7 +9,7 @@ surface implemented by the package. Always prefer the installed binary's
 ```text
 yano init [--name <name>] [--target <dir>] [--force] [--llmp] [--herdr] [--no-git]
 yano start --instance <id> [--role <role>] [--project <scope>] [--project-scope <scope>] [--trace-mode <mode>]
-yano frontend-review setup|start|url [--project-root <dir>] [--print-only|--dry-run]
+yano frontend-review browser|setup|start|url [--project-root <dir>] [--print-only|--dry-run]
 yano doctor [--json] [--network]
 yano update [--check|--reload] [--dry-run] [--yes] [--timeout <seconds>] [--force]
 yano uninstall [--yes]
@@ -24,8 +24,10 @@ yano qa-inventory scan [--project-root <dir>] [--yano-self-audit] [--json]
 yano gantt [options]
 yano watch [options]
 yano schedule add --name <nome> --project-root <dir> --script <path> --mode <self|planner:<progetto>|yano-local-pc> [--cron '...'] [--once] [--timeout-ms N] [--expected-consequence <testo>] [--json]
-yano schedule run <id>|list [--json]|remove|enable|disable --id <id>  # script-first recurring jobs; run = esegui lo script subito (test)
-yano invoke --role <planner[:<scope>]|yano-local-pc> --prompt "..." [--project-root <dir>] [--timeout-ms N]  # bridge deterministico dagli script
+yano schedule run --id <id>|list [--json]|remove|enable|disable --id <id>  # script-first recurring jobs; run = esegui lo script subito (test)
+yano schedule-rules <add|list|query|update|remove|seed> [opzioni]  # regole persistenti scheduler (query semantica, mai delete definitiva)
+yano mail-triage [--dry-run|--confirm|--no-notify]  # triage posta scheduler (solo Cestino; primo giro con gate di conferma)
+yano invoke --role <planner[:<scope>]|yano-local-pc|scheduler> --prompt "..." [--project-root <dir>] [--timeout-ms N]  # bridge deterministico dagli script; scheduler = return-hop esecutore, anti-loop max 1 hop via YANO_DELEGATION_HOPS/ORIGIN
 yano trace [subcommand] [options]
 yano pause|resume|recovery [subcommand] [options]
 yano repair [options]
@@ -64,7 +66,9 @@ yano start --herdr --instance <instance> --role <role>
 The launcher verifies that a Herdr workspace with the project label also has a
 pane rooted at the current project. It refuses to create a tab in the currently
 focused workspace when that verification fails. Do not substitute raw `herdr
-tab create` / `herdr agent start` for Yano agents.
+tab create` / `herdr agent start` for Yano agents. A transient
+`agent_kind_mismatch` is accepted only after the same pane is confirmed by a
+Herdr snapshot as a live `pi` agent; other launch errors remain fatal.
 
 `yano start --project-scope <scope>` overrides the MQTT scope derived from the
 project root: without the flag the runtime uses `projectKey(cwd)` (canonical
@@ -183,19 +187,32 @@ rule requires its ID from `--list --json`.
 # Esecuzione = runtime Node sul file; fallback loggato + enabled:false se lo script manca.
 # Folder script persistente: <data>/scheduler/scripts/ (un upgrade non lo cancella).
 yano schedule add --name <nome> --project-root <dir> --script <path> --mode <self|planner:<progetto>|yano-local-pc> [--cron '0 14,21 * * *'] [--once] [--timeout-ms N] [--expected-consequence <testo>] [--json]
-yano schedule run <id> [--json]        # esegue lo script registrato SUBITO (test prima di renderlo ricorrente)
+yano schedule run --id <id> [--json]        # esegue lo script registrato SUBITO (test prima di renderlo ricorrente)
 yano schedule instances --id <job-id> [--limit N] [--json] # cronologia esecuzioni e status
 yano schedule retry --id <instance-id> [--json]            # retry manuale collegato all'istanza originale
 yano schedule list [--json]            # job con script_path, mode, expected_consequence, enabled, last_status
 yano schedule remove --id <id>|enable --id <id>|disable --id <id>
 yano schedule tick [--json]            # dispatcher one-minute (cron di sistema -> `yano schedule tick`)
-yano schedule supervise [--json]       # supervisor + tick (ricrea la tab Herdr scheduler se manca)
+yano schedule supervise [--json]       # supervisor + tick (tick dei job, garanzia planner-01 di yano-local-pc, reinstalla il digest se manca — nessun agent Herdr scheduler)
 yano schedule cron <install|status|remove>
 
 # Bridge deterministico chiamabile DENTRO gli script (e da CLI fuori da un agente):
 #   planner[:<scope>]  -> compone `yano start --herdr --role planner --project <scope> --print-only` (wake del planner di progetto)
-#   yano-local-pc    -> delega a `yano local-pc ask` (broker-aware, timeout, mai hang)
-yano invoke --role <planner[:<scope>]|yano-local-pc> --prompt "..." [--project <scope>|--project-root <dir>] [--timeout-ms N]
+#   yano-local-pc    -> delega a `yano local-pc ask` (broker-aware, timeout, mai hang); MAI schedule — se gli chiedono una schedulazione, delega 1 hop allo scheduler e si ferma
+#   scheduler        -> compone `yano start --herdr --role scheduler` (scheduler-service ESECUTORE: imposta ed esegue); return-hop per la delega bidirezionale scheduler<->local-pc, max 1 hop (YANO_DELEGATION_HOPS/YANO_DELEGATION_ORIGIN, il secondo rimbalzo è rifiutato)
+yano invoke --role <planner[:<scope>]|yano-local-pc|scheduler> --prompt "..." [--project <scope>|--project-root <dir>] [--timeout-ms N]
+
+# Regole persistenti scheduler (<data>/scheduler/scheduler-rules.json, sopravvivono al reset chat):
+# query semantica ("quali regole cancellazione sono attive?"), update/remove semantici; seed idempotente (a) support@mail.xtb.com -> Cestino (b) pubblicità con unsubscribe -> disiscrizione poi Cestino
+yano schedule-rules add --pattern <testo> [--kind blocklist|unsubscribe|keep|generic] [--action trash|unsubscribe_then_trash|review|keep] [--schedule-id <id>] [--note <testo>] [--json]
+yano schedule-rules list [--schedule-id <id>] [--all] [--json]
+yano schedule-rules query <testo> [--schedule-id <id>] [--json]
+yano schedule-rules update --id <id> [--pattern ...] [--kind ...] [--action ...] [--note ...] [--enable|--disable] [--json]
+yano schedule-rules remove --id <id> [--json]
+yano schedule-rules seed [--json]
+
+# Triage posta scheduler (mode self, scripts/yano-mail-triage.mjs): regole prima dell'LLM (blocklist -> Cestino senza LLM), unsubscribe via GET diretto + fallback browser, SOLO Cestino via delete_message (mai definitiva), gate primo giro (dry-run + yano mail-triage --confirm), report per-run in <data>/scheduler/mail-triage-reports/ (keep 50)
+yano mail-triage [--dry-run|--confirm|--no-notify]
 
 # Legacy (job testo+cron già esistenti, dispatch planner col testo come in passato):
 yano cron --add <natural request> [--project-root <dir>]
@@ -310,6 +327,10 @@ The raw observable trace is authoritative; the SQLite semantic index and
 consolidated memories are derived data. Never clear evidence during an active
 diagnosis.
 
+For planner action-integrity checks, filter `yano trace events` by
+`--type planner_action_claim_without_tool`, `planner_action_guard_wakeup`, or
+`planner_action_guard_exhausted`.
+
 ## Recovery, update, and repair
 
 ```text
@@ -318,6 +339,14 @@ yano resume --run <id> [--project <name>] [--all] [--dry-run] [--yes]
 yano recovery status|list [--project <name>]
 yano repair [--project-root <dir>] [--dry-run|--yes] [--init-db] [--force]
 yano repair --all-projects [--dry-run|--yes] [--update]
+
+yano capabilities show
+yano capabilities detect [--write]
+yano capabilities set <frontend|backend> [--url <url>|--absent]
+
+`capabilities` gestisce il manifest persistente della topologia del progetto.
+`detect --write` aggiorna il file atomicamente; la salute online/offline/errore
+non va scritta dagli agenti ed è responsabilità del supervisor Yano.
 yano update --reload --dry-run
 yano update --reload --yes [--timeout <seconds>] [--force]
 ```
@@ -466,3 +495,31 @@ non-finalized run, then sends a recovery prompt with trace, ticket and worktree
 context. Once all runs are finalized it closes that project's watcher tab.
 yano watcher supervise --json
 # verifica collisioni di identità e planner duplicati senza crearne altri
+
+## Contratto essenziale (2026-09-15)
+
+`yano status --all --explain --json` espone decisioni watcher e fingerprint;
+`yano feedback-api start` conserva API e dati senza GUI Kanban (`dash` è alias).
+Il Gantt mostra fasi previste, dipendenze e round osservati con modelli/provider.
+`yano frontend-review browser --url URL` abilita annotazioni DOM senza React.
+Watcher/scheduler sono deterministici; Local PC resta il servizio LLM persistente.
+Nuovi piani: `plan_set` richiede `scoping.status` e `scoping.rationale`.
+Dettagli, compatibilità e limiti: [Yano essenziale](../../../../docs/quick-guides/yano-essential.md).
+
+Ponytail è attivo in modalità `full` per tutti i ruoli Yano, anche con prompt
+personalizzati. `yano ponytail status` mostra la policy; `yano ponytail off`
+la disattiva nel progetto, `--global` cambia il default ereditato, `reset`
+rimuove l’override. Le preferenze persistono fra i riavvii.
+
+Le API feedback accettano bug senza credenziali E2E; le credenziali, se
+fornite, devono essere complete. La raccolta non equivale a verifica
+autenticata. Gli URL di progetto isolano anche modifica e cancellazione.
+
+Il reload controllato assegna la motivazione di ripresa automaticamente e
+rilancia le istanze MQTT `offline`; un lancio fallito conserva il checkpoint.
+
+Il Gantt espone progetto e descrizione per lavoro, filtri assignment/periodo/stato,
+viste Ora/Prossimi passi/Conclusi e attività strumenti. Solo un turno corrente
+con heartbeat busy sano anima la barra. Le risposte mancanti storiche non
+sono attività live. Modello/provider derivano dai metadata o dagli header
+registrati; il routing configurato resta distinto dal modello effettivo.

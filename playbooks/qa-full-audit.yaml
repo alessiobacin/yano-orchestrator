@@ -22,6 +22,11 @@ catalog:
     - requirements verification
     - full regression audit
     - capability audit
+    - standard QA
+    - medium QA
+    - deep QA
+    - use-case and test adequacy
+    - expected human behavior verification
   exclusions:
     - new feature implementation
     - deployment execution
@@ -29,16 +34,30 @@ catalog:
     - project_name
     - project_root
     - variant
+    - campaign_id
+    - chapter_id
 enforcement:
   status: partial
   note: The matrix format, evidence rules and remediation routing are
     contractual; the runtime does not yet auto-detect matrix coverage or
     auto-block completion — the planner and the two roles below enforce it.
+team:
+  strategy: inventory contract first, bounded execution second, use-case adequacy and cross-command regression before remediation
+  default_variant: medium
+  roles:
+    - {id: qa-inventory-analyst, purpose: Build the canonical feature and command matrix., outputs: [capability_matrix, expected_behavior], write_scope: [chapter-report-only], capabilities: [node, npm, npx]}
+    - {id: qa-functional-verifier, purpose: Execute direct and downstream checks in isolation., outputs: [execution_evidence, verdicts], write_scope: [isolated-test-artifacts-only], capabilities: [node, npm, curl]}
+    - {id: test-adequacy-analyst, purpose: Map use cases, negative paths and test sufficiency., outputs: [use_case_map, test_gaps], write_scope: [chapter-report-only], capabilities: [node, npm]}
+    - {id: mutation-tester, purpose: Check whether tests detect representative behavioral mutations., outputs: [mutation_signal], write_scope: [isolated-test-artifacts-only], capabilities: [node, npm]}
+  variants:
+    - {id: standard, roles: [qa-inventory-analyst, qa-functional-verifier], parallel_groups: [[qa-functional-verifier]]}
+    - {id: medium, roles: [qa-inventory-analyst, qa-functional-verifier, test-adequacy-analyst], parallel_groups: [[qa-functional-verifier, test-adequacy-analyst]]}
+    - {id: deep, roles: [qa-inventory-analyst, qa-functional-verifier, test-adequacy-analyst, mutation-tester], parallel_groups: [[qa-functional-verifier, test-adequacy-analyst, mutation-tester]]}
 contract:
   execution: sequential
   checkpoint: every_matrix_phase_and_transition
-  evidence: [scope, inventory_entry, precondition, command, exit_code, stdout_stderr, before_snapshot, after_snapshot, verdict, limitation]
-  report_sections: [scope, capability_matrix, dependency_graph, evidence, findings, remediation, full_rerun, blockers, handoff]
+  evidence: [scope, inventory_entry, use_case, expected_human_behavior, precondition, command, exit_code, stdout_stderr, before_snapshot, after_snapshot, test_mapping, cross_command_delta, verdict, confidence, evidence_confidence, judgment_confidence, judgment_confidence_rationale, limitation, resource_record]
+  report_sections: [scope, capability_matrix, use_case_and_test_adequacy, dependency_graph, evidence, findings, remediation, full_rerun, resource_accounting, blockers, handoff]
   budgets: {max_commands: 300, max_files: 500, max_minutes: 120, max_tokens: 30000}
   verification: {mode: command_feature_matrix_with_cross_command_regression, required: true}
   recovery: [resume_from_last_checkpoint, preserve_matrix, rerun_failed_entry, full_matrix_rerun_after_remediation, escalate_after_three_red_rounds]
@@ -54,6 +73,9 @@ states:
     terminal: false
   - id: verifying
     owner: qa-functional-verifier
+    terminal: false
+  - id: test_adequacy
+    owner: test-adequacy-analyst
     terminal: false
   - id: findings
     owner: planner
@@ -93,6 +115,20 @@ transitions:
       - command_matrix_published
       - matrix_covers_every_documented_capability
       - state_effect_graph_declared_for_mutating_commands
+  - id: start_test_adequacy
+    from: mapping
+    to: test_adequacy
+    actor: test-adequacy-analyst
+    requires:
+      - use_case_catalog_requested
+      - existing_tests_indexed
+  - id: merge_adequacy
+    from: [verifying, test_adequacy]
+    to: findings
+    actor: planner
+    requires:
+      - verification_evidence_published
+      - test_adequacy_published
   - id: report_findings
     from: verifying
     to: findings

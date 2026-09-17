@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import { timelineFromEvents, observedModelFromMessage, timelineLabel } from './yano-timeline.mjs';
+const ts='2026-09-15T10:00:00Z', now=Date.parse(ts)+60000;
+const base={project:'alpha',project_key:'root-alpha',instance:'coder-01',role:'coder'};
+const event=(type,rest={})=>({...base,type,ts,...rest});
+const events=[event('wake_in',{assignment_id:'a',prompt_preview:'Correggere il login',sender_instance:'planner-01'}),event('turn_start',{assignment_id:'a',turn_id:'turn:1'}),event('model_observed',{assignment_id:'a',...observedModelFromMessage({content:'[llmp] provider: bacin | model: muse | Intent: 1'})}),event('tool_execution_start',{assignment_id:'a',tool:'read'})];
+const live=timelineFromEvents(events,{now,heartbeat:{'coder-01':{healthy:true,status:'busy'}}}).rounds[0];
+assert.equal(live.title,'Correggere il login');assert.equal(live.project,'alpha');assert.equal(live.live,true);assert.equal(live.models[0].model,'muse');assert.equal(live.steps[0].tool,'read');
+assert.equal(timelineFromEvents(events,{now,heartbeat:{'coder-01':{healthy:true,status:'idle'}}}).rounds[0].live,false);
+assert.equal(timelineFromEvents(events,{now:now+86400000}).rounds[0].display_status,'unconfirmed');
+const closed=timelineFromEvents([...events,event('agent_end',{assignment_id:'a'}),event('assignment_completed',{assignment_id:'a'})],{now}).rounds[0];assert.equal(closed.status,'completed');assert.equal(closed.live,false);
+const direct=timelineFromEvents([event('turn_start',{turn_id:'turn:direct',prompt_preview:'Verificare i test'}),event('assistant_response',{text:'[llmp] provider: actual | model: actual-model\nTest eseguiti'}),event('agent_end')],{now}).rounds[0];assert.equal(direct.status,'completed');assert.equal(direct.models[0].provider,'actual');
+const historical=timelineFromEvents([event('turn_start'),event('assistant_response',{text:'[llmp] provider: actual | model: actual-model\nCorretti i test del login'}),event('agent_end')],{now}).rounds[0];assert.equal(historical.title,'Corretti i test del login');assert.equal(historical.title_source,'response_summary');
+const cross=timelineFromEvents([...events,{...event('wake_in',{assignment_id:'a'}),project:'beta',project_key:'root-beta'}],{now});assert.equal(cross.rounds.length,2,'assignment identifiers cannot mix project roots');
+const restarted=timelineFromEvents([...events,event('session_start')],{now,heartbeat:{'coder-01':{healthy:true,status:'busy'}}});assert.equal(restarted.rounds[0].live,false,'new session does not animate abandoned old work');
+assert.equal(timelineLabel('token=abc password=xyz'), 'token=[REDACTED] password=[REDACTED]');
+assert.equal(observedModelFromMessage({provider:'p',model:'m',content:[]}).observed_model,'m');
+console.log('readable Gantt: descriptions, historical models, live/stale state, isolation, direct turns passed');

@@ -56,10 +56,12 @@ Use the smallest command that answers the request. Typical translations are:
 | Open the Gantt for this project | `yano gantt --project-root "$PWD" --persistent --open` | URL and automatically selected free port in `10000-19999` |
 | Recover the current or all persistent Gantt links | `yano gantt --link --json` or `yano gantt --links --json` | registered URL, project root and live/stopped status |
 | Is Yano ready? | `yano doctor --network` and `yano deps --json` | broker, Git, Pi, CLI, credentials and capability checks |
+| Run a complete QA/product/architecture audit | `yano architect assess --task "..." --json` then `yano playbook show audit-campaign --json` | recommended campaign, variant, chapter roles, capability gaps and dual confidence fields (`evidence_confidence`/`judgment_confidence`) |
+| Check whether AI work can become a script | `node scripts/audit-delegation.mjs --manifest audit-manifest.json` | D0/D1/AI classification, postconditions and measurement plan |
 | Initialize a new or existing repository | `yano init --name "<name>"` (or `--no-git` for a conversation-only folder) | Requires `cm`; initializes Code Mem with `cm init pi`, then preserves application files while adding missing Yano infrastructure |
 | Initialize and open Herdr with planner | `yano init --name "<name>" --herdr` | Herdr workspace, root pane, and `planner-01` launch |
-| Start an agent in Herdr | `yano start --herdr --instance <id> --role <role>` | verifies workspace label + project root before tab creation |
-| Prepare a visual frontend review | `yano frontend-review start` | installs project-local React `agentation` (React/Angular), or infers a browser-only review via the Yano wrapper for Streamlit/Python/static frontends without touching their source; infers the dev script/URL and starts the development app after user consent |
+| Start an agent in Herdr | `yano start --herdr --instance <id> --role <role>` | verifies workspace/root; recovers only a transient mismatch after `agent: pi` confirmation |
+| Prepare a visual frontend review | `yano frontend-review browser --url URL` or `yano frontend-review start` | generates a DOM annotation bookmarklet without app dependencies (start `yano feedback-api start` to receive feedback); or installs project-local React `agentation` (React/Angular), or infers a browser-only review via the Yano wrapper for Streamlit/Python/static frontends without touching their source; legacy Agentation adapters remain optional |
 | Allocate isolated E2E ports | `yano test-env allocate --worktree <dir> --json` | selects and persists a free paired frontend/backend port set; never silently reuses another checkout |
 | Start an instance on the persistent Local PC runtime | `yano local-pc status` | `yano-local-pc` and its `planner-01` are supervised in the persistent `yano-local-pc` workspace; scheduler and watcher remain in their own service workspaces |
 | List or inspect agent memory | `yano memory agents --project-root <dir>`, then `yano memory show --scope instance --instance <id> --role <role>` | Lists project, role and instance Markdown memories; memory is bounded and survives agent restart |
@@ -68,6 +70,7 @@ Use the smallest command that answers the request. Typical translations are:
 | Investigate a specific failure | `yano trace context ... --json`, then `yano trace search ... --mode hybrid --json` | filtered evidence before broad history |
 | Pause and resume work | `yano pause ... --yes`, then `yano resume ... --yes` | checkpoint, assignments, missing agents; never use `end` as pause |
 | Reconcile stale or missing agents | `yano repair --dry-run`, then `yano repair --yes` | proposed snapshot/restart/cleanup plan before applying it |
+| Declare project frontend/backend topology | `yano capabilities detect --write` | canonical manifest; runtime health stays supervisor-owned |
 | Apply a Yano update to live instances | `yano update --reload --dry-run`, then `yano update --reload --yes` | controlled checkpoint restart; converts an accidental npm link to a permanent global copy |
 | Find or inspect a playbook | `yano playbook list`, `show`, `candidates`, `agent show` | catalog source, requirements, roles and missing credentials |
 | Configure a missing requirement | `yano config set <KEY> <value>` or `... --stdin` | global per-user config path, never application `.env` for global installs |
@@ -342,6 +345,14 @@ Use `index` before semantic search when the index is absent or stale, and
 for the user's actual verdict and `opinion` only for a clearly labelled
 planner hypothesis. Never clear trace data during diagnosis.
 
+When a planner says it is about to run/check something, inspect the same
+planner trace for `planner_action_claim_without_tool`. This means the visible
+assistant message had no observable `toolCall`; Yano keeps completion pending
+and sends a bounded corrective follow-up, recorded as
+`planner_action_guard_wakeup`. `planner_action_guard_exhausted` means the
+planner still did not produce a tool call after the allowed attempts; it is not
+evidence that the announced operation succeeded.
+
 ### Playbook and capability requirements
 
 ```text
@@ -351,6 +362,9 @@ yano playbook show <id> --json
 yano playbook show clean-repo --json  # verifica anche il contratto documentale
 yano agent show <role> --json
 yano playbook check <file> --json
+node scripts/audit-manifest.mjs --project-root <dir> --output audit-manifest.json
+node scripts/audit-delegation.mjs --manifest audit-manifest.json --output delegation.json
+node scripts/audit-resource-ledger.mjs --trace-root <YANO_DATA_DIR>/traces --project <name>
 ```
 
 Read `credential_checks` and `warnings`. If a required CLI, MCP, skill, token,
@@ -423,9 +437,9 @@ not modify project files or finalize a run. To edit the cron entry use
 
 ### Recurring jobs
 
-Two modes coexist. **Script-first (current model)** — `yano schedule add --name <nome> --project-root <dir> --script <path> --mode <self|planner:<progetto>|yano-local-pc> [--cron '...'] [--once]` registers a job that executes the REGISTERED SCRIPT at trigger time (never a shell; the script lives in the persistent per-user folder `<data>/scheduler/scripts/`, so a package upgrade never deletes it). Test every script before making it recurring with `yano schedule run <id>` (runs the script immediately); if the script is missing or fails, the dispatch logs `failed` and disables the job (`enabled:false`) — never free text to a planner from the cron. Manage jobs with `yano schedule list`, `--remove --id`, `--enable --id`, `--disable --id`; `--once` auto-disables a job after its first run. Routing is decided INSIDE the script via `yano invoke`: `yano invoke --role planner:<scope> --prompt "..."` (composes `yano start --herdr --role planner --project <scope> --print-only` to wake that project's planner) or `yano invoke --role yano-local-pc --prompt "..."` (delegates to the broker-aware `yano local-pc ask`). Destructive or project-mutating intent always routes through the project planner with human gates.
+Two modes coexist. **Script-first (current model)** — `yano schedule add --name <nome> --project-root <dir> --script <path> --mode <self|planner:<progetto>|yano-local-pc> [--cron '...'] [--once]` registers a job that executes the REGISTERED SCRIPT at trigger time (never a shell; the script lives in the persistent per-user folder `<data>/scheduler/scripts/`, so a package upgrade never deletes it). Test every script before making it recurring with `yano schedule run --id <id>` (runs the script immediately); if the script is missing or fails, the dispatch logs `failed` and disables the job (`enabled:false`) — never free text to a planner from the cron. Manage jobs with `yano schedule list`, `--remove --id`, `--enable --id`, `--disable --id`; `--once` auto-disables a job after its first run. Routing is decided INSIDE the script via `yano invoke`: `yano invoke --role planner:<scope> --prompt "..."` (composes `yano start --herdr --role planner --project <scope> --print-only` to wake that project's planner) or `yano invoke --role yano-local-pc --prompt "..."` (delegates to the broker-aware `yano local-pc ask` — reserved for one-off interactive machine tasks, never for recurring schedules; yano-local-pc NEVER creates schedules itself, it delegates back in a single hop via `yano invoke --role scheduler --prompt "..."`), or `yano invoke --role scheduler --prompt "..."` (wakes the scheduler-service EXECUTOR, which sets up AND runs the schedule — the return hop of the bidirectional scheduler<->local-pc delegation, max 1 hop via `YANO_DELEGATION_HOPS`/`YANO_DELEGATION_ORIGIN`, the second bounce is refused). When a user asks for a schedule, the scheduler executes the task IMMEDIATELY in chat as the first run (for mail: always dry-run with a confirmation gate), then saves the script and registers the schedule, and at tick it runs the script itself. Fully deterministic flows run with NO agent at all: the `self` script does the work materially (example: `scripts/yano-mail-triage.mjs` reads Mail.app through the apple-mail MCP server over stdio and classifies via llmProxy over HTTP — yano-local-pc is not involved). User rules persist in `<data>/scheduler/scheduler-rules.json` (CRUD + semantic query via `yano schedule-rules add|list|query|update|remove|seed`); mail rules: (a) `support@mail.xtb.com` always to Trash, (b) ads with unsubscribe get an unsubscribe attempt (direct link, then browser if needed), otherwise Trash. Mail triage rules run BEFORE the LLM (blocklist to Trash without LLM), Trash-only via `delete_message` (never permanent delete), first-run gate (`yano mail-triage --dry-run`, confirm with `yano mail-triage --confirm`), per-run reports in `<data>/scheduler/mail-triage-reports/` (keep 50). Destructive or project-mutating intent always routes through the project planner with human gates.
 
-**Legacy (natural language)** — `yano cron --add` accepts the Italian forms `ogni giorno alle 14 e alle 21 esegui <task>` and `ogni settimana di lunedì alle 13:00 fai partire <task>`, stores the resulting cron and task in the global Yano data-root, and returns a job id. Manage it with `yano cron --list`, `--disable <id>`, `--enable <id>`, `--run <id>` or `--remove <id>`. The global one-minute supervisor restores the persistent `yano-local-pc` runtime and its service agents after a reboot or closed tab, then dispatches every scheduled LLM task to the Local PC planner. A scheduled task never bypasses playbook approval gates; scripts must read secrets from `.env`, never embed tokens. Application projects are never used as the system-services workspace.
+**Legacy (natural language)** — `yano cron --add` accepts the Italian forms `ogni giorno alle 14 e alle 21 esegui <task>` and `ogni settimana di lunedì alle 13:00 fai partire <task>`, stores the resulting cron and task in the global Yano data-root, and returns a job id. Manage it with `yano cron --list`, `--disable <id>`, `--enable <id>`, `--run <id>` or `--remove <id>`. The global one-minute supervisor runs from the system cron: it ticks due jobs (script-first — the registered script runs, routing decided inside it), guarantees `planner-01` in the `yano-local-pc` workspace after a reboot or closed tab, and reinstalls the default digest if missing. Only legacy text+cron jobs still dispatch their task text through `yano local-pc ask --planner` to `planner-01`; recurring machine work (e.g. mail triage) runs agent-free in `mode: self`. A scheduled task never bypasses playbook approval gates; scripts must read secrets from `.env`, never embed tokens. Application projects are never used as the system-services workspace.
 
 ### External service supervision
 
@@ -450,3 +464,24 @@ Prima di creare un agente, Yano verifica la coppia canonica `project-root` +
 `instance` e rifiuta i duplicati. I planner multipli devono essere numerati
 (`planner-01`, `planner-02`, ...). Per audit e collisioni già presenti:
 `yano watcher supervise --json`.
+
+## Contratto essenziale (2026-09-15)
+
+`yano status --all --explain --json` espone decisioni watcher e fingerprint;
+`yano feedback-api start` conserva API e dati senza GUI Kanban (`dash` è alias).
+Il Gantt mostra fasi previste, dipendenze e round osservati con modelli/provider.
+`yano frontend-review browser --url URL` abilita annotazioni DOM senza React.
+Watcher/scheduler sono deterministici; Local PC resta il servizio LLM persistente.
+Nuovi piani: `plan_set` richiede `scoping.status` e `scoping.rationale`.
+Dettagli, compatibilità e limiti: [Yano essenziale](../../../docs/quick-guides/yano-essential.md).
+
+Ponytail è attivo in modalità `full` per tutti i ruoli Yano, anche con prompt
+personalizzati. `yano ponytail status` mostra la policy; `yano ponytail off`
+la disattiva nel progetto, `--global` cambia il default ereditato, `reset`
+rimuove l’override. Le preferenze persistono fra i riavvii.
+
+Il Gantt espone progetto e descrizione per lavoro, filtri assignment/periodo/stato,
+viste Ora/Prossimi passi/Conclusi e attività strumenti. Solo un turno corrente
+con heartbeat busy sano anima la barra. Le risposte mancanti storiche non
+sono attività live. Modello/provider derivano dai metadata o dagli header
+registrati; il routing configurato resta distinto dal modello effettivo.

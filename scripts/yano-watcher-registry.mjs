@@ -27,6 +27,8 @@
 // persisted table: watcher_projects tracks whether a polling loop is alive.
 
 import crypto from "node:crypto";
+import { agentLifecycle } from "./watcher/agent-lifecycle.mjs";
+import { projectTimeline } from "./yano-timeline.mjs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -60,7 +62,8 @@ import { projectRuns, runNeedsPlanner } from "./watcher/project-runs.mjs";
 export { projectRuns, projectOpenHolds, runNeedsPlanner, projectNeedsPlanner } from "./watcher/project-runs.mjs";
 import {
 	findProjectWorkspace, plannerAgentsInWorkspace, plannerHeartbeatHealthy,
-	paneHasLivePiProcess, livePlannerPanesInWorkspace,
+	paneHasLivePiProcess, panePiProcessState, livePlannerPanesInWorkspace, plannerLooksHealthyViaExplain,
+	isPlannerIdentity,
 } from "./watcher/planner-health.mjs";
 export { findProjectWorkspace, plannerHeartbeatHealthy } from "./watcher/planner-health.mjs";
 
@@ -71,7 +74,16 @@ const DEFAULT_LOOKBACK_MS = 3600000;
 const DEFAULT_PLANNER_STALL_MS = 15 * 60_000;
 const ORPHANED_TICKET_IDLE_MS = 2 * 60_000;
 const PLANNER_RECOVERY_COOLDOWN_MS = 10 * 60_000;
-const IDLE_WATCHER_GRACE_MS = 60 * 60_000;
+// A live OS-level `pi` process is not proof the application inside it is
+// still running (a wedged event loop or a connection that died without the
+// process exiting looks identical from Herdr's side). Deferring forever in
+// that case — the pre-existing behavior — left a genuinely crashed planner
+// unrecovered for 12+ hours overnight (2026-09-12/13 incident) until a
+// manual `yano repair --force`. Once the heartbeat has been continuously
+// stale-but-present for longer than any real transient blip could last,
+// stop trusting OS process presence and fall through to the normal
+// close+relaunch recovery below.
+const PLANNER_UNHEALTHY_ESCALATION_MS = 30 * 60_000;
 // A processing card without a live planner is an orphaned claim, not active
 // work. Give a planner a generous recovery window before returning it to the
 // operator-controlled Received column.
@@ -126,13 +138,14 @@ function openDatabase() {
 			lookback_ms INTEGER NOT NULL DEFAULT 3600000,
 			last_recovery_at TEXT,
 			last_recovery_reason TEXT,
+			planner_unhealthy_since TEXT,
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		);
 	`);
 	// Existing global registries predate recovery bookkeeping. Keep the upgrade
 	// idempotent so a supervisor can safely start after a package update.
-	for (const column of ["last_recovery_at TEXT", "last_recovery_reason TEXT"]) {
+	for (const column of ["last_recovery_at TEXT", "last_recovery_reason TEXT", "planner_unhealthy_since TEXT"]) {
 		try { db.exec(`ALTER TABLE watcher_projects ADD COLUMN ${column}`); } catch { /* already present */ }
 	}
 	// Migrate the old implicit five-minute cadence to the control-plane
@@ -201,8 +214,9 @@ function shellQuote(valueToQuote) {
 // projectNeedsPlanner moved verbatim into scripts/watcher/project-runs.mjs
 // — re-exported below to preserve every external import path.
 
-export function listWatcherProjectRows() {
-	const db = openDatabase();
+export function listWatcherProjectRows({ readOnly = false } = {}) {
+	if (readOnly && !fs.existsSync(dbPath())) return [];
+	const db = readOnly ? new (requireSqlite().DatabaseSync)(dbPath(), { readOnly: true }) : openDatabase();
 	try { return db.prepare("SELECT * FROM watcher_projects ORDER BY name, root").all(); }
 	finally { try { db.close(); } catch { /* best effort */ } }
 }
@@ -228,6 +242,14 @@ export function pruneMissingWatcherProjects() {
 // ensureRegisteredPlanner stays here (below): it closes tabs (M1) and
 // writes to the registry DB, a different risk class deferred for now.
 
+// A project owns exactly one planner. When the live planner is exposed by
+// Herdr under its unique agent name (`planner-<project>-<hash>`) the legacy
+// exact-label lookup (`label === "planner-01"`) misses it and the recovery
+// path creates a duplicate `planner-01` tab. Match by role instead.
+function findPlannerTab(snapshot, workspaceId) {
+	return (snapshot?.tabs || []).find((item) => item.workspace_id === workspaceId && isPlannerIdentity(item.label));
+}
+
 export function ensureRegisteredPlanner(row, snapshot, db = null) {
 	if (!snapshot || !fs.existsSync(row.root)) return { recovery: "project_unavailable" };
 	// The planner is the permanent control-plane identity of every initialized
@@ -239,16 +261,61 @@ export function ensureRegisteredPlanner(row, snapshot, db = null) {
 	const workspace = findProjectWorkspace(snapshot, row.root, row.name);
 	const planners = workspace ? plannerAgentsInWorkspace(snapshot, workspace.workspace_id, row.root) : [];
 	const healthy = planners.find(plannerHeartbeatHealthy);
-	if (healthy) return { recovery: "planner_healthy", planner_status: healthy.agent_status || "unknown", planner_instance: healthy.name || null };
+	if (healthy) {
+		// Bonifica: an empty duplicate planner tab (e.g. a legacy `planner-01`
+		// left over next to the live uniquely-named planner) has no live Pi
+		// process and is closed here instead of accumulating. Live processes
+		// are never force-closed — simultaneous live planners are reported as
+		// an identity conflict (findAgentIdentityConflicts) instead.
+		const leftovers = planners.filter((planner) => planner.tab_id !== healthy.tab_id && !paneHasLivePiProcess(planner.pane_id));
+		for (const leftover of leftovers) {
+			const tab = snapshot.tabs?.find((item) => item.tab_id === leftover.tab_id);
+			if (tab) closeHerdrTab(tab.tab_id);
+		}
+		if (db && row.planner_unhealthy_since) db.prepare("UPDATE watcher_projects SET planner_unhealthy_since = NULL, updated_at = ? WHERE project_key = ?").run(now(), row.project_key);
+		return { recovery: "planner_healthy", planner_status: healthy.agent_status || "unknown", planner_instance: healthy.name || null };
+	}
 	// A stale heartbeat does not prove that the Pi process has exited. Never
 	// inject a second planner-01 command into a pane that still owns a live Pi
 	// process: concurrent watcher/manual recovery used to produce duplicate
 	// identity errors and tabs whose purpose appeared to change between roles.
+	// But a wedged/hung process that never publishes a heartbeat again looks
+	// identical to this on every future pass too — bound the deferral so it
+	// cannot last forever (see PLANNER_UNHEALTHY_ESCALATION_MS above).
+	let escalatedUnhealthyPlanner = false;
 	const livePlanner = planners.find((planner) => paneHasLivePiProcess(planner.pane_id));
-	if (livePlanner) return { recovery: "planner_process_present_stale_heartbeat", planner_status: livePlanner.agent_status || "unknown", planner_instance: livePlanner.name || null, planner_pane_id: livePlanner.pane_id };
+	if (livePlanner) {
+		const unhealthySince = Date.parse(row.planner_unhealthy_since || "");
+		const pastThreshold = Number.isFinite(unhealthySince) && Date.now() - unhealthySince >= PLANNER_UNHEALTHY_ESCALATION_MS;
+		// A final confirmation before ever closing a planner: `agent_status`
+		// (e.g. "done" right after a finished turn, observed to persist 45+
+		// minutes with no auto-transition) and the heartbeat FILE (only ever
+		// refreshed on activity, so any planner idle-between-tasks longer than
+		// its freshness window looks identical to genuinely stuck) can BOTH
+		// report "unhealthy" for a planner that Herdr's own deeper `agent
+		// explain` still calls idle with no warning/blocker. Only escalate when
+		// explain agrees something is actually wrong — otherwise this would
+		// eventually close and relaunch every fleet planner that simply sits
+		// quiet between tasks for half an hour, destroying live context for no
+		// reason.
+		const escalate = pastThreshold && !plannerLooksHealthyViaExplain(livePlanner.pane_id);
+		if (!escalate) {
+			if (db && !Number.isFinite(unhealthySince)) db.prepare("UPDATE watcher_projects SET planner_unhealthy_since = ?, updated_at = ? WHERE project_key = ?").run(now(), now(), row.project_key);
+			return { recovery: "planner_process_present_stale_heartbeat", planner_status: livePlanner.agent_status || "unknown", planner_instance: livePlanner.name || null, planner_pane_id: livePlanner.pane_id };
+		}
+		// Escalating: fall through to the close+relaunch path below exactly as
+		// if the process had already exited. Reset the tracker now so the new
+		// planner gets its own full grace window instead of inheriting this one.
+		if (db) db.prepare("UPDATE watcher_projects SET planner_unhealthy_since = NULL, updated_at = ? WHERE project_key = ?").run(now(), row.project_key);
+		escalatedUnhealthyPlanner = true;
+	}
 	// During Herdr startup the pane can be live before the `agents` projection
 	// contains it. Treat a planner-labelled live pane as owned immediately.
-	const livePlannerPane = livePlannerPanesInWorkspace(snapshot, workspace?.workspace_id, row.root)[0];
+	// Skipped once we've just escalated past a stale-forever planner above —
+	// this check matches the exact same pane by tab label alone (it does not
+	// consult snapshot.agents), and would otherwise silently re-swallow the
+	// escalation before the close+relaunch below ever runs.
+	const livePlannerPane = !escalatedUnhealthyPlanner && livePlannerPanesInWorkspace(snapshot, workspace?.workspace_id, row.root)[0];
 	if (livePlannerPane) return { recovery: "planner_process_present_startup_race", planner_status: "working", planner_instance: "planner-01", planner_pane_id: livePlannerPane.pane_id };
 	const reason = "planner_missing_or_stale_heartbeat";
 	// Unlike reconcileProjectRun, this check used to run unconditionally on
@@ -280,7 +347,7 @@ export function ensureRegisteredPlanner(row, snapshot, db = null) {
 // terminal pane (conventionally labelled "human" across every project).
 function isProtectedTabLabel(label) {
 	const text = String(label || "").trim().toLowerCase();
-	return text === "human" || /planner/i.test(text);
+	return /^human(?:-|$)/.test(text) || text === "yano-local-pc" || /planner/i.test(text);
 }
 
 function piSessionKey(pane) {
@@ -302,7 +369,7 @@ function projectAgentIdentity(label, projectName) {
 // one tab and close the extra copies. This is intentionally separate from
 // ticket cleanup: it also works when the project has no readable run/ticket
 // history left.
-export function cleanupDuplicateProjectSessionTabs(snapshot, row, runs = []) {
+function duplicateProjectSessionDecisions(snapshot, row, runs = []) {
 	if (!snapshot) return [];
 	const workspace = findProjectWorkspace(snapshot, row.root, row.name);
 	if (!workspace) return [];
@@ -315,11 +382,13 @@ export function cleanupDuplicateProjectSessionTabs(snapshot, row, runs = []) {
 		const key = piSessionKey(pane);
 		const identity = projectAgentIdentity(tab.label || pane.label || pane.terminal_title_stripped, row.name);
 		if (!key || !identity) continue;
-		if (!groups.has(identity)) groups.set(identity, []);
-		groups.get(identity).push({ pane, tab, session: key });
+		const groupKey = `${identity}\0${key}`;
+		if (!groups.has(groupKey)) groups.set(groupKey, []);
+		groups.get(groupKey).push({ pane, tab, session: key, identity });
 	}
 	const closed = [];
-	for (const [identity, members] of groups) {
+	for (const members of groups.values()) {
+		const identity = members[0].identity;
 		if (members.length < 2) continue;
 		// Prefer a pane whose label is tied to an active assignment. If there is
 		// no active work, the first stable tab is retained deterministically.
@@ -329,27 +398,42 @@ export function cleanupDuplicateProjectSessionTabs(snapshot, row, runs = []) {
 			return Number(rightActive) - Number(leftActive) || String(left.tab.tab_id).localeCompare(String(right.tab.tab_id));
 		});
 		for (const duplicate of members.slice(1)) {
-			const result = closeHerdrTab(duplicate.tab.tab_id);
-			closed.push({ tab_id: duplicate.tab.tab_id, pane_id: duplicate.pane.pane_id, label: duplicate.tab.label || "(senza nome)", identity, session: duplicate.session, reason: "duplicate_pi_session", ...result });
+			closed.push({ tab_id: duplicate.tab.tab_id, pane_id: duplicate.pane.pane_id, label: duplicate.tab.label || "(senza nome)", identity, session: duplicate.session, reason: "duplicate_pi_session", action: "close" });
 		}
 	}
+	return closed;
+}
+
+export function cleanupDuplicateProjectSessionTabs(snapshot, row, runs = []) {
+    const closed = duplicateProjectSessionDecisions(snapshot, row, runs).map((item) => ({ ...item, ...closeHerdrTab(item.tab_id) }));
 	if (closed.length) {
 		try { appendRawTraceRecord({ cwd: row.root, project: row.name, record: { type: "watcher_duplicate_pi_sessions_closed", record_type: "event", source: "yano-watcher", instance: "yano-watcher", closed } }); } catch { /* best effort */ }
 	}
 	return closed;
 }
 
-function sameAgentIdentity(left, right) {
+export function sameAgentIdentity(left, right) {
 	const a = String(left || "");
 	const b = String(right || "");
 	return Boolean(a && b && (a === b || a.startsWith(`${b}-`) || b.startsWith(`${a}-`)));
 }
 
+// Pi's real session filenames dash-separate the milliseconds too
+// (…T12-30-23-986Z_<uuid>.jsonl, confirmed against a real `herdr api
+// snapshot`), not dot-separated as an earlier version of this regex assumed
+// (…T12-30-23.986Z…, a format no real session file ever uses). That earlier
+// regex silently failed to match virtually every real session path, making
+// isFreshReplacementSession() return false for every genuine fresh retry —
+// harmless while nothing actually closed live tabs, but load-bearing now
+// that COMPLETED_AGENT_IDLE_GRACE_MS actually closes them. Captures each
+// component directly instead of matching-then-reformatting, so it isn't
+// sensitive to which separator the milliseconds use.
 function sessionStartedAt(agent, pane) {
 	const value = agent?.agent_session?.value || pane?.agent_session?.value || "";
-	const match = String(value).match(/\/(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}(?:\.\d+)?Z)_/);
+	const match = String(value).match(/\/(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})(?:[.-](\d+))?Z_/);
 	if (!match) return null;
-	const iso = match[1].replace(/^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2}(?:\.\d+)?)Z$/, "$1T$2:$3:$4Z");
+	const [, year, month, day, hour, minute, second, ms] = match;
+	const iso = `${year}-${month}-${day}T${hour}:${minute}:${second}.${(ms || "0").padEnd(3, "0").slice(0, 3)}Z`;
 	const timestamp = Date.parse(iso);
 	return Number.isFinite(timestamp) ? timestamp : null;
 }
@@ -372,6 +456,17 @@ function isFreshReplacementSession(instance, agent, pane, cutoffs) {
 	return [...cutoffs.entries()].some(([assigned, cutoff]) => sameAgentIdentity(instance, assigned) && startedAt > cutoff);
 }
 
+// How long ago this instance's most recent terminal ticket completed, using
+// the same cutoffs map isFreshReplacementSession() already reads. Infinity
+// when there is no matching cutoff at all, so a caller comparing against a
+// grace period never has to special-case "never seen" as "recent".
+function terminalCutoffAgeMs(instance, cutoffs, now = Date.now()) {
+	const matches = [...cutoffs.entries()].filter(([assigned]) => sameAgentIdentity(instance, assigned));
+	if (!matches.length) return Infinity;
+	const mostRecentCutoff = Math.max(...matches.map(([, cutoff]) => cutoff));
+	return now - mostRecentCutoff;
+}
+
 // Ticket history is append-only: an instance name can legitimately be reused
 // by a later run. Cleanup must therefore never let a terminal ticket from an
 // older run close a worker currently assigned to an active run.
@@ -387,127 +482,42 @@ function cleanupAssignmentSets(runs) {
 	return { activeAssignments, terminalAssignments };
 }
 
-export function cleanupCompletedAgentTabs(snapshot, row, runs) {
+export function projectTabDecisions(snapshot, row, runs, { rounds = null, now = Date.now(), processLive = panePiProcessState, evidenceAvailable = true } = {}) {
 	if (!snapshot) return [];
-	const { activeAssignments, terminalAssignments } = cleanupAssignmentSets(runs);
-	const terminalCutoffs = terminalAssignmentCutoffs(runs);
-	const isTerminalAssignment = (instance) => [...terminalAssignments].some((assigned) =>
-		sameAgentIdentity(instance, assigned) && ![...activeAssignments].some((active) => sameAgentIdentity(instance, active)));
-	const removed = [];
-	const closedTabIds = new Set();
-	const agentsInProject = (snapshot.agents || []).filter((agent) => path.resolve(agent.cwd || "") === path.resolve(row.root));
-	for (const agent of agentsInProject) {
-		const tab = snapshot.tabs?.find((item) => item.tab_id === agent.tab_id);
-		// A real Herdr snapshot does not populate agent.name/agent.instance, and
-		// agent.terminal_title_stripped is a generic Pi pane title ("π -
-		// <project>"), not the role identity — none of these ever matched a
-		// ticket's assigned_instance in production. Real evidence (2026-09-05):
-		// this made the ENTIRE live-agent branch below a no-op for every real
-		// project — every closed tab up to this point came from the agent-less
-		// second pass instead, which already (correctly) reads the tab's own
-		// label. Yano's own tab-naming convention names a tab after its exact
-		// instance, so prefer that; only fall back to the agent's own fields
-		// when a tab genuinely cannot be found for this agent.
-		const instance = String(tab?.label || agent.name || agent.instance || agent.terminal_title_stripped || "");
-		const isProtected = /planner/i.test(instance) || isProtectedTabLabel(tab?.label);
-		const pane = snapshot.panes?.find((item) => item.pane_id === agent.pane_id || item.tab_id === agent.tab_id);
-		const terminalTask = isTerminalAssignment(instance) && !isFreshReplacementSession(instance, agent, pane, terminalCutoffs);
-		const status = String(agent.agent_status || "unknown").toLowerCase();
-		const dead = !paneHasLivePiProcess(agent.pane_id);
-		// Planner tabs are persistent project control surfaces, and a "human"
-		// tab is the user's own manual terminal — never close either merely
-		// because a run completed or the process is temporarily absent; when an
-		// active run/hold needs recovery, ensureRegisteredPlanner() owns the
-		// explicit blocked-planner close/relaunch decision below.
-		if (isProtected) continue;
-		// A live Pi process is authoritative over append-only ticket history. A
-		// retry can legitimately reuse an instance name after an older ticket
-		// completed; never kill that live session merely because the old name is
-		// terminal. Once the process exits, the orphan-tab pass below cleans it.
-		if (!terminalTask && !dead) continue;
-		if (terminalTask && !dead) continue;
-		if (!dead && !["idle", "offline", "unknown", "stopped", "done"].includes(status)) continue;
-		if (!tab) continue;
-		const closed = closeHerdrTab(tab.tab_id);
-		closedTabIds.add(tab.tab_id);
-		removed.push({ tab_id: tab.tab_id, pane_id: agent.pane_id, instance, reason: dead ? "dead_process" : "terminal_ticket", ...closed });
-	}
-	// A Pi process that has fully exited disappears from snapshot.agents
-	// entirely (Herdr does not keep a "dead agent" placeholder) — its TAB,
-	// however, lingers forever with no owning agent at all, invisible to the
-	// loop above. Real evidence (2026-09-05 audit): article-writer alone had
-	// 12 such agent-less tabs (duplicated coder-02/docs-sync instances whose
-	// process had long since exited). Sweep the project's own workspace
-	// directly for these; a tab is only closed here when ticket history
-	// confirms its assigned instance's work is actually done/failed — a
-	// same-minute freshly-launched instance that has not registered its Pi
-	// agent yet has no terminal-assignment match, so it is never touched.
 	const workspace = findProjectWorkspace(snapshot, row.root, row.name);
-	if (workspace) {
-		const liveTabIds = new Set(agentsInProject.map((agent) => agent.tab_id));
-		for (const tab of snapshot.tabs || []) {
-			if (tab.workspace_id !== workspace.workspace_id) continue;
-			if (liveTabIds.has(tab.tab_id) || closedTabIds.has(tab.tab_id)) continue;
-			if (isProtectedTabLabel(tab.label)) continue;
-			const instance = String(tab.label || "");
-			if (!instance || !isTerminalAssignment(instance)) continue;
-			const closed = closeHerdrTab(tab.tab_id);
-			closedTabIds.add(tab.tab_id);
-			removed.push({ tab_id: tab.tab_id, pane_id: null, instance, reason: "orphaned_agentless_terminal_ticket", ...closed });
-		}
-	}
-	if (removed.length) {
-		try { appendRawTraceRecord({ cwd: row.root, project: row.name, record: { type: "watcher_completed_agent_tabs_closed", record_type: "event", source: "yano-watcher-registry", instance: "yano-watcher", closed: removed } }); } catch { /* best effort */ }
-	}
-	return removed;
+	const { activeAssignments } = cleanupAssignmentSets(runs);
+	const cutoffs = terminalAssignmentCutoffs(runs);
+	const duplicates = new Set(duplicateProjectSessionDecisions(snapshot, row, runs).map((item) => item.tab_id));
+	try { rounds ??= projectTimeline(row.root).rounds; } catch { rounds = []; evidenceAvailable = false; }
+	return (snapshot.tabs || []).filter((tab) => workspace ? tab.workspace_id === workspace.workspace_id : (snapshot.agents || []).some((agent) => agent.tab_id === tab.tab_id && path.resolve(agent.cwd || "") === path.resolve(row.root))).map((tab) => {
+		const pane = (snapshot.panes || []).find((item) => item.tab_id === tab.tab_id);
+		const agent = (snapshot.agents || []).find((item) => item.tab_id === tab.tab_id || (pane && item.pane_id === pane.pane_id));
+		const instance = String(tab.label || agent?.name || agent?.instance || "");
+		const startedAt = sessionStartedAt(agent, pane);
+		const assignments = rounds.filter((round) => sameAgentIdentity(instance, round.instance) && !round.ended_at && (!startedAt || !round.started_at || Date.parse(round.started_at) >= startedAt));
+		const tickets = runs.flatMap((run) => (run.tickets || []).filter((ticket) => sameAgentIdentity(instance, ticket.assigned_instance)).map((ticket) => ({ id: ticket.id, run_id: run.id, status: ticket.status })));
+		const live = pane?.pane_id || agent?.pane_id ? processLive(agent?.pane_id || pane.pane_id) : tickets.some((ticket) => ["done", "failed"].includes(ticket.status)) ? false : null;
+		const status = String(agent?.agent_status || pane?.agent_status || "unknown").toLowerCase();
+		const foreignRoot = [pane?.cwd, agent?.cwd].filter(Boolean).some((cwd) => path.resolve(cwd) !== path.resolve(row.root));
+		const decision = foreignRoot ? { action: "keep", reason: "different_project_root" } : duplicates.has(tab.tab_id) ? { action: "close", reason: "duplicate_pi_session" } : agentLifecycle({ protectedTab: isProtectedTabLabel(instance), live, status,
+			activeTicket: [...activeAssignments].some((id) => sameAgentIdentity(instance, id)), pendingAssignment: assignments.length > 0,
+			terminalAge: [...cutoffs.keys()].some((id) => sameAgentIdentity(instance, id)) ? terminalCutoffAgeMs(instance, cutoffs, now) : null,
+			sessionAge: startedAt ? now - startedAt : null, freshReplacement: isFreshReplacementSession(instance, agent, pane, cutoffs), evidenceAvailable });
+		return { instance, logical_instance: projectAgentIdentity(instance, row.name), label: tab.label || instance, tab_id: tab.tab_id, pane_id: agent?.pane_id || pane?.pane_id || null, session: agent?.agent_session?.value || pane?.agent_session?.value || null, live, status, tickets, assignments: assignments.map((r) => r.assignment_id), ...decision };
+	});
 }
 
-// Project-workspace hygiene: the planner is the permanent control surface and
-// human* tabs belong to the operator. Every other tab must have a live agent
-// and a non-terminal assignment to remain open; agent-less/dead tabs (including
-// Herdr tabs such as "3") are stale by definition and are closed deterministically.
-export function cleanupStaleProjectTabs(snapshot, row, runs, alreadyClosedTabIds = new Set()) {
-	if (!snapshot) return [];
-	const workspace = findProjectWorkspace(snapshot, row.root, row.name);
-	if (!workspace) return [];
-	const duplicateSessionTabs = cleanupDuplicateProjectSessionTabs(snapshot, row, runs);
-	const duplicateTabIds = new Set(duplicateSessionTabs.map((item) => item.tab_id));
-	const { activeAssignments, terminalAssignments } = cleanupAssignmentSets(runs);
-	const terminalCutoffs = terminalAssignmentCutoffs(runs);
-	const closed = [];
-	for (const tab of snapshot.tabs || []) {
-		if (tab.workspace_id !== workspace.workspace_id || isProtectedTabLabel(tab.label)) continue;
-		if (duplicateTabIds.has(tab.tab_id) || alreadyClosedTabIds.has(tab.tab_id)) continue;
-		// Herdr populates snapshot.panes the instant a pane is created, but only
-		// adds a matching snapshot.agents row once its own polling detects the
-		// `pi` process running inside it — a real, observed, nonzero delay. A
-		// freshly-launched instance (e.g. `yano start --instance
-		// frontend-developer-01 ...`) can therefore have a live pane with no
-		// agent entry yet. Resolving liveness through `pane.pane_id` (always
-		// present immediately) instead of `agent?.pane_id` (present late) is
-		// the same correct pattern already used elsewhere in this file for the
-		// same reason (see the pane→agent lookup near cleanupCompletedAgentTabs
-		// callers). Before this fix, a not-yet-indexed but genuinely alive pane
-		// made `live` short-circuit to false WITHOUT ever calling
-		// paneHasLivePiProcess(), closing a brand-new worker within its first
-		// watcher sweep — sometimes before the planner delegated it any ticket
-		// (2026-09-07 newMioDOC incident: frontend-developer-01/coder-01).
-		const pane = (snapshot.panes || []).find((item) => item.tab_id === tab.tab_id);
-		const agent = (snapshot.agents || []).find((item) => item.tab_id === tab.tab_id);
-		const identity = String(tab.label || agent?.name || agent?.instance || "");
-		const activeTask = [...activeAssignments].some((value) => sameAgentIdentity(identity, value));
-		const terminalTask = !activeTask && [...terminalAssignments].some((value) => sameAgentIdentity(identity, value)) && !isFreshReplacementSession(identity, agent, pane, terminalCutoffs);
-		const livePaneId = agent?.pane_id || pane?.pane_id;
-		const live = Boolean(livePaneId && paneHasLivePiProcess(livePaneId));
-		if (!identity || (!live && terminalTask) || !live) {
-			const result = closeHerdrTab(tab.tab_id);
-			closed.push({ tab_id: tab.tab_id, label: tab.label || "(senza nome)", reason: terminalTask ? "terminal_task" : live ? "unnamed_orphan_tab" : "dead_agent", ...result });
-		}
-	}
+export function cleanupCompletedAgentTabs(snapshot, row, runs) {
+	const closed = projectTabDecisions(snapshot, row, runs).filter((item) => item.action === "close").map((item) => ({ ...item, ...closeHerdrTab(item.tab_id) }));
 	if (closed.length) {
-		try { appendRawTraceRecord({ cwd: row.root, project: row.name, record: { type: "watcher_stale_project_tabs_closed", record_type: "event", source: "yano-watcher", closed } }); } catch { /* cleanup must not stop supervision */ }
+		try { appendRawTraceRecord({ cwd: row.root, project: row.name, record: { type: "watcher_completed_agent_tabs_closed", record_type: "event", source: "yano-watcher", instance: "yano-watcher", closed } }); } catch {}
 	}
 	return closed;
+}
+
+export function cleanupStaleProjectTabs(snapshot, row, runs, alreadyClosedTabIds = new Set()) {
+    const filtered = snapshot ? { ...snapshot, tabs: (snapshot.tabs || []).filter((tab) => !alreadyClosedTabIds.has(tab.tab_id)) } : null;
+    return cleanupCompletedAgentTabs(filtered, row, runs);
 }
 
 function plannerStalled(run) {
@@ -726,14 +736,14 @@ function recoverPlanner({ row, snapshot, run, reason }) {
 	let tab = livePlanner && current?.tabs?.find((item) => item.tab_id === livePlanner.tab_id);
 	let pane = livePlanner && current?.panes?.find((item) => item.pane_id === livePlanner.pane_id);
 	if (!pane) {
-		tab = current?.tabs?.find((item) => item.workspace_id === workspace.workspace_id && item.label === "planner-01");
+		tab = findPlannerTab(current, workspace.workspace_id);
 		pane = tab && current?.panes?.find((item) => item.tab_id === tab.tab_id);
 	}
 	if (!pane) {
 		const created = spawnSync("herdr", ["tab", "create", "--workspace", workspace.workspace_id, "--cwd", row.root, "--label", "planner-01", "--no-focus"], { encoding: "utf8" });
 		if (created.status !== 0) throw new Error((created.stderr || "tab planner non creata").trim());
 		current = herdrSnapshot() || current;
-		tab = current?.tabs?.find((item) => item.workspace_id === workspace.workspace_id && item.label === "planner-01");
+		tab = findPlannerTab(current, workspace.workspace_id);
 		pane = tab && current?.panes?.find((item) => item.tab_id === tab.tab_id);
 	}
 	if (!pane) throw new Error(`pane planner non trovato per ${row.name}`);
@@ -977,10 +987,7 @@ export async function doStatusForRow(db, row, { heal = true, snapshot: suppliedS
 		// ordinary shell tabs in a newly-created Herdr workspace are not Yano
 		// orphans and must not be cleaned up.
 		const pausedRuns = pausedProjectState.runs;
-		const completedTabs = pausedProjectState.available ? cleanupCompletedAgentTabs(pausedSnapshot, row, pausedRuns) : [];
-		const agent_tabs_closed = pausedProjectState.available
-			? [...completedTabs, ...cleanupStaleProjectTabs(pausedSnapshot, row, pausedRuns, new Set(completedTabs.map((item) => item.tab_id)))]
-			: [];
+		const agent_tabs_closed = pausedProjectState.available ? cleanupCompletedAgentTabs(pausedSnapshot, row, pausedRuns) : [];
 		let planner;
 		try { planner = ensureRegisteredPlanner(row, pausedSnapshot, db); } catch (error) { planner = { recovery: "planner_recovery_failed", recovery_error: error instanceof Error ? error.message : String(error) }; }
 		return { ...base, planner, ...(agent_tabs_closed.length ? { agent_tabs_closed } : {}) };
@@ -1011,10 +1018,7 @@ export async function doStatusForRow(db, row, { heal = true, snapshot: suppliedS
 		// A registered-but-not-initialized project has no Yano-owned tickets.
 		// Skip both cleanup passes so the operator can finish `yano init` in the
 		// workspace without the minute-level watcher removing shell tabs.
-		const completedTabs = heal && projectState.available ? cleanupCompletedAgentTabs(snapshot, row, runs) : [];
-		const agent_tabs_closed = heal && projectState.available
-			? [...completedTabs, ...cleanupStaleProjectTabs(snapshot, row, runs, new Set(completedTabs.map((item) => item.tab_id)))]
-			: [];
+		const agent_tabs_closed = heal && projectState.available ? cleanupCompletedAgentTabs(snapshot, row, runs) : [];
 		const planner = heal ? (() => { try { return ensureRegisteredPlanner(row, snapshot, db); } catch (error) { return { recovery: "planner_recovery_failed", recovery_error: error instanceof Error ? error.message : String(error) }; } })() : { recovery: "not_checked" };
 		return { ...base, live: "running", identity_conflicts, planner, agent_tabs_closed, ...await reconcileProjectRun(db, row, snapshot, mqttClientProvider) };
 	}
@@ -1038,6 +1042,7 @@ function superviseRetention() {
 	try { last = Date.parse(JSON.parse(fs.readFileSync(marker, "utf8")).completed_at || "") || 0; } catch {}
 	if (Date.now() - last < 86_400_000) return { skipped: true, reason: "daily_cadence", last_run_at: last ? new Date(last).toISOString() : null };
 	const result = applyRetention({ root: traceRoot(), yes: true });
+	if (!result.applied) return { ...result, scheduled: true };
 	fs.mkdirSync(path.dirname(marker), { recursive: true, mode: 0o700 });
 	fs.writeFileSync(marker, JSON.stringify({ completed_at: now(), files: result.files.length, bytes: result.bytes, action: result.action || "none", backup: result.backup }, null, 2), { mode: 0o600 });
 	return { ...result, scheduled: true };

@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Code-Mem + Yano — piano di integrazione</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0b1220; --panel:#121d2e; --panel2:#17263a; --line:#2a405b; --text:#e7edf5; --muted:#a9b8ca; --accent:#62dfc7; --warn:#ffd580; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:linear-gradient(145deg,#0b1220,#102238); color:var(--text); font:15px/1.5 system-ui,-apple-system,sans-serif; }
+    main { max-width:1120px; margin:0 auto; padding:36px 24px 64px; }
+    h1 { margin:0 0 8px; font-size:clamp(28px,4vw,46px); letter-spacing:-.03em; }
+    h2 { margin:34px 0 12px; font-size:22px; }
+    h3 { margin:0 0 8px; font-size:16px; }
+    p { margin:8px 0; color:var(--muted); }
+    .eyebrow { color:var(--accent); font-weight:700; text-transform:uppercase; letter-spacing:.12em; font-size:12px; }
+    .hero, .card { background:rgba(18,29,46,.9); border:1px solid var(--line); border-radius:18px; padding:22px; box-shadow:0 14px 40px rgba(0,0,0,.16); }
+    .hero { border-color:#39756e; }
+    .grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+    .grid3 { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; }
+    .tag { display:inline-block; border:1px solid #3d6b81; border-radius:999px; padding:3px 9px; color:#bdeee5; font-size:12px; margin:4px 4px 0 0; }
+    .status { color:var(--warn); font-weight:700; }
+    .flow { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:10px; align-items:stretch; }
+    .flow .step { position:relative; background:var(--panel2); border:1px solid var(--line); border-radius:14px; padding:14px; min-width:0; }
+    .flow .step:not(:last-child)::after { content:'→'; position:absolute; right:-17px; top:38%; color:var(--accent); font-size:22px; z-index:2; }
+    .step b { display:block; color:var(--accent); margin-bottom:5px; }
+    code { color:#c7fff4; background:#0a1525; border-radius:5px; padding:1px 5px; }
+    pre { overflow:auto; background:#08111e; border:1px solid var(--line); border-radius:12px; padding:14px; color:#d9f6ef; }
+    ul { margin:8px 0 0; padding-left:20px; color:var(--muted); }
+    li { margin:5px 0; }
+    .recommended { border-color:#3a9d8d; }
+    .small { font-size:13px; }
+    @media (max-width:850px) { .flow { grid-template-columns:1fr; } .flow .step:not(:last-child)::after { content:'↓'; right:48%; top:auto; bottom:-22px; } .grid,.grid3 { grid-template-columns:1fr; } main { padding:22px 14px 44px; } }
+  </style>
+</head>
+<body>
+<main>
+  <section class="hero">
+    <div class="eyebrow">Analisi — nessuna modifica applicata</div>
+    <h1>Code-Mem autonomo, Yano come adapter</h1>
+    <p>Il posto giusto per la memoria degli errori è Code-Mem. Yano deve inviare eventi strutturati e consumare le lesson, senza rendere Code-Mem dipendente da Yano.</p>
+    <span class="tag">standalone-first</span><span class="tag">backward compatible</span><span class="tag">non-blocking</span>
+  </section>
+
+  <h2>Stato verificato</h2>
+  <section class="grid">
+    <article class="card"><h3>Code-Mem già presente</h3><ul><li>CLI modulare in <code>src/</code>, bundle distribuito in <code>bin/cm</code>.</li><li><code>cm init pi</code> crea store locale, skill Pi e hook di sessione/risposta.</li><li>Esistono già <code>cm save</code>, <code>cm recall</code>, deduplica, lifecycle e <code>cm consolidate</code>.</li></ul></article>
+    <article class="card"><h3>Cosa manca per le failure</h3><ul><li>L’hook attuale salva soprattutto recall di sessione e messaggi completati.</li><li>Non esiste ancora un record strutturato nativo per errore, tentativo, causa e verifica.</li><li>Il prompt può guidare l’LLM, ma non deve essere l’unico meccanismo di rilevazione.</li></ul></article>
+    <article class="card"><h3>Integrazione Yano attuale</h3><ul><li>Yano invoca <code>cm recall</code> e <code>cm query</code> in modo bounded, con fallback se Code-Mem non è disponibile.</li><li>Ogni agente riceve la skill Yano Code-Mem.</li><li>Yano mantiene inoltre trace memory e memoria locale dell’agente: sono superfici diverse.</li></ul></article>
+    <article class="card"><h3>Disallineamento da sanare</h3><p class="status">Il repository locale dichiara versioni diverse:</p><ul><li><code>src/globals.js</code> e bundle: <code>0.6.0</code></li><li><code>package.json</code>: <code>0.1.0</code></li><li><code>bin/package.json</code>: <code>0.0.1</code></li><li>CLI globale osservata: <code>0.7.0</code></li></ul></article>
+  </section>
+
+  <h2>Flusso target</h2>
+  <section class="flow">
+    <div class="step"><b>1 · osserva</b><span class="small">Hook o integrazione rileva test fallito, comando non-zero o eccezione.</span></div>
+    <div class="step"><b>2 · registra</b><span class="small">Code-Mem salva evidenza grezza, origine e fingerprint senza LLM.</span></div>
+    <div class="step"><b>3 · arricchisci</b><span class="small">Il prompt chiede all’LLM causa, approccio fallito e contesto verificabile.</span></div>
+    <div class="step"><b>4 · verifica</b><span class="small">La lesson diventa affidabile solo dopo test o prova esplicita.</span></div>
+    <div class="step"><b>5 · riusa</b><span class="small">Il prossimo agente riceve solo le lesson pertinenti via recall bounded.</span></div>
+  </section>
+
+  <h2>Modifiche nei due progetti</h2>
+  <section class="grid">
+    <article class="card recommended"><h3>Repository Code-Mem — nucleo</h3><ul><li>Aggiungere un comando/API generico, per esempio <code>cm record failure --json</code>.</li><li>Persistenza strutturata con origine opzionale (<code>yano</code>, <code>ci</code>, <code>manual</code>).</li><li>Fingerprint, deduplica, privacy, stato <code>observed → unresolved → resolved/obsolete</code>.</li><li>Prompt/skill standalone aggiornato e hook best-effort.</li><li>Comando di refresh locale per aggiornare skill e hook dei progetti già inizializzati.</li></ul></article>
+    <article class="card"><h3>Repository Yano — adapter</h3><ul><li>Convertire eventi di tool/test/round falliti in record Code-Mem non bloccanti.</li><li>Passare metadati opzionali: task, ticket, run, round, ruolo, provider, file.</li><li>Recuperare le lesson pertinenti prima di un retry/escalation.</li><li>Conservare la trace Yano come evidenza completa: Code-Mem riceve una sintesi con provenienza.</li><li>Il planner segnala problemi di Yano a <code>yano-local-pc</code>; non modifica Yano autonomamente.</li></ul></article>
+  </section>
+
+  <h2>Distribuzione e aggiornamento</h2>
+  <pre>1. Code-Mem: modifica src/ → build bundle → test → sincronizza versioni → commit/push
+2. Installazione globale: cm update (aggiorna CLI e skill user-level)
+3. Yano: aggiorna adapter/skill/documentazione → test → bump → commit/push → npm update
+4. Progetti esistenti: migrazione esplicita, senza cancellare memory/state.db
+5. Verifica: cm version, yano doctor, test di cattura, recall e fallback</pre>
+  <p>Il passo 4 deve diventare un comando esplicito e idempotente, ad esempio <code>yano code-mem sync --all</code> o un comando equivalente di Code-Mem. Il semplice <code>cm update</code> oggi aggiorna il CLI e le skill user-level, ma non è sufficiente per riscrivere automaticamente gli hook locali già presenti in ogni progetto.</p>
+
+  <h2>Opzioni valutate</h2>
+  <section class="grid3">
+    <article class="card"><h3>A · solo prompt</h3><p>Rapido, ma fragile: l’LLM può dimenticare di salvare o registrare una diagnosi non verificata.</p><span class="tag">non sufficiente</span></article>
+    <article class="card recommended"><h3>B · hook + prompt</h3><p>Rilevazione deterministica dell’evidenza, arricchimento semantico dell’LLM e fallback sicuro.</p><span class="tag">raccomandata</span></article>
+    <article class="card"><h3>C · daemon sempre attivo</h3><p>Più automatico, ma aumenta processi, consumo e complessità. Va valutato solo dopo B.</p><span class="tag">fase successiva</span></article>
+  </section>
+
+  <h2>Rischi da chiudere prima del codice</h2>
+  <section class="card"><ul><li>Non salvare password, token, screenshot privati o dati personali.</li><li>Non trasformare ogni warning in una failure: servono segnali oggettivi o conferma dell’agente.</li><li>Non usare una failure non verificata come verità: deve rimanere <code>observed</code>.</li><li>Non rompere progetti già inizializzati: migrazione versionata, dry-run e nessuna cancellazione della memoria.</li><li>Tenere separati Code-Mem standalone, Yano trace e memoria operativa dell’agente.</li></ul></section>
+
+  <h2>Conclusione</h2>
+  <section class="hero"><p>Si può modificare Code-Mem da questa sessione. La modifica va fatta prima nel repository standalone; Yano va aggiornato dopo, solo per l’adapter e il consumo delle nuove API. Infine serve una migrazione idempotente per i progetti Yano già esistenti. Non è corretto affidare tutto al prompt: la soluzione raccomandata è hook deterministico + prompt + lesson verificata.</p></section>
+</main>
+</body>
+</html>

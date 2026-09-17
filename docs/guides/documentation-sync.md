@@ -38,18 +38,26 @@ Lo scheduler è **script-first**: `yano schedule add --name <nome> --project-roo
 <dir> --script <path> --mode <self|planner:<progetto>|yano-local-pc>
 [--cron '...'] [--once] [--timeout-ms N] [--expected-consequence <testo>]`
 registra un job che al trigger esegue LO SCRIPT registrato (mai shell; folder
-persistente utente `<data>/scheduler/scripts/`). `yano schedule run <id>` testa
+persistente utente `<data>/scheduler/scripts/`). `yano schedule run --id <id>` testa
 lo script subito (obbligatorio prima di renderlo ricorrente); `yano schedule
-list` mostra i campi del job (script_path, mode, expected_consequence, stato).
+list` mostra un inventario compatto del job (id, nome, cron, stato, modalità); con
+`--json --pretty` il JSON è indentato per la lettura manuale. La cronologia e i
+risultati dettagliati sono disponibili con `schedule instances`.
 Il routing LLM avviene DENTRO lo script via `yano invoke --role
-<planner[:<scope>]|yano-local-pc> --prompt "..."` (planner di progetto o
-yano-local-pc). `yano cron` resta il CRUD legacy per i job testo+cron
+<planner[:<scope>]|yano-local-pc|scheduler> --prompt "..."` (planner di progetto,
+yano-local-pc per soli one-off mai schedulati, scheduler come return-hop
+ESECUTORE della delega bidirezionale max 1 hop). Lo scheduler imposta ED
+esegue: primo giro subito in chat (posta: dry-run + `yano mail-triage
+--confirm`), regole utente in `<data>/scheduler/scheduler-rules.json`
+(`yano schedule-rules add|list|query|update|remove|seed`, query semantica),
+regole email (blocklist→Cestino senza LLM, unsubscribe→tentativo
+disiscrizione poi Cestino, solo Cestino mai definitiva, gate primo giro,
+report per-run). `yano cron` resta il CRUD legacy per i job testo+cron
 (`--add` frase naturale, `--list`, `--remove <id>`, `--enable <id>`,
 `--disable <id>`, `--run <id>`): dispatch planner col testo come in passato.
 Il cron di sistema esegue ogni minuto `yano schedule tick|supervise` (o
-`yano cron --supervise`): avvia le scadenze e ricrea i servizi nel runtime
-persistente `yano-local-pc` se una tab
-tab Herdr è stata chiusa. Il registro è nel data-root globale e sopravvive a
+`yano cron --supervise`): avvia le scadenze e garantisce `planner-01` nel runtime
+persistente `yano-local-pc` se la tab è stata chiusa. Il registro è nel data-root globale e sopravvive a
 riavvii; l'uninstall di Yano rimuove soltanto le sue righe cron marcate.
 Vincoli non negoziabili: niente shell/token/pipe/redirezioni nei job (unico
 esecutore = script validato), token solo da `.env`, azioni distruttive sempre
@@ -125,3 +133,13 @@ la selezione usa uno slot stabile più il fallback su una porta libera. Il flag
 Gantt del progetto corrente e `--links` elenca tutte le registrazioni. Il
 registro conserva anche un link fermo, ma il server resta un processo
 foreground e il suo aggiornamento live vale finché il processo è in esecuzione.
+
+## Contratto essenziale (2026-09-15)
+
+`yano status --all --explain --json` espone decisioni watcher e fingerprint;
+`yano feedback-api start` conserva API e dati senza GUI Kanban (`dash` è alias).
+Il Gantt mostra fasi previste, dipendenze e round osservati con modelli/provider.
+`yano frontend-review browser --url URL` abilita annotazioni DOM senza React.
+Watcher/scheduler sono deterministici; Local PC resta il servizio LLM persistente.
+Nuovi piani: `plan_set` richiede `scoping.status` e `scoping.rationale`.
+Dettagli, compatibilità e limiti: [Yano essenziale](../quick-guides/yano-essential.md).

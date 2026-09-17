@@ -12,8 +12,6 @@ const PACKAGE_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname
 const COMPUTER_INSTANCE = "yano-local-pc";
 const COMPUTER_ROLE = "yano-local-pc";
 const COMPUTER_WORKSPACE = "yano-local-pc";
-const SCHEDULER_WORKSPACE = "yano-scheduler";
-const WATCHER_WORKSPACE = "yano-watcher";
 // Herdr normalizes the first tab created by a workspace to the safe slug;
 // keeping this canonical prevents a second duplicate tab on recovery.
 const COMPUTER_TAB = "yano-local-pc";
@@ -55,12 +53,64 @@ function logService(event, details = {}) {
 		appendFileSync(serviceLogPath(), `${JSON.stringify({ timestamp: new Date().toISOString(), event, ...details })}\n`, { mode: 0o600 });
 	} catch { /* logging must never prevent service recovery */ }
 }
-function ensureComputerRuntime() {
+function ensureCodeMemStore(root) {
+	// Best-effort CodeMem store (`memory/state.db`) for yano-local-pc.
+	// Runs `cm init pi` with cwd=runtimeRoot (never the project checkout);
+	// `cm init` itself is idempotent, failures must never block startup.
+	try {
+		const result = spawnSync("cm", ["init", "pi"], { cwd: root, encoding: "utf8", timeout: 30_000 });
+		if (result?.error) {
+			logService("codemem_store_failed", { root, reason: String(result.error.message || result.error) });
+			return false;
+		}
+		if (result?.status !== 0) {
+			logService("codemem_store_failed", { root, status: result?.status ?? null, stderr: String(result?.stderr || "").slice(0, 500) });
+			return false;
+		}
+		logService("codemem_store_ensured", { root });
+		return true;
+	} catch (error) {
+		logService("codemem_store_failed", { root, reason: String(error?.message || error) });
+		return false;
+	}
+}
+export function rehydrateLocalPcMemory({ root = computerRuntimeRoot(), limit = 5, maxChars = 2000 } = {}) {
+	// Bounded restart-rehydration probe: `cm recent` with cwd=runtimeRoot
+	// (never the project checkout). The planner-01 Pi session rehydrates
+	// itself via the CodeMem session_start hook installed by `cm init pi`
+	// (T1); this probe verifies the store is readable at every
+	// start/recovery tick and exposes the bounded context for diagnostics.
+	// Best-effort: failures return ok:false, never throw, never block the
+	// minute supervisor. Only counts are logged — memory content stays out
+	// of the service log. Stateless by design, so it is restart-safe.
+	try {
+		const result = spawnSync("cm", ["recent", String(limit)], { cwd: root, encoding: "utf8", timeout: 8_000 });
+		if (result?.error || result?.status !== 0) {
+			logService("codemem_rehydrate_failed", { root });
+			return { ok: false, count: 0, context: "" };
+		}
+		const text = String(result.stdout || "").trim();
+		if (!text || /^no memory/i.test(text)) {
+			logService("codemem_rehydrated", { root, count: 0, chars: 0 });
+			return { ok: true, count: 0, context: "" };
+		}
+		const count = (text.match(/^\d+\./gm) || []).length;
+		const context = text.slice(0, maxChars);
+		logService("codemem_rehydrated", { root, count, chars: context.length });
+		return { ok: true, count, context };
+	} catch {
+		logService("codemem_rehydrate_failed", { root });
+		return { ok: false, count: 0, context: "" };
+	}
+}
+export function ensureComputerRuntime() {
 	const root = computerRuntimeRoot();
 	const agents = path.join(root, "agents");
 	const projectConfig = path.join(root, ".pi", "extensions", "yano-orchestrator", "config");
 	mkdirSync(agents, { recursive: true, mode: 0o700 });
 	mkdirSync(projectConfig, { recursive: true, mode: 0o700 });
+	ensureCodeMemStore(root);
+	rehydrateLocalPcMemory({ root });
 	const appleMcp = process.platform === "darwin" ? "[apple-notes, apple-messages, apple-contacts, apple-reminders, apple-calendar, apple-maps, apple-mail, apple-voice-memos]" : "[]";
 	if (!existsSync(path.join(agents, "roles.yaml"))) writeFileSync(path.join(agents, "roles.yaml"), `roles:\n  ${COMPUTER_ROLE}:\n    activation: always\n    playbook: yano-local-pc-operations\n    label: "Yano Local PC"\n    brief: "Agente per interagire con il PC dello sviluppatore tramite MCP, CLI e strumenti locali; porta nel contesto Yano informazioni e risorse del computer. Conferma sempre prima delle operazioni distruttive o dell'invio di messaggi."\n    model:\n      provider: llmproxy\n      model: llmproxy\n    skills: [yano-cli]\n    cli: [node, yano]\n    mcp: ${appleMcp}\n    teams: [system]\n`, { mode: 0o600 });
 	writeFileSync(path.join(projectConfig, "project.json"), JSON.stringify({ schema_version: 1, extension_version: "global", project: SYSTEM_PROJECT, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }, null, 2), { mode: 0o600 });
@@ -88,12 +138,6 @@ function ensureComputerRuntime() {
 	return root;
 }
 const SERVICES = [
-	// Herdr infers the agent kind from the tab title while starting it. A tab
-	// named exactly `yano-watcher` is classified as a legacy
-	// external kind and rejected as `--kind pi`; keep the workspace names but
-	// use neutral owned tab labels.
-	{ instance: "watcher-service", agentName: "watcher-service", role: "watcher", workspace: WATCHER_WORKSPACE, tab: "watcher-service", cwd: serviceRuntimeRoot(WATCHER_WORKSPACE), project: WATCHER_WORKSPACE },
-	{ instance: "scheduler-service", agentName: "scheduler-service", role: "scheduler", workspace: SCHEDULER_WORKSPACE, tab: "scheduler-service", cwd: serviceRuntimeRoot(SCHEDULER_WORKSPACE), project: SCHEDULER_WORKSPACE },
 	{ instance: "planner-01", agentName: "planner-01", role: "planner", workspace: COMPUTER_WORKSPACE, tab: "planner-01", cwd: computerRuntimeRoot(), project: SYSTEM_PROJECT },
 ];
 

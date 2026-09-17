@@ -130,7 +130,7 @@ await runner.check("schedule add registers a script job and installs the cron", 
 	assert.equal(parsed.created.mode, "self");
 	assert.equal(parsed.created.expected_consequence, "test-echo.js eseguito");
 	assert.equal(parsed.created.script_path, path.join(scriptsDir, "test-echo.js"));
-	assert.match(fs.readFileSync(crontabFile, "utf8"), /yano-scheduler-supervisor/);
+	assert.match(fs.readFileSync(crontabFile, "utf8"), /yano-watcher-supervisor/);
 });
 await runner.check("schedule add rejects a missing script", async () => {
 	let threw = false;
@@ -146,7 +146,8 @@ await runner.check("schedule list exposes job fields (script_path/mode/expected_
 	const out = cli(["schedule", "list", "--json"]);
 	const jobs = JSON.parse(out.trim());
 	assert.equal(jobs.length, 1);
-	assert.ok("script_path" in jobs[0] && "mode" in jobs[0] && "expected_consequence" in jobs[0]);
+	assert.ok("id" in jobs[0] && "name" in jobs[0] && "cron" in jobs[0] && "enabled" in jobs[0] && "mode" in jobs[0] && "project" in jobs[0]);
+	assert.ok(!("instances" in jobs[0]) && !("last_result" in jobs[0]), "schedule list is a compact inventory; execution details belong to schedule instances");
 });
 // Block 4 — `yano schedule run` executes the script via the dispatcher (mode self)
 await runner.check("schedule run executes the registered script (mode self)", async () => {

@@ -29,7 +29,29 @@ const retentionDefaults = Object.freeze({ traces: 30, recovery: 14, logs: 30 });
 function retentionConfig() { const cfg = process.env; return { traces: Math.max(0, Number(cfg.YANO_TRACE_RETENTION_DAYS || retentionDefaults.traces)), recovery: Math.max(0, Number(cfg.YANO_RECOVERY_RETENTION_DAYS || retentionDefaults.recovery)), logs: Math.max(0, Number(cfg.YANO_LOG_RETENTION_DAYS || retentionDefaults.logs)), backup: cfg.YANO_DATA_BACKUP_DIR ? path.resolve(cfg.YANO_DATA_BACKUP_DIR) : null }; }
 function oldFiles(root, cutoff) { const result = []; const visit = (dir) => { let entries; try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; } for (const entry of entries) { const file = path.join(dir, entry.name); if (entry.isDirectory()) visit(file); else { try { if (fs.statSync(file).mtimeMs < cutoff) result.push(file); } catch {} } } }; if (fs.existsSync(root)) visit(root); return result; }
 export function retentionPlan({ root = globalDataPath({ env: process.env }), nowMs = Date.now() } = {}) { const cfg = retentionConfig(); const areas = ["traces", "recovery", "logs"]; const files = areas.flatMap((area) => oldFiles(path.join(root, area), nowMs - cfg[area] * 86400000).map((source) => ({ area, source, relative: path.relative(root, source), bytes: fs.statSync(source).size }))); return { root, backup: cfg.backup, retention_days: cfg, files, bytes: files.reduce((sum, item) => sum + item.bytes, 0) }; }
-export function applyRetention({ root = globalDataPath({ env: process.env }), yes = false } = {}) { const plan = retentionPlan({ root }); if (!yes) return { ...plan, dry_run: true, applied: false }; for (const item of plan.files) { if (plan.backup) { const target = path.join(plan.backup, "retired", item.relative); fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 }); fs.copyFileSync(item.source, target); fs.unlinkSync(item.source); } else fs.unlinkSync(item.source); } return { ...plan, dry_run: false, applied: true, action: plan.backup ? "moved_to_backup" : "deleted" }; }
+export function applyRetention({ root = globalDataPath({ env: process.env }), yes = false } = {}) {
+	const plan = retentionPlan({ root });
+	if (!yes) return { ...plan, dry_run: true, applied: false };
+	if (plan.backup && plan.files.length) {
+		try {
+			// Never create a missing /Volumes mount as a local backup directory.
+			if (process.platform === "darwin" && plan.backup.startsWith("/Volumes/")) fs.accessSync(path.join("/Volumes", plan.backup.split("/")[2]), fs.constants.W_OK);
+			fs.mkdirSync(plan.backup, { recursive: true, mode: 0o700 });
+			fs.accessSync(plan.backup, fs.constants.W_OK);
+		} catch (error) {
+			return { ...plan, dry_run: false, applied: false, deferred: true, reason: "backup_unavailable", error: error.message };
+		}
+	}
+	for (const item of plan.files) {
+		if (plan.backup) {
+			const target = path.join(plan.backup, "retired", item.relative);
+			fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+			fs.copyFileSync(item.source, target);
+		}
+		fs.unlinkSync(item.source);
+	}
+	return { ...plan, dry_run: false, applied: true, action: plan.backup ? "moved_to_backup" : "deleted" };
+}
 
 export function dataUsage() {
 	return [

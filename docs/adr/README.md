@@ -14,3 +14,4 @@ contesto con evidenze dal repository, decisione e conseguenze.
 Se un nuovo documento contraddice un ADR esistente, il conflitto va
 segnalato esplicitamente (`docs/notes/agents/domain.md`): "Contraddice ADR-000X —
 ma vale la pena riaprirla perché…".
+- [0005 — Control plane essenziale](0005-essential-control-plane.md)

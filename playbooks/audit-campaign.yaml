@@ -1,0 +1,136 @@
+schema_version: 1
+id: audit-campaign
+label: Audit campaign — QA, architecture, product and orchestration
+description: >-
+  Coordinates a chaptered, evidence-first audit of an application. It runs
+  deterministic discovery once, delegates independent chapters in parallel,
+  unlocks dependent chapters only after their evidence is available, and ends
+  with a separate implementation DAG. It can be run alone or as the parent
+  playbook for the specialist audits in this catalog.
+catalog:
+  scope: global
+  reusable: true
+  intents:
+    - complete application audit
+    - deep quality assurance campaign
+    - architecture and product review
+    - QA plus UX plus market analysis
+    - audit all commands tools MCP scripts and playbooks
+    - review AI orchestration and token efficiency
+  exclusions:
+    - production mutation before explicit remediation approval
+    - invented findings without evidence
+    - duplicate repository discovery by every specialist
+  parameters:
+    - project_name
+    - project_root
+    - variant
+    - campaign_id
+    - chapter_scope
+    - remediation_mode
+requirements:
+  cli: [node, git, yano]
+  skills: [yano-cli, yano-planner-trace-analysis]
+team:
+  strategy: one deterministic discovery pack, then a chapter DAG with shared evidence and a final synthesis gate
+  default_variant: deep
+  roles:
+    - id: repo-cartographer
+      purpose: Build the canonical repository, command, test, playbook, agent, MCP and documentation map.
+      outputs: [audit-manifest.json, scope-boundary, capability-index]
+      write_scope: [audit-artifacts-only]
+      capabilities: [node, git, yano]
+    - id: toolchain-evaluator
+      purpose: Verify whether CLI, MCP, script, skill and playbook capabilities are available and appropriate.
+      outputs: [capability-readiness, tool-choice-matrix, missing-prerequisites]
+      write_scope: [chapter-report-only]
+      capabilities: [node, git, yano]
+    - id: test-adequacy-analyst
+      purpose: Map use cases and state transitions to tests, then identify untested or weakly tested behavior.
+      outputs: [use-case-catalog, coverage-gaps, test-strategy]
+      write_scope: [chapter-report-only]
+      capabilities: [node, git]
+    - id: architecture-health-reviewer
+      purpose: Assess boundaries, coupling, cohesion, complexity, duplication, dead code and refactor seams.
+      outputs: [architecture-findings, refactor-candidates, dependency-risks]
+      write_scope: [chapter-report-only]
+      capabilities: [node, git]
+    - id: automation-control-auditor
+      purpose: Review automation, logging, observability, state propagation and script-first opportunities.
+      outputs: [control-flow-findings, observability-gaps, deterministic-delegation-candidates]
+      write_scope: [chapter-report-only]
+      capabilities: [node, git, yano]
+    - id: product-ux-analyst
+      purpose: Evaluate human expectations, command ergonomics, GUI usefulness, feature gaps and market alternatives.
+      outputs: [product-ux-chapter, competitor-evidence, opportunity-backlog]
+      write_scope: [chapter-report-only]
+      capabilities: [node, git]
+    - id: audit-synthesizer
+      purpose: Cross-review chapter evidence, remove duplicates and create the implementation DAG.
+      outputs: [cross-review, prioritized-findings, implementation-plan]
+      write_scope: [audit-dossier-only]
+      capabilities: [node, git]
+  variants:
+    - id: standard
+      roles: [repo-cartographer, test-adequacy-analyst, architecture-health-reviewer, audit-synthesizer]
+      parallel_groups: [[test-adequacy-analyst, architecture-health-reviewer]]
+    - id: medium
+      roles: [repo-cartographer, toolchain-evaluator, test-adequacy-analyst, architecture-health-reviewer, automation-control-auditor, product-ux-analyst, audit-synthesizer]
+      parallel_groups: [[toolchain-evaluator, test-adequacy-analyst, architecture-health-reviewer, automation-control-auditor, product-ux-analyst]]
+    - id: deep
+      roles: [repo-cartographer, toolchain-evaluator, test-adequacy-analyst, architecture-health-reviewer, automation-control-auditor, product-ux-analyst, audit-synthesizer]
+      parallel_groups: [[toolchain-evaluator, test-adequacy-analyst, architecture-health-reviewer, automation-control-auditor, product-ux-analyst]]
+contract:
+  execution: deterministic_discovery_then_chapter_dag_then_implementation_dag
+  checkpoint: persist_every_chapter_and_every_dependency_gate
+  evidence: [campaign_scope, manifest, capability_probe, chapter_question, command, exit_code, artifact, source_reference, expected_behavior, observed_behavior, classification, confidence, evidence_confidence, judgment_confidence, judgment_confidence_rationale, limitation, resource_record]
+  report_sections: [executive_summary, scope_and_variant, capability_matrix, chapter_index, functional_qa, test_adequacy, architecture_health, toolchain_and_delegation, observability, product_ux_market, cross_review, prioritized_findings, implementation_dag, resource_ledger, blockers, open_questions]
+  budgets: {max_commands: 600, max_files: 1200, max_minutes: 240, max_tokens: 90000}
+  verification: {mode: chapter_evidence_with_cross_axis_consistency_and_full_rerun, required: true}
+  recovery: [resume_from_campaign_checkpoint, reuse_manifest, rerun_only_stale_chapter, preserve_partial_dossier, escalate_after_three_red_rounds]
+states:
+  - {id: received, owner: planner, terminal: false}
+  - {id: scoped, owner: planner, terminal: false}
+  - {id: discovery, owner: repo-cartographer, terminal: false}
+  - {id: capability_preflight, owner: toolchain-evaluator, terminal: false}
+  - {id: chapters_parallel, owner: chapter_specialists, terminal: false}
+  - {id: chapters_dependent, owner: planner, terminal: false}
+  - {id: cross_review, owner: audit-synthesizer, terminal: false}
+  - {id: implementation_dag, owner: planner, terminal: false}
+  - {id: remediation, owner: planner_and_coders, terminal: false}
+  - {id: final_verification, owner: planner, terminal: false}
+  - {id: completed, owner: planner, terminal: true}
+  - {id: blocked, owner: planner_and_human, terminal: true}
+transitions:
+  - {id: define_scope, from: received, to: scoped, actor: planner, requires: [objective_received, project_boundary_confirmed, variant_selected, campaign_id_created]}
+  - {id: build_discovery, from: scoped, to: discovery, actor: planner, requires: [read_only_boundary, resource_budget_recorded]}
+  - {id: open_preflight, from: discovery, to: capability_preflight, actor: toolchain-evaluator, requires: [manifest_persisted, command_and_artifact_indexed]}
+  - {id: open_parallel_chapters, from: capability_preflight, to: chapters_parallel, actor: planner, requires: [required_capabilities_classified, unavailable_capabilities_recorded, chapter_dag_persisted]}
+  - {id: open_dependent_chapters, from: chapters_parallel, to: chapters_dependent, actor: planner, requires: [all_unblocked_parallel_chapters_complete, evidence_contracts_satisfied]}
+  - {id: cross_review, from: chapters_dependent, to: cross_review, actor: audit-synthesizer, requires: [all_required_chapters_complete, duplicate_scan_complete, contradictions_listed]}
+  - {id: plan_implementation, from: cross_review, to: implementation_dag, actor: planner, requires: [findings_deduplicated, dependency_edges_written, script_first_review_complete]}
+  - {id: start_remediation, from: implementation_dag, to: remediation, actor: planner, requires: [user_approved_remediation_scope, tickets_or_tasks_created]}
+  - {id: verify, from: remediation, to: final_verification, actor: planner, requires: [remediation_checkpoints_complete]}
+  - {id: close_clean, from: final_verification, to: completed, actor: planner, requires: [relevant_chapters_rerun, no_open_blocking_finding, resource_ledger_persisted, docs_sync_decision_recorded]}
+  - {id: rework, from: final_verification, to: cross_review, actor: planner, requires: [new_or_residual_finding_recorded]}
+  - {id: block, from: [scoped, discovery, capability_preflight, chapters_parallel, chapters_dependent, cross_review, implementation_dag, remediation, final_verification], to: blocked, actor: planner_and_human, requires: [blocker_evidence_persisted, partial_dossier_saved]}
+failure_routes:
+  - {condition: missing_project_boundary, action: pause_and_request_explicit_root, terminal: true}
+  - {condition: missing_capability, action: record_capability_gap_and_choose_safe_fallback, terminal: false}
+  - {condition: chapter_timeout, action: preserve_partial_report_and_retry_once_or_reassign, terminal: false}
+  - {condition: contradictory_chapters, action: open_cross_review_item_and_do_not_merge_claims, terminal: false}
+  - {condition: three_remediation_rounds_red, action: escalate_to_human_with_open_dag, terminal: true}
+invariants:
+  - {id: discovery_once, description: Repository discovery is performed once and shared by chapter agents through immutable artifacts.}
+  - {id: chapter_isolation, description: Each chapter has one owner, explicit inputs, explicit outputs and a declared write scope.}
+  - {id: dual_confidence, description: Every chapter, finding, recommendation and hypothesis separates evidence_confidence from the LLM's judgment_confidence and records a short rationale for the latter.}
+  - {id: dependency_gates_are_real, description: Dependent chapters cannot start until the evidence they consume is persisted and reviewed.}
+  - {id: no_duplicate_reading, description: Specialists read the manifest and assigned slices first; full-repository rereading requires a recorded reason.}
+  - {id: script_first, description: D0 observations use deterministic scripts; AI is used for D1 interpretation and semantic judgement.}
+  - {id: facts_inferences_hypotheses, description: Every conclusion is classified and linked to evidence or an explicit limitation.}
+  - {id: expected_vs_observed, description: Functional and UX claims include the expected human behavior and observed behavior separately.}
+  - {id: resource_accounting, description: Every chapter records model, turn, inference, timing, token fields, deterministic calls and measurement quality; unknown values remain unknown.}
+  - {id: no_hidden_reasoning, description: Reports contain conclusions and evidence, never private chain-of-thought.}
+  - {id: read_only_until_remediation, description: Audit chapters cannot mutate the reference project; remediation starts only after the implementation DAG gate.}
+  - {id: planner_owns_merge, description: Only the planner synthesizes chapters, orders implementation and closes the campaign.}
+  - {id: full_verification, description: After remediation the planner reruns affected chapters and the relevant cross-axis checks, not only the changed command.}

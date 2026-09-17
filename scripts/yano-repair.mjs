@@ -15,6 +15,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import mqtt from "mqtt";
 import { buildTraceOverview, projectKey, readTraceRecords, resolveTraceProject, traceRoot } from "./yano-trace-storage.mjs";
+import { waitForHerdrPanePi } from "./launch-planner.mjs";
 import { herdrSnapshot as fetchHerdrSnapshot } from "./yano-herdr-client.mjs";
 import { projectDbPath, resolveYanoWorkspaceDir, slugifyProject } from "./yano-project.mjs";
 import { ensureProjectDatabase } from "./yano-project-db.mjs";
@@ -576,7 +577,16 @@ function launchAgentInPane(info, pane, role, instance, traceMode, continueSessio
 		"--", ...piArgs,
 	];
 	const result = spawnSync("herdr", command.slice(1), { cwd: info.root, encoding: "utf8", maxBuffer: 2_000_000 });
-	if (result.status !== 0) return { ok: false, pane_id: pane.pane_id, instance, role, command: command.join(" "), error: ((result.stderr || result.stdout || "avvio agente fallito")).trim() };
+	if (result.status !== 0) {
+		// Same transient `agent_kind_mismatch` race as launch-planner.mjs: the
+		// pane can already be running Pi while this synchronous handshake still
+		// reports the mismatch. Only suppress it after Herdr itself confirms the
+		// same pane as a live Pi registration; any other error stays fatal.
+		const stderrText = String(result.stderr || "");
+		if (!/agent_kind_mismatch/i.test(stderrText) || !waitForHerdrPanePi(pane.pane_id)) {
+			return { ok: false, pane_id: pane.pane_id, instance, role, command: command.join(" "), error: (stderrText || result.stdout || "avvio agente fallito").trim() };
+		}
+	}
 	const label = canonicalTabLabel(info, role);
 	if (label && pane.tab_id) spawnSync("herdr", ["tab", "rename", pane.tab_id, label], { encoding: "utf8" });
 	let promptSent = false;

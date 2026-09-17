@@ -1,5 +1,19 @@
 # Development notes
 
+## Revisione 67 — recupero del falso `agent_kind_mismatch` di Herdr
+
+Un avvio reale di `yano start --herdr` creava il processo Pi e lo registrava
+correttamente nel lifecycle hook, ma il comando sincrono `herdr agent start`
+rispondeva nel frattempo `agent_kind_mismatch` (il pane mostrava per un attimo
+il nome dell'istanza Yano invece del kind `pi`). Il launcher terminava quindi
+con errore anche se il planner era già live.
+
+Il recupero è ora bounded e specifico: dopo quel codice di errore Yano interroga
+la snapshot per lo stesso pane fino a una finestra breve di avvio a freddo e
+sopprime il falso negativo solo quando Herdr conferma `agent: pi` in uno stato
+non terminale. Un'identità diversa o uno stato offline resta un errore esplicito. La regressione end-to-end è in
+`scripts/smoke-test-herdr-agent-start-race.mjs`.
+
 ## Revisione 62 — chiusura del client MQTT nel watcher smoke test
 
 La suite completa restava appesa dopo `smoke-test-watch-stalls` perché il

@@ -60,7 +60,13 @@ reset. Sono supportati più URL e upload tramite drag-and-drop.
 
 I bug vengono processati dal planner in ordine FIFO per progetto. Un planner
 inattivo viene risvegliato subito; un planner occupato li prende al termine del
-run corrente. Il planner può avviare coder aggiuntivi quando serve. Ogni bug
+run corrente. Con una conferma in sospeso (richiesta conferma aperta o decision
+hold attivo) le nuove voci restano parcheggiate in coda visibile e non
+interrompono il filo corrente: vengono prese in carico solo a un via esplicito
+riferito (ID `BUG-…`/`SUG-…` oppure verbo di via + ambito, anche multiplo come
+`confermo 1 e 3`). Un "confermo"/"ok"/"procedi" secco con più candidati aperti
+non sblocca nulla:
+il planner chiede a quale voce si riferisce e si ferma. Il planner può avviare coder aggiuntivi quando serve. Ogni bug
 usa un worktree, report e commit separati. Un backend puro e deterministico può
 essere finalizzato automaticamente dopo test e review verdi; un bug frontend o
 misto richiede sempre conferma dell'utente. In quel caso il commit resta nel
@@ -79,6 +85,7 @@ yano suggestion create --project-id workspace-example --message "..."
 yano bug list --type bug
 yano suggestion list --type suggestion
 yano feedback update --type suggestion --id SUG-... --status processed --reason "implementata dopo conferma utente"
+yano feedback update --type bug --id BUG-... --status processing --reason "via esplicito utente"
 yano feedback delete --type bug --id BUG-... --reason "duplicato verificato"
 yano bug create --project-id workspace-example --message "Toast rosso" --screenshot /tmp/bug-settings.png
 yano bug create --project-id workspace-example --message "Errore remoto" --screenshot https://example.test/bug.png

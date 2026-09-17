@@ -8,7 +8,7 @@ category: delegation
 signal: delegation_timeout
 fingerprint: 21bc9a897e676d98147cde872c3ac604c0aa221aaa55070d1f13756893485421
 detected_at: 2026-09-03T22:16:37.674Z
-last_seen_at: 2026-09-08T14:06:27.540Z
+last_seen_at: 2026-09-11T15:58:39.714Z
 source_project: newbiz-website
 source_project_root: /Users/alessiobacin/Development/Code/newbiz-vendite/newbiz-website
 source_project_key: workspace-701fce3575c4

@@ -61,6 +61,9 @@ async function sendEmailNotification(message, config, fetchImpl) {
 }
 
 export async function sendGlobalNotification(message, { env = process.env, sender = "yano", role = "system", project = "globale", task = null, status = null, previousVersion = null, currentVersion = null, fetchImpl = globalThis.fetch } = {}) {
+	if (env.YANO_TEST_MODE === "1" && fetchImpl === globalThis.fetch) {
+        return { ok: false, skipped: true, detail: "test_mode: external notifications disabled", channels: {} };
+    }
 	const config = resolveYanoConfig({ env });
 	const contextual = formatNotification(message, { sender, role, project, task, status, server: os.hostname(), previousVersion, currentVersion: currentVersion || readCurrentVersion() });
 	const [whatsapp, telegram, email] = await Promise.all([

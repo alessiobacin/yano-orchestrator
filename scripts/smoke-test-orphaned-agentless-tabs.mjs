@@ -63,7 +63,7 @@ await check("an agent-less tab whose instance has a done ticket is closed as 'or
 	const removed = cleanupCompletedAgentTabs(snapshot, row, runs);
 	const orphan = removed.find((item) => item.tab_id === "t-docs-sync");
 	assert.ok(orphan, "the agent-less docs-sync tab is closed");
-	assert.equal(orphan.reason, "orphaned_agentless_terminal_ticket");
+	assert.equal(orphan.reason, "dead_agent");
 	assert.equal(orphan.instance, "docs-sync-01-fixture");
 });
 

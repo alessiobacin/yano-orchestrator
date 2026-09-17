@@ -136,8 +136,18 @@ await check("runDigest() sends the formatted text through the injected sender an
 // yano-notify.mjs: verify the global-channel sender resolves config and
 // reaches out to the right endpoint, without a real network call.
 const { sendGlobalNotification } = await import("./yano-notify.mjs");
+await check("test mode never calls the global network fetch", async () => {
+    const original = globalThis.fetch;
+    let calls = 0;
+    globalThis.fetch = async () => { calls++; return new Response(JSON.stringify({ok:true}), {status:200}); };
+    try {
+        const result = await sendGlobalNotification("test", {env:{...process.env,YANO_TEST_MODE:"1",TELEGRAM_BOT_TOKEN:"fake",TELEGRAM_DESTINATION_CHAT_ID:"fake"}});
+        assert.equal(calls,0);
+        assert.equal(result.skipped,true);
+    } finally { globalThis.fetch=original; }
+});
 await check("sendGlobalNotification reports 'not configured' cleanly when no channel is set up", async () => {
-	const result = await sendGlobalNotification("test", { env: { ...process.env, TELEGRAM_BOT_TOKEN: "", TELEGRAM_DESTINATION_CHAT_ID: "", EVOLUTION_API_URL: "", SENDGRID_API_KEY: "" } });
+	const result = await sendGlobalNotification("test", { env: { ...process.env, YANO_TEST_MODE: "0", TELEGRAM_BOT_TOKEN: "", TELEGRAM_DESTINATION_CHAT_ID: "", EVOLUTION_API_URL: "", SENDGRID_API_KEY: "" } });
 	assert.equal(result.ok, false);
 });
 

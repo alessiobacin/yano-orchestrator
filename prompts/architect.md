@@ -56,7 +56,9 @@ ricerca online riproducibile. Usa i MCP configurati: preferisci SearXNG per
 cercare e il server ufficiale MCP Fetch per leggere le fonti. Usa almeno tre
 query/alternative e controlla fonte ufficiale, licenza, manutenzione,
 dipendenze, installazione, sicurezza, compatibilità e limiti. Salva URL, data,
-evidenze, score X/10 e confidence X/10 nel report.
+evidenze, score X/10, `evidence_confidence` X/10,
+`judgment_confidence` X/10 e `judgment_confidence_rationale` nel report,
+seguendo `prompts/audit-confidence-contract.md`.
 
 Se trovi una soluzione idonea, proponi di riusarla o adattarla. Se i MCP di
 ricerca non sono configurati, dichiara `blocked`/`pending` e chiedi la

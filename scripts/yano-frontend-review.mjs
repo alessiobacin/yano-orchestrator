@@ -12,7 +12,8 @@ import path from "node:path";
 import { projectKey, resolveTraceProject } from "./yano-trace-storage.mjs";
 
 const usage = () => console.log([
-	"Uso: yano frontend-review <setup|start|url> [--project-root <dir>] [--print-only|--dry-run]",
+	"Uso: yano frontend-review <browser|setup|start|url> [--project-root <dir>] [--print-only|--dry-run]",
+	"  browser --url URL [--api-url URL]  annotazioni DOM senza dipendenze del frontend",
 	"  setup  installa agentation come devDependency e stampa il contratto di integrazione",
 	"         (per framework non-React/non-Angular non installa nulla: review browser-only via wrapper Yano)",
 	"  start  esegue setup, avvia il comando dev inferito e stampa l'URL rilevato",
@@ -384,7 +385,16 @@ export async function runFrontendReview({ cwd = process.cwd(), argv = [] } = {})
 	const rootIndex = argv.indexOf("--project-root"); const root = rootIndex >= 0 ? path.resolve(argv[rootIndex + 1]) : cwd;
 	const printOnly = argv.includes("--print-only") || argv.includes("--dry-run");
 	let result;
-	if (command === "url") result = inferFrontendDev(root);
+	if (command === "browser") {
+		const get = (flag) => argv.includes(flag) ? argv[argv.indexOf(flag) + 1] : null;
+		const url = new URL(get("--url"));
+		const api = new URL(get("--api-url") || "http://127.0.0.1:11000");
+		if (![url, api].every((u) => ["http:", "https:"].includes(u.protocol))) throw new Error("URL HTTP(S) richiesto");
+		const id = projectKey(root, resolveTraceProject(root));
+		const script = `(()=>{const s=document.createElement('script');s.src=${JSON.stringify(new URL('/review.js',api).href)};s.dataset.endpoint=${JSON.stringify(new URL('/api/annotations/'+encodeURIComponent(id),api).href)};document.documentElement.append(s)})()`;
+		result = { review_mode: "browser", url: url.href, project_id: id, bookmarklet: "javascript:" + encodeURIComponent(script), next: "Avvia yano feedback-api start, salva il bookmarklet nei preferiti e attivalo nella pagina da rivedere. CSP o accesso locale del browser possono richiedere un’integrazione esplicita dello script. iframe cross-origin e canvas richiedono screenshot." };
+	}
+	else if (command === "url") result = inferFrontendDev(root);
 	else if (command === "setup") result = await setup(root, { printOnly });
 	else if (command === "start") {
 		if (printOnly) throw new Error("--print-only/--dry-run è supportato solo con setup");

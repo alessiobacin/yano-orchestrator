@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { ponytailPolicy } from "./yano-ponytail.mjs";
 // `yano status` / `yano logs` / `yano fleet` / `yano mcp` / `yano skills` /
 // `yano doctor --network` — informazioni di sola lettura sul progetto e
 // sull'orchestrazione, senza aprire una sessione `pi` (Ticket 12).
@@ -28,6 +29,7 @@ import * as net from "node:net";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { parse as parseYaml } from "yaml";
+import { readApplicationHeartbeat, readTraceRecords } from "./yano-trace-storage.mjs";
 import { projectKey } from "./yano-trace-storage.mjs";
 import mqtt from "mqtt";
 import { slugify, tracePaths } from "./yano-trace-storage.mjs";
@@ -110,7 +112,12 @@ function herdrProjectStatuses(projectRoot) {
 
 function loadYamlOrNull(file) { try { if (!existsSync(file)) return null; return parseYaml(readFileSync(file, "utf-8")); } catch { return null; } }
 
-function runStatus(cwd, argv) {
+async function runStatus(cwd, argv) {
+	if (argv.includes("--help") || argv.includes("-h")) {
+		console.log("Uso: yano status [--project-root DIR] [--run ID] [--all] [--explain] [--json] — sola lettura, stato e decisioni watcher"); return;
+	}
+	if (argv.some((flag) => ["--all", "--explain", "--json"].includes(flag))) return explainStatus(projectCwd(cwd, argv), argv);
+
 	const effectiveCwd = projectCwd(cwd, argv);
 	const dbPath = projectDbPath(effectiveCwd, optionValue(argv, "--project"));
 	if (!existsSync(dbPath)) { console.log("yano status: nessun orchestrator.db per questo progetto — niente da mostrare."); return; }
@@ -133,6 +140,35 @@ function runStatus(cwd, argv) {
 		if (holds.length) console.log(`   ⚠️ ${holds.length} decision hold aperte: ${holds.map((h) => `"${h.question}"`).join(", ")}`);
 	}
 	db.close();
+}
+
+async function explainStatus(cwd, argv) {
+	const [{ herdrSnapshot }, { listWatcherProjectRows, projectRuns, projectTabDecisions, sameAgentIdentity }, { listYanoProjects }, { buildFingerprint }] = await Promise.all([
+		import("./yano-herdr-client.mjs"), import("./yano-watcher-registry.mjs"), import("./yano-projects.mjs"), import("./yano-build.mjs")]);
+	const snapshot = herdrSnapshot();
+	const registered = listWatcherProjectRows({ readOnly: true });
+	const catalog = new Map(registered.map((row) => [path.resolve(row.root), row]));
+	for (const row of listYanoProjects({ snapshot }).projects || []) if (!catalog.has(path.resolve(row.root))) catalog.set(path.resolve(row.root), row);
+	const roots = argv.includes("--all") ? [...catalog.keys()] : [path.resolve(cwd)];
+	const projects = roots.map((root) => {
+		const row = catalog.get(root) || { root, name: resolveProject(root) };
+		const state = projectRuns(root);
+		const tabs = snapshot ? projectTabDecisions(snapshot, row, state.runs, { evidenceAvailable: state.available }) : [];
+		for (const tab of tabs) {
+			try { tab.heartbeat = readApplicationHeartbeat(root, tab.logical_instance || tab.instance); } catch { tab.heartbeat = null; }
+		}
+		const watcher_events = readTraceRecords({ cwd: root, types: ["watcher_completed_agent_tabs_closed", "watcher_stale_project_tabs_closed", "watcher_planner_recovered", "yano_watcher_scan"], limit: 5 }).map((event) => ({ type: event.type, at: event.ts, status: event.status, closed: event.closed?.map((item) => ({ tab_id: item.tab_id, closed: item.closed, reason: item.reason })) }));
+		const missing = state.runs.flatMap((run) => (run.tickets || []).filter((ticket) => ['pending','running'].includes(ticket.status) && ticket.assigned_instance && !tabs.some((tab) => sameAgentIdentity(tab.instance, ticket.assigned_instance) && tab.live)).map((ticket) => ({ instance: ticket.assigned_instance, ticket_id: ticket.id, run_id: run.id, action: !snapshot ? 'inspect' : run.paused || run.open_holds ? 'wait' : 'recover_via_planner', reason: snapshot ? 'assigned_agent_absent' : 'herdr_unreachable' })));
+		return { root, name: row.name, ponytail: ponytailPolicy(root), watcher_status: row.worker_status || 'not_registered', available: state.available, runs: state.runs, tabs, missing, watcher_events };
+	});
+	const result = { generated_at: new Date().toISOString(), herdr_reachable: Boolean(snapshot), build: buildFingerprint(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')), projects };
+	if (argv.includes("--json")) console.log(JSON.stringify(result, null, 2));
+	else for (const project of projects) {
+		console.log(`${project.name} — watcher ${project.watcher_status}${snapshot ? '' : ' — Herdr non raggiungibile'}`);
+		for (const tab of project.tabs) console.log(`  ${tab.instance}: ${tab.status}, processo ${tab.live} → ${tab.action} (${tab.reason})${tab.remaining_ms ? `, ${Math.ceil(tab.remaining_ms/1000)}s` : ''}`);
+		for (const missing of project.missing) console.log(`  ${missing.instance}: ${missing.action} (${missing.reason})`);
+	}
+	return result;
 }
 
 function runLogs(cwd, argv) {

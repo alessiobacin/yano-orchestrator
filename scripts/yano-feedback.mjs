@@ -25,6 +25,7 @@ export function dbPath() { return path.join(traceRoot(), "feedback", "feedback.s
 export function openDatabase() {
 	fs.mkdirSync(path.dirname(dbPath()), { recursive: true, mode: 0o700 });
 	const db = new (sqlite().DatabaseSync)(dbPath());
+	db.exec("PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL;");
 	db.exec(`CREATE TABLE IF NOT EXISTS feedback (id TEXT PRIMARY KEY, type TEXT NOT NULL, project_id TEXT NOT NULL, message TEXT NOT NULL, resolution TEXT, status TEXT NOT NULL, screenshots TEXT NOT NULL DEFAULT '[]', title TEXT, severity TEXT, route TEXT, environment TEXT, browser_context TEXT, notes TEXT, created_by TEXT, updated_by TEXT, credentials_ciphertext TEXT, credentials_iv TEXT, credentials_tag TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL); CREATE INDEX IF NOT EXISTS feedback_project_idx ON feedback(project_id,type,created_at); CREATE TABLE IF NOT EXISTS feedback_audit (id TEXT PRIMARY KEY, feedback_id TEXT NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL, reason TEXT NOT NULL, before_json TEXT, after_json TEXT, created_at TEXT NOT NULL); CREATE INDEX IF NOT EXISTS feedback_audit_idx ON feedback_audit(feedback_id,created_at);`);
 	try { db.exec("ALTER TABLE feedback ADD COLUMN screenshots TEXT NOT NULL DEFAULT '[]'"); } catch (error) { if (!/duplicate column/i.test(String(error?.message || error))) throw error; }
 	for (const column of ["title TEXT", "severity TEXT", "route TEXT", "environment TEXT", "browser_context TEXT", "notes TEXT", "created_by TEXT", "updated_by TEXT", "credentials_ciphertext TEXT", "credentials_iv TEXT", "credentials_tag TEXT"]) {
@@ -118,8 +119,8 @@ export function claimFeedback(db, feedbackId, { actor = "planner", reason = "pre
 }
 export function buildQueuedFeedbackWakeMessage(claimed, type) {
 	const screenshotNote = claimed.screenshots?.length ? `\nScreenshot allegati: ${JSON.stringify(claimed.screenshots.map((shot) => ({ kind: shot.kind, url: shot.url, path: shot.path, name: shot.name, mime_type: shot.mime_type, attached_image: Boolean(shot.preview_url || shot.data) })))}` : "";
-	if (type === "bug") return `[bug ${claimed.id}] Bug persistito in coda FIFO. Risolvilo ora prima di restare inattivo.\n\n${claimed.message}${screenshotNote}\n\nClassifica prima l'impatto: backend puro oppure frontend/misto.`;
-	return `[suggestion ${claimed.id}] Suggestion persistita in coda. Valutala ora prima di restare inattivo: richiede sempre conferma esplicita dell'utente prima di qualsiasi modifica.\n\n${claimed.message}${screenshotNote}\n\nSe l'utente conferma, pianifica l'implementazione come nuova feature; se rifiuta, chiudi il record con una nota (yano feedback update --status cancelled).`;
+	if (type === "bug") return `[bug ${claimed.id}] Voce in coda FIFO, in attesa di via esplicito riferito — resta in coda, non è un'interruzione.\n\n${claimed.message}${screenshotNote}\n\nClassifica prima l'impatto: backend puro oppure frontend/misto. Prendila in carico solo al via esplicito riferito (yano feedback update --id ${claimed.id} --status processing --reason "..."); una conferma secca senza riferimento non sblocca nulla.`;
+	return `[suggestion ${claimed.id}] Voce in coda, in attesa di via esplicito riferito — resta in coda, non è un'interruzione: richiede sempre conferma esplicita dell'utente prima di qualsiasi modifica.\n\n${claimed.message}${screenshotNote}\n\nSe l'utente conferma, pianifica l'implementazione come nuova feature; se rifiuta, chiudi il record con una nota (yano feedback update --status cancelled).`;
 }
 // Dequeues the oldest pending bug/suggestion for a project and claims it, so a
 // planner that just went idle (or just received a live feedback_received
@@ -138,6 +139,46 @@ export function claimNextQueuedFeedback(db, projectId, { preferredType = null } 
 		return { type, claimed, message: buildQueuedFeedbackWakeMessage(claimed, type) };
 	}
 	return null;
+}
+// Peek senza claim (anti-hijack 2026-09-17, ticket feedback-hijack-fix):
+// restituisce la voce in testa alla coda SENZA cambiare stato. Il claim resta
+// differito al via esplicito riferito dell'utente (il planner lo esegue con
+// `yano feedback update --status processing`); il surfacing non avanza mai la
+// coda da solo. Stesso ordinamento di claimNextQueuedFeedback.
+export function peekNextQueuedFeedback(db, projectId, { preferredType = null } = {}) {
+	const order = preferredType === "bug" || preferredType === "suggestion" ? [preferredType, preferredType === "bug" ? "suggestion" : "bug"] : ["bug", "suggestion"];
+	for (const type of order) {
+		const pending = listFeedback(db, { project_id: projectId, type, statuses: ["received", "pending_planner", "queued"] });
+		const next = pending.sort((a, b) => priorityRank(a) - priorityRank(b) || Date.parse(a.created_at) - Date.parse(b.created_at))[0];
+		if (!next) continue;
+		return { type, item: next, message: buildQueuedFeedbackWakeMessage(next, type) };
+	}
+	return null;
+}
+// Gate di parcheggio silenzioso: con conferma in sospeso o ordine di ignorare
+// la coda, il wake non deve mai iniettare un turno (MAI triggerTurn) — la voce
+// resta visibile in coda/dashboard finché non arriva un via esplicito.
+export function shouldParkFeedbackWake({ confirmationPending = false, queueIgnored = false } = {}) {
+	return Boolean(confirmationPending || queueIgnored);
+}
+// Euristica: l'ultimo messaggio del planner chiede una conferma all'utente.
+export function looksLikeConfirmationRequest(text) {
+	const t = String(text || "");
+	if (!t.trim()) return false;
+	const hasQuestion = t.includes("?");
+	const confirmWord = /(conferm|approv|autorizz|via libera|ok per procedere|dimmi (pure|se)|fammi sapere se)/i.test(t);
+	const explicitWait = /(attendo|aspetto|in attesa del(?:la|lo)?|resto in attesa|ferm[oaie] finch[ée])[^.?!]{0,80}(conferm|ok|via|risposta|sblocco)/i.test(t);
+	return (hasQuestion && confirmWord) || explicitWait;
+}
+// Euristica: l'utente ordina di ignorare/parcheggiare la coda.
+export function looksLikeQueueIgnoreOrder(text) {
+	return /(ignora|lascia stare|non considerare|mett[ie] da parte|parcheggia)[^.?!]{0,80}(coda|bug|feedback|suggestion|voci)/i.test(String(text || ""));
+}
+// Via esplicito riferito: ID di record oppure verbo di via + ambito di coda.
+// Un "confermo"/"ok"/"procedi" secco NON matcha mai qui (resta parcheggiato).
+export function looksLikeExplicitQueueGo(text) {
+	const t = String(text || "");
+	return /\b(BUG|SUG)-[0-9a-f-]{4,}\b/i.test(t) || /\b(confermo|procedi|vai pure|ok,?\s*procedi|approvato)\b[^.?!]{0,60}\b(tutti|tutto|bug|suggestion|coda|entrambi|1 e 3)\b/i.test(t);
 }
 const PRIORITY_RANK = Object.freeze({ critical: 0, high: 1, medium: 2, low: 3 });
 export function priorityRank(item) {
@@ -164,6 +205,7 @@ export async function createAgentationFeedback(db, projectId, payload) {
 		pageUrl ? `Pagina: ${pageUrl}` : "",
 	].filter(Boolean).join("\n");
 	const item = await createFeedback(db, {
+		screenshots: payload?.screenshots, browser_context: payload?.browser_context || annotation.browser_context,
 		type: "bug", project_id: projectId, message: `${comment}\n\n${details}`,
 		title: comment.slice(0, 300), severity: "medium", route, environment: "development",
 		created_by: clean(payload?.created_by || "agentation"), notes: annotationId ? `agentation:${annotationId}` : "agentation",
@@ -267,9 +309,9 @@ function readRequest(req) {
 }
 
 async function notifyPlanner(item) {
+	if (process.env.YANO_FEEDBACK_SKIP_NOTIFY === "1" || process.env.YANO_TEST_MODE === "1") return { delivered: 0, skipped: "test" };
 	const client = await mqtt.connectAsync(process.env.PI_ORCH_BROKER_URL || "mqtt://127.0.0.1:1883", { connectTimeout: 3_000 });
 	try {
-	if (process.env.YANO_FEEDBACK_SKIP_NOTIFY === "1") return { delivered: 0, skipped: "test" };
 	const scope = item.project_id;
 		const statuses = [];
 		const onMessage = (_topic, payload) => { try { const card = JSON.parse(payload.toString()); if (card.role === "planner" && card.status !== "offline") statuses.push(card); } catch {} };
@@ -288,7 +330,7 @@ export async function createFeedback(db, input) {
 	if (!RESOLUTIONS.has(resolution)) throw new Error("resolution deve essere automatic oppure user_confirmation");
 	const actor = clean(input.created_by || input.username || "local-user");
 	const credentials = input.credentials || (input.test_username || input.test_password ? { username: input.test_username, password: input.test_password } : null);
-	if (type === "bug" && input.require_credentials !== false && (!credentials?.username || !credentials?.password)) throw new Error("per un bug sono obbligatori username e password per i test E2E");
+	if (type === "bug" && (input.require_credentials === true || credentials) && (!credentials?.username || !credentials?.password)) throw new Error("per un bug sono obbligatori username e password per i test E2E");
 	const encrypted = type === "bug" && credentials ? encryptCredentials({ username: String(credentials.username), password: String(credentials.password) }) : null;
 	const timestamp = now(); const feedbackId = id(type); const item = { id: feedbackId, type, project_id: projectId, message, resolution, status: "received", screenshots: materializeScreenshots(feedbackId, input.screenshots), title: clean(input.title || "").slice(0, 300) || null, severity: clean(input.severity || "medium").slice(0, 30), route: clean(input.route || "").slice(0, 500) || null, environment: clean(input.environment || "").slice(0, 100) || null, browser_context: input.browser_context ? JSON.stringify(input.browser_context).slice(0, 10000) : null, notes: clean(input.notes || "").slice(0, 5000) || null, created_by: actor, updated_by: actor, created_at: timestamp, updated_at: timestamp };
 	db.prepare("INSERT INTO feedback(id,type,project_id,message,resolution,status,screenshots,title,severity,route,environment,browser_context,notes,created_by,updated_by,credentials_ciphertext,credentials_iv,credentials_tag,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(item.id,type,projectId,message,resolution,item.status,JSON.stringify(item.screenshots),item.title,item.severity,item.route,item.environment,item.browser_context,item.notes,item.created_by,item.updated_by,encrypted?.ciphertext || null,encrypted?.iv || null,encrypted?.tag || null,timestamp,timestamp);
@@ -317,7 +359,7 @@ export function deleteFeedback(db, itemId, { actor = "local-user", reason = "del
 export function listFeedbackAudit(db, itemId) { return db.prepare("SELECT id,feedback_id,actor,action,reason,before_json,after_json,created_at FROM feedback_audit WHERE feedback_id=? ORDER BY created_at ASC").all(itemId); }
 
 function json(res, status, body) { res.writeHead(status, { "content-type": "application/json; charset=utf-8" }); res.end(JSON.stringify(body)); }
-export async function handleFeedbackApi(db, req, res, { requireCredentials = true } = {}) {
+export async function handleFeedbackApi(db, req, res, { requireCredentials = false } = {}) {
 	try {
 		const parts = new URL(req.url, "http://localhost").pathname.split("/").filter(Boolean); const method=req.method;
 		if (method === "GET" && !parts.length) return json(res,200,{ok:true,service:"yano-feedback",port:PORT});
@@ -328,6 +370,7 @@ export async function handleFeedbackApi(db, req, res, { requireCredentials = tru
 		if (!TYPES.has(collection === "bugs" ? "bug" : collection === "suggestions" ? "suggestion" : "")) return json(res,404,{error:"endpoint non trovato"});
 		const type = collection === "bugs" ? "bug" : "suggestion";
 		const query = new URL(req.url, "http://localhost").searchParams; const projectId = projectFromPath || query.get("project_id") || null;
+		if (itemId) { const found = row(db, itemId); if (!found || found.type !== type || (projectId && found.project_id !== projectId)) return json(res,404,{error:"not found"}); }
 		if (method === "GET" && !itemId) return json(res,200,listFeedback(db, { type, project_id: projectId }).reverse());
 		if (method === "POST" && !itemId) return json(res,201,await createFeedback(db,{...(await readRequest(req)),type,project_id:projectId || undefined,require_credentials:type === "bug" ? requireCredentials : true}));
 		if (itemId && method === "GET") { const found = row(db,itemId); if (!found || (projectId && found.project_id !== projectId)) return json(res,404,{error:"not found"}); return json(res,200,{...found,audit:listFeedbackAudit(db,itemId)}); }
@@ -340,5 +383,5 @@ export async function handleFeedbackApi(db, req, res, { requireCredentials = tru
 
 function value(argv, flag) { const i=argv.indexOf(flag); return i>=0?argv[i+1]:null; }
 function values(argv, flag) { const result=[]; for(let i=0;i<argv.length;i++) if(argv[i]===flag && argv[i+1]) result.push(argv[i+1]); return result; }
-function usage() { return "Uso: yano feedback serve|create|list|get|update|delete [--type bug|suggestion] [--project-id ID] [--message TESTO] [--screenshot PATH|URL] [--resolution automatic|user_confirmation] [--status received|pending_planner|queued|processing|awaiting_user_confirmation|processed|resolved|paused|retry|failed|cancelled] [--username USER --password PASSWORD]"; }
-export async function runYanoFeedback({ argv=[] }={}) { const sub=argv[0]; if(!sub||sub==="--help") { console.log(usage()); return; } const db=openDatabase(); try { if(sub==="serve") { const server=http.createServer((req,res)=>handleFeedbackApi(db,req,res)); const port=Number(value(argv,"--port"))||Number(process.env.YANO_FEEDBACK_API_PORT)||PORT; await new Promise((resolve)=>server.listen(port,"127.0.0.1",()=>{console.log(`yano feedback: API in ascolto su http://127.0.0.1:${port}`); resolve();})); return; } const type=value(argv,"--type"); const common={type,project_id:value(argv,"--project-id"),message:value(argv,"--message"),resolution:value(argv,"--resolution"),screenshots:values(argv,"--screenshot"),test_username:value(argv,"--username"),test_password:value(argv,"--password"),require_credentials:type === "bug"}; if(sub==="create") console.log(JSON.stringify(await createFeedback(db,common),null,2)); else if(sub==="list") console.log(JSON.stringify(listFeedback(db,{type,project_id:value(argv,"--project-id")}).reverse(),null,2)); else if(sub==="get") console.log(JSON.stringify(row(db,value(argv,"--id")),null,2)); else if(sub==="update") console.log(JSON.stringify(await updateFeedback(db,value(argv,"--id"),{message:value(argv,"--message"),resolution:value(argv,"--resolution"),status:value(argv,"--status"),screenshots:values(argv,"--screenshot").length?values(argv,"--screenshot"):undefined,audit_reason:value(argv,"--reason"),updated_by:value(argv,"--username")}),null,2)); else if(sub==="delete") console.log(JSON.stringify(deleteFeedback(db,value(argv,"--id"),{actor:value(argv,"--username"),reason:value(argv,"--reason")}),null,2)); else throw new Error(usage()); } finally { if(sub!=="serve") db.close(); } }
+function usage() { return "Uso: yano feedback serve|create|list|get|update|delete [--type bug|suggestion] [--project-id ID] [--message TESTO] [--title TITOLO] [--route PATH] [--environment ENV] [--severity LIVELLO] [--created-by USER] [--screenshot PATH|URL] [--resolution automatic|user_confirmation] [--status received|pending_planner|queued|processing|awaiting_user_confirmation|processed|resolved|paused|retry|failed|cancelled] [--username USER --password PASSWORD]"; }
+export async function runYanoFeedback({ argv=[] }={}) { const sub=argv[0]; if(!sub||sub==="--help") { console.log(usage()); return; } const db=openDatabase(); try { if(sub==="serve") { const server=http.createServer((req,res)=>handleFeedbackApi(db,req,res)); const port=Number(value(argv,"--port"))||Number(process.env.YANO_FEEDBACK_API_PORT)||PORT; await new Promise((resolve)=>server.listen(port,"127.0.0.1",()=>{console.log(`yano feedback: API in ascolto su http://127.0.0.1:${port}`); resolve();})); return; } const type=value(argv,"--type"); const common={type,project_id:value(argv,"--project-id"),message:value(argv,"--message"),title:value(argv,"--title"),route:value(argv,"--route"),environment:value(argv,"--environment"),severity:value(argv,"--severity"),created_by:value(argv,"--created-by"),resolution:value(argv,"--resolution"),screenshots:values(argv,"--screenshot"),test_username:value(argv,"--username"),test_password:value(argv,"--password"),require_credentials:false}; if(sub==="create") console.log(JSON.stringify(await createFeedback(db,common),null,2)); else if(sub==="list") console.log(JSON.stringify(listFeedback(db,{type,project_id:value(argv,"--project-id")}).reverse(),null,2)); else if(sub==="get") console.log(JSON.stringify(row(db,value(argv,"--id")),null,2)); else if(sub==="update") console.log(JSON.stringify(await updateFeedback(db,value(argv,"--id"),{message:value(argv,"--message"),resolution:value(argv,"--resolution"),status:value(argv,"--status"),screenshots:values(argv,"--screenshot").length?values(argv,"--screenshot"):undefined,audit_reason:value(argv,"--reason"),updated_by:value(argv,"--username")}),null,2)); else if(sub==="delete") console.log(JSON.stringify(deleteFeedback(db,value(argv,"--id"),{actor:value(argv,"--username"),reason:value(argv,"--reason")}),null,2)); else throw new Error(usage()); } finally { if(sub!=="serve") db.close(); } }

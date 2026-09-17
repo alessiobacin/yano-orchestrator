@@ -123,17 +123,10 @@ const inlineCheckFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "yano-wr
 fs.writeFileSync(inlineCheckFile, inlineJs);
 new (await import("node:child_process")).execFileSync(process.execPath, ["--check", inlineCheckFile], { stdio: "pipe" });
 
-// Fixture storica non garantita nel worktree: `.mcp.json.example` è untracked
-// nel checkout main (debito baseline, non di questo task). Skip non fatale.
-const mcpExamplePath = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", ".mcp.json.example");
-if (fs.existsSync(mcpExamplePath)) {
-	const template = JSON.parse(fs.readFileSync(mcpExamplePath, "utf8"));
-	assert.deepEqual(template.mcpServers.agentation, { command: "npx", args: ["-y", "agentation-mcp", "server"] });
-} else {
-	console.warn("SKIP assert .mcp.json.example: file assente nel worktree (debito baseline, vedi report)");
-}
+const template = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", ".mcp.json.example"), "utf8"));
+assert.equal(template.mcpServers.agentation, undefined, "Agentation is optional, never bootstrapped by the default MCP template");
 const roles = YAML.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agents", "roles.yaml"), "utf8")).roles;
-assert.deepEqual(roles.planner.mcp, ["github", "agentation"]);
+assert.deepEqual(roles.planner.mcp, ["github"]);
 assert.deepEqual(roles["frontend-developer"].mcp, ["chrome-devtools"]);
 assert.deepEqual(roles["frontend-reviewer"].mcp, ["chrome-devtools"]);
 assert.equal(roles["e2e-simulator"].playbook, "frontend-browser");
@@ -147,6 +140,6 @@ assert.ok(backendPlaybook.invariants.includes("frontend_impact_requires_frontend
 const plannerPrompt = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "prompts", "planner.md"), "utf8");
 assert.match(plannerPrompt, /screenshot o altra immagine/);
 assert.match(plannerPrompt, /e2e-simulator/);
-assert.match(plannerPrompt, /yano frontend-review start/);
-assert.match(plannerPrompt, /Vuoi fare\s+una review visuale dell'app in sviluppo con Agentation/);
+assert.match(plannerPrompt, /yano frontend-review browser/);
+assert.match(plannerPrompt, /Vuoi fare\s+una review visuale dell'app in sviluppo/);
 console.log("FRONTEND REVIEW SMOKE TEST PASSED");

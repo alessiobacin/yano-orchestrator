@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="it" data-theme="luxury">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Review Tecnica — Yano Orchestrator</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/daisyui@5.5.19/daisyui.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/daisyui@5.5.19/themes.css">
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.2.4/dist/index.global.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  :where(.grid, .flex) > * { min-width: 0; }
+  :where(p, h1, h2, h3, h4, li, td, th, .badge) { overflow-wrap: anywhere; }
+  :where(img, svg, video, canvas, iframe) { max-width: 100%; height: auto; }
+  body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .evidence-quote { border-left: 3px solid var(--color-warning); padding-left: 1rem; font-style: italic; }
+</style>
+</head>
+<body class="bg-base-200 text-base-content">
+
+<main class="mx-auto max-w-6xl p-5 lg:p-10 space-y-12">
+
+  <!-- HERO / VERDICT -->
+  <section class="hero bg-base-100 rounded-box shadow-xl border border-base-content/10">
+    <div class="hero-content flex-col text-center py-12 px-6">
+      <div class="badge badge-error badge-lg mb-4 gap-1">⚠ Verdetto: instabilità strutturale, non bug isolati</div>
+      <h1 class="text-3xl lg:text-5xl font-bold mb-4">Review tecnica &amp; logica<br><span class="text-primary">Yano Orchestrator ("IANO")</span></h1>
+      <p class="max-w-3xl text-base lg:text-lg opacity-80">
+        Non un audit teorico: ogni numero qui sotto viene da questo repository — dimensione file reale,
+        ticket auto-generati reali, log delle revisioni reale. La conclusione centrale è che il sistema
+        ha accumulato <strong>più superficie funzionale di quanta ne riesca a stabilizzare</strong>, e il
+        sotto-sistema critico (il watcher/supervisore) mostra un pattern reattivo — bug in produzione → patch
+        mirata → nuovo edge case → patch mirata — ripetuto per otto revisioni consecutive.
+      </p>
+    </div>
+  </section>
+
+  <!-- SCALE DASHBOARD -->
+  <section>
+    <h2 class="text-2xl font-bold mb-1">1. La scala del sistema, in numeri</h2>
+    <p class="opacity-70 mb-5">Misurati direttamente su questo checkout, oggi.</p>
+    <div class="stats stats-vertical lg:stats-horizontal shadow w-full bg-base-100 flex-wrap">
+      <div class="stat">
+        <div class="stat-title">extensions/orchestrator.ts</div>
+        <div class="stat-value text-error">7 764</div>
+        <div class="stat-desc">righe in <strong>un solo file</strong>, di cui ~5 062 in <strong>una sola funzione anonima</strong></div>
+      </div>
+      <div class="stat">
+        <div class="stat-title">scripts/</div>
+        <div class="stat-value text-warning">208</div>
+        <div class="stat-desc">file — <strong>140 (67%)</strong> sono smoke test e2e, non unit test</div>
+      </div>
+      <div class="stat">
+        <div class="stat-title">Unit test veri</div>
+        <div class="stat-value">0</div>
+        <div class="stat-desc">solo test a scatola nera con broker MQTT + processo <span class="mono">pi</span> reali</div>
+      </div>
+      <div class="stat">
+        <div class="stat-title">Revisioni di sviluppo</div>
+        <div class="stat-value text-warning">68</div>
+        <div class="stat-desc"><span class="mono">development-notes.md</span>, 5 340 righe — la più recente è del 7 settembre</div>
+      </div>
+    </div>
+    <div class="stats stats-vertical lg:stats-horizontal shadow w-full bg-base-100 mt-4 flex-wrap">
+      <div class="stat">
+        <div class="stat-title">Ruoli agente definiti</div>
+        <div class="stat-value">42</div>
+        <div class="stat-desc">più 26 playbook YAML che li orchestrano</div>
+      </div>
+      <div class="stat">
+        <div class="stat-title">prompt planner.md</div>
+        <div class="stat-value text-warning">739</div>
+        <div class="stat-desc">righe — 2,5× il prossimo prompt più lungo</div>
+      </div>
+      <div class="stat">
+        <div class="stat-title">Ticket watcher aperti</div>
+        <div class="stat-value text-error">52 / 53</div>
+        <div class="stat-desc"><strong>98% mai chiusi</strong>, generati negli ultimi 12 giorni</div>
+      </div>
+      <div class="stat">
+        <div class="stat-title">File &gt; 1000 righe</div>
+        <div class="stat-value text-error">4 / 4</div>
+        <div class="stat-desc">tutti nel cluster watcher/repair/architect</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- THE SMOKING GUN: TICKET FLOOD -->
+  <section>
+    <h2 class="text-2xl font-bold mb-1">2. Il segnale più forte: il watcher genera più problemi di quanti ne risolva</h2>
+    <p class="opacity-70 mb-5">Dati letti direttamente da <span class="mono">.scratch/optimize-orchestrator/issues/</span> — 149 file totali.</p>
+
+    <div class="grid md:grid-cols-2 gap-6">
+      <div class="card bg-base-100 border border-base-content/10">
+        <div class="card-body">
+          <h3 class="card-title text-lg">Due generazioni di ticket, due fasi del progetto</h3>
+          <ul class="steps steps-vertical mt-2">
+            <li class="step step-primary">
+              <div class="text-left"><strong>Ticket 1–85</strong> — architetturali/feature: playbook effect runtime, decision holds, approval escalation multi-principal, capability probes, redazione, migrazioni schema...</div>
+            </li>
+            <li class="step step-error">
+              <div class="text-left"><strong>Ticket 86–149</strong> (64 ticket, ultimi 12 giorni) — <strong>100% auto-generati dal watcher</strong> sugli stessi 4 segnali ricorrenti, quasi mai chiusi</div>
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="card bg-base-100 border border-base-content/10">
+        <div class="card-body">
+          <h3 class="card-title text-lg">Distribuzione dei 53 ticket watcher (27 ago – 8 set)</h3>
+          <div class="overflow-x-auto">
+            <table class="table table-sm mt-2">
+              <thead><tr><th>Segnale</th><th>Conteggio</th><th>Diagnostica nel ticket</th></tr></thead>
+              <tbody>
+                <tr><td><span class="mono">tool_failure</span></td><td class="font-bold">34</td><td><span class="badge badge-error badge-sm">nessuna — solo "ok:false", indaga tu</span></td></tr>
+                <tr><td><span class="mono">workspace_scope_mismatch</span></td><td class="font-bold">7</td><td><span class="badge badge-warning badge-sm">generica</span></td></tr>
+                <tr><td><span class="mono">no_live_target</span></td><td class="font-bold">6</td><td><span class="badge badge-warning badge-sm">generica</span></td></tr>
+                <tr><td><span class="mono">delegation_timeout</span></td><td class="font-bold">6</td><td><span class="badge badge-warning badge-sm">generica</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="text-sm opacity-70 mt-2">Ogni ticket usa lo <strong>stesso template</strong>: "ricostruisci il round, trova dove aspettativa e stato reale divergono" — zero root cause pre-analizzata, zero puntatore al codice.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="alert alert-error alert-soft mt-6">
+      <span><strong>Cadenza:</strong> ~4-5 nuovi ticket "bug interno di Yano" al giorno, negli ultimi 12 giorni. Tasso di chiusura: <strong>1 su 53 (≈2%)</strong>. Il backlog cresce più velocemente di quanto chiunque — umano o planner — riesca a smaltirlo.</span>
+    </div>
+  </section>
+
+  <!-- WATCHER INCIDENT TIMELINE -->
+  <section>
+    <h2 class="text-2xl font-bold mb-1">3. Storia del watcher: nato da un incidente, patchato 8 volte</h2>
+    <p class="opacity-70 mb-5">Ricostruita da <span class="mono">docs/notes/development-notes.md</span> (5 340 righe, 68 "Revisioni") — citazioni testuali.</p>
+
+    <ul class="timeline timeline-vertical timeline-snap-icon max-md:timeline-compact">
+      <li>
+        <div class="timeline-middle"><div class="badge badge-neutral">Rev 29</div></div>
+        <div class="timeline-start md:text-end mb-8">
+          <time class="font-mono italic">origine</time>
+          <div class="text-base font-black">Il watchdog nasce da un incidente</div>
+          <p class="evidence-quote text-sm">"un turno LLM troncato ha bloccato tutto senza che nessuno se ne accorgesse" — e la nota ammette apertamente il difetto strutturale mai risolto: "un task genuinamente lento e un task davvero bloccato appaiono identici dall'esterno".</p>
+        </div>
+        <hr class="bg-error"/>
+      </li>
+      <li>
+        <hr class="bg-error"/>
+        <div class="timeline-middle"><div class="badge badge-neutral">Rev 40</div></div>
+        <div class="timeline-end mb-8">
+          <div class="text-base font-black">Punto cieco scoperto</div>
+          <p class="evidence-quote text-sm">"bug reale: run completato ma mai finalizzato/notificato (watchdog cieco a questo caso)".</p>
+        </div>
+        <hr class="bg-error"/>
+      </li>
+      <li>
+        <hr class="bg-error"/>
+        <div class="timeline-middle"><div class="badge badge-neutral">Rev 56</div></div>
+        <div class="timeline-start md:text-end mb-8">
+          <div class="text-base font-black">Falsi positivi</div>
+          <p class="text-sm opacity-80">mismatch di scope MQTT fa apparire agenti vivi come morti; keyword-matching nel rilevatore "debate" genera allarmi errati.</p>
+        </div>
+        <hr class="bg-error"/>
+      </li>
+      <li>
+        <hr class="bg-error"/>
+        <div class="timeline-middle"><div class="badge badge-neutral">Rev 62</div></div>
+        <div class="timeline-end mb-8">
+          <div class="text-base font-black">Il bug è nello strumento che verifica il watcher</div>
+          <p class="text-sm opacity-80">la suite di smoke test del watcher si blocca per un subscriber MQTT di test mai chiuso.</p>
+        </div>
+        <hr class="bg-error"/>
+      </li>
+      <li>
+        <hr class="bg-error"/>
+        <div class="timeline-middle"><div class="badge badge-neutral">Rev 63</div></div>
+        <div class="timeline-start md:text-end mb-8">
+          <div class="text-base font-black">Il watchdog uccide un run che aspetta legittimamente l'utente</div>
+          <p class="evidence-quote text-sm">"i gate umani non sono stall o ticket orfani" — un playbook fermo su un <span class="mono">decision_hold</span> ancora aperto viene "marcato failed" per errore.</p>
+        </div>
+        <hr class="bg-error"/>
+      </li>
+      <li>
+        <hr class="bg-error"/>
+        <div class="timeline-middle"><div class="badge badge-error badge-lg">Rev 65</div></div>
+        <div class="timeline-end mb-8">
+          <div class="text-base font-black">Il rewrite più grande — innescato da un incidente in produzione</div>
+          <p class="evidence-quote text-sm">"jobs.json reale mostrava lo stesso job delle 7:00 rilanciato <strong>39 volte in 2 ore</strong> (~30 notifiche Telegram reali inviate), e un progetto con watcher in pausa aveva accumulato <strong>19 tab Herdr, 12 delle quali orfane</strong>."</p>
+          <p class="text-sm opacity-80 mt-1">Causa: <span class="mono">durableAcceptance()</span> leggeva male un JSON di successo non standard come "ancora bloccato", ritriggerando il job ogni minuto. Bonus scoperto nella stessa revisione: <strong>la rotazione dei log era rotta per design</strong> — la retention usa <span class="mono">mtime</span> su un file in append continuo, che ha sempre <span class="mono">mtime: ora</span> e quindi non ruota mai.</p>
+        </div>
+        <hr class="bg-error"/>
+      </li>
+      <li>
+        <hr class="bg-error"/>
+        <div class="timeline-middle"><div class="badge badge-error badge-lg">Rev 68</div></div>
+        <div class="timeline-start md:text-end">
+          <time class="font-mono italic">più recente — 7 settembre</time>
+          <div class="text-base font-black">Il watcher uccide agenti appena nati e ancora vivi</div>
+          <p class="evidence-quote text-sm">"live diventava false per corto-circuito senza mai interpellare paneHasLivePiProcess()" — scoperto su un incidente reale (progetto "newMioDOC"). Un bug adiacente resta esplicitamente <strong>non risolto</strong> (ticket #134, workspace_scope_mismatch).</p>
+        </div>
+      </li>
+    </ul>
+
+    <div class="alert alert-warning alert-soft mt-4">
+      <span><strong>Nota metodologica:</strong> anche la convenzione di logging del changelog è stata cambiata a metà progetto senza retro-numerare le voci esistenti (Rev 57/60/63 duplicati, ordine invertito dopo Rev 62) — segnale minore ma reale di processo non consolidato.</span>
+    </div>
+  </section>
+
+  <!-- ARCHITECTURAL EVIDENCE -->
+  <section>
+    <h2 class="text-2xl font-bold mb-1">4. Cosa c'è sotto: un monolite con 6 responsabilità mescolate</h2>
+    <p class="opacity-70 mb-5"><span class="mono">extensions/orchestrator.ts</span> — 7 764 righe, <strong>65 tool</strong> registrati dentro un'unica closure anonima.</p>
+
+    <div class="grid md:grid-cols-2 gap-6 mb-6">
+      <div class="card bg-base-100 border border-base-content/10">
+        <div class="card-body">
+          <h3 class="card-title text-base">Concetti mescolati in un solo scope</h3>
+          <ul class="list-disc list-inside text-sm space-y-1 opacity-90">
+            <li><strong>SQL/storage</strong> — 116 query SQL inline nella classe <span class="mono">SQLiteOrchestratorStorage</span> (768 righe)</li>
+            <li><strong>Trasporto MQTT</strong> — publish/subscribe interfogliati con la logica di business</li>
+            <li><strong>Integrazione terminale/tmux</strong> — shell-out a Herdr per rinominare pane/tab</li>
+            <li><strong>Client HTTP notifiche</strong> — WhatsApp/Telegram/SendGrid scritti a mano</li>
+            <li><strong>Rendering TUI</strong> — <span class="mono">renderCall</span>/<span class="mono">renderResult</span> dentro ogni tool</li>
+            <li><strong>Parsing flag CLI</strong> — nello stesso file</li>
+          </ul>
+        </div>
+      </div>
+      <div class="card bg-base-100 border border-base-content/10">
+        <div class="card-body">
+          <h3 class="card-title text-base">Tool più grandi (rompono la regola delle 150 righe)</h3>
+          <div class="overflow-x-auto">
+            <table class="table table-xs">
+              <tbody>
+                <tr><td><span class="mono">worktree_finalize</span></td><td class="text-right font-bold text-error">308 righe</td></tr>
+                <tr><td><span class="mono">agent_send</span></td><td class="text-right font-bold text-error">275 righe</td></tr>
+                <tr><td><span class="mono">plan_set</span></td><td class="text-right">144 righe</td></tr>
+                <tr><td><span class="mono">worktree_abandon</span></td><td class="text-right">89 righe</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="text-sm opacity-70 mt-2"><strong>105 commenti "Revisione N"</strong> annotano patch dentro il codice stesso — es. <span class="evidence-quote">"This used to fail the run silently — nobody heard about it"</span> (L7187).</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="alert alert-info alert-soft mb-4">
+      <span><strong>Nota di equità:</strong> il file è disordinato per dimensione e accoppiamento, <em>non</em> per sciatteria — quasi zero codice morto, error handling difensivo consistente (154 try / 142 catch), costanti ben nominate. Il problema è strutturale (troppo in un solo posto), non di qualità riga-per-riga.</span>
+    </div>
+
+    <div class="mermaid">
+graph TB
+  subgraph oggi["OGGI — un file, 7764 righe"]
+    M["export default function(pi)<br/>~5062 righe<br/>65 tool + MQTT + storage + notifiche + TUI + CLI"]
+  end
+  subgraph proposto["PROPOSTO — moduli separati"]
+    A["storage/<br/>sqlite-orchestrator-storage.ts<br/>(già isolabile: 768 righe)"]
+    B["watchdog/<br/>detector puri, già testabili<br/>(estrazione più facile)"]
+    C["notifications/<br/>whatsapp · telegram · sendgrid"]
+    D["terminal-integration/<br/>herdr pane/tab shell-out"]
+    E["tools/worktree/<br/>tools/plan/<br/>tools/ticket/"]
+    CORE["core/<br/>identity · mqtt · session_start"]
+    CORE --> A
+    CORE --> B
+    CORE --> C
+    CORE --> D
+    CORE --> E
+  end
+  oggi -.->|refactor incrementale| proposto
+  style M fill:#7f1d1d,color:#fff
+  style CORE fill:#1e3a5f,color:#fff
+    </div>
+  </section>
+
+  <!-- SCRIPTS DIR EVIDENCE -->
+  <section>
+    <h2 class="text-2xl font-bold mb-1">5. scripts/: un secondo orchestratore nascosto dentro la cartella "tooling"</h2>
+    <div class="overflow-x-auto rounded-box border border-base-content/10 bg-base-100">
+      <table class="table table-zebra">
+        <thead><tr><th>File</th><th>Righe</th><th>Problema osservato</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="mono">yano-watcher-registry.mjs</td>
+            <td class="font-bold text-error">1 675</td>
+            <td>~70 funzioni, <strong>76 try/catch (20 inghiottono l'errore)</strong>. Copre: init/pause/resume, health planner, cleanup tab duplicate, ticket orfani, coda feedback, dimensione log, install cron — un secondo orchestratore a tutti gli effetti</td>
+          </tr>
+          <tr>
+            <td class="mono">watch-stalls.mjs</td>
+            <td class="font-bold text-error">1 603</td>
+            <td>63 try/catch (9 swallow), pattern di cleanup <span class="mono">setTimeout</span> duplicato 4× invece di un helper condiviso</td>
+          </tr>
+          <tr>
+            <td class="mono">yano-architect.mjs</td>
+            <td class="font-bold text-error">1 227</td>
+            <td>—</td>
+          </tr>
+          <tr>
+            <td class="mono">yano-repair.mjs</td>
+            <td class="font-bold text-error">1 088</td>
+            <td>Reimplementa <span class="mono">projectInfo()</span>, <span class="mono">shellQuote()</span>, <span class="mono">herdrSnapshot()</span> in modo indipendente da <span class="mono">yano-watcher-registry.mjs</span> — stesso concetto, due implementazioni, nessun modulo condiviso</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="text-sm opacity-70 mt-2">Tutti e 4 i file oltre le 1000 righe appartengono allo stesso cluster watcher/repair/architect — non è un caso isolato, è la firma di un sotto-sistema che ha continuato a crescere per accrezione invece che per design.</p>
+  </section>
+
+  <!-- MISC BUGS FOUND -->
+  <section>
+    <h2 class="text-2xl font-bold mb-1">6. Altri segnali trovati ispezionando il checkout live</h2>
+    <div class="grid md:grid-cols-3 gap-4">
+      <div class="alert alert-error alert-soft flex-col items-start">
+        <strong>Cartella <span class="mono">undefined/</span> nella root dei dati</strong>
+        <span class="text-sm">Contiene trace reali (<span class="mono">workspace-d3dda6a0cb4d</span>) — sintomo classico di una variabile non definita finita in un <span class="mono">path.join()</span> in produzione.</span>
+      </div>
+      <div class="alert alert-warning alert-soft flex-col items-start">
+        <strong>ADR-0003 documenta un fallimento esplicito</strong>
+        <span class="text-sm">Il vecchio meccanismo <span class="mono">yano sync-prompts</span> (Rev 46) è stato abbandonato in Rev 47: "il README documenta il fallimento del vecchio approccio".</span>
+      </div>
+      <div class="alert alert-info alert-soft flex-col items-start">
+        <strong>Rotazione log rotta "per design"</strong>
+        <span class="text-sm">La retention su file in append continuo (<span class="mono">mtime</span>-based) non può mai scattare — scoperta solo in Rev 65, dopo mesi di funzionamento presunto.</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- KEEP / REWRITE / RETIRE TABLE -->
+  <section>
+    <h2 class="text-2xl font-bold mb-1">7. Tavola di lavoro: cosa tenere, cosa riscrivere, cosa tagliare</h2>
+    <p class="opacity-70 mb-5">Proposta iniziale per sotto-sistema — <strong>da validare insieme</strong> nelle domande alla fine di questo documento.</p>
+    <div class="overflow-x-auto rounded-box border border-base-content/10 bg-base-100">
+      <table class="table">
+        <thead><tr><th>Sotto-sistema</th><th>Stato attuale</th><th>Proposta</th><th>Perché</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="font-semibold">Ticket/DAG layer (SQLite)</td>
+            <td><span class="badge badge-success badge-sm">solido</span></td>
+            <td><span class="badge badge-outline">KEEP</span></td>
+            <td>Ben isolato, poco citato negli incidenti; da estrarre in modulo dedicato ma non riscrivere</td>
+          </tr>
+          <tr>
+            <td class="font-semibold">Worktree isolation</td>
+            <td><span class="badge badge-success badge-sm">solido</span></td>
+            <td><span class="badge badge-outline">KEEP</span></td>
+            <td>ADR-0001 dedicata, nessun incidente ricorrente riportato</td>
+          </tr>
+          <tr>
+            <td class="font-semibold">Watchdog detector (stall/orphan/unfinalized)</td>
+            <td><span class="badge badge-info badge-sm">puro/testabile</span></td>
+            <td><span class="badge badge-outline">KEEP + estrai</span></td>
+            <td>Già funzioni pure — la parte più facile da isolare e coprire con unit test veri</td>
+          </tr>
+          <tr class="bg-error/10">
+            <td class="font-semibold">Watcher registry (1675 righe)</td>
+            <td><span class="badge badge-error badge-sm">instabile</span></td>
+            <td><span class="badge badge-error badge-outline">RISTRUTTURA</span></td>
+            <td>Troppe responsabilità eterogenee in un solo processo/file — spezzare per dominio (identity, tab lifecycle, services, scheduler-dedup, log-retention)</td>
+          </tr>
+          <tr class="bg-error/10">
+            <td class="font-semibold">Politica di generazione ticket auto</td>
+            <td><span class="badge badge-error badge-sm">rumore</span></td>
+            <td><span class="badge badge-error badge-outline">RIDISEGNA</span></td>
+            <td>34/53 ticket senza root cause; nessuna aggregazione/backoff — genera più lavoro di quanto ne risparmi</td>
+          </tr>
+          <tr>
+            <td class="font-semibold">orchestrator.ts (monolite 7764 righe)</td>
+            <td><span class="badge badge-warning badge-sm">funziona ma illeggibile</span></td>
+            <td><span class="badge badge-warning badge-outline">MODULARIZZA</span></td>
+            <td>Non riscrivere da zero (bassa densità di dead code, error handling già presente) — spacchettare in 5 moduli mantenendo la logica</td>
+          </tr>
+          <tr>
+            <td class="font-semibold">Copertura test (0 unit, 140 e2e)</td>
+            <td><span class="badge badge-error badge-sm">squilibrata</span></td>
+            <td><span class="badge badge-error badge-outline">RIEQUILIBRA</span></td>
+            <td>Introdurre unit test sulle funzioni pure estratte prima di aggiungere altri smoke test e2e (multi-minuto, costosi da mantenere)</td>
+          </tr>
+          <tr>
+            <td class="font-semibold">Ambizione feature (playbook effect runtime, decision holds, capability probes, redazione, approval multi-principal...)</td>
+            <td><span class="badge badge-warning badge-sm">?</span></td>
+            <td><span class="badge badge-warning badge-outline">DA DECIDERE</span></td>
+            <td>85 ticket architetturali storici suggeriscono scope costruito in anticipo rispetto all'uso reale — <strong>domanda aperta all'utente</strong></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- RECOMMENDATIONS -->
+  <section>
+    <h2 class="text-2xl font-bold mb-1">8. Raccomandazione: refactor mirato, non riscrittura da zero</h2>
+    <div class="card bg-base-100 border border-base-content/10">
+      <div class="card-body">
+        <p class="mb-3">Il codice non è sciatto — è <strong>sovraccarico</strong>. Una riscrittura completa butterebbe via error handling e logica già validata da centinaia di incidenti reali documentati, con alto rischio di reintrodurre gli stessi bug già risolti. La raccomandazione è un <strong>refactor strutturale incrementale</strong>, in quest'ordine:</p>
+        <ul class="steps steps-vertical">
+          <li class="step step-primary text-left"><div class="text-left pl-2"><strong>Congela nuove feature sul watcher</strong> finché il backlog (52 ticket aperti) non scende sotto una soglia gestibile — smettere di aggiungere responsabilità a un sistema che non riesce a smaltire quelle attuali</div></li>
+          <li class="step step-primary text-left"><div class="text-left pl-2"><strong>Cambia la politica dei ticket auto-generati</strong> — niente più "tool_failure" senza root cause; aggregare per fingerprint/categoria invece di un file per evento; backoff quando lo stesso segnale si ripete N volte in una finestra</div></li>
+          <li class="step step-primary text-left"><div class="text-left pl-2"><strong>Estrai i watchdog detector puri in modulo indipendente</strong> con unit test veri — è il lavoro a più basso rischio e più alto ritorno (già isolati, già documentati come "unit-testable con clock controllato")</div></li>
+          <li class="step step-primary text-left"><div class="text-left pl-2"><strong>Spacchetta orchestrator.ts</strong> in storage/, watchdog/, notifications/, terminal-integration/, tools/{worktree,plan,ticket} — mantenendo il comportamento, non riscrivendolo</div></li>
+          <li class="step step-primary text-left"><div class="text-left pl-2"><strong>Spezza yano-watcher-registry.mjs</strong> (1675 righe) per dominio, ognuno con proprio ciclo di vita/fallimento isolato — oggi un bug in "digest email" può teoricamente compromettere "identity conflict detection"</div></li>
+          <li class="step step-primary text-left"><div class="text-left pl-2"><strong>Solo dopo</strong> aver stabilizzato il core: decidere consapevolmente se l'ambizione feature (ticket 1-85) va mantenuta, ridotta o congelata</div></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- OPEN QUESTIONS -->
+  <section>
+    <h2 class="text-2xl font-bold mb-1">9. Domande aperte — servono per decidere lo scope</h2>
+    <p class="opacity-70 mb-5">Come richiesto: prima di toccare qualunque cosa, queste sono le decisioni che solo tu puoi prendere. Te le pongo anche in chat.</p>
+    <div class="grid md:grid-cols-2 gap-4">
+      <div class="card bg-base-100 border-2 border-primary/30"><div class="card-body">
+        <h3 class="card-title text-base">A. Riscrittura vs refactor incrementale</h3>
+        <p class="text-sm">Il monolite da 7764 righe va spacchettato mantenendo la logica esistente (rischio basso, ritorno medio) o vuoi valutare una riscrittura ground-up del core (rischio alto, possibilità di ripensare le architetture playbook/effect-runtime da zero)?</p>
+      </div></div>
+      <div class="card bg-base-100 border-2 border-primary/30"><div class="card-body">
+        <h3 class="card-title text-base">B. Ampiezza delle feature</h3>
+        <p class="text-sm">42 ruoli, 26 playbook, notifiche multi-canale, model-advisor, architect, auto-improve, memoria/trace semantica... Tutto questo è realmente usato? Cosa taglieresti per ridurre la superficie di bug?</p>
+      </div></div>
+      <div class="card bg-base-100 border-2 border-primary/30"><div class="card-body">
+        <h3 class="card-title text-base">C. Politica ticket watcher</h3>
+        <p class="text-sm">Vuoi pausare la creazione automatica di ticket finché non si svuota il backlog attuale (52 aperti)? O preferisci prima cambiare la policy (aggregazione/backoff) e lasciarla attiva?</p>
+      </div></div>
+      <div class="card bg-base-100 border-2 border-primary/30"><div class="card-body">
+        <h3 class="card-title text-base">D. Priorità: affidabilità, velocità o semplicità?</h3>
+        <p class="text-sm">Sono in tensione tra loro (Rev 65 mostra che "più meccanismi di safety" ha generato nuovi bug). Quale vince quando devono essere bilanciati?</p>
+      </div></div>
+    </div>
+  </section>
+
+</main>
+</body>
+</html>

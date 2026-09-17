@@ -197,13 +197,14 @@ conservare per sempre le tab morte (dettaglio: `docs/diagram/12-pulizia-tab-agen
 
 La stessa passata riconcilia anche `<YANO_DATA_DIR>/scheduler/jobs.json`:
 un dispatch non è considerato riuscito perché è stato semplicemente accodato.
-Il bridge verso `planner-01` di `yano-local-pc` attende un ack bounded di
-pubblicazione (non la conclusione LLM del task); un
+Per i job legacy testo+cron, il bridge verso `planner-01` di `yano-local-pc`
+attende un ack bounded di pubblicazione (non la conclusione LLM del task); un
 `failed` o un `dispatched` senza esito oltre la finestra configurata viene
 marcato con la causa, ritentato una sola volta per finestra e registrato in
 `watcher-global.jsonl` e nelle `instances` dello schedule. Il planner di
-`yano-local-pc` può ricevere il task anche mentre il tab dell'agente Local PC è
-in recovery: è il planner il destinatario durevole degli schedule generici.
+`yano-local-pc` può ricevere il task anche mentre la sua tab è in recovery:
+è il planner il destinatario durevole dei job legacy generici (i job
+script-first eseguono invece lo script registrato e non passano di qui).
 
 Quando un ticket pronto resta `pending` senza assegnatario dopo una race di
 recovery, il watcher invia al planner vivo un wake-up deduplicato per finestra
@@ -523,6 +524,16 @@ richiama, per percorso assoluto, il vero motore `scripts/yano-digest.mjs` del
 pacchetto — un `yano update` aggiorna quindi la logica del digest senza dover
 rieseguire alcun bootstrap (dettaglio: `docs/diagram/10-digest-giornaliero.mmd`).
 ### Identità del planner durante avvio e ripristino
+
+Il planner permanente viene identificato per RUOLO, mai per nome esatto di
+tab/agente. Da Revisione 66 Herdr registra ogni agente con nome univoco
+(`planner-<progetto>-<hash>`), mentre l'identità Pi (`--instance`) resta
+`planner-01`: il watcher riconosce il planner dal ruolo agente, dal prefisso
+`planner` di nome/istanza o dalla label della tab, e `yano start` rifiuta un
+secondo `planner-01` quando un planner con nome univoco è già live. Quando il
+planner è sano, le tab planner duplicate senza processo Pi live vengono
+bonificate; due planner live simultanei restano segnalati come identity
+conflict, mai chiusi a forza.
 
 Il planner permanente viene identificato con la root canonica del progetto,
 la tab Herdr `planner-01` e il processo Pi vivo nel pane. Durante l'avvio di

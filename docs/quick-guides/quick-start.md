@@ -109,10 +109,17 @@ resta `agents/roles.yaml` nella root.
 
 ## 2. Avvia il broker MQTT
 
-Per la review visuale di una pagina già in sviluppo, `yano frontend-review browser
---url URL` genera un bookmarklet senza installare dipendenze nell’app. Avvia
-`yano feedback-api start --no-open` per ricevere le annotazioni. Gli adapter
-Agentation `setup`/`start` restano opzionali. Vedi la
+Per ogni task con impatto frontend, dopo la verifica E2E, il planner chiede il
+consenso dell'utente: “Vuoi fare una review visuale dell'app in sviluppo?”. Per una pagina già in sviluppo, `yano frontend-review browser
+--url URL` genera un bookmarklet senza installare dipendenze nell’app (avvia
+`yano feedback-api start --no-open` per ricevere le annotazioni). In alternativa, `yano frontend-review setup` installa e
+verifica `agentation` e l'import/mount solo in development (per React e
+Angular; per Streamlit, app Python o siti statici il setup non installa nulla
+e non tocca il sorgente — review browser-only via wrapper Yano), poi
+`yano frontend-review start` avvia lo script rilevato. Gli adapter
+Agentation `setup`/`start` restano opzionali. Il planner deve
+fornire l'URL reale restituito dal comando, non inventarlo; le annotazioni
+vengono ricevute dal planner tramite il server MCP Agentation. Vedi la
 [guida Yano essenziale](yano-essential.md) per uso e limiti del browser.
 
 Con il broker Docker incluso:

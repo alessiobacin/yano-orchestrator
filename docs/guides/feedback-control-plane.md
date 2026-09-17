@@ -20,6 +20,12 @@ attore, timestamp, motivo e stato precedente/successivo. Il planner rimane
 responsabile della classificazione e della risoluzione; la dashboard non è un
 agente LLM.
 
+Con una conferma in sospeso (richiesta conferma aperta o decision hold
+attivo) le nuove voci restano parcheggiate in coda visibile e non
+interrompono il filo corrente: il claim avviene solo a un via esplicito
+riferito (`yano feedback update --status processing`), mai al surfacing.
+Dettaglio comportamentale in [12-yano-feedback](../quick-guides/12-yano-feedback.md).
+
 La retention viene applicata una volta al giorno dal watcher. Le soglie e il
 backup opzionale sono configurati globalmente con `yano config`; il dettaglio
 del piano è consultabile con `yano data retain --dry-run`.

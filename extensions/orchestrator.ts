@@ -61,7 +61,7 @@ import { llmProxyAutoModel, switchImageTurnToAuto } from "../scripts/yano-vision
 import { recoverUnavailableRestoredModel, switchPinnedModelToAuto } from "../scripts/yano-model-fallback.mjs";
 import { buildPlannerActionGuardPrompt, findUnexecutedActionClaim } from "../scripts/planner-action-guard.mjs";
 import { recommend as recommendModel } from "../scripts/yano-model-advisor.mjs";
-import { openDatabase as openFeedbackDatabase, createFeedback as createFeedbackRecord, claimFeedback, claimNextQueuedFeedback, listFeedback, buildQueuedFeedbackWakeMessage, terminalStatusForFeedbackId } from "../scripts/yano-feedback.mjs";
+import { openDatabase as openFeedbackDatabase, createFeedback as createFeedbackRecord, claimFeedback, claimNextQueuedFeedback, peekNextQueuedFeedback, shouldParkFeedbackWake, looksLikeConfirmationRequest, looksLikeQueueIgnoreOrder, listFeedback, buildQueuedFeedbackWakeMessage, terminalStatusForFeedbackId } from "../scripts/yano-feedback.mjs";
 import { detectStalledTickets } from "../scripts/watcher/detect-stalled-tickets.mjs";
 import { writeWatchdogHeartbeat } from "../scripts/watcher/heartbeat.mjs";
 import {
@@ -1597,11 +1597,39 @@ export default function (pi: ExtensionAPI) {
 	// silently stuck forever. preferredType lets a live feedback_received
 	// notification check the queue matching what just arrived first, while
 	// still respecting that queue's own FIFO order (see the smoke test).
+	//
+	// Anti-hijack 2026-09-17 (ticket feedback-hijack-fix, incidente newMioDOC:
+	// 5 bug FIFO iniettati con triggerTurn in mezzo al filo HACCP; un
+	// "confermo, procedi" secco fu agganciato all'ultima proposta invece che
+	// all'HACCP): con conferma in sospeso la voce viene PARCHEGGIATA in coda
+	// visibile, MAI iniettata con triggerTurn. Il claim resta differito al
+	// via esplicito riferito dell'utente — qui si usa peekNextQueuedFeedback
+	// (nessun cambio di stato al surfacing, niente avanzamento speculativo).
+	// Il prompt del planner ("### Conferme secche e code") definisce cosa
+	// sblocca: solo risposte con riferimento esplicito.
+	function plannerHasOpenDecisionHold(): boolean {
+		try {
+			const storage = ensureYanoStorage();
+			return storage.listRuns(identity!.project)
+				.filter((r) => r.status === "active")
+				.some((r) => storage.listDecisionHolds(r.id, "open").length > 0);
+		} catch { return false; }
+	}
 	function wakeNextQueuedFeedback(reason: string, preferredType?: "bug" | "suggestion"): void {
 		if (!identity || identity.role !== "planner" || computeSelfStatus() !== "idle") return;
 		let db: any = null;
 		try {
 			db = openFeedbackDatabase();
+			const parked = shouldParkFeedbackWake({
+				confirmationPending: plannerHasOpenDecisionHold() || looksLikeConfirmationRequest((globalThis as any).__yanoLastPlannerText),
+				queueIgnored: looksLikeQueueIgnoreOrder((globalThis as any).__yanoLastUserText),
+			});
+			const peeked = peekNextQueuedFeedback(db, identity.project, { preferredType });
+			if (!peeked) return;
+			if (parked) {
+				logEvent("feedback_queue_parked", { feedback_id: peeked.item.id, reason, feedback_type: peeked.type });
+				return;
+			}
 			const result = claimNextQueuedFeedback(db, identity.project, { preferredType });
 			if (!result) return;
 			const imageBlocks = (result.claimed.screenshots || []).flatMap((shot: any) => {
@@ -2407,6 +2435,15 @@ export default function (pi: ExtensionAPI) {
 	pi.on("input", async (event: any) => {
 		if (!identity) return;
 		currentInputScreenshots = inputScreenshotReferences(event);
+		// Anti-hijack 2026-09-17: traccia l'ultimo testo utente per il gate di
+		// parcheggio (ordine "ignora la coda") in wakeNextQueuedFeedback.
+		try {
+			const content = (event as any)?.message?.content ?? (event as any)?.content ?? "";
+			const text = typeof content === "string" ? content : Array.isArray(content)
+				? content.map((part: any) => part?.text || part?.content || "").join(" ")
+				: "";
+			if (text.trim()) (globalThis as any).__yanoLastUserText = text;
+		} catch { /* best effort */ }
 		await switchImageTurnToAuto({ event, ctx: currentCtx, setModel: (model) => pi.setModel(model), log: logEvent });
 	});
 
@@ -2987,6 +3024,9 @@ export default function (pi: ExtensionAPI) {
 				}
 			}
 		}
+		// Anti-hijack 2026-09-17: traccia l'ultimo testo planner per il gate di
+		// parcheggio (richiesta conferma in sospeso) in wakeNextQueuedFeedback.
+		if (lastAssistantText.trim()) (globalThis as any).__yanoLastPlannerText = lastAssistantText;
 		const lastModelMessage = [...ctx.sessionManager.getBranch()].reverse().find((entry: any) => entry?.message?.role === "assistant") as any;
 		logEvent("model_observed", {
 			assignment_id: inbound?.assignment_id ?? null,

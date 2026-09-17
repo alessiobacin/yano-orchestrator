@@ -119,8 +119,8 @@ export function claimFeedback(db, feedbackId, { actor = "planner", reason = "pre
 }
 export function buildQueuedFeedbackWakeMessage(claimed, type) {
 	const screenshotNote = claimed.screenshots?.length ? `\nScreenshot allegati: ${JSON.stringify(claimed.screenshots.map((shot) => ({ kind: shot.kind, url: shot.url, path: shot.path, name: shot.name, mime_type: shot.mime_type, attached_image: Boolean(shot.preview_url || shot.data) })))}` : "";
-	if (type === "bug") return `[bug ${claimed.id}] Bug persistito in coda FIFO. Risolvilo ora prima di restare inattivo.\n\n${claimed.message}${screenshotNote}\n\nClassifica prima l'impatto: backend puro oppure frontend/misto.`;
-	return `[suggestion ${claimed.id}] Suggestion persistita in coda. Valutala ora prima di restare inattivo: richiede sempre conferma esplicita dell'utente prima di qualsiasi modifica.\n\n${claimed.message}${screenshotNote}\n\nSe l'utente conferma, pianifica l'implementazione come nuova feature; se rifiuta, chiudi il record con una nota (yano feedback update --status cancelled).`;
+	if (type === "bug") return `[bug ${claimed.id}] Voce in coda FIFO, in attesa di via esplicito riferito — resta in coda, non è un'interruzione.\n\n${claimed.message}${screenshotNote}\n\nClassifica prima l'impatto: backend puro oppure frontend/misto. Prendila in carico solo al via esplicito riferito (yano feedback update --id ${claimed.id} --status processing --reason "..."); una conferma secca senza riferimento non sblocca nulla.`;
+	return `[suggestion ${claimed.id}] Voce in coda, in attesa di via esplicito riferito — resta in coda, non è un'interruzione: richiede sempre conferma esplicita dell'utente prima di qualsiasi modifica.\n\n${claimed.message}${screenshotNote}\n\nSe l'utente conferma, pianifica l'implementazione come nuova feature; se rifiuta, chiudi il record con una nota (yano feedback update --status cancelled).`;
 }
 // Dequeues the oldest pending bug/suggestion for a project and claims it, so a
 // planner that just went idle (or just received a live feedback_received
@@ -139,6 +139,46 @@ export function claimNextQueuedFeedback(db, projectId, { preferredType = null } 
 		return { type, claimed, message: buildQueuedFeedbackWakeMessage(claimed, type) };
 	}
 	return null;
+}
+// Peek senza claim (anti-hijack 2026-09-17, ticket feedback-hijack-fix):
+// restituisce la voce in testa alla coda SENZA cambiare stato. Il claim resta
+// differito al via esplicito riferito dell'utente (il planner lo esegue con
+// `yano feedback update --status processing`); il surfacing non avanza mai la
+// coda da solo. Stesso ordinamento di claimNextQueuedFeedback.
+export function peekNextQueuedFeedback(db, projectId, { preferredType = null } = {}) {
+	const order = preferredType === "bug" || preferredType === "suggestion" ? [preferredType, preferredType === "bug" ? "suggestion" : "bug"] : ["bug", "suggestion"];
+	for (const type of order) {
+		const pending = listFeedback(db, { project_id: projectId, type, statuses: ["received", "pending_planner", "queued"] });
+		const next = pending.sort((a, b) => priorityRank(a) - priorityRank(b) || Date.parse(a.created_at) - Date.parse(b.created_at))[0];
+		if (!next) continue;
+		return { type, item: next, message: buildQueuedFeedbackWakeMessage(next, type) };
+	}
+	return null;
+}
+// Gate di parcheggio silenzioso: con conferma in sospeso o ordine di ignorare
+// la coda, il wake non deve mai iniettare un turno (MAI triggerTurn) — la voce
+// resta visibile in coda/dashboard finché non arriva un via esplicito.
+export function shouldParkFeedbackWake({ confirmationPending = false, queueIgnored = false } = {}) {
+	return Boolean(confirmationPending || queueIgnored);
+}
+// Euristica: l'ultimo messaggio del planner chiede una conferma all'utente.
+export function looksLikeConfirmationRequest(text) {
+	const t = String(text || "");
+	if (!t.trim()) return false;
+	const hasQuestion = t.includes("?");
+	const confirmWord = /(conferm|approv|autorizz|via libera|ok per procedere|dimmi (pure|se)|fammi sapere se)/i.test(t);
+	const explicitWait = /(attendo|aspetto|in attesa del(?:la|lo)?|resto in attesa|ferm[oaie] finch[ée])[^.?!]{0,80}(conferm|ok|via|risposta|sblocco)/i.test(t);
+	return (hasQuestion && confirmWord) || explicitWait;
+}
+// Euristica: l'utente ordina di ignorare/parcheggiare la coda.
+export function looksLikeQueueIgnoreOrder(text) {
+	return /(ignora|lascia stare|non considerare|mett[ie] da parte|parcheggia)[^.?!]{0,80}(coda|bug|feedback|suggestion|voci)/i.test(String(text || ""));
+}
+// Via esplicito riferito: ID di record oppure verbo di via + ambito di coda.
+// Un "confermo"/"ok"/"procedi" secco NON matcha mai qui (resta parcheggiato).
+export function looksLikeExplicitQueueGo(text) {
+	const t = String(text || "");
+	return /\b(BUG|SUG)-[0-9a-f-]{4,}\b/i.test(t) || /\b(confermo|procedi|vai pure|ok,?\s*procedi|approvato)\b[^.?!]{0,60}\b(tutti|tutto|bug|suggestion|coda|entrambi|1 e 3)\b/i.test(t);
 }
 const PRIORITY_RANK = Object.freeze({ critical: 0, high: 1, medium: 2, low: 3 });
 export function priorityRank(item) {

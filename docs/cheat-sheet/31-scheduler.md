@@ -6,7 +6,7 @@ yano schedule add --name <nome> --project-root "$PWD" --script <path> --mode sel
 yano schedule add --name backuppone-shot --project-root "$PWD" --script <path> --mode self --cron '0 0 * * *' --once
 
 # Test PRIMA di renderlo ricorrente — esegue lo script subito
-yano schedule run <job-id>
+yano schedule run --id <job-id>   # test PRIMA di renderlo ricorrente — esegue lo script subito
 
 # Gestione
 yano schedule list                   # inventario compatto con ID, nome, cron, stato, modalità

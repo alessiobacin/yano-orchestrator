@@ -455,6 +455,30 @@ uno di questi eventi, accoda una sola scansione finale immediata e avvisa il
 planner se trova un problema; poi riprende la cadenza configurata. Il trace
 contiene `yano_watcher_final_scan_requested` e lo scan finale con `once: true`.
 
+## Attesa utente e progetto spostato
+
+Un planner in attesa di risposta non viene mai recuperato né svegliato dal
+watcher: domanda senza risposta (`unanswered_user_question`) oppure
+`decision_hold` aperti su tutti i run attivi producono
+`recovery: "waiting_for_user"` (`planner_status: "waiting"`), `yano watch`
+riporta `status: "waiting"` e `yano status --all --explain --json` espone il
+dettaglio in `user_wait` (inclusi `questions` e `held_run_ids`). I ticket di
+run in attesa restano esclusi da orphan/ready e dal recovery.
+
+Una root registrata che non esiste più su disco non viene mai riscritta in
+automatico (sarebbe un fork di identità trace/MQTT): il watcher emette
+`watcher_project_root_gone` e restituisce un verdetto — `relocated` (stesso
+progetto trovato altrove, con proposta di aggiornamento e hint
+`yano watcher init --project-root <nuovo-percorso>`) oppure `missing`
+(istruzione di ri-aggiunta esplicita). Recovery: `project_relocated` o
+`project_root_missing`, mai rumore `planner_missing`.
+
+La stessa passata chiude le tab orfane senza agente live né processo `pi`
+vivo nei workspace di manutenzione `yano-auto-improver`/`yano-architect`
+(mai label `human`/planner; in assenza di pane osservabili non chiude nulla).
+Gli worker auto-improver restano on-demand: la supervisione non ripristina
+più worker idle e azzera il registro solo a chiusura Herdr effettiva.
+
 ## Rumore: fixture di test e ticket senza recidiva
 
 Un progetto il cui nome segue la convenzione delle fixture degli smoke test di

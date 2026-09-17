@@ -9,7 +9,7 @@ surface implemented by the package. Always prefer the installed binary's
 ```text
 yano init [--name <name>] [--target <dir>] [--force] [--llmp] [--herdr] [--no-git]
 yano start --instance <id> [--role <role>] [--project <scope>] [--project-scope <scope>] [--trace-mode <mode>]
-yano frontend-review setup|start|url [--project-root <dir>]
+yano frontend-review browser|setup|start|url [--project-root <dir>] [--print-only|--dry-run]
 yano doctor [--json] [--network]
 yano update [--check|--reload] [--dry-run] [--yes] [--timeout <seconds>] [--force]
 yano uninstall [--yes]

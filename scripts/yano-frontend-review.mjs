@@ -12,11 +12,13 @@ import path from "node:path";
 import { projectKey, resolveTraceProject } from "./yano-trace-storage.mjs";
 
 const usage = () => console.log([
-	"Uso: yano frontend-review <browser|setup|start|url>",
+	"Uso: yano frontend-review <browser|setup|start|url> [--project-root <dir>] [--print-only|--dry-run]",
 	"  browser --url URL [--api-url URL]  annotazioni DOM senza dipendenze del frontend",
 	"  setup  installa agentation come devDependency e stampa il contratto di integrazione",
-	"  start  esegue setup, avvia lo script dev inferito e stampa l'URL rilevato",
+	"         (per framework non-React/non-Angular non installa nulla: review browser-only via wrapper Yano)",
+	"  start  esegue setup, avvia il comando dev inferito e stampa l'URL rilevato",
 	"  url    inferisce soltanto comando e URL probabile, senza avviare processi",
+	"  --print-only, --dry-run  con setup: stampa il contratto JSON senza installare pacchetti né avviare processi",
 ].join("\n"));
 
 function readPackage(root) {
@@ -45,12 +47,82 @@ export function resolveFrontendRoots(root) {
 		const frontendRoot = path.join(requestedRoot, directory);
 		if (hasDevScript(frontendRoot)) return { projectRoot: requestedRoot, frontendRoot };
 	}
-	throw new Error("nessuno script frontend dev trovato (cercati scripts.dev, scripts.start o scripts.serve nella directory corrente e nei sotto-progetti webapp/client/frontend)");
+	// Frontend non-Node: non richiedono package.json né script npm. La radice
+	// del progetto stessa è sia projectRoot che frontendRoot.
+	if (detectNonNodeFrontend(requestedRoot)) return { projectRoot: requestedRoot, frontendRoot: requestedRoot };
+	for (const directory of ["webapp", "client", "frontend"]) {
+		const nested = path.join(requestedRoot, directory);
+		if (fs.existsSync(nested) && detectNonNodeFrontend(nested)) return { projectRoot: requestedRoot, frontendRoot: nested };
+	}
+	throw new Error("nessuno script frontend dev trovato (cercati scripts.dev, scripts.start o scripts.serve nella directory corrente e nei sotto-progetti webapp/client/frontend; nessun frontend Streamlit/Python/statico riconosciuto)");
+}
+
+// Marker deterministici per frontend che non usano Node/npm. L'ordine conta:
+// Streamlit è anche Python generico, quindi va riconosciuto per primo.
+function detectNonNodeFrontend(root) {
+	try {
+		const entries = new Set(fs.readdirSync(root));
+		const readText = (file) => { try { return fs.readFileSync(path.join(root, file), "utf8"); } catch { return ""; } };
+		const streamlitMarkers = ["streamlit_app.py", "app.py", "main.py"];
+		// Dipendenza streamlit dichiarata (anche senza entry-point canonico).
+		if (/^\s*streamlit(\[.*\]|[=<>~!;\s]|$)/im.test(readText("requirements.txt"))) return { kind: "streamlit" };
+		if (/["']streamlit(\[.*?\]|[=<>~!]+.*?)?["']/i.test(readText("pyproject.toml"))) return { kind: "streamlit" };
+		for (const entry of streamlitMarkers) {
+			if (!entries.has(entry)) continue;
+			const source = readText(entry);
+			if (/^\s*(import\s+streamlit|from\s+streamlit\s+import)/im.test(source)) return { kind: "streamlit" };
+		}
+		// App Python generica: entry-point con framework web noto.
+		const pythonMarkers = ["app.py", "main.py", "wsgi.py", "asgi.py", "manage.py"];
+		for (const entry of pythonMarkers) {
+			if (!entries.has(entry)) continue;
+			const source = readText(entry);
+			if (/^\s*(import\s+(flask|django|fastapi|bottle|tornado|dash)|from\s+(flask|django|fastapi|dash)\s+import)/im.test(source)) return { kind: "python" };
+			if (/streamlit/i.test(source)) return { kind: "streamlit" };
+		}
+		// Sito statico: index.html alla root.
+		if (entries.has("index.html")) return { kind: "static" };
+	} catch { /* directory illeggibile: nessun frontend non-Node */ }
+	return null;
+}
+
+function nonNodePort(kind, frontendRoot) {
+	if (process.env.YANO_FRONTEND_PORT) return Number(process.env.YANO_FRONTEND_PORT);
+	if (kind === "streamlit") {
+		if (process.env.STREAMLIT_SERVER_PORT) return Number(process.env.STREAMLIT_SERVER_PORT);
+		try {
+			const config = fs.readFileSync(path.join(frontendRoot, ".streamlit", "config.toml"), "utf8");
+			const match = config.match(/^\s*port\s*=\s*(\d{2,5})/m);
+			if (match) return Number(match[1]);
+		} catch { /* nessun config.toml: default 8501 */ }
+		return 8501;
+	}
+	if (kind === "static") return 8080;
+	return 8000;
+}
+
+function inferNonNodeFrontend(roots, kind) {
+	const frontendRoot = roots.frontendRoot;
+	const port = nonNodePort(kind, frontendRoot);
+	if (kind === "streamlit") {
+		const entry = ["streamlit_app.py", "app.py", "main.py"].find((file) => fs.existsSync(path.join(frontendRoot, file))) || "streamlit_app.py";
+		const command = `streamlit run ${entry} --server.port ${port}`;
+		return { script: "streamlit", raw: command, command, manager: "streamlit", port, url: `http://localhost:${port}`, framework: "streamlit", agentation_supported: false, review_mode: "browser-only", project_root: roots.projectRoot, frontend_root: frontendRoot };
+	}
+	if (kind === "static") {
+		const command = `npx serve -l ${port}`;
+		return { script: "serve", raw: command, command, manager: "npx", port, url: `http://localhost:${port}`, framework: "static", agentation_supported: false, review_mode: "browser-only", project_root: roots.projectRoot, frontend_root: frontendRoot };
+	}
+	const entry = ["app.py", "main.py", "wsgi.py", "asgi.py", "manage.py"].find((file) => fs.existsSync(path.join(frontendRoot, file))) || "app.py";
+	const command = entry === "manage.py" ? `python manage.py runserver ${port}` : `python ${entry}`;
+	return { script: "run", raw: command, command, manager: "python", port, url: `http://localhost:${port}`, framework: "python", agentation_supported: false, review_mode: "browser-only", project_root: roots.projectRoot, frontend_root: frontendRoot };
 }
 
 export function inferFrontendDev(root) {
 	const roots = resolveFrontendRoots(root);
 	const frontendRoot = roots.frontendRoot;
+	const nonNode = detectNonNodeFrontend(frontendRoot);
+	if (nonNode && !fs.existsSync(path.join(frontendRoot, "package.json"))) return inferNonNodeFrontend(roots, nonNode.kind);
 	const pkg = readPackage(frontendRoot);
 	const scripts = pkg.scripts || {};
 	const script = ["dev", "start", "serve"].find((name) => typeof scripts[name] === "string");
@@ -179,12 +251,97 @@ async function setupAngularAgentation(info) {
 	return { ...info, agentation_supported: true, review_mode: "agentation", package: "agentation + React adapter", installed: true, package_changed: missing.length > 0, component_imported: true, integration, next: "Agentation è attiva solo in development; apri l'URL restituito e verifica il toolbar in basso a destra" };
 }
 
-export async function setup(root) {
+export const AGENTATION_WEBHOOK_BASE = "http://127.0.0.1:11000/api/agentation";
+
+export function browserOnlyWebhook(projectRoot) {
+	return `${AGENTATION_WEBHOOK_BASE}/${projectKey(projectRoot, resolveTraceProject(projectRoot))}`;
+}
+
+// Slug di default del progetto nel dashboard (stessa derivazione usata da
+// `yano frontend-dash start` quando --project-id non è passato).
+export function wrapperProjectSlug(projectRoot) {
+	return path.basename(path.resolve(projectRoot)).toLowerCase().replace(/[^a-z0-9]+/g, "-");
+}
+
+// Pagina wrapper servita da Yano (`yano frontend-dash start`, route
+// `/<projectId>/__yano-review`): incorpora l'app target in un iframe e
+// inoltra le annotazioni al webhook agentation del progetto. Pura funzione
+// senza dipendenze esterne; il sorgente dell'app target non viene toccato.
+export function renderBrowserOnlyWrapper({ projectId, webhookUrl, framework, targetUrl }) {
+	const esc = (value) => String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+	const targetPrefix = `/${encodeURIComponent(projectId)}/`;
+	return `<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="yano-project-id" content="${esc(projectId)}">
+<title>Yano review browser-only — ${esc(projectId)}</title>
+<style>html,body{margin:0;height:100%}#yano-target{width:100%;height:100%;border:0}#yano-bar{position:fixed;left:12px;bottom:12px;z-index:999999;font:13px system-ui;background:#111;color:#fff;padding:8px 12px;border-radius:8px;opacity:.92}#yano-bar button{margin-left:8px;cursor:pointer}#yano-hint{position:fixed;right:12px;bottom:12px;z-index:999999;font:12px system-ui;background:#fff;border:1px solid #ccc;padding:6px 10px;border-radius:8px;display:none}</style>
+</head>
+<body>
+<iframe id="yano-target" title="app target" src="${esc(targetPrefix)}"></iframe>
+<div id="yano-bar">Yano review (${esc(framework)}) — target ${esc(targetUrl)}<button id="yano-annotate" type="button">Annota: OFF</button></div>
+<div id="yano-hint">Modalità annotazione: clicca un punto dell'app, poi scrivi il commento</div>
+<script>
+(() => {
+const webhook = ${JSON.stringify(webhookUrl)};
+const frame = document.getElementById("yano-target");
+const toggle = document.getElementById("yano-annotate");
+const hint = document.getElementById("yano-hint");
+let armed = false;
+toggle.addEventListener("click", () => { armed = !armed; toggle.textContent = "Annota: " + (armed ? "ON" : "OFF"); hint.style.display = armed ? "block" : "none"; });
+frame.addEventListener("load", () => {
+try {
+frame.contentDocument.addEventListener("click", (event) => {
+if (!armed) return;
+event.preventDefault();
+const text = window.prompt("Annotazione Yano (inviata al webhook del progetto):");
+if (text === null) return;
+fetch(webhook, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ annotation: { x: event.clientX, y: event.clientY, text }, page_url: frame.contentDocument.location.href, created_by: "yano-wrapper", framework: ${JSON.stringify(framework)} }) }).then((res) => { window.alert(res.ok ? "Annotazione inviata" : "Invio fallito (HTTP " + res.status + ")"); }).catch(() => window.alert("Webhook non raggiungibile"));
+}, true);
+} catch (err) { window.alert("Annotazione non disponibile su questa pagina (stessa origine richiesta)"); }
+});
+})();
+</script>
+</body>
+</html>`;
+}
+
+// Contratto browser-only: la pagina wrapper è servita da Yano e incorpora
+// l'app target in un iframe, inoltrando le annotazioni al webhook agentation
+// del progetto. NON installa nulla nel progetto target e NON ne tocca il sorgente.
+function browserOnlyContract(info) {
+	const webhookUrl = browserOnlyWebhook(info.project_root);
+	const slug = wrapperProjectSlug(info.project_root);
+	return {
+		...info,
+		package: null,
+		installed: false,
+		package_changed: false,
+		source_touched: false,
+		wrapper: "yano-agentation-wrapper",
+		webhook_url: webhookUrl,
+		target_url: info.url,
+		wrapper_path: `/${slug}/__yano-review`,
+		wrapper_url: null,
+		wrapper_command: `yano frontend-dash start --project-path ${info.project_root}`,
+		next: `avvia l'app target (${info.command}), poi avvia il wrapper con \`yano frontend-dash start --project-path ${info.project_root}\` e apri l'URL ${`/${slug}/__yano-review`} che stampa: le annotazioni arrivano al webhook ${webhookUrl}`,
+	};
+}
+
+export async function setup(root, { printOnly = false } = {}) {
 	const info = inferFrontendDev(root);
+	if (printOnly) {
+		if (info.framework === "angular") return { ...info, agentation_supported: true, review_mode: "agentation", package: "agentation + React adapter", installed: false, package_changed: false, dry_run: true };
+		if (info.framework === "react") return { ...info, package: "agentation", installed: false, package_changed: false, dry_run: true };
+		return { ...browserOnlyContract(info), dry_run: true };
+	}
 	const frontendRoot = info.frontend_root;
 	if (info.framework === "angular") {
 		return setupAngularAgentation(info);
 	}
+	if (info.review_mode === "browser-only") return browserOnlyContract(info);
 	if (!info.agentation_supported) throw new Error("framework frontend non riconosciuto; nessuna modifica applicata");
 	const alreadyInstalled = Boolean(({ ...(readPackage(frontendRoot).dependencies || {}), ...(readPackage(frontendRoot).devDependencies || {}) }).agentation);
 	const install = info.manager === "npm" ? ["install", "-D", "agentation"]
@@ -210,6 +367,9 @@ function waitForPort(host, port, timeoutMs = 30_000) {
 
 async function start(root) {
 	const info = await setup(root);
+	if (info.review_mode === "browser-only" && info.framework !== "angular") {
+		throw new Error(`review browser-only per framework "${info.framework}": avvia manualmente "${info.command}" in ${info.frontend_root}, poi usa il wrapper Yano (webhook ${info.webhook_url}); start automatico non supportato senza package manager`);
+	}
 	const child = spawn(info.manager, ["run", info.script], { cwd: info.frontend_root, detached: true, stdio: "ignore", shell: process.platform === "win32" });
 	child.unref();
 	const reachable = await waitForPort("127.0.0.1", info.port);
@@ -223,6 +383,7 @@ export async function runFrontendReview({ cwd = process.cwd(), argv = [] } = {})
 	const command = argv[0];
 	if (!command || command === "--help" || command === "-h") { usage(); return; }
 	const rootIndex = argv.indexOf("--project-root"); const root = rootIndex >= 0 ? path.resolve(argv[rootIndex + 1]) : cwd;
+	const printOnly = argv.includes("--print-only") || argv.includes("--dry-run");
 	let result;
 	if (command === "browser") {
 		const get = (flag) => argv.includes(flag) ? argv[argv.indexOf(flag) + 1] : null;
@@ -234,8 +395,11 @@ export async function runFrontendReview({ cwd = process.cwd(), argv = [] } = {})
 		result = { review_mode: "browser", url: url.href, project_id: id, bookmarklet: "javascript:" + encodeURIComponent(script), next: "Avvia yano feedback-api start, salva il bookmarklet nei preferiti e attivalo nella pagina da rivedere. CSP o accesso locale del browser possono richiedere un’integrazione esplicita dello script. iframe cross-origin e canvas richiedono screenshot." };
 	}
 	else if (command === "url") result = inferFrontendDev(root);
-	else if (command === "setup") result = await setup(root);
-	else if (command === "start") result = await start(root);
+	else if (command === "setup") result = await setup(root, { printOnly });
+	else if (command === "start") {
+		if (printOnly) throw new Error("--print-only/--dry-run è supportato solo con setup");
+		result = await start(root);
+	}
 	else throw new Error(`sottocomando frontend-review sconosciuto: ${command}`);
 	console.log(JSON.stringify(result, null, 2));
 }

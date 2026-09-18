@@ -84,11 +84,15 @@ yano watch \
 ```
 
 `--once` è utile per una verifica manuale o per un job esterno. Il lookback
-predefinito è 24 ore:
+predefinito è 60 minuti (3600000 ms; `--lookback-ms` per cambiarlo):
 
 ```bash
-yano watch --project-root /path/progetto --lookback-ms 3600000 --once
+yano watch --project-root /path/progetto --once
 ```
+
+Le notifiche già instradate sono deduplicate via checkpoint per-progetto
+`<traces>/<project-key>/notify-checkpoint.json` (best-effort, fail-open: se assente o
+corrotto la passata rilegge lo storico come prima; mai bloccante).
 
 ### Controllo e compaction del contesto
 

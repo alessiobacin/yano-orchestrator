@@ -55,6 +55,7 @@ import { missingConfigError, resolveYanoConfig } from "./yano-config.mjs";
 import { projectDbPath } from "./yano-project.mjs";
 import { herdrSnapshot } from "./yano-herdr-client.mjs";
 import { detectStalledTickets } from "./watcher/detect-stalled-tickets.mjs";
+import { loadNotifyCheckpoint, saveNotifyCheckpoint } from "./watcher/notify-checkpoint.mjs";
 import { readWatchdogHeartbeatAgeMs, shouldPublishStallEvent } from "./watcher/heartbeat.mjs";
 
 const yanoRequire = createRequire(import.meta.url);
@@ -229,7 +230,13 @@ function installAgentFallbackMonitor({ client, cwd, project, packageRoot, runtim
 }
 
 function parseArgs(argv) {
-	const o = { project: null, projectRoot: null, lookbackMs: 86_400_000, stallMs: 900000, intervalMs: 300000, once: false, away: false, contextCompactRatio: Number(process.env.YANO_WATCH_CONTEXT_COMPACT_RATIO) || 0.5, validationRun: null, playbookProposal: null, playbookId: null, playbookChecksum: null, validationRound: null };
+	// Default 60 minuti (performance-optimization-loop round 1): allineato al
+	// default del registry (DEFAULT_LOOKBACK_MS in yano-watcher-registry.mjs,
+	// già 3600000 per i worker persistenti). Il default CLI a 24h era
+	// l'outlier: ogni passata rileggeva 24h di trace per 8 readTraceRecords.
+	// Con stall-threshold 15min e polling 5min, 60min coprono 4 soglie stall.
+	// Override esplicito invariato: --lookback-ms <ms>.
+	const o = { project: null, projectRoot: null, lookbackMs: 3_600_000, stallMs: 900000, intervalMs: 300000, once: false, away: false, contextCompactRatio: Number(process.env.YANO_WATCH_CONTEXT_COMPACT_RATIO) || 0.5, validationRun: null, playbookProposal: null, playbookId: null, playbookChecksum: null, validationRound: null };
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i];
 		if (a === "--project") o.project = argv[++i];
@@ -706,7 +713,7 @@ export function watchUsage() {
 		"",
 		"  --project <slug>                 nome del progetto osservato",
 		"  --project-root <dir>             root del progetto osservato",
-		"  --lookback-ms <ms>               finestra temporale della scansione",
+		"  --lookback-ms <ms>               finestra temporale della scansione (default 3600000 = 60min)",
 		"  --stall-ms <ms>                  soglia per un ticket stalled",
 		"  --interval-ms <ms>               intervallo del polling persistente",
 		"  --context-compact-ratio <0..1>   soglia watcher per compaction automatica (default 0.50; env YANO_WATCH_CONTEXT_COMPACT_RATIO)",
@@ -810,6 +817,21 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 	const startedAt = new Date().toISOString();
 	const watchCwd = opts.projectRoot ? path.resolve(opts.projectRoot) : cwd;
 	const project = canonicalProjectScope(watchCwd, opts.project || resolveProject(watchCwd));
+	// Round 1 (performance-optimization-loop): checkpoint dedup persistente —
+	// elimina a regime le riletture storiche complete (vedi
+	// scripts/watcher/notify-checkpoint.mjs per l'argomento di equivalenza).
+	// Best-effort: checkpoint assente/corroso => comportamento baseline.
+	const notifyCheckpoint = loadNotifyCheckpoint({ cwd: watchCwd, project });
+	const notifySince = new Date(Date.now() - Math.max(0, opts.lookbackMs));
+	const checkpointCompactions = notifyCheckpoint?.seeded ? notifyCheckpoint.compactionByInstance : null;
+	const checkpointContextRoutes = notifyCheckpoint?.seeded ? notifyCheckpoint.contextRoutes : null;
+	const checkpointStallKeys = notifyCheckpoint?.seeded ? notifyCheckpoint.stallKeys : null;
+	// Holder per il persist unico di fine passata: i set/mappe reali vivono
+	// negli scope dei blocchi try sotto; qui solo i riferimenti. seeded=true
+	// solo se il blocco contesto è arrivato in fondo (seed completo) — se il
+	// blocco ha lanciato, il prossimo passaggio rifà il seed completo.
+	let passCompactionSnapshot = null;
+	let passContextRoutesSnapshot = null;
 	const topicScope = process.env.PI_ORCH_TEST_NO_EXIT === "1" ? project : projectKey(watchCwd, project);
 	const effectivePackageRoot = packageRoot || path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 	const config = resolveYanoConfig({ packageRoot: effectivePackageRoot });
@@ -1170,12 +1192,27 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 		const ratioThreshold = Number.isFinite(opts.contextCompactRatio) && opts.contextCompactRatio > 0 && opts.contextCompactRatio < 1
 			? opts.contextCompactRatio
 			: 0.5;
-		const lastCompactionByInstance = new Map();
-		const allTraceRecords = readTraceRecords({ cwd: watchCwd, project, limit: 100000, type: "context_compaction_completed" });
-		for (const record of allTraceRecords) {
-			if (!record.instance) continue;
-			const previous = lastCompactionByInstance.get(record.instance);
-			if (!previous || String(record.ts || "") > String(previous.ts || "")) lastCompactionByInstance.set(record.instance, record);
+		const lastCompactionByInstance = checkpointCompactions
+			? new Map(checkpointCompactions)
+			: new Map();
+		if (!checkpointCompactions) {
+			// Primo passaggio (nessun checkpoint): full scan storica per il seed,
+			// identica alla baseline — bit-identical sets. Niente lettura
+			// incrementale aggiuntiva: il seed copre già l'intera storia.
+			for (const record of readTraceRecords({ cwd: watchCwd, project, limit: 100000, type: "context_compaction_completed" })) {
+				if (!record.instance) continue;
+				const previous = lastCompactionByInstance.get(record.instance);
+				if (!previous || String(record.ts || "") > String(previous.ts || "")) lastCompactionByInstance.set(record.instance, record);
+			}
+		} else {
+			// A regime: le compaction sono scritte da ALTRI processi, quindi il
+			// checkpoint da solo non basta — ma basta una lettura since-bound
+			// (mtime-gated: solo file recenti) invece della full scan storica.
+			for (const record of readTraceRecords({ cwd: watchCwd, project, since: notifySince, limit: 100000, type: "context_compaction_completed" })) {
+				if (!record.instance) continue;
+				const previous = lastCompactionByInstance.get(record.instance);
+				if (!previous || String(record.ts || "") > String(previous.ts || "")) lastCompactionByInstance.set(record.instance, record);
+			}
 		}
 		for (const record of latestByInstance.values()) {
 			const completed = lastCompactionByInstance.get(record.instance);
@@ -1216,10 +1253,25 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 			} });
 		} catch { /* best effort */ }
 
-		const priorContextRoutes = new Set(readTraceRecords({ cwd: watchCwd, project, limit: 100000 })
-			.filter((record) => record.type === "yano_watcher_notification_route" && record.signal === "context_compaction_requested")
-			.map((record) => record.fingerprint)
-			.filter(Boolean));
+		// Checkpoint-seeded: niente full scan a regime; il seed del primo
+		// passaggio è bit-identico alla baseline. Le route sono scritte solo
+		// da questo stesso watcher, quindi il checkpoint le copre tutte;
+		// l'incremento since-bound recupera solo eventuali route di un
+		// passaggio concorrente (union, mai clobber).
+		const priorContextRoutes = checkpointContextRoutes
+			? new Set(checkpointContextRoutes)
+			: new Set(readTraceRecords({ cwd: watchCwd, project, limit: 100000 })
+				.filter((record) => record.type === "yano_watcher_notification_route" && record.signal === "context_compaction_requested")
+				.map((record) => record.fingerprint)
+				.filter(Boolean));
+		if (checkpointContextRoutes) {
+			// A regime: union con le route scritte da un passaggio concorrente
+			// dopo il seed. Nel seed-path la full scan sopra copre già tutto.
+			for (const record of readTraceRecords({ cwd: watchCwd, project, since: notifySince, limit: 100000 })
+				.filter((record) => record.type === "yano_watcher_notification_route" && record.signal === "context_compaction_requested")) {
+				if (record.fingerprint) priorContextRoutes.add(record.fingerprint);
+			}
+		}
 		for (const finding of contextFindings) {
 			if (priorContextRoutes.has(finding.fingerprint)) continue;
 			const target = liveAgents.find((agent) => agent.instance === finding.instance);
@@ -1245,12 +1297,27 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 			}
 			priorContextRoutes.add(finding.fingerprint);
 		}
+		// Blocco arrivato in fondo: set completi, idonei al persist.
+		passCompactionSnapshot = lastCompactionByInstance;
+		passContextRoutesSnapshot = priorContextRoutes;
 	} catch (error) {
 		console.warn(`yano watch: controllo contesto non riuscito — ${error instanceof Error ? error.message : String(error)}`);
 	}
-	const previouslyRoutedStalls = new Set(readTraceRecords({ cwd: watchCwd, project, limit: 100000 })
-		.filter((record) => record.type === "yano_watcher_notification_route" && record.signal === "ticket_stalled")
-		.map((record) => `${record.run_id || "?"}:${record.ticket_id || "?"}`));
+	// Checkpoint-seeded come sopra: le stall-route sono scritte solo da
+	// questo watcher (via routeNotice), quindi il checkpoint le copre tutte.
+	const previouslyRoutedStalls = checkpointStallKeys
+		? new Set(checkpointStallKeys)
+		: new Set(readTraceRecords({ cwd: watchCwd, project, limit: 100000 })
+			.filter((record) => record.type === "yano_watcher_notification_route" && record.signal === "ticket_stalled")
+			.map((record) => `${record.run_id || "?"}:${record.ticket_id || "?"}`));
+	if (checkpointStallKeys) {
+		// A regime: union con le stall-route di un passaggio concorrente.
+		// Nel seed-path la full scan sopra copre già l'intera storia.
+		for (const record of readTraceRecords({ cwd: watchCwd, project, since: notifySince, limit: 100000 })
+			.filter((record) => record.type === "yano_watcher_notification_route" && record.signal === "ticket_stalled")) {
+			previouslyRoutedStalls.add(`${record.run_id || "?"}:${record.ticket_id || "?"}`);
+		}
+	}
 	for (const stalled of marker) {
 		const stallKey = `${stalled.run_id || "?"}:${stalled.ticket_id || "?"}`;
 		if (previouslyRoutedStalls.has(stallKey)) continue;
@@ -1518,6 +1585,21 @@ export async function runWatch({ cwd, argv, packageRoot = null }) {
 			}
 		}
 	}
+
+	// Round 1 persist (best-effort, mai bloccante): gli stall-set sono sempre
+	// aggiornati in-pass (chiavi aggiunte sopra solo quando notificate);
+	// contesto/compaction solo se il blocco è arrivato in fondo. Il save fa
+	// union con il file — un passaggio concorrente non perde chiavi.
+	try {
+		saveNotifyCheckpoint({
+			cwd: watchCwd,
+			project,
+			stallKeys: previouslyRoutedStalls,
+			contextRoutes: passContextRoutesSnapshot,
+			compactionByInstance: passCompactionSnapshot,
+			seeded: passCompactionSnapshot !== null && passContextRoutesSnapshot !== null,
+		});
+	} catch { /* checkpoint must never block the watcher */ }
 
 	const scanStatus = marker.length || awaitFindings.length || validationFindings.length || contextFindings.length ? "finding" : "healthy";
 	const scan = appendWatcherScan({

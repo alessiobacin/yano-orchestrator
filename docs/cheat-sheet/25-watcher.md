@@ -14,6 +14,11 @@ yano watcher resume --project-root "$PWD"        # riattiva esplicitamente un pr
 yano watch --project-root "$PWD" --once
 ~~~
 
+Il lookback predefinito è 60 minuti (`--lookback-ms 3600000`; override esplicito
+invariato). Le notifiche già instradate sono deduplicate via checkpoint per-progetto
+`<traces>/<project-key>/notify-checkpoint.json` (best-effort, fail-open: se assente o
+corrotto la passata rilegge lo storico come prima; mai bloccante).
+
 La scansione rileva anche due timeout `agent_await` consecutivi sullo stesso
 assignment (`agent_await_stalled`), indipendentemente dallo stato del ticket.
 L'evento diagnostico è `yano_watcher_await_check`.
